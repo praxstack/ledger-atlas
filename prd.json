@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "project": "ledger-atlas-milestone-one",
+  "acceptance": "unaccepted working tree; atom status done means an implemented candidate with evidence, not a gated product commit or shipped release",
+  "atoms": [
+    {
+      "id": "ORC-001",
+      "title": "Package skeleton and real verifier",
+      "criterion": "Swift package targets, mmctl placeholder, synthetic fixture boundary, and fast/full verification are green without importer logic.",
+      "status": "done",
+      "deps": [],
+      "p0": true,
+      "paths": ["Package.swift", "Sources/", "Tests/", "scripts/verify.sh", "fixtures/synthetic/"],
+      "evidence": ["./scripts/verify.sh --full"]
+    },
+    {
+      "id": "ANL-001",
+      "title": "Type-7 evidence decision",
+      "criterion": "A read-only aggregate analysis records exactly what the eight observed type-7 rows prove and leaves semantics unknown where evidence is insufficient.",
+      "status": "done",
+      "deps": ["ORC-001"],
+      "p0": false,
+      "paths": ["docs/decisions/0007-type-7.md"],
+      "evidence": ["docs/decisions/0007-type-7.md", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "ANL-002",
+      "title": "Budget period evidence decision",
+      "criterion": "A read-only aggregate analysis records evidence and uncertainty for observed PERIOD_TYPE=6 without guessing a vendor label.",
+      "status": "done",
+      "deps": ["ORC-001"],
+      "p0": false,
+      "paths": ["docs/decisions/0008-budget-period-6.md"],
+      "evidence": ["docs/decisions/0008-budget-period-6.md", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "IMP-001",
+      "title": "Source classifier and immutable reader",
+      "criterion": "mmctl classifies supported/unknown/corrupt SQLite profiles read-only and proves before/after source hash equality.",
+      "status": "done",
+      "deps": ["ORC-001"],
+      "p0": true,
+      "paths": ["Sources/MMImport/Classification/", "Tests/MMImportTests/Classification/"],
+      "evidence": ["swift test --filter SourceClassificationTests", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "IMP-002",
+      "title": "Staging provenance and opaque sidecar",
+      "criterion": "Every parsed source record/field receives deterministic provenance and unknown values round-trip through a bounded opaque sidecar.",
+      "status": "done",
+      "deps": ["IMP-001"],
+      "p0": true,
+      "paths": ["Sources/MMImport/Staging/", "Sources/LedgerCore/Provenance/", "Tests/MMImportTests/Staging/"],
+      "evidence": ["swift test --filter ImmutableSourceStagingTests", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "IMP-003",
+      "title": "Loss report and reconciliation",
+      "criterion": "Every staged source entity is deterministically mapped, sidecar-preserved, intentionally excluded with reason, or blocking; expect-zero-loss fails otherwise.",
+      "status": "done",
+      "deps": ["IMP-002", "ANL-001", "ANL-002"],
+      "p0": true,
+      "paths": ["Sources/MMImport/Reconciliation/", "Sources/mmctl/", "Tests/MMImportTests/Reconciliation/"],
+      "evidence": ["swift test --filter LossReportTests", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "LED-001",
+      "title": "Canonical money and temporal primitives",
+      "criterion": "Canonical primitives preserve exact amount/currency/raw literal and UTC/local-date/timezone semantics without binary floating point.",
+      "status": "done",
+      "deps": ["ORC-001"],
+      "p0": true,
+      "paths": ["Sources/LedgerCore/Primitives/", "Tests/LedgerCoreTests/Primitives/"],
+      "evidence": ["swift test --filter CanonicalPrimitivesTests", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "LED-002",
+      "title": "Atomic idempotent canonical commit",
+      "criterion": "A staged import atomically commits or leaves canonical state unchanged, and repeated identical imports create no duplicate economic event.",
+      "status": "done",
+      "deps": ["IMP-003", "LED-001"],
+      "p0": true,
+      "paths": ["Sources/LedgerCore/Persistence/", "Sources/MMImport/Commit/", "Tests/LedgerCoreTests/Persistence/", "Tests/MMImportTests/Commit/"],
+      "evidence": ["swift test --filter CanonicalPersistenceModelsTests", "swift test --filter AtomicCanonicalCommitTests", "./scripts/verify.sh --full"]
+    },
+    {
+      "id": "ADM-001",
+      "title": "Admit the trusted commit gate",
+      "criterion": "Human Choice A admits the commit gate by creating the first official Git commit of owned admission records after full verification and both P0 review lenses. A shipped product, L3+ compatibility, and a real-v19 certificate are not claimed. The whole product tree is not included.",
+      "status": "doing",
+      "deps": [],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/orchestration/criteria/ADM-001.txt",
+        "status.html",
+        "progress.txt",
+        "CONTEXT.md",
+        "docs/product-status.json"
+      ],
+      "evidence": []
+    }
+  ]
+}
