@@ -1,0 +1,37 @@
+// swift-tools-version: 6.2
+
+import PackageDescription
+
+let package = Package(
+  name: "LedgerAtlas",
+  platforms: [.macOS(.v15)],
+  products: [
+    .library(name: "LedgerCore", targets: ["LedgerCore"]),
+    .library(name: "MMImport", targets: ["MMImport"]),
+    .library(name: "MMFixtures", targets: ["MMFixtures"]),
+    .library(name: "LedgerAtlasMacUI", targets: ["LedgerAtlasMacUI"]),
+    .executable(name: "mmctl", targets: ["mmctl"]),
+    .executable(name: "LedgerAtlasMac", targets: ["LedgerAtlasMac"]),
+  ],
+  targets: [
+    .target(
+      name: "CSQLite",
+      publicHeadersPath: "include",
+      linkerSettings: [.linkedLibrary("sqlite3"), .linkedLibrary("z")]
+    ),
+    .target(name: "LedgerCore"),
+    .target(name: "LedgerStore", dependencies: ["CSQLite", "LedgerCore"]),
+    .target(name: "MMImport", dependencies: ["CSQLite", "LedgerCore", "LedgerStore"]),
+    .target(name: "MMFixtures", dependencies: ["LedgerCore"]),
+    .target(name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore"]),
+    .executableTarget(name: "mmctl", dependencies: ["LedgerCore", "MMImport"]),
+    .executableTarget(name: "LedgerAtlasMac", dependencies: ["LedgerAtlasMacUI"]),
+    .testTarget(name: "LedgerCoreTests", dependencies: ["LedgerCore", "MMImport", "MMFixtures"]),
+    .testTarget(name: "LedgerStoreTests", dependencies: ["CSQLite", "LedgerCore", "LedgerStore"]),
+    .testTarget(name: "MMImportTests", dependencies: ["CSQLite", "MMImport"]),
+    .testTarget(name: "MMFixturesTests", dependencies: ["MMFixtures"]),
+    .testTarget(
+      name: "LedgerAtlasMacUITests",
+      dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "MMImport", "LedgerAtlasMacUI"]),
+  ]
+)

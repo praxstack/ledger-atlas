@@ -1,0 +1,9 @@
+# Ledger Atlas journal
+
+- `2026-08-10 · bootstrap · ORC-001 · CREATED` — Separate product repository initialized with a Swift package/verifier skeleton, synthetic-only fixture boundary, and reviewed Codex harness. No importer or UI logic exists.
+- `2026-08-10 · implementation · BASELINE-CANDIDATE · UNCOMMITTED` — Added the compatibility kernel, exact primitives, immutable staging, reconciliation, canonical schema v8, `mmctl`, and an early native Mac shell. Full verification is green; real Android v19 remains classification-only and no baseline commit exists yet.
+- `2026-08-17 · implementation · SYNTHETIC-CANDIDATE · UNCOMMITTED` — Schema v10, LedgerApplication/LedgerClient, Mac LedgerJourney, and redacted mmctl inspect/coverage/stage/reconcile on the synthetic v19 text subset. Real observed-v19 remains L0 classification-only. No baseline commit.
+- `2026-08-17 · implementation · SEARCH-INSIGHTS · UNCOMMITTED` — Public search filters (account, date, amount, category, memo, tag, status, correction history), snapshot-derived insight inventory, rebuildable projections, and Mac Search/Insights surfaces. 234 Swift tests; verify.sh --full green. No baseline commit.
+- `2026-08-17 · implementation · BACKUP-RESTORE · UNCOMMITTED` — Atomic package restore (one mutate), two-cycle link/money/product preservation, and journey export/restore. 237 Swift tests; verify.sh --full green. No baseline commit.
+- `2026-08-17 · implementation · DESTINATIONS-PARITY · UNCOMMITTED` — Data-backed daily-finance destinations via journey native commands; shared LedgerClient search/report/projection/checksum parity fixture. 238 Swift tests; verify.sh --full green. No shipped iOS app, no L3+.
+- `2026-08-18 · implementation · OBSERVED-V19-REVIEW · UNCOMMITTED` — L0 `review(databaseURL:)` structure-review seam for the published 19-table catalog. No L3+, no real-v19 certificate, no baseline commit. 249 Swift tests.

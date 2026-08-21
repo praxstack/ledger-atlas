@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+.swiftpm/
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.orchestrion/runtime/
+.orchestrion/off
+work/
+.agent/
+
+# Only synthetic fixtures belong in this repository.
+fixtures/*
+!fixtures/synthetic/
+!fixtures/synthetic/**

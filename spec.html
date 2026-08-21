@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ledger Atlas — Short Specification</title>
+<style>body{font:16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#172033}code{background:#eef2f7;padding:2px 4px}strong{color:#9b1c1c}</style>
+<h1>Ledger Atlas</h1>
+<p>A clean-room, local-first personal-finance product. Money Manager files are import inputs, never the product’s internal data model.</p>
+<h2>What exists</h2>
+<p>An unaccepted Swift implementation candidate: exact money and time handling, immutable SQLite classification, staging, loss accounting, atomic/idempotent persistence, a redacted <code>mmctl</code> inspect/coverage/stage/reconcile surface (no CLI write), a synthetic-profile import workspace, <code>LedgerApplication</code> commands including export/restore, and a native Mac journey that can approve a synthetic source and edit the imported ledger.</p>
+<h2>Compatibility promise</h2>
+<p><strong>No universal compatibility claim.</strong> The observed Android v19 SQLite profile is classification-only. The positive adapter is a synthetic text-safe test subset, not a certificate for the real 19-table/non-text format. <code>mmctl</code> cannot write a canonical ledger.</p>
+<h2>Still required</h2>
+<p>A gated baseline commit; evidence-backed real-v19 mapping; a shipped daily-finance workbench; iOS client; analytics; sync; and production migration support.</p>
+<p>Canonical status: <a href="docs/product-status.json">product-status.json</a> · Progress: <a href="specProgress.html">specProgress.html</a> · Plain reading: <a href="status.html">status.html</a> · Guide: <a href="guide.html">guide.html</a></p>

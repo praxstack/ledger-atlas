@@ -1,0 +1,1 @@
+Gate v2 permits unrelated untracked paths outside a bounded atom, rejects untracked paths owned by the atom, materializes and fully verifies the exact staged tree, preserves the 400000-byte provider review limit, and preserves mandatory reviewer plus red-team lenses for every P0 atom.

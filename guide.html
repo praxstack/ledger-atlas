@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger Atlas — Spec, functions, deliverables vs progress</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #e8efe6;
+      --ink: #1a2420;
+      --rule: #b7c9b4;
+      --muted: #4a5c54;
+      --stamp: #9b1c1c;
+      --ok: #176c3a;
+      --mid: #8a5a12;
+      --card: #f4f7f2;
+      --focus: #1a2420;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, transparent 47px, #c45c5c55 47px, #c45c5c55 49px, transparent 49px),
+        repeating-linear-gradient(var(--paper), var(--paper) 31px, var(--rule) 32px);
+      font-family: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+      font-size: 1.12rem;
+      line-height: 1.5;
+    }
+    .sheet {
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 2.2rem 1.3rem 4rem 3.5rem;
+    }
+    header {
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: 1rem;
+      margin-bottom: 1.4rem;
+    }
+    .eyebrow {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 0.4rem;
+    }
+    h1 {
+      font-size: 1.95rem;
+      font-weight: 700;
+      line-height: 1.15;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    h2 {
+      font-size: 1.2rem;
+      margin: 2rem 0 0.7rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--ink);
+    }
+    h3 { font-size: 1.02rem; margin: 1.2rem 0 0.45rem; }
+    p { margin: 0 0 0.85rem; }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem 1rem;
+      margin: 0.75rem 0 0;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.76rem;
+    }
+    a { color: var(--ink); }
+    a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+    .keys {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin: 0.4rem 0 1rem;
+    }
+    .chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.18rem 0.45rem;
+      border: 1.5px solid currentColor;
+    }
+    .in-git { color: var(--ok); }
+    .candidate { color: var(--mid); }
+    .blocked { color: var(--stamp); }
+    .later { color: var(--muted); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.98rem;
+      margin: 0 0 1.1rem;
+      background: var(--card);
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0.45rem 0.55rem;
+      border-bottom: 1px solid var(--rule);
+    }
+    th {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    td:nth-child(1) { white-space: nowrap; }
+    .note {
+      background: var(--card);
+      border-left: 4px solid var(--ink);
+      padding: 0.75rem 0.9rem;
+      margin: 0 0 1rem;
+    }
+    footer {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 2rem;
+    }
+    @media (max-width: 640px) {
+      body { background: var(--paper); }
+      .sheet { padding: 1.4rem 1rem 3rem; }
+      td:nth-child(1) { white-space: normal; }
+      table { font-size: 0.92rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header>
+      <p class="eyebrow">Ledger Atlas · reading guide · 2026-08-19</p>
+      <h1>Spec, functions, and deliverables versus progress</h1>
+      <p>This is a map, not a certificate. It uses the product words: Entry, Account, Transfer, sidecar, LossReport, source profile, and canonical ledger.</p>
+      <nav>
+        <a href="#how">How to read</a>
+        <a href="#mac">Phase 0 Mac</a>
+        <a href="#spec">Spec</a>
+        <a href="#fn">Functions</a>
+        <a href="#del">Deliverables</a>
+        <a href="#git">In Git</a>
+        <a href="status.html">Status slip</a>
+        <a href="spec.html">Short spec</a>
+      </nav>
+    </header>
+
+    <div class="keys" id="how">
+      <span class="chip in-git">In Git</span>
+      <span class="chip candidate">Candidate on disk</span>
+      <span class="chip blocked">Blocked</span>
+      <span class="chip later">Later / out of scope</span>
+    </div>
+    <p class="note">
+      <strong>In Git</strong> means the official first commit <code>cf50880</code> contains it.
+      <strong>Candidate</strong> means the code and tests exist in the working folder and pass locally, but they are not in that commit.
+      <strong>Blocked</strong> means we must not pretend it is done.
+      Passing tests are not a shipped app.
+    </p>
+
+    <h2 id="mac">Phase 0 Mac app — not iPhone, not Android</h2>
+    <p>Phase 0 is Mac only. iPhone, Android, and sync are later. That does not make the Mac app finished. There are two bars.</p>
+    <table>
+      <thead><tr><th>Bar</th><th>What “done” means</th><th>Now</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Ticket 06 · vertical slice</td>
+          <td>Pick a synthetic file. Review it. Approve it. See the canonical ledger. Change one amount. The source file stays unchanged.</td>
+          <td><span class="chip candidate">Phase 0 criteria met on disk</span> Select → review (no private amounts) → approve → ledger rows → valid amount edit. Failed approve/edit now surface a recoverable message. Not in Git. Not ticket 19.</td>
+        </tr>
+        <tr>
+          <td>Ticket 19 · daily Mac workbench</td>
+          <td>Use Ledger Atlas as a Mac money app: accounts, transfers, splits, recurrence, budgets, search, reports, backup, menus, undo, keyboard, empty states.</td>
+          <td><span class="chip blocked">Not done ~25%</span> Thirteen sidebar labels exist. Most screens are lists. There is no form to create a Transfer in the window. No undo. No menus.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>What the live window actually has: a sidebar of 13 destinations, a file picker, Import Review plus Approve, a ledger list with one amount field, a search box, and an insights table. Accounts, categories, transfers, recurrence, installments, budgets, backup, and settings show rows if the kernel already created them. They do not give you a full editor.</p>
+    <p>The kernel behind the window can create those objects in tests. That is not the same as a working Mac app. You cannot live in this window as your money manager yet. You also do not need iPhone or Android to finish Phase 0. You need to finish the Mac window itself.</p>
+
+    <h2 id="spec">1. Spec</h2>
+    <p>There are two layers. The full vision is the money app you want to live in. Milestone one is the smaller contract we are allowed to claim as a candidate: importer, command line, public ledger commands, and a native Mac journey. Sync, cloud accounts, shipped iPhone or Android apps, telemetry, machine learning, and “we support Money Manager” are out of milestone one.</p>
+
+    <h3>Full vision</h3>
+    <table>
+      <thead><tr><th>Rule</th><th>Progress</th></tr></thead>
+      <tbody>
+        <tr><td>Independent money app, Mac first</td><td><span class="chip candidate">Candidate</span> Developer Mac window. Not shipped.</td></tr>
+        <tr><td>Money Manager files are import only</td><td><span class="chip candidate">Candidate</span> Adapter boundary exists. Real backup still classification-only.</td></tr>
+        <tr><td>Lossless-or-loud: map, sidecar, exclude with reason, or stop</td><td><span class="chip candidate">Candidate</span> LossReport on synthetic text subset. Not certified on a real v19 file.</td></tr>
+        <tr><td>Exact decimal, never binary float</td><td><span class="chip candidate">Candidate</span> ExactDecimal in tests.</td></tr>
+        <tr><td>Named source profiles only</td><td><span class="chip candidate">Candidate</span> Matrix exists. Certified cells: 0.</td></tr>
+        <tr><td>Native Mac, original identity</td><td><span class="chip candidate">Candidate</span> Icons and journey exist. Undo, VoiceOver, keyboard editor do not.</td></tr>
+        <tr><td>Verifiable releases</td><td><span class="chip in-git">In Git</span> Gate admitted as ADM-001. No installer, signing, or notarization.</td></tr>
+        <tr><td>Later: iPhone, Android, encrypted sync</td><td><span class="chip later">Later</span> Shared command sketch only. No iOS target.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Milestone-one acceptance</h3>
+    <table>
+      <thead><tr><th>ID</th><th>What the spec says</th><th>Progress</th></tr></thead>
+      <tbody>
+        <tr><td>AC-01</td><td>Inspect a file read-only. Hash it. Classify the source profile. Do not write the source.</td><td><span class="chip candidate">Candidate</span> mmctl inspect. Not in Git.</td></tr>
+        <tr><td>AC-02</td><td>Stage every source item as mapped, sidecar, excluded with a reason, or blocking.</td><td><span class="chip candidate">Candidate</span> Synthetic four-table path only. mmctl cannot write the canonical ledger.</td></tr>
+        <tr><td>AC-03</td><td>Keep amount literals and time zones. No binary float.</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>AC-04</td><td>If import fails, leave the destination unchanged.</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>AC-05</td><td>The same import twice must not duplicate Entries.</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>AC-06</td><td>Name the exact cell. Do not claim universal compatibility.</td><td><span class="chip candidate">Candidate</span> L0 only. Real v19 is not a lossless import.</td></tr>
+        <tr><td>AC-07</td><td>A commit needs fresh full verification and bound review.</td><td><span class="chip in-git">In Git</span> Proven on ADM-001. Not yet used for the product source.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="fn">2. Functions</h2>
+    <p>What a person can do today versus what the spec still asks.</p>
+    <table>
+      <thead><tr><th>Function</th><th>On fake test data</th><th>On your real backup</th></tr></thead>
+      <tbody>
+        <tr><td>Open a file without changing it</td><td><span class="chip candidate">Yes</span></td><td><span class="chip candidate">Look only</span> Classify. Do not import as lossless.</td></tr>
+        <tr><td>Name the source profile</td><td><span class="chip candidate">Yes</span></td><td><span class="chip candidate">Observed Android v19 at L0</span></td></tr>
+        <tr><td>LossReport every subject</td><td><span class="chip candidate">Synthetic subset</span></td><td><span class="chip blocked">Blocked</span> Unknown vendor codes.</td></tr>
+        <tr><td>Write the canonical ledger</td><td><span class="chip candidate">ImportWorkspace</span></td><td><span class="chip blocked">No</span> mmctl has no write command.</td></tr>
+        <tr><td>Create Entry, Account, Transfer</td><td><span class="chip candidate">Yes</span></td><td><span class="chip later">After a trusted import</span></td></tr>
+        <tr><td>Fees, splits, installments, recurrence, budgets</td><td><span class="chip candidate">Yes</span></td><td><span class="chip later">After a trusted import</span></td></tr>
+        <tr><td>Search and reports</td><td><span class="chip candidate">Yes</span></td><td><span class="chip later">After a trusted import</span></td></tr>
+        <tr><td>Export and restore two cycles</td><td><span class="chip candidate">Yes</span></td><td><span class="chip later">After a trusted import</span></td></tr>
+        <tr><td>Mac: review, approve, browse, edit</td><td><span class="chip candidate">Journey exists</span></td><td><span class="chip blocked">Not a daily-finance app yet</span></td></tr>
+        <tr><td>Undo, VoiceOver, keyboard editor</td><td><span class="chip blocked">Not found</span></td><td><span class="chip blocked">Not found</span></td></tr>
+        <tr><td>iPhone / Android / sync</td><td><span class="chip later">Out of milestone one</span></td><td><span class="chip later">Out of milestone one</span></td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="del">3. Deliverables versus progress</h2>
+    <h3>Twenty tickets</h3>
+    <table>
+      <thead><tr><th>#</th><th>Deliverable</th><th>Progress</th></tr></thead>
+      <tbody>
+        <tr><td>01</td><td>Admit the trusted commit gate</td><td><span class="chip in-git">In Git</span> ADM-001. Gate works. Whole product not yet saved through it.</td></tr>
+        <tr><td>02</td><td>Reconcile product truth across docs</td><td><span class="chip candidate">Partial</span> This guide and the status slip. SPEC.md still says no baseline commit.</td></tr>
+        <tr><td>03</td><td>Canonical Entry create / correct / tombstone</td><td><span class="chip candidate">Candidate</span> Not in Git.</td></tr>
+        <tr><td>04</td><td>Privacy-safe Import Review</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>05</td><td>Atomic import and identical retry</td><td><span class="chip candidate">Candidate</span> Synthetic path.</td></tr>
+        <tr><td>06</td><td>Show canonical data in the Mac app</td><td><span class="chip candidate">Candidate</span> Journey select → review → approve → session.</td></tr>
+        <tr><td>07</td><td>Registry-backed certificates</td><td><span class="chip candidate">Candidate</span> Named cells only. Certified cells: 0.</td></tr>
+        <tr><td>08</td><td>Account for observed v19 structure</td><td><span class="chip candidate">Candidate</span> Counts tables. Does not map money.</td></tr>
+        <tr><td>09</td><td>Prove v19 Account / category / currency meaning</td><td><span class="chip blocked">Blocked</span> Needs a proven oracle, not a guess.</td></tr>
+        <tr><td>10</td><td>Prove v19 Entry sign, amount, time</td><td><span class="chip blocked">Blocked</span></td></tr>
+        <tr><td>11</td><td>Prove v19 Transfer and complex types</td><td><span class="chip blocked">Blocked</span> Types 3/4/7 stay unknown.</td></tr>
+        <tr><td>12</td><td>Preserve v19 recurrence, photos, unknowns</td><td><span class="chip blocked">Blocked</span></td></tr>
+        <tr><td>13</td><td>Certify one named real-v19 lossless import</td><td><span class="chip blocked">Blocked</span> Cannot close by guessing.</td></tr>
+        <tr><td>14</td><td>Linked Transfer and multi-currency</td><td><span class="chip candidate">Candidate</span> Kernel + some Mac wiring.</td></tr>
+        <tr><td>15</td><td>Splits and installments</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>16</td><td>Recurrence and budgets</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>17</td><td>Search, reports, accessible insights</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>18</td><td>Backup, export, restore</td><td><span class="chip candidate">Candidate</span></td></tr>
+        <tr><td>19</td><td>Complete native Mac daily-finance app</td><td><span class="chip blocked">Not done</span> Destinations exist. Product quality does not.</td></tr>
+        <tr><td>20</td><td>Shared contracts and iOS parity</td><td><span class="chip later">Sketch only</span> No iOS app target.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Other named batches</h3>
+    <table>
+      <thead><tr><th>Batch</th><th>Deliverable</th><th>Progress</th></tr></thead>
+      <tbody>
+        <tr><td>PRD ORC / IMP / LED / ANL</td><td>Eight milestone-one atoms</td><td><span class="chip candidate">Candidate</span> Marked done as code, not as Git history except ADM-001.</td></tr>
+        <tr><td>Advisor 001–005</td><td>Calendar, fee, package restore, report totals, portable verify</td><td><span class="chip candidate">Candidate</span> Verified on disk. Not in Git.</td></tr>
+        <tr><td>plans/001</td><td>Receipt-owned sidecar (not tied to the first Entry)</td><td><span class="chip blocked">Open</span> Still event-owned.</td></tr>
+        <tr><td>plans/002</td><td>Pending real-v19 certification cell</td><td><span class="chip blocked">Open</span></td></tr>
+        <tr><td>plans/003</td><td>Default-off autonomous admission repairs</td><td><span class="chip candidate">Partial</span> Gate admitted. One-shot spend still a known limit.</td></tr>
+        <tr><td>Evidence lab</td><td>Read-only inspector, hashed originals</td><td><span class="chip candidate">Separate repo</span> Immutable. Not the product.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="git">4. What is actually in Git</h2>
+    <p>Official commit <code>cf50880</code> on <code>main</code> contains six files: CONTEXT.md, prd.json, progress.txt, status.html, docs/product-status.json, and the ADM-001 criterion. The rest of the product is still untracked on disk. No push. No App Store. No real-backup certificate.</p>
+    <p>Counts, not claims: about one fifth of the full vision; zero as a shipped app; milestone-one mostly present as a candidate; twenty-ticket program about two fifths as candidate and none closed except gate admission.</p>
+
+    <footer>
+      Live evidence: verify.sh --fast 257 Swift tests; originals hashed; first official commit ADM-001 only.
+      Related pages: <a href="status.html">status.html</a> · <a href="spec.html">spec.html</a> · <a href="specProgress.html">specProgress.html</a> · <a href="docs/product-status.json">product-status.json</a>
+    </footer>
+  </main>
+</body>
+</html>
