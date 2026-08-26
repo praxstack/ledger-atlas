@@ -20,4 +20,4 @@ testpaths = ["tests/orchestration"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = [".orchestrion/runtime", ".build"]
+exclude = [".build"]

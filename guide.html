@@ -175,7 +175,7 @@
         <tr>
           <td>Ticket 06 · vertical slice</td>
           <td>Pick a synthetic file. Review it. Approve it. See the canonical ledger. Change one amount. The source file stays unchanged.</td>
-          <td><span class="chip candidate">Phase 0 criteria met on disk</span> Select → review (no private amounts) → approve → ledger rows → valid amount edit. Failed approve/edit now surface a recoverable message. Not in Git. Not ticket 19.</td>
+          <td><span class="chip candidate">Phase 0 criteria met in tests</span> Select → review (no private amounts) → approve → ledger rows → valid amount edit. Failed approve/edit surface a recoverable message. The code is in local Git. This is not ticket 19 or a shipped workbench.</td>
         </tr>
         <tr>
           <td>Ticket 19 · daily Mac workbench</td>
@@ -200,7 +200,7 @@
         <tr><td>Exact decimal, never binary float</td><td><span class="chip candidate">Candidate</span> ExactDecimal in tests.</td></tr>
         <tr><td>Named source profiles only</td><td><span class="chip candidate">Candidate</span> Matrix exists. Certified cells: 0.</td></tr>
         <tr><td>Native Mac, original identity</td><td><span class="chip candidate">Candidate</span> Icons and journey exist. Undo, VoiceOver, keyboard editor do not.</td></tr>
-        <tr><td>Verifiable releases</td><td><span class="chip in-git">In Git</span> Gate admitted as ADM-001. No installer, signing, or notarization.</td></tr>
+        <tr><td>Verifiable releases</td><td><span class="chip blocked">Not done</span> No installer, signing, notarization, or release smoke test.</td></tr>
         <tr><td>Later: iPhone, Android, encrypted sync</td><td><span class="chip later">Later</span> Shared command sketch only. No iOS target.</td></tr>
       </tbody>
     </table>
@@ -209,13 +209,13 @@
     <table>
       <thead><tr><th>ID</th><th>What the spec says</th><th>Progress</th></tr></thead>
       <tbody>
-        <tr><td>AC-01</td><td>Inspect a file read-only. Hash it. Classify the source profile. Do not write the source.</td><td><span class="chip candidate">Candidate</span> mmctl inspect. Not in Git.</td></tr>
+        <tr><td>AC-01</td><td>Inspect a file read-only. Hash it. Classify the source profile. Do not write the source.</td><td><span class="chip candidate">Candidate</span> mmctl inspect exists in local Git. Real-profile certification is still missing.</td></tr>
         <tr><td>AC-02</td><td>Stage every source item as mapped, sidecar, excluded with a reason, or blocking.</td><td><span class="chip candidate">Candidate</span> Synthetic four-table path only. mmctl cannot write the canonical ledger.</td></tr>
         <tr><td>AC-03</td><td>Keep amount literals and time zones. No binary float.</td><td><span class="chip candidate">Candidate</span></td></tr>
         <tr><td>AC-04</td><td>If import fails, leave the destination unchanged.</td><td><span class="chip candidate">Candidate</span></td></tr>
         <tr><td>AC-05</td><td>The same import twice must not duplicate Entries.</td><td><span class="chip candidate">Candidate</span></td></tr>
         <tr><td>AC-06</td><td>Name the exact cell. Do not claim universal compatibility.</td><td><span class="chip candidate">Candidate</span> L0 only. Real v19 is not a lossless import.</td></tr>
-        <tr><td>AC-07</td><td>A commit needs fresh full verification and bound review.</td><td><span class="chip in-git">In Git</span> Proven on ADM-001. Not yet used for the product source.</td></tr>
+        <tr><td>AC-07</td><td>Delivered code needs relevant tests, full verification, and risk-based review.</td><td><span class="chip candidate">Pending</span> The current cleanup requires a fresh full run.</td></tr>
       </tbody>
     </table>
 
@@ -243,9 +243,9 @@
     <table>
       <thead><tr><th>#</th><th>Deliverable</th><th>Progress</th></tr></thead>
       <tbody>
-        <tr><td>01</td><td>Admit the trusted commit gate</td><td><span class="chip in-git">In Git</span> ADM-001. Gate works. Whole product not yet saved through it.</td></tr>
-        <tr><td>02</td><td>Reconcile product truth across docs</td><td><span class="chip candidate">Partial</span> This guide and the status slip. SPEC.md still says no baseline commit.</td></tr>
-        <tr><td>03</td><td>Canonical Entry create / correct / tombstone</td><td><span class="chip candidate">Candidate</span> Not in Git.</td></tr>
+        <tr><td>01</td><td>Remove the agent-created commit-permission system</td><td><span class="chip in-git">Verified locally</span> Stakeholder GO recorded 26 August; fast and full checks passed after cleanup.</td></tr>
+        <tr><td>02</td><td>Reconcile product truth across docs</td><td><span class="chip candidate">Updated</span> Current docs distinguish tested candidate, committed bytes, certified import, and shipped app.</td></tr>
+        <tr><td>03</td><td>Canonical Entry create / correct / tombstone</td><td><span class="chip candidate">Candidate</span> Implemented and tested in local Git; native screen completion remains open.</td></tr>
         <tr><td>04</td><td>Privacy-safe Import Review</td><td><span class="chip candidate">Candidate</span></td></tr>
         <tr><td>05</td><td>Atomic import and identical retry</td><td><span class="chip candidate">Candidate</span> Synthetic path.</td></tr>
         <tr><td>06</td><td>Show canonical data in the Mac app</td><td><span class="chip candidate">Candidate</span> Journey select → review → approve → session.</td></tr>
@@ -270,21 +270,21 @@
     <table>
       <thead><tr><th>Batch</th><th>Deliverable</th><th>Progress</th></tr></thead>
       <tbody>
-        <tr><td>PRD ORC / IMP / LED / ANL</td><td>Eight milestone-one atoms</td><td><span class="chip candidate">Candidate</span> Marked done as code, not as Git history except ADM-001.</td></tr>
-        <tr><td>Advisor 001–005</td><td>Calendar, fee, package restore, report totals, portable verify</td><td><span class="chip candidate">Candidate</span> Verified on disk. Not in Git.</td></tr>
+        <tr><td>PRD ORC / IMP / LED / ANL</td><td>Eight milestone-one work items</td><td><span class="chip candidate">Candidate</span> Marked done with test evidence in local Git; not a release claim.</td></tr>
+        <tr><td>Advisor 001–004</td><td>Calendar, fee, package restore, report totals</td><td><span class="chip candidate">Candidate</span> Implemented, tested, and present in local Git. The obsolete verifier plan was removed.</td></tr>
         <tr><td>plans/001</td><td>Receipt-owned sidecar (not tied to the first Entry)</td><td><span class="chip blocked">Open</span> Still event-owned.</td></tr>
         <tr><td>plans/002</td><td>Pending real-v19 certification cell</td><td><span class="chip blocked">Open</span></td></tr>
-        <tr><td>plans/003</td><td>Default-off autonomous admission repairs</td><td><span class="chip candidate">Partial</span> Gate admitted. One-shot spend still a known limit.</td></tr>
+        <tr><td>Commit governance</td><td>Temporary permissions, special gate, admission paperwork</td><td><span class="chip blocked">Removed</span> It was process work, not product functionality.</td></tr>
         <tr><td>Evidence lab</td><td>Read-only inspector, hashed originals</td><td><span class="chip candidate">Separate repo</span> Immutable. Not the product.</td></tr>
       </tbody>
     </table>
 
     <h2 id="git">4. What is actually in Git</h2>
-    <p>Official commit <code>cf50880</code> on <code>main</code> contains six files: CONTEXT.md, prd.json, progress.txt, status.html, docs/product-status.json, and the ADM-001 criterion. The rest of the product is still untracked on disk. No push. No App Store. No real-backup certificate.</p>
+    <p>The local main branch contains product source and historical governance commits. The current cleanup is not yet committed. There is no configured remote, App Store delivery, or real-backup certificate.</p>
     <p>Counts, not claims: about one fifth of the full vision; zero as a shipped app; milestone-one mostly present as a candidate; twenty-ticket program about two fifths as candidate and none closed except gate admission.</p>
 
     <footer>
-      Live evidence: verify.sh --fast 257 Swift tests; originals hashed; first official commit ADM-001 only.
+      Live evidence: verify.sh --fast and --full passed 26 August with 283 Swift tests, 3 Python tests, lint, format, debug and release builds, and CLI smoke. The explicit private 25-screenshot inventory check also passed.
       Related pages: <a href="status.html">status.html</a> · <a href="spec.html">spec.html</a> · <a href="specProgress.html">specProgress.html</a> · <a href="docs/product-status.json">product-status.json</a>
     </footer>
   </main>

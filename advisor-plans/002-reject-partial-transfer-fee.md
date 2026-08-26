@@ -61,7 +61,8 @@ See existing `invalidTransferFeeLeavesLedgerUnchanged` in
 
 ## Git workflow
 
-Do not commit unless `./scripts/gate-commit.sh` is armed. No push/merge.
+Use a normal local commit after the relevant checks pass. Push and merge are separate
+external actions.
 
 ## Steps
 

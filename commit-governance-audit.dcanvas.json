@@ -1,0 +1,253 @@
+{
+  "kind": "canvas",
+  "schemaVersion": "0.2.0",
+  "id": "01M0Z3CQVNHC5X3T3F8PB990XC",
+  "title": "Decide what project rules Ledger Atlas should keep",
+  "eyebrow": "Plain-English stakeholder decision",
+  "lede": "Agents added a custom rule system that now blocks normal commits and delays product work. You asked for solid specifications, reviews, tests, and bug fixing. You did not ask for this specific rule system. This page explains what happened, what each rule does, and lets you choose what stays.",
+  "generated": "2026-08-26T13:25:37Z",
+  "project": "Ledger Atlas",
+  "thread": {
+    "branch": "main",
+    "id": "01M0Z3CQVNHC5X3T3F8PB990XD"
+  },
+  "revision": {
+    "parentIds": [
+      "01M0Z3CQVNHC5X3T3F8PB990XE"
+    ],
+    "contentFingerprint": "df361875989e3c0bf8798a3c9cccb3958876ae48060cb2b02b2201dcad1b95d8",
+    "branch": "main",
+    "id": "01M0Z40SP3VQJKR6WYK7XS3MXW"
+  },
+  "task": {
+    "kind": "governance-audit",
+    "title": "Choose which agent-created project rules remain",
+    "tags": [
+      "ledger-atlas",
+      "accountability",
+      "cleanup"
+    ]
+  },
+  "theme": {
+    "id": "private-review",
+    "version": "1.0.0",
+    "overridden": false
+  },
+  "reviewProfile": {
+    "id": "artifact-review",
+    "version": "1.0.0",
+    "overridden": false
+  },
+  "writingPolicy": {
+    "id": "unslop-humanizer",
+    "version": "1.0.0",
+    "mode": "warn"
+  },
+  "assets": [],
+  "questionPlan": {
+    "version": "1.0.0",
+    "nodes": []
+  },
+  "sections": [
+    {
+      "id": "01M0Z3CQVNHC5X3T3F8PB990XF",
+      "number": "01",
+      "heading": "What happened",
+      "description": "On 19 August, an agent added a special commit checker. It stopped Ledger Atlas from using a normal Git commit unless several extra conditions were satisfied. The files called this “Human Choice A,” but I cannot verify that you chose or approved that system. The honest conclusion is that an agent treated an assumption as permission.",
+      "context": "On 22 August, an automated synchronization added the full rule system together with product code. From 24 to 26 August, agents spent time repairing that rule system because it had its own security and reliability problems. Four rule-related commits are finished and two are unfinished. The current plan blocks product coding until the final two are complete. Those rule commits added no personal-finance functionality. Audit references, if needed: cf50880, 8623651, 94e2637, 47cd850, 6d6d629, and cd9222e.",
+      "questions": []
+    },
+    {
+      "id": "01M0Z3CQVNHC5X3T3F8PB990XP",
+      "number": "02",
+      "heading": "Rules that currently slow or block product work",
+      "description": "For each row, choose Remove, Simplify, or Keep. The recommended starting choices are already shown, but they do not count as your approval until you change or submit them.",
+      "questions": [
+        {
+          "id": "01M0Z3CQVNHC5X3T3F8PB990XQ",
+          "key": "commit_rules",
+          "type": "triage",
+          "answerKind": "triage",
+          "control": {
+            "id": "triage",
+            "version": "1.0.0"
+          },
+          "prompt": "What should happen to each rule?",
+          "buckets": [
+            "remove",
+            "simplify",
+            "keep"
+          ],
+          "items": [
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XR",
+              "name": "Normal Git commits are blocked. Agents must use a special commit program.",
+              "default": "remove"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XS",
+              "name": "Work stops unless a temporary permission is active. That permission expires.",
+              "default": "remove"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XT",
+              "name": "Every task has a fixed file list. Changing an extra file can block the commit.",
+              "default": "simplify"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XV",
+              "name": "Each useful change needs a second paperwork commit before the next task can start.",
+              "default": "remove"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XW",
+              "name": "Six paperwork commits must finish before product coding can resume. Four are done and two remain.",
+              "default": "remove"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XX",
+              "name": "Almost every code change requires two AI reviews and the full test suite before it can be committed.",
+              "default": "simplify"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XY",
+              "name": "The exact versions of development tools are locked. A tool update can stop commits.",
+              "default": "remove"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990XZ",
+              "name": "Project hooks inspect commands and can automatically continue an agent turn.",
+              "default": "remove"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990Y0",
+              "name": "The project rule system blocks push, merge, rebase, and deployment even after local work is complete.",
+              "default": "simplify"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "01M0Z3CQVNHC5X3T3F8PB990Y5",
+      "number": "03",
+      "heading": "Private backups and screenshots",
+      "description": "Agents created these rules to avoid putting your private financial information into Git history, logs, or shared test files. You did not explicitly request these exact rules. They should protect your data without preventing agents from reading the supplied files locally and building every visible function.",
+      "questions": [
+        {
+          "id": "01M0Z3CQVNHC5X3T3F8PB990Y6",
+          "key": "evidence_rules",
+          "type": "triage",
+          "answerKind": "triage",
+          "control": {
+            "id": "triage",
+            "version": "1.0.0"
+          },
+          "prompt": "How should the supplied private evidence be handled?",
+          "buckets": [
+            "remove",
+            "simplify",
+            "keep"
+          ],
+          "items": [
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990Y7",
+              "name": "Keep the original backups and screenshots unchanged. Agents may read them locally for mapping and testing.",
+              "default": "keep"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990Y8",
+              "name": "Keep the original private files out of Git history, but allow local tests to reference them directly.",
+              "default": "keep"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990Y9",
+              "name": "Map and build every function visible in the supplied screenshots.",
+              "default": "keep"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990YA",
+              "name": "Use synthetic copies for tracked automated tests so private names, balances, notes, and photos never enter test output.",
+              "default": "keep"
+            },
+            {
+              "id": "01M0Z3CQVNHC5X3T3F8PB990YB",
+              "name": "Replace SCREEN-SPEC.md with a simpler checklist tied directly to each supplied screenshot.",
+              "default": "simplify"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "01M0Z3CQVNHC5X3T3F8PB990YC",
+      "number": "04",
+      "heading": "Choose the cleanup",
+      "description": "No cleanup has been applied yet. The first option removes the blocking paperwork while preserving tests, financial correctness checks, and sensible privacy protections.",
+      "questions": [
+        {
+          "id": "01M0Z3CQVNHC5X3T3F8PB990YD",
+          "key": "removal_scope",
+          "type": "single",
+          "answerKind": "single",
+          "control": {
+            "id": "cards",
+            "version": "1.0.0"
+          },
+          "prompt": "Which approach should Ledger Atlas use?",
+          "default": "product_first",
+          "options": [
+            {
+              "value": "product_first",
+              "label": "Remove blockers, keep quality checks",
+              "description": "Use normal commits after relevant tests and review. Remove temporary permissions, paired paperwork commits, special tool locks, and automatic continuation hooks. Keep financial correctness tests, risk-based review, and private-data protection.",
+              "recommended": true
+            },
+            {
+              "value": "total_repository_removal",
+              "label": "Remove every project-specific rule",
+              "description": "Delete the custom commit system, project hooks, special review requirements, and project privacy rules. General platform safety restrictions would still exist."
+            },
+            {
+              "value": "keep_current",
+              "label": "Keep the current rule system",
+              "description": "Finish the two remaining paperwork commits before returning to product work. This is the slowest option and adds no finance functionality while it runs."
+            }
+          ]
+        },
+        {
+          "id": "01M0Z3CQVNHC5X3T3F8PB990YE",
+          "key": "audit_corrections",
+          "type": "text",
+          "answerKind": "text",
+          "control": {
+            "id": "native",
+            "version": "1.0.0"
+          },
+          "prompt": "Tell me what is still unclear, wrong, or missing."
+        },
+        {
+          "id": "01M0Z3CQVNHC5X3T3F8PB990YF",
+          "key": "apply_cleanup",
+          "type": "confirm",
+          "answerKind": "confirm",
+          "control": {
+            "id": "cards",
+            "version": "1.0.0"
+          },
+          "prompt": "Apply the selected cleanup to this repository?",
+          "options": [
+            {
+              "value": "go",
+              "label": "GO"
+            },
+            {
+              "value": "hold",
+              "label": "HOLD"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

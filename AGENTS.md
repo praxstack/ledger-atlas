@@ -13,15 +13,15 @@ Read `CONTEXT.md`, `SPEC.md`, `prd.json`, and `docs/orchestration/RUNBOOK.md` be
 3. Vendor schemas/codes stay in versioned adapters. The canonical ledger, package, analytics contracts, and future sync protocol are independently owned.
 4. Financial truth never uses binary floating point. Preserve raw literals and explicit unit, scale, rounding, timezone, local date, tombstone, linkage, and provenance.
 5. Real financial content, credentials, SMS, photos, names, notes, and transaction values never enter tracked fixtures, prompts, logs, screenshots, or test output. Use synthetic fixtures.
-6. Build behavior interoperability with an original identity and native Mac interaction model. Do not copy vendor code, branding, proprietary assets, or a pixel-for-pixel UI.
 
-## Autonomous engineering
+## Engineering quality
 
-- An explicitly armed atom may implement, test, stage its declared paths, obtain provider review, and create one gated commit. It expires at time/iteration/no-progress ceilings.
-- The atom may not modify the hook, rule, verifier, review, gate, attestation, or evidence controls governing its own run. Change those only in a separate manual P0 atom.
-- Keep one frozen criterion and exact path ownership. Preserve unrelated work. Never weaken/delete/skip tests to get green.
-- Use bounded subagents only for genuinely independent scopes. One owner per writable file/module; reviewers are read-only.
-- Commit only through `./scripts/gate-commit.sh` while exact finite authority is active. Direct commit, `--no-verify`, push, merge, rebase, deploy, credentials, messages, destructive cleanup, and scope expansion are unauthorized.
+- Normal local Git commits are allowed after the relevant checks pass. Ledger Atlas does not require finite atom authority, gate receipts, paired admission commits, or provider-review paperwork.
+- Before editing, trace the affected flow and callers, state the acceptance criteria, and check the architecture boundaries above. Keep the change focused and preserve unrelated work.
+- Never weaken, delete, or skip a relevant test to get green. Fix shared root causes in the lowest common layer instead of patching one caller.
+- Money, import, migration, package, backup, restore, security, and privacy changes require focused tests plus independent review proportional to their actual risk. Review quality matters; a fixed two-provider ceremony does not.
+- Project hooks catch common direct writes to named read-only evidence, reject destructive Git cleanup, and prevent test deletion. They are not a security boundary and do not grant commit authority, continue agent turns, or block ordinary product work.
+- Use bounded subagents only for genuinely independent scopes. One owner per writable file or module; reviewers are read-only.
 
 ## Verification
 
@@ -30,7 +30,7 @@ Read `CONTEXT.md`, `SPEC.md`, `prd.json`, and `docs/orchestration/RUNBOOK.md` be
 ./scripts/verify.sh --full
 ```
 
-P0 includes import/mapping, money/time arithmetic, migrations, canonical schema, source writes, export/round-trip, sync, security/privacy, tests, and orchestration controls. It requires reviewer and red-team lenses. Green tests authorize neither integration nor universal compatibility claims.
+Fast and full verification are engineering evidence, not commit permissions. Import/mapping, money/time arithmetic, migrations, canonical schema, source writes, export/round-trip, security, and privacy changes receive extra adversarial coverage. Green tests authorize neither release nor universal compatibility claims.
 
 ## Agent skills
 
@@ -44,8 +44,8 @@ Closed five-label readiness vocabulary (`needs-triage`, `needs-info`, `ready-for
 
 ### Domain docs
 
-Single-context: root `CONTEXT.md` plus six declared domains (delivery governance, compatibility laboratory, canonical ledger, v19 adapter, native Mac product, shared clients). See `docs/agents/domain.md`.
+Single-context: root `CONTEXT.md` plus six declared domains (engineering quality, compatibility laboratory, canonical ledger, v19 adapter, native Mac product, shared clients). See `docs/agents/domain.md`.
 
 ### Skill discovery
 
-Start each session with the `using-superpowers` skill to discover available skills before answering. The gstack suite (browse, ship, investigate, retro, and related) is installed host-side under `~/.agents/skills/`; invoke it by name when a task matches. Per-role model mapping for pstack lives globally at `~/.config/pstack/models.md`. For any user-facing prose drafted here, run `stop-slop` or `humanize` over it before shipping.
+Start each session with the `using-superpowers` skill to discover available skills before answering. The gstack suite (browse, ship, investigate, retro, and related) is installed host-side under `~/.agents/skills/`; invoke it by name when a task matches. Per-role model mapping for pstack lives globally at `~/.config/pstack/models.md`. For any user-facing prose drafted here, run `unslop` (or `stop-slop` / `humanize`) over it before shipping.

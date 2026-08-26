@@ -177,12 +177,12 @@
     <h2 id="works">What already works</h2>
     <p>We can look at a Money Manager file without changing it. We can name the <strong>source profile</strong> (the exact backup type). We can keep unknown pieces in a <strong>sidecar</strong> (the original bytes, stored as-is). A <strong>LossReport</strong> must list every source item as mapped, kept, excluded with a reason, or blocking.</p>
     <p>On fake test data we can create an <strong>Entry</strong>, an <strong>Account</strong>, and a <strong>Transfer</strong>. We can split a purchase, run an installment plan, search, report, export, and restore. The Mac journey can review a test source and open the imported ledger.</p>
-    <p class="no">We do not have a lossless import certificate for a real Android v19 backup. Certified cells: 0. Universal compatibility: false. This page is part of the first official Git commit: admission records only. The rest of the product source is not in that commit.</p>
+    <p class="no">We do not have a lossless import certificate for a real Android v19 backup. Certified cells: 0. Universal compatibility: false. Product source exists in local Git, but it is still an implementation candidate, not a shipped app.</p>
 
-    <h2 id="two">Two facts only you can move</h2>
+    <h2 id="two">Two facts that still block delivery</h2>
     <div class="fact">
-      <strong>1. The first official save is the admission record, not the whole app.</strong>
-      You turned the commit gate on. This commit is that first snapshot. It does not contain the kernel, the Mac app, or the importer. Those files still need later atoms.
+      <strong>1. The supplied real backup has not completed a verified import.</strong>
+      Candidate importer code and synthetic tests exist. There is no private reconciliation result proving that every supplied source item populated Ledger Atlas without silent loss.
     </div>
     <div class="fact">
       <strong>2. A real Money Manager backup cannot get a lossless import certificate yet.</strong>
@@ -190,17 +190,17 @@
     </div>
     <p>I can keep building the Mac app on the canonical ledger we already have. I cannot pretend your real backup is imported. I cannot put this on the App Store.</p>
 
-    <h2 id="pick">You picked A</h2>
-    <p>The commit gate is admitted as atom ADM-001. This commit is the first official save of those admission records. A later whole-product snapshot cannot pass the independent-review size limit of 400 kilobytes; the product source is much larger than that. This staged admission set is small and under the limit.</p>
+    <h2 id="pick">Commit-governance decision</h2>
+    <p>On 26 August 2026, the stakeholder explicitly removed the custom commit-permission system. Normal local commits are allowed after relevant tests and review. Private evidence protections and project quality hooks remain.</p>
     <div class="choices">
       <div class="choice">
-        <span>Choice A · selected</span>
-        Turn on the commit gate. Later product slices can be saved the same way, one atom at a time.
+        <span>Cleanup · selected</span>
+        Remove temporary permissions, admission paperwork, special commit scripts, and fixed provider-review ceremony.
       </div>
     </div>
 
     <footer>
-      Live check: verify.sh --full passed as part of ADM-001. Originals hashed. This file is in the first official commit. After the gate succeeds, the operator stops the ADM-001 loop.
+      Live check: verify.sh --fast and --full passed after the 26 August cleanup. The run executed 283 Swift tests, 3 Python quality/traceability tests, lint, formatting, debug and release builds, and the CLI smoke test. The explicit private 25-screenshot inventory profile also passed.
       This slip is a reading aid. It is not a compatibility certificate.
     </footer>
   </main>

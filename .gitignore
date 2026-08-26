@@ -6,8 +6,6 @@
 .ruff_cache/
 __pycache__/
 *.pyc
-.orchestrion/runtime/
-.orchestrion/off
 work/
 .agent/
 

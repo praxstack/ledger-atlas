@@ -10,4 +10,5 @@ Use this closed vocabulary in GitHub and Linear.
 | `ready-for-human` | The next action needs human-supervised authority, judgment, credentials, or an irreversible/external gate. |
 | `wontfix` | Deliberately declined; the close reason must explain why. |
 
-Exactly one readiness label should be active. Ticket 01 starts as `ready-for-human` because it changes the controls that govern autonomous work. Downstream tickets remain `needs-info` or `needs-triage` until their declared blockers close; dependency order alone does not confer authority.
+Exactly one readiness label should be active. Dependency order alone does not prove
+readiness; the named blocker, acceptance criteria, and required evidence must be clear.

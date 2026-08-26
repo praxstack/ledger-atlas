@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "updated": "2026-08-18",
-  "acceptance": "first official commit is ADM-001 admission records only; whole-product baseline and remote acceptance remain open",
+  "updated": "2026-08-26",
+  "acceptance": "implementation candidate in local Git; release, shipment, and real-v19 compatibility certification remain open",
   "verification": {
     "syntheticSwift": "257 tests passed locally",
-    "orchestrationPython": "39 tests passed locally",
-    "fastRepositoryGate": "passed 2026-08-18 after advisor-plans 001-005",
-    "fullRepositoryGate": "passed 2026-08-18 after advisor-plans 001-005"
+    "engineeringPython": "3 tests passed locally on 2026-08-26; explicit private 25-screenshot inventory profile also passed",
+    "fastRepositoryCheck": "passed 2026-08-26; 283 Swift tests plus lint, format, build, Python, and CLI smoke",
+    "fullRepositoryCheck": "passed 2026-08-26; 283 Swift tests plus release build"
   },
   "product": {
     "kernel": "implemented candidate: exact money/time, immutable classification, staging, reconciliation, atomic/idempotent canonical persistence, schema v10 application ledger, LedgerApplication commands",
@@ -21,10 +21,8 @@
     "universalClaim": false
   },
   "blockers": [
-    "human Choice A admits the gate as ADM-001; first official save is the admission record, not the whole product tree",
-    "baseline admission remains supervised; a whole-tree snapshot exceeds the 400 KiB independent-review limit",
     "real-v19 semantic mapping and behavioral oracles are incomplete",
-    "L3+ certificates remain rejected until receipt-backed gates exist",
+    "no supplied backup has completed private import and reconciliation",
     "sync, cloud identity, a shipped iOS app, Android, push, merge, and release remain separate milestones"
   ]
 }

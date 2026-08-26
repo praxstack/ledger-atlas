@@ -68,12 +68,12 @@ Match existing Swift Testing `@Test` style in `LedgerApplicationTests.swift`.
 **Out of scope**:
 - Recurrence generateOccurrence batching (advisor-plans/002 is unrelated)
 - Vendor DO_TYPE / ZDATE semantics
-- `scripts/gate-commit.sh`, hooks, originals
+- hooks and original evidence
 
 ## Git workflow
 
-- Do not `git commit` unless a finite run arms `./scripts/gate-commit.sh`.
-- This repo has an unborn HEAD. Do not `git init` extra remotes or push.
+Use normal local commits after the relevant checks pass. Do not add remotes or push
+unless the active task includes that external action.
 
 ## Steps
 

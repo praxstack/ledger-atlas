@@ -6,10 +6,20 @@ Canonical research root:
 
 `/Users/prax/Developer/money-manager-reverse-engineering`
 
-`scripts/verify.sh` honors `LEDGER_ATLAS_EVIDENCE_ROOT` as an override of that path. When the directory is missing or lacks `.orchestrion/protected-inputs.sha256`, the sibling protected-input check is skipped; originals stay read-only and are still hashed when the tree is present.
+The original files may be referenced directly by local, private import and
+reconciliation tests. SQLite inputs are opened with `mode=ro&immutable=1`; callers
+may hash a file before and after a run to prove it was not modified.
 
-Its protected-input manifest is:
+Product tests committed to Git use `fixtures/synthetic/`. A named compatibility
+certification may read an explicit external backup without copying personal names,
+balances, notes, SMS, photos, or transaction data into Git or test output.
 
-`/Users/prax/Developer/money-manager-reverse-engineering/.orchestrion/protected-inputs.sha256`
+Current explicitly supplied reference artifacts:
 
-Product tests use `fixtures/synthetic/`. A named compatibility certification may read an explicit external backup with SQLite `mode=ro&immutable=1` while the product repository is the only writable sandbox root. Never create a writable copy as an unattended convenience.
+- `/Users/prax/Downloads/Money Manager_26-08-2026.xlsx`
+- `/Users/prax/Downloads/25-12-2024_24-12-2025.xlsx`
+- `/Users/prax/Downloads/25-12-2025_24-12-2026.xlsx`
+- `/Users/prax/Downloads/25-07-2026_24-08-2026.xlsx`
+- `/Users/prax/Downloads/25-08-2026_24-09-2026.xlsx`
+- `/Users/prax/Downloads/money_android.sqlite`
+- `/Users/prax/Downloads/Money Manager Backup 26 Aug 2026.zip`

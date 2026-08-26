@@ -1,0 +1,1 @@
+Human-executed evidence collection: photo byte export, type-7 device action, original-app oracles for SMS/macros/ZETC/CODE_DATA and PERIOD_TYPE=6; each action lands as immutable corpus evidence plus a synthetic fixture pair under fixtures/synthetic/.

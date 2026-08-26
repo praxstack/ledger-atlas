@@ -1,5 +1,5 @@
 {
-  "description": "Ledger Atlas bounded orchestration hooks. Inactive until explicitly armed.",
+  "description": "Ledger Atlas evidence and destructive-operation safety hooks.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/orchestrion.py\" session_start",
+            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/quality.py\" session_start",
             "timeout": 5,
             "statusMessage": "Loading Ledger Atlas context",
             "additionalContextLimit": 6000
@@ -21,21 +21,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/orchestrion.py\" pre_tool_use",
+            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/quality.py\" pre_tool_use",
             "timeout": 5,
-            "statusMessage": "Checking Ledger Atlas policy"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/orchestrion.py\" stop",
-            "timeout": 120,
-            "statusMessage": "Checking the active Ledger Atlas goal gate"
+            "statusMessage": "Protecting Ledger Atlas evidence"
           }
         ]
       }

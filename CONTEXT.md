@@ -1,9 +1,9 @@
 # Ledger Atlas durable context
 
 Updated: 2026-08-18
-Status: unaccepted implementation candidate. The Swift package contains an importer,
+Status: unaccepted implementation candidate. Repository commits contain an importer,
 canonical-ledger kernel (schema v10), public LedgerApplication commands, redacted CLI,
-and a native Mac journey/session. No baseline commit, real-v19 lossless import
+and a native Mac journey/session. No real-v19 lossless import
 certificate, or shipped application exists.
 
 ## Canonical vocabulary
@@ -73,8 +73,9 @@ the journey can create accounts, categories, transfers, splits, installments,
 recurrence, and budgets so those destinations are data-backed. Settings expose
 reduced-motion and privacy-redaction rows. It is not a shipped finance product.
 Shared `LedgerClient` / `IOSFacingLedgerClient` contracts include search, report,
-projection, checksum, and export; there is no iOS app target. No sync, cloud service, real-v19 import certificate, or universal
-compatibility claim exists. Human Choice A admits the commit gate as atom ADM-001. The first official
-Git commit is that admission record only. The kernel, Mac app, and importer
-are still uncommitted working-tree files. No shipped product, L3+, or
+projection, checksum, and export; there is no iOS app target. No sync, cloud service,
+real-v19 import certificate, or universal compatibility claim exists. The custom
+commit-governance system was removed by an explicit stakeholder decision on
+2026-08-26. Product work now follows the technical and architecture checks in
+`AGENTS.md` and `docs/orchestration/RUNBOOK.md`. No shipped product, L3+, or
 real-v19 certificate is claimed.

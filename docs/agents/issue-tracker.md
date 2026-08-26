@@ -23,9 +23,12 @@ The local Markdown pack at `.scratch/ledger-atlas-end-to-end/issues/` is the dur
 - Linear owns planning order, assignee visibility, and project views.
 - Dependency changes must be reflected in both trackers.
 - A Linear issue must never imply completion when its GitHub issue remains open.
-- No issue may authorize commit, push, merge, deploy, destructive work, or access to protected evidence; repository gates remain authoritative.
+- Issues define scope and acceptance criteria. They do not override private-evidence
+  handling, destructive-action safeguards, or external deployment authorization.
 
 ## Current endpoints
 
 - GitHub: `https://github.com/praxstack/ledger-atlas`
 - Linear: `https://linear.app/prax-lannister/project/ledger-atlas-e967c6d2afe0`
+
+This clone has no git remote. Always pass `-R praxstack/ledger-atlas` to `gh issue` / `gh pr` commands; bare `gh issue create` will fail or target the wrong repo.

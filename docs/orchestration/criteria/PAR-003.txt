@@ -1,0 +1,1 @@
+Category rename/reorder/hide commands with explicit ordinal ordering; optional parent reference with application-level cycle detection inside mutate producing a named cycle-detected error; rollup aggregates child activity without double counting and excludes tombstoned or hidden branches; observed-v19 parent references map only after PAR-007 oracle evidence lands.

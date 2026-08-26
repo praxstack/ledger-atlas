@@ -2,9 +2,13 @@
 
 Keep one task context focused on one domain. Cross-domain work must be split into linked tickets with explicit interface acceptance criteria.
 
-## Delivery governance
+Layout: single-context. Root `CONTEXT.md` is the shared vocabulary; architecture decisions are recorded as ADRs under `docs/decisions/` (numbered markdown files), not `docs/adr/`.
 
-Commit gate, staged-tree verification, attestation, finite authority, reviewer and red-team receipts, protected-input checks, and tracker synchronization.
+## Engineering quality
+
+Acceptance criteria, architecture boundaries, root-cause fixes, focused and full
+verification, risk-based review, and tracker synchronization. Quality checks improve
+the product; they do not create a separate commit-permission system.
 
 ## Compatibility laboratory
 

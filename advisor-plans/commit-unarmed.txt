@@ -1,8 +1,0 @@
-Commit not created.
-
-Reason: HEAD is unborn and no finite run state authorizes both this atom and
-provider review. ./scripts/gate-commit.sh is unarmed (no
-.orchestrion/runtime/active-run.json). Direct git commit is forbidden.
-
-P0 lenses required for money/export/verify diffs before any later armed gate.
-Do not treat passing tests as merge, push, or compatibility certification.
