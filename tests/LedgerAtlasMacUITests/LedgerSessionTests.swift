@@ -117,6 +117,7 @@ import Testing
   for _ in 0..<100 where !gate.hasStarted { try? await Task.sleep(for: .milliseconds(1)) }
   #expect(session.open(replacement, requiresSecurityScope: true))
   for _ in 0..<100 where session.screen == .loading { try? await Task.sleep(for: .milliseconds(1)) }
+  for _ in 0..<100 where counts.stopped < 1 { try? await Task.sleep(for: .milliseconds(1)) }
   #expect(counts.stopped == 1)
 
   gate.release()
