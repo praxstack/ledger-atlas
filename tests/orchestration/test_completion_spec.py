@@ -11,6 +11,12 @@ RENDERER = ROOT / "scripts/render_completion_spec.py"
 MARKDOWN = ROOT / "docs/specifications/ledger-atlas-mac-completion-v2.md"
 HTML = ROOT / "docs/specifications/ledger-atlas-mac-completion-v2.html"
 PRD = ROOT / "prd.json"
+SCREENSHOT_MANIFEST = ROOT / "docs/specifications/screenshot-traceability-v1.json"
+PRIVATE_SENTINELS = (
+    "SYNTHETIC_PRIVATE_ACCOUNT_9D57",
+    "SYNTHETIC_PRIVATE_TRANSACTION_2A61",
+    "SYNTHETIC_PRIVATE_ATTACHMENT_7C84",
+)
 
 
 def run_check(markdown: Path = MARKDOWN, html: Path = HTML) -> subprocess.CompletedProcess[str]:
@@ -52,13 +58,24 @@ def test_completion_html_is_accessible_and_self_contained() -> None:
     assert '<nav aria-label="Specification sections">' in rendered
     assert '<main id="main" tabindex="-1">' in rendered
     assert '<a class="skip" href="#main">' in rendered
-    assert "JetBrainsMono Nerd Font" in rendered
+    body_rule = re.search(r"body\s*\{(?P<rule>[^}]*)}", rendered)
+    assert body_rule is not None
+    primary_font = re.search(r"font-family:\s*(?P<stack>[^;]+)", body_rule["rule"])
+    assert primary_font is not None
+    assert primary_font["stack"].lstrip().startswith('"JetBrainsMono Nerd Font"')
     assert "@media print" in rendered
     assert '<meta name="source-sha256"' in rendered
     assert '<meta name="generated-at"' in rendered
     assert "<link " not in rendered
     assert "<script" not in rendered
     assert "url(" not in rendered
+
+
+def test_completion_html_excludes_private_paths_and_sentinels() -> None:
+    rendered = HTML.read_text(encoding="utf-8")
+    manifest = json.loads(SCREENSHOT_MANIFEST.read_text(encoding="utf-8"))
+    forbidden = (manifest["private_root"], "/Users/", *PRIVATE_SENTINELS)
+    assert all(value not in rendered for value in forbidden)
 
 
 def test_prd_release_graph_matches_published_tickets() -> None:

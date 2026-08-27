@@ -225,8 +225,8 @@ def render(source: str, generated_at: str) -> str:
   --paper:#151a17; --panel:#202722; --rule:#3d4942; --accent:#70c3b1; --code:#29332d; }} }}
 * {{ box-sizing:border-box }}
 html {{ scroll-behavior:smooth }}
-body {{ margin:0; color:var(--ink); background:var(--paper); font:15px/1.55 -apple-system,
-  BlinkMacSystemFont,"Segoe UI",sans-serif }}
+body {{ margin:0; color:var(--ink); background:var(--paper); font-family:"JetBrainsMono Nerd Font",
+  "MesloLGS NF",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:15px; line-height:1.55 }}
 a {{ color:var(--accent); text-underline-offset:3px }}
 a:focus-visible {{ outline:3px solid var(--accent); outline-offset:3px }}
 .skip {{ position:absolute; left:-10000px; top:auto }}
