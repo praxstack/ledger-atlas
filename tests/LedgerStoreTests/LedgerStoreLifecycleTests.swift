@@ -246,6 +246,49 @@ import Testing
   }
 }
 
+@Test func lifecycleNeverRestoresSameSizeCorruptionOverTheCanonicalPath() throws {
+  try withLifecycleDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    _ = try writeV10Ledger(to: url)
+    let original = try Data(contentsOf: url)
+    let recovery = LedgerStoreLifecycle.recoveryImageURL(for: url)
+    var corrupted = Data(repeating: 0x58, count: original.count)
+    corrupted.replaceSubrange(0..<16, with: Data("not-a-sqlite-db!".utf8))
+
+    #expect(throws: LedgerStoreLifecycle.Error.pathChanged) {
+      try LedgerStoreLifecycle.open(at: url) { phase in
+        guard phase == .afterPublication else { return }
+        let sibling = try #require(
+          FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+          ).first {
+            $0.lastPathComponent.hasPrefix(".ledger-atlas-upgrade-")
+              && $0.pathExtension == "tmp"
+          })
+        var before = stat()
+        guard lstat(sibling.path, &before) == 0 else { throw LifecycleTestError.injected }
+        try corrupted.write(to: sibling)
+        var times = [before.st_atimespec, before.st_mtimespec]
+        guard
+          times.withUnsafeMutableBufferPointer({ values in
+            utimensat(AT_FDCWD, sibling.path, values.baseAddress, 0)
+          }) == 0,
+          chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR | S_IRGRP)) == 0
+        else { throw LifecycleTestError.injected }
+      }
+    }
+
+    #expect(try Data(contentsOf: url) != corrupted)
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
+    #expect(try Data(contentsOf: recovery) == original)
+    #expect(chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+    #expect(try fileMode(recovery) == mode_t(S_IRUSR | S_IWUSR))
+    let retried = try LedgerStoreLifecycle.open(at: url)
+    #expect(retried.disposition == .opened)
+    #expect(try Data(contentsOf: recovery) == original)
+  }
+}
+
 @Test func lifecycleRefusesSymlinksCompanionsAndAuthenticatedPathSwaps() throws {
   try withLifecycleDirectory { directory in
     let url = directory.appendingPathComponent("ledger.sqlite")

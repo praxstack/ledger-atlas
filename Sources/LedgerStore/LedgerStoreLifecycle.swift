@@ -224,7 +224,7 @@ public enum LedgerStoreLifecycle {
     guard
       fstatat(
         destination.parentDescriptor, replacement.leaf, &displaced, AT_SYMLINK_NOFOLLOW) == 0,
-      sameContentIdentity(displaced, source.identity),
+      safeFile(displaced), sameContentIdentity(displaced, source.identity),
       filesEqual(source.descriptor, recovery.descriptor), fsync(destination.parentDescriptor) == 0
     else {
       _ = Darwin.renameatx_np(
@@ -243,7 +243,8 @@ public enum LedgerStoreLifecycle {
           parentDescriptor: destination.parentDescriptor)
       } catch {
         _ = restoreDisplacedSource(
-          source, replacement: replacement, destination: destination)
+          source, recovery: recovery, expectedDisplaced: displaced,
+          replacement: replacement, destination: destination)
         throw Error.pathChanged
       }
       throw error
@@ -254,7 +255,8 @@ public enum LedgerStoreLifecycle {
         parentDescriptor: destination.parentDescriptor)
     } catch {
       _ = restoreDisplacedSource(
-        source, replacement: replacement, destination: destination)
+        source, recovery: recovery, expectedDisplaced: displaced,
+        replacement: replacement, destination: destination)
       throw Error.pathChanged
     }
     let store = try openPublished(
@@ -316,12 +318,13 @@ public enum LedgerStoreLifecycle {
   }
 
   private static func restoreDisplacedSource(
-    _ source: PinnedFile, replacement: TemporaryFile, destination: Destination
+    _ source: PinnedFile, recovery: PinnedFile, expectedDisplaced: stat,
+    replacement: TemporaryFile, destination: Destination
   ) -> Bool {
     guard
       let published = try? identity(of: replacement.descriptor), safeFile(published),
       let retainedSource = try? identity(of: source.descriptor), safeFile(retainedSource),
-      sameContentIdentity(source.identity, retainedSource)
+      sameFile(expectedDisplaced, retainedSource)
     else { return false }
     var publishedAtPath = stat()
     var displacedAtPath = stat()
@@ -334,6 +337,7 @@ public enum LedgerStoreLifecycle {
         destination.parentDescriptor, replacement.leaf, &displacedAtPath,
         AT_SYMLINK_NOFOLLOW) == 0,
       sameFile(retainedSource, displacedAtPath),
+      filesEqual(source.descriptor, recovery.descriptor),
       Darwin.renameatx_np(
         destination.parentDescriptor, replacement.leaf, destination.parentDescriptor,
         destination.leaf, UInt32(RENAME_SWAP)) == 0,
