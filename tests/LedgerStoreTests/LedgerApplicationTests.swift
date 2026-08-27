@@ -437,20 +437,37 @@ private func makeApplicationStore() throws -> LedgerStore {
   #expect(currentObject["schemaVersion"] == nil)
   #expect(currentObject["schemaFingerprint"] == nil)
 
-  var legacyObject = currentObject
-  legacyObject.removeValue(forKey: "formatVersion")
-  legacyObject.removeValue(forKey: "formatFingerprint")
-  legacyObject["schemaVersion"] = LedgerPortablePackageFormat.legacyV10SchemaVersion
-  legacyObject["schemaFingerprint"] = LedgerPortablePackageFormat.legacyV10SchemaFingerprint
-  let legacyPayload = try JSONSerialization.data(withJSONObject: legacyObject, options: [.sortedKeys])
-  let legacyDigest = SHA256.hash(data: legacyPayload).map { String(format: "%02x", $0) }.joined()
+  let legacyPayload = Data(
+    (#"{"accounts":[{"currencyUnit":"USD","id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lifecycle":"active","name":"Cash","originID":"1111111111111111111111111111111111111111111111111111111111111111","originLabel":"synthetic"}],"budgets":[],"categories":[],"installmentPlans":[],"links":[],"preservedSource":[],"recurrenceRules":[],"revisions":[],"schemaFingerprint":"aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926","schemaVersion":10}"#).utf8)
+  let legacyManifestBytes = Data(
+    (#"{"createdAtMilliseconds":0,"payloadSHA256":"3689355a3fdc2624bf56bf94cae56e8c06ca827b2a8f6057870ed078deebcdff","schemaFingerprint":"aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926","schemaVersion":10}"#).utf8)
+  let legacyManifestObject = try #require(
+    JSONSerialization.jsonObject(with: legacyManifestBytes) as? [String: Any])
   let legacyManifest = LedgerExportManifest(
-    schemaVersion: LedgerPortablePackageFormat.legacyV10SchemaVersion,
-    schemaFingerprint: LedgerPortablePackageFormat.legacyV10SchemaFingerprint,
-    payloadSHA256: legacyDigest, createdAtMilliseconds: 0)
+    schemaVersion: try #require(legacyManifestObject["schemaVersion"] as? Int),
+    schemaFingerprint: try #require(legacyManifestObject["schemaFingerprint"] as? String),
+    payloadSHA256: try #require(legacyManifestObject["payloadSHA256"] as? String),
+    createdAtMilliseconds: try #require(
+      legacyManifestObject["createdAtMilliseconds"] as? Int64))
   let destination = LedgerApplication(store: try makeApplicationStore())
   try destination.importPackage(manifest: legacyManifest, payload: legacyPayload)
-  #expect(try destination.snapshot().accounts.map(\.id) == [account.id])
+  #expect(try destination.snapshot().accounts.map(\.id) == [String(repeating: "a", count: 64)])
+}
+
+@Test func applyExportRejectsUnknownPortableIdentityBeforeMutation() throws {
+  let store = try makeApplicationStore()
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "synthetic")
+  let account = try LedgerAccount(
+    id: String(repeating: "a", count: 64), name: "Future", currencyUnit: "USD", origin: origin)
+  let future = LedgerCanonicalPackage(
+    formatVersion: LedgerPortablePackageFormat.version + 1,
+    formatFingerprint: String(repeating: "f", count: 64), accounts: [account], categories: [],
+    revisions: [], links: [], recurrenceRules: [], budgets: [], installmentPlans: [])
+
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try store.applyExport(future)
+  }
+  #expect(try store.readSnapshot().accounts.isEmpty)
 }
 
 @Test func twelveMonthlyInstallmentsStartingJanuaryStayInTheSameYear() throws {

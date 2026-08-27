@@ -109,6 +109,62 @@ import Testing
   }
 }
 
+@Test func lifecycleRetriesEveryFailureAfterPublishingAValidatedRecoveryImage() throws {
+  let phases: [LedgerStoreLifecycle.TestPhase] = [
+    .afterRecoveryPublished, .afterReplacementCreated, .afterReplacementMigrated,
+    .afterReplacementValidated, .afterPublication,
+  ]
+  for phase in phases {
+    try withLifecycleDirectory { directory in
+      let url = directory.appendingPathComponent("ledger.sqlite")
+      _ = try writeV10Ledger(to: url)
+      let v10Bytes = try Data(contentsOf: url)
+      #expect(throws: LedgerStoreLifecycle.Error.interrupted) {
+        try LedgerStoreLifecycle.open(at: url) { reached in
+          if reached == phase { throw LifecycleTestError.injected }
+        }
+      }
+
+      let retried = try LedgerStoreLifecycle.open(at: url)
+      #expect(retried.disposition == (phase == .afterPublication ? .opened : .upgraded))
+      let recovery = LedgerStoreLifecycle.recoveryImageURL(for: url)
+      #expect(try Data(contentsOf: recovery) == v10Bytes)
+      #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
+    }
+  }
+}
+
+@Test func lifecycleRejectsUntrustedExistingRecoveryImagesWithoutMutatingV10() throws {
+  enum RecoveryKind { case mismatched, unsafeMode, symlink, companion }
+  for kind in [RecoveryKind.mismatched, .unsafeMode, .symlink, .companion] {
+    try withLifecycleDirectory { directory in
+      let url = directory.appendingPathComponent("ledger.sqlite")
+      _ = try writeV10Ledger(to: url)
+      let original = try Data(contentsOf: url)
+      let recovery = LedgerStoreLifecycle.recoveryImageURL(for: url)
+      switch kind {
+      case .mismatched:
+        try Data("not a ledger".utf8).write(to: recovery)
+        #expect(chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+      case .unsafeMode:
+        try original.write(to: recovery)
+        #expect(chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR | S_IRGRP)) == 0)
+      case .symlink:
+        #expect(Darwin.symlink(url.path, recovery.path) == 0)
+      case .companion:
+        try original.write(to: recovery)
+        #expect(chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+        try Data().write(to: URL(fileURLWithPath: recovery.path + "-wal"))
+      }
+
+      #expect(throws: LedgerStoreLifecycle.Error.recoveryImageExists) {
+        try LedgerStoreLifecycle.open(at: url)
+      }
+      #expect(try Data(contentsOf: url) == original)
+    }
+  }
+}
+
 @Test func lifecycleRefusesSymlinksCompanionsAndAuthenticatedPathSwaps() throws {
   try withLifecycleDirectory { directory in
     let url = directory.appendingPathComponent("ledger.sqlite")
@@ -140,6 +196,34 @@ import Testing
     }
     #expect(try Data(contentsOf: parked) == original)
     #expect(try Data(contentsOf: url) == replacementBytes)
+  }
+}
+
+@Test func lifecycleInspectAndOpenRejectForgedInactiveJournalBindings() throws {
+  for operation in ["inspect", "open"] {
+    try withLifecycleDirectory { directory in
+      let url = directory.appendingPathComponent("ledger.sqlite")
+      do {
+        let created = try LedgerStoreLifecycle.create(at: url)
+        let origin = try LedgerOrigin(id: String(repeating: "3", count: 64), label: "synthetic")
+        try created.store.createAccount(
+          LedgerAccount(
+            id: String(repeating: "4", count: 64), name: "Synthetic", currencyUnit: "USD",
+            origin: origin))
+      }
+      let binding = URL(fileURLWithPath: url.path + "-journal.ledger-atlas-binding")
+      let authenticBinding = try Data(contentsOf: binding)
+      try Data(repeating: 0x78, count: authenticBinding.count).write(to: binding)
+      #expect(chmod(binding.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+
+      #expect(throws: LedgerStoreLifecycle.Error.companionPresent) {
+        if operation == "inspect" {
+          _ = try LedgerStoreLifecycle.inspect(at: url)
+        } else {
+          _ = try LedgerStoreLifecycle.open(at: url)
+        }
+      }
+    }
   }
 }
 

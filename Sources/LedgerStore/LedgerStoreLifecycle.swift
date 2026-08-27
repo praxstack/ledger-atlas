@@ -55,9 +55,11 @@ public enum LedgerStoreLifecycle {
     let result = try inspect(source)
     try requirePath(url, matches: source.identity)
     switch result {
-    case .current: try requireInspectableCompanions(at: url)
+    case .current:
+      try requireInspectableCompanions(at: url, databaseDescriptor: source.descriptor)
     case .upgradeRequired: try requireNoCompanions(at: url)
     }
+    try requirePath(url, matches: source.identity)
     return result
   }
 
@@ -121,6 +123,8 @@ public enum LedgerStoreLifecycle {
     switch try inspect(source) {
     case .current:
       let store = try openPublished(at: url, expected: source.identity)
+      try requireInspectableCompanions(at: url, databaseDescriptor: source.descriptor)
+      try requirePath(url, matches: source.identity)
       return Result(store: store, disposition: .opened, recoveryImageURL: nil)
     case .upgradeRequired:
       try invoke(hook, .afterSourceAuthenticated)
@@ -135,31 +139,52 @@ public enum LedgerStoreLifecycle {
     defer { Darwin.close(destination.parentDescriptor) }
     let recoveryURL = recoveryImageURL(for: url)
     let recoveryLeaf = recoveryURL.lastPathComponent
-    guard !entryExists(recoveryLeaf, in: destination.parentDescriptor) else {
-      throw Error.recoveryImageExists
-    }
-
-    let recovery = try TemporaryFile(
-      parentDescriptor: destination.parentDescriptor, prefix: ".ledger-atlas-recovery-")
+    var temporaryRecovery: TemporaryFile?
     var recoveryPublished = false
-    defer { recovery.closeAndRemoveUnlessPublished(recoveryPublished) }
-    try invoke(hook, .afterRecoveryCreated)
-    try copy(source.descriptor, to: recovery.descriptor)
-    try requirePath(url, matches: source.identity)
-    guard filesEqual(source.descriptor, recovery.descriptor) else { throw Error.pathChanged }
-    try validate(recovery.descriptor, as: .legacyV10)
-    try invoke(hook, .afterRecoveryValidated)
-    guard
-      Darwin.renameatx_np(
-        destination.parentDescriptor, recovery.leaf, destination.parentDescriptor,
-        recoveryLeaf, UInt32(RENAME_EXCL)) == 0,
-      fsync(destination.parentDescriptor) == 0
-    else {
-      if errno == EEXIST { throw Error.recoveryImageExists }
-      throw Error.publicationFailed
+    var didPublishRecovery = false
+    defer { temporaryRecovery?.closeAndRemoveUnlessPublished(recoveryPublished) }
+    let recovery: PinnedFile
+    if entryExists(recoveryLeaf, in: destination.parentDescriptor) {
+      do {
+        recovery = try openValidatedRecovery(
+          source: source, url: recoveryURL, leaf: recoveryLeaf,
+          parentDescriptor: destination.parentDescriptor)
+      } catch {
+        throw Error.recoveryImageExists
+      }
+    } else {
+      let temporary = try TemporaryFile(
+        parentDescriptor: destination.parentDescriptor, prefix: ".ledger-atlas-recovery-")
+      temporaryRecovery = temporary
+      try invoke(hook, .afterRecoveryCreated)
+      try copy(source.descriptor, to: temporary.descriptor)
+      try requirePath(url, matches: source.identity)
+      guard filesEqual(source.descriptor, temporary.descriptor) else { throw Error.pathChanged }
+      try validate(temporary.descriptor, as: .legacyV10)
+      try invoke(hook, .afterRecoveryValidated)
+      guard
+        Darwin.renameatx_np(
+          destination.parentDescriptor, temporary.leaf, destination.parentDescriptor,
+          recoveryLeaf, UInt32(RENAME_EXCL)) == 0,
+        fsync(destination.parentDescriptor) == 0
+      else {
+        if errno == EEXIST { throw Error.recoveryImageExists }
+        throw Error.publicationFailed
+      }
+      recoveryPublished = true
+      let descriptor = dup(temporary.descriptor)
+      guard descriptor >= 0 else { throw Error.publicationFailed }
+      do {
+        recovery = PinnedFile(
+          descriptor: descriptor, identity: try identity(of: descriptor), url: recoveryURL)
+      } catch {
+        Darwin.close(descriptor)
+        throw error
+      }
+      didPublishRecovery = true
     }
-    recoveryPublished = true
-    try invoke(hook, .afterRecoveryPublished)
+    defer { Darwin.close(recovery.descriptor) }
+    if didPublishRecovery { try invoke(hook, .afterRecoveryPublished) }
 
     let replacement = try TemporaryFile(
       parentDescriptor: destination.parentDescriptor, prefix: ".ledger-atlas-upgrade-")
@@ -172,7 +197,11 @@ public enum LedgerStoreLifecycle {
     try invoke(hook, .afterReplacementValidated)
     try requirePath(url, matches: source.identity)
     try requireNoCompanions(at: url)
-    guard filesEqual(source.descriptor, recovery.descriptor) else { throw Error.pathChanged }
+    try requireNoCompanions(leaf: recoveryLeaf, in: destination.parentDescriptor)
+    guard
+      sameEntry(recoveryLeaf, identity: recovery.identity, in: destination.parentDescriptor),
+      filesEqual(source.descriptor, recovery.descriptor)
+    else { throw Error.pathChanged }
 
     guard
       Darwin.renameatx_np(
@@ -201,6 +230,28 @@ public enum LedgerStoreLifecycle {
       _ = fsync(destination.parentDescriptor)
     }
     return Result(store: store, disposition: .upgraded, recoveryImageURL: recoveryURL)
+  }
+
+  private static func openValidatedRecovery(
+    source: PinnedFile, url: URL, leaf: String, parentDescriptor: Int32
+  ) throws -> PinnedFile {
+    try requireNoCompanions(leaf: leaf, in: parentDescriptor)
+    let descriptor = Darwin.openat(parentDescriptor, leaf, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    guard descriptor >= 0 else { throw Error.recoveryImageExists }
+    do {
+      let value = try identity(of: descriptor)
+      var atPath = stat()
+      guard
+        safeFile(value),
+        fstatat(parentDescriptor, leaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0,
+        sameFile(value, atPath), filesEqual(source.descriptor, descriptor)
+      else { throw Error.recoveryImageExists }
+      try validate(descriptor, as: .legacyV10)
+      return PinnedFile(descriptor: descriptor, identity: value, url: url)
+    } catch {
+      Darwin.close(descriptor)
+      throw error
+    }
   }
 
   private static func inspect(_ source: PinnedFile) throws -> Inspection {
@@ -334,12 +385,13 @@ public enum LedgerStoreLifecycle {
     guard url.isFileURL, url.path.hasPrefix("/"), !url.lastPathComponent.isEmpty else {
       throw Error.unsafePath
     }
-    try requireInspectableCompanions(at: url)
     let descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
     guard descriptor >= 0 else { throw Error.unsafePath }
     do {
       let value = try identity(of: descriptor)
       guard safeFile(value) else { throw Error.unsafePath }
+      try requirePath(url, matches: value)
+      try requireInspectableCompanions(at: url, databaseDescriptor: descriptor)
       try requirePath(url, matches: value)
       return PinnedFile(descriptor: descriptor, identity: value, url: url)
     } catch {
@@ -425,33 +477,28 @@ public enum LedgerStoreLifecycle {
     }
   }
 
+  private static func requireNoCompanions(leaf: String, in parentDescriptor: Int32) throws {
+    for suffix in ["-journal", "-journal.ledger-atlas-binding", "-wal", "-shm"] {
+      var value = stat()
+      errno = 0
+      guard
+        fstatat(parentDescriptor, leaf + suffix, &value, AT_SYMLINK_NOFOLLOW) != 0,
+        errno == ENOENT
+      else { throw Error.companionPresent }
+    }
+  }
+
   /// A successfully mutated current store retains an authenticated, empty rollback journal.
   /// The pinned mutation VFS verifies the binding before reusing the journal for a write; this
   /// preflight only admits that inactive shape and still refuses WAL, SHM, hot journals, and
   /// orphan bindings.
-  private static func requireInspectableCompanions(at url: URL) throws {
-    for suffix in ["-wal", "-shm"] {
-      var value = stat()
-      errno = 0
-      guard lstat(url.path + suffix, &value) != 0, errno == ENOENT else {
-        throw Error.companionPresent
-      }
-    }
-
-    let journalPath = url.path + "-journal"
-    let bindingPath = journalPath + ".ledger-atlas-binding"
-    var journal = stat()
-    if lstat(journalPath, &journal) == 0 {
-      var binding = stat()
-      guard journal.st_size == 0, safeFile(journal), lstat(bindingPath, &binding) == 0,
-        safeFile(binding), binding.st_size > 0, binding.st_size <= 256
-      else { throw Error.companionPresent }
-      return
-    }
-    guard errno == ENOENT else { throw Error.companionPresent }
-    var binding = stat()
-    errno = 0
-    guard lstat(bindingPath, &binding) != 0, errno == ENOENT else {
+  private static func requireInspectableCompanions(
+    at url: URL, databaseDescriptor: Int32
+  ) throws {
+    do {
+      try LedgerStore.validateInactiveSQLiteCompanions(
+        at: url, databaseDescriptor: databaseDescriptor)
+    } catch {
       throw Error.companionPresent
     }
   }

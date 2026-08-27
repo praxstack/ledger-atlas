@@ -692,6 +692,9 @@ public final class LedgerStore {
   }
 
   public func applyExport(_ package: LedgerCanonicalPackage) throws {
+    guard package.formatVersion == LedgerPortablePackageFormat.version,
+      package.formatFingerprint == LedgerPortablePackageFormat.fingerprint
+    else { throw Error.incompatibleCanonicalStore }
     let origins =
       package.accounts.map(\.origin) + package.categories.map(\.origin)
       + package.revisions.map(\.draft.origin) + package.recurrenceRules.map(\.origin)
@@ -1767,6 +1770,90 @@ public final class LedgerStore {
     } else {
       guard errno == ENOENT else { throw Error.incompatibleCanonicalStore }
     }
+  }
+
+  package static func validateInactiveSQLiteCompanions(
+    at url: URL, databaseDescriptor: Int32
+  ) throws {
+    var database = stat()
+    guard fstat(databaseDescriptor, &database) == 0, isSafeCanonicalFile(database) else {
+      throw Error.incompatibleCanonicalStore
+    }
+    for suffix in ["-wal", "-shm"] {
+      var companion = stat()
+      errno = 0
+      guard lstat(url.path + suffix, &companion) != 0, errno == ENOENT else {
+        throw Error.incompatibleCanonicalStore
+      }
+    }
+    let journalPath = url.path + "-journal"
+    let journalDescriptor = Darwin.open(journalPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    if journalDescriptor < 0 {
+      guard errno == ENOENT else { throw Error.incompatibleCanonicalStore }
+      var binding = stat()
+      errno = 0
+      guard lstat(journalPath + ".ledger-atlas-binding", &binding) != 0, errno == ENOENT else {
+        throw Error.incompatibleCanonicalStore
+      }
+      return
+    }
+    defer { Darwin.close(journalDescriptor) }
+    var journal = stat()
+    var journalAtPath = stat()
+    guard fstat(journalDescriptor, &journal) == 0, lstat(journalPath, &journalAtPath) == 0,
+      sameFile(journal, journalAtPath), journal.st_size == 0, isSafeJournalFile(journal)
+    else { throw Error.incompatibleCanonicalStore }
+
+    let bindingPath = journalPath + ".ledger-atlas-binding"
+    let bindingDescriptor = Darwin.open(bindingPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    guard bindingDescriptor >= 0 else { throw Error.incompatibleCanonicalStore }
+    defer { Darwin.close(bindingDescriptor) }
+    var binding = stat()
+    var bindingAtPath = stat()
+    guard fstat(bindingDescriptor, &binding) == 0, lstat(bindingPath, &bindingAtPath) == 0,
+      sameFile(binding, bindingAtPath), isSafeJournalBinding(binding)
+    else { throw Error.incompatibleCanonicalStore }
+    let expected = Data(journalBindingPayload(database: database, journal: journal).utf8)
+    guard binding.st_size == expected.count else { throw Error.incompatibleCanonicalStore }
+    var actual = Data(count: Int(binding.st_size))
+    let count = actual.withUnsafeMutableBytes { bytes in
+      pread(bindingDescriptor, bytes.baseAddress, bytes.count, 0)
+    }
+    guard count == actual.count, actual == expected else { throw Error.incompatibleCanonicalStore }
+    var retainedJournal = stat()
+    var retainedJournalAtPath = stat()
+    var retainedBinding = stat()
+    var retainedBindingAtPath = stat()
+    guard
+      fstat(journalDescriptor, &retainedJournal) == 0,
+      lstat(journalPath, &retainedJournalAtPath) == 0,
+      sameFile(journal, retainedJournal), sameFile(journal, retainedJournalAtPath),
+      fstat(bindingDescriptor, &retainedBinding) == 0,
+      lstat(bindingPath, &retainedBindingAtPath) == 0,
+      sameFile(binding, retainedBinding), sameFile(binding, retainedBindingAtPath)
+    else { throw Error.incompatibleCanonicalStore }
+    for suffix in ["-wal", "-shm"] {
+      var companion = stat()
+      errno = 0
+      guard lstat(url.path + suffix, &companion) != 0, errno == ENOENT else {
+        throw Error.incompatibleCanonicalStore
+      }
+    }
+  }
+
+  private static func journalBindingPayload(database: stat, journal: stat) -> String {
+    """
+    ledger-atlas-journal-v3
+    \(UInt64(bitPattern: Int64(database.st_dev)))
+    \(database.st_ino)
+    \(database.st_birthtimespec.tv_sec)
+    \(database.st_birthtimespec.tv_nsec)
+    \(UInt64(bitPattern: Int64(journal.st_dev)))
+    \(journal.st_ino)
+    \(journal.st_birthtimespec.tv_sec)
+    \(journal.st_birthtimespec.tv_nsec)
+
+    """
   }
 
   private static func isSafeJournalFile(_ value: stat) -> Bool {
