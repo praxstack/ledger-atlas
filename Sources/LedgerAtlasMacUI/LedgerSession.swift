@@ -2,6 +2,51 @@ import Foundation
 import LedgerStore
 import Observation
 
+private final class SecurityScopeLease: @unchecked Sendable {
+  private let lock = NSLock()
+  private let url: URL
+  private let stop: (URL) -> Void
+  private var owners = 2
+
+  init(url: URL, stop: @escaping (URL) -> Void) {
+    self.url = url
+    self.stop = stop
+  }
+
+  func release() {
+    let shouldStop = lock.withLock {
+      owners -= 1
+      return owners == 0
+    }
+    if shouldStop { stop(url) }
+  }
+}
+
+private final class SecurityScopeLeaseRegistry: @unchecked Sendable {
+  private let lock = NSLock()
+  private var leases: [Int: SecurityScopeLease] = [:]
+
+  func insert(_ lease: SecurityScopeLease, for generation: Int) {
+    lock.withLock { leases[generation] = lease }
+  }
+
+  func lease(for generation: Int) -> SecurityScopeLease? {
+    lock.withLock { leases[generation] }
+  }
+
+  func release(for generation: Int) {
+    lock.withLock { leases.removeValue(forKey: generation) }?.release()
+  }
+
+  func releaseAll() {
+    let released = lock.withLock { () -> [SecurityScopeLease] in
+      defer { leases.removeAll() }
+      return Array(leases.values)
+    }
+    released.forEach { $0.release() }
+  }
+}
+
 @MainActor
 @Observable
 package final class LedgerSession {
@@ -59,7 +104,7 @@ package final class LedgerSession {
   private let load: @Sendable (URL) -> Presentation?
   private let startScope: (URL) -> Bool
   private let stopScope: (URL) -> Void
-  private var scopedURLs: [Int: URL] = [:]
+  private let scopedLeases = SecurityScopeLeaseRegistry()
   private var loadingGenerations: Set<Int> = []
   private var loads: [Int: Task<Void, Never>] = [:]
 
@@ -97,11 +142,13 @@ package final class LedgerSession {
         state = .unavailable
         return false
       }
-      scopedURLs[generation] = url
+      scopedLeases.insert(SecurityScopeLease(url: url, stop: stopScope), for: generation)
     }
     let load = load
+    let lease = scopedLeases.lease(for: generation)
     loadingGenerations.insert(generation)
-    loads[generation] = Task.detached { [weak self] in
+    loads[generation] = Task.detached { [weak self, lease] in
+      defer { lease?.release() }
       let presentation = load(url)
       await MainActor.run {
         self?.finishLoad(generation: generation, presentation: presentation)
@@ -113,7 +160,7 @@ package final class LedgerSession {
   package func close() {
     openGeneration &+= 1
     loads.values.forEach { $0.cancel() }
-    releaseCompletedScopes()
+    releaseAllScopes()
     state = .noLedger
   }
 
@@ -128,15 +175,15 @@ package final class LedgerSession {
     if presentation == nil { releaseScope(for: generation) }
   }
 
-  private func releaseCompletedScopes() {
-    let completed = scopedURLs.keys.filter { !loadingGenerations.contains($0) }
-    for generation in completed {
-      releaseScope(for: generation)
-    }
+  deinit {
+    scopedLeases.releaseAll()
+  }
+
+  private func releaseAllScopes() {
+    scopedLeases.releaseAll()
   }
 
   private func releaseScope(for generation: Int) {
-    guard let scopedURL = scopedURLs.removeValue(forKey: generation) else { return }
-    stopScope(scopedURL)
+    scopedLeases.release(for: generation)
   }
 }

@@ -6,6 +6,16 @@ import LedgerCore
 import LedgerStore
 import Testing
 
+@MainActor
+@Test func recordedFailuresRetainWidgetPublicationFailureAlongsideTheFlowFailure() {
+  let journey = LedgerJourney()
+
+  journey.recordFailure("Widget status could not be published.")
+  journey.recordFailure("Ledger access was not granted.")
+
+  #expect(journey.lastFailure == "Widget status could not be published. Ledger access was not granted.")
+}
+
 @testable import LedgerAtlasMacUI
 
 @MainActor

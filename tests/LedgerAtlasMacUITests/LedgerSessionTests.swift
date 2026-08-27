@@ -124,6 +124,28 @@ import Testing
   #expect(counts.stopped == 2)
 }
 
+@MainActor
+@Test func deallocatedSessionReleasesItsScopeAfterABlockedReadFinishes() async {
+  let url = URL(fileURLWithPath: "/synthetic/blocked.sqlite")
+  let gate = LoaderGate()
+  let counts = ScopeCounts()
+  var session: LedgerSession? = LedgerSession(
+    testingLoader: { _ in gate.blockUntilReleased(); return nil },
+    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStopper: { _ in counts.stop() })
+  weak var releasedSession = session
+
+  #expect(session?.open(url, requiresSecurityScope: true) == true)
+  for _ in 0..<100 where !gate.hasStarted { try? await Task.sleep(for: .milliseconds(1)) }
+  session = nil
+  #expect(releasedSession == nil)
+  #expect(counts.stopped == 0)
+
+  gate.release()
+  for _ in 0..<100 where counts.stopped == 0 { try? await Task.sleep(for: .milliseconds(1)) }
+  #expect(counts.stopped == 1)
+}
+
 private final class LoaderGate: @unchecked Sendable {
   private let condition = NSCondition()
   private var started = false
