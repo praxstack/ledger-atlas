@@ -42,9 +42,10 @@
 		0B2E6D4C5DAD29CF53544AE9 /* LedgerAtlas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LedgerAtlas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerAtlasWidget.swift; sourceTree = "<group>"; };
 		262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedactedWidgetProjection.swift; sourceTree = "<group>"; };
+		5F398DB7037B5E56D14F920C /* LedgerAtlasPackage */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LedgerAtlasPackage; path = LedgerAtlasPackage; sourceTree = SOURCE_ROOT; };
 		978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LedgerAtlasWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerAtlasMacApp.swift; sourceTree = "<group>"; };
-		FCB3B1186F60726959502EE6 /* ledger-atlas-mac-completion-v2 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "ledger-atlas-mac-completion-v2"; path = .; sourceTree = SOURCE_ROOT; };
+		C9A18D20504B0D55CCEFDF6F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,10 +90,10 @@
 		A9DC40FAA3B22FE61DD558CC = {
 			isa = PBXGroup;
 			children = (
+				5F398DB7037B5E56D14F920C /* LedgerAtlasPackage */,
 				7EE26042D6EC5647053770E6 /* LedgerAtlasMac */,
 				00673D2F5794FE7E7A36609C /* LedgerAtlasMacUI */,
 				C7CB8E0B0880BF0B2D247723 /* LedgerAtlasWidget */,
-				CD1D7D37DF8C33670D53BA58 /* Packages */,
 				33E736A5A067853E4816F0BD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -100,18 +101,11 @@
 		C7CB8E0B0880BF0B2D247723 /* LedgerAtlasWidget */ = {
 			isa = PBXGroup;
 			children = (
+				C9A18D20504B0D55CCEFDF6F /* Info.plist */,
 				1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */,
 			);
 			name = LedgerAtlasWidget;
 			path = Sources/LedgerAtlasWidget;
-			sourceTree = "<group>";
-		};
-		CD1D7D37DF8C33670D53BA58 /* Packages */ = {
-			isa = PBXGroup;
-			children = (
-				FCB3B1186F60726959502EE6 /* ledger-atlas-mac-completion-v2 */,
-			);
-			name = Packages;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -184,7 +178,7 @@
 			mainGroup = A9DC40FAA3B22FE61DD558CC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				5BB4FE47ED72ECA99FB700C1 /* XCLocalSwiftPackageReference "." */,
+				CD6523084F602AF93AFC640D /* XCLocalSwiftPackageReference "LedgerAtlasPackage" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 33E736A5A067853E4816F0BD /* Products */;
@@ -251,8 +245,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = 57GGJTRSFG;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier = "com.apple.widgetkit-extension";
+				INFOPLIST_FILE = Sources/LedgerAtlasWidget/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -347,8 +340,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = 57GGJTRSFG;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier = "com.apple.widgetkit-extension";
+				INFOPLIST_FILE = Sources/LedgerAtlasWidget/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -458,9 +450,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		5BB4FE47ED72ECA99FB700C1 /* XCLocalSwiftPackageReference "." */ = {
+		CD6523084F602AF93AFC640D /* XCLocalSwiftPackageReference "LedgerAtlasPackage" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = .;
+			relativePath = LedgerAtlasPackage;
 		};
 /* End XCLocalSwiftPackageReference section */
 

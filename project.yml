@@ -10,7 +10,8 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "15.0"
 packages:
   LedgerAtlas:
-    path: .
+    path: LedgerAtlasPackage
+    group: ""
 targets:
   LedgerAtlas:
     type: application
@@ -32,6 +33,12 @@ targets:
   LedgerAtlasWidget:
     type: app-extension
     platform: macOS
+    info:
+      path: Sources/LedgerAtlasWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Ledger Atlas
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
     sources:
       - Sources/LedgerAtlasWidget
       - path: Sources/LedgerAtlasMacUI/RedactedWidgetProjection.swift
@@ -41,6 +48,4 @@ targets:
         CODE_SIGN_ENTITLEMENTS: LedgerAtlasWidget.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 57GGJTRSFG
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier: com.apple.widgetkit-extension
         SKIP_INSTALL: YES

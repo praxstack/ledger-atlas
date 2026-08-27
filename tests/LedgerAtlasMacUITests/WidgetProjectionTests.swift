@@ -45,3 +45,65 @@ import Testing
 
   #expect(store.reopenURL() == selected)
 }
+
+@Test func projectionStoreReplacesPayloadsWithUnexpectedFields() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let store = RedactedWidgetProjectionStore(containerURL: directory)
+  try Data(#"{"schemaVersion":1,"state":"ready","memo":"private"}"#.utf8).write(to: store.url)
+
+  #expect(store.read() == .empty)
+  let repaired = try #require(String(data: Data(contentsOf: store.url), encoding: .utf8))
+  #expect(!repaired.contains("memo"))
+}
+
+@Test func bookmarksUseTypedPurposesAndRenewStaleCanonicalSelections() throws {
+  let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let selected = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
+  var writes = 0
+  let store = SecurityScopedBookmarkStore(
+    defaults: defaults,
+    makeBookmark: { _ in writes += 1; return Data("renewed".utf8) },
+    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) })
+
+  try store.save(selected, for: .canonicalLedger)
+
+  #expect(store.reopen(.canonicalLedger) == .renewed(selected))
+  #expect(writes == 2)
+  #expect(store.reopen(.importSource) == .missing)
+}
+
+@Test func widgetProjectionPublisherWritesOnlyFixedRuntimeStates() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let store = RedactedWidgetProjectionStore(containerURL: directory)
+  let publisher = RedactedWidgetProjectionPublisher(store: store)
+
+  publisher.publish(.permissionDenied)
+  #expect(store.read().state == .permissionDenied)
+  publisher.publish(.ready)
+  #expect(store.read().state == .ready)
+}
+
+@Test func corruptCanonicalBookmarkIsClearedWithoutTouchingImportSelection() throws {
+  let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let store = SecurityScopedBookmarkStore(
+    defaults: defaults,
+    makeBookmark: { Data($0.path.utf8) },
+    resolveBookmark: {
+      guard $0 != Data("corrupt".utf8) else { throw CocoaError(.fileReadCorruptFile) }
+      return URL(fileURLWithPath: String(decoding: $0, as: UTF8.self))
+    })
+  try store.save(URL(fileURLWithPath: "/synthetic/import.mmbak"), for: .importSource)
+  defaults.set(Data("corrupt".utf8), forKey: "\(SecurityScopedBookmarkStore.defaultKey).canonicalLedger")
+
+  #expect(store.reopen(.canonicalLedger) == .corrupt)
+  #expect(store.reopen(.canonicalLedger) == .missing)
+  #expect(store.reopen(.importSource) == .resolved(URL(fileURLWithPath: "/synthetic/import.mmbak")))
+}

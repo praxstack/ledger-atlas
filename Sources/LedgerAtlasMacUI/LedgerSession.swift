@@ -57,13 +57,22 @@ package final class LedgerSession {
   package private(set) var state: State = .noLedger
   private var openGeneration = 0
   private let load: @Sendable (URL) -> Presentation?
+  private let startScope: (URL) -> Bool
+  private let stopScope: (URL) -> Void
+  private var scopedURL: URL?
 
-  package init(testingLoader: (@Sendable (URL) -> Presentation?)? = nil) {
+  package init(
+    testingLoader: (@Sendable (URL) -> Presentation?)? = nil,
+    testingScopeStarter: ((URL) -> Bool)? = nil,
+    testingScopeStopper: ((URL) -> Void)? = nil
+  ) {
     load =
       testingLoader ?? { url in
         guard let store = try? LedgerStore.openReadOnly(at: url) else { return nil }
         return try? Presentation(snapshot: store.readSnapshot())
       }
+    startScope = testingScopeStarter ?? { $0.startAccessingSecurityScopedResource() }
+    stopScope = testingScopeStopper ?? { $0.stopAccessingSecurityScopedResource() }
   }
 
   package var screen: Screen {
@@ -75,21 +84,40 @@ package final class LedgerSession {
     }
   }
 
-  package func open(_ url: URL) {
+  @discardableResult
+  package func open(_ url: URL, requiresSecurityScope: Bool = false) -> Bool {
+    close()
     openGeneration &+= 1
     let generation = openGeneration
     state = .loading
-    let securityScope = url.startAccessingSecurityScopedResource()
+    if requiresSecurityScope {
+      guard startScope(url) else {
+        state = .unavailable
+        return false
+      }
+      scopedURL = url
+    }
     let load = load
     Task.detached { [weak self] in
-      defer {
-        if securityScope { url.stopAccessingSecurityScopedResource() }
-      }
       let presentation = load(url)
       await MainActor.run {
         guard self?.openGeneration == generation else { return }
         self?.state = presentation.map(State.loaded) ?? .unavailable
+        if presentation == nil { self?.releaseScope() }
       }
     }
+    return true
+  }
+
+  package func close() {
+    openGeneration &+= 1
+    releaseScope()
+    state = .noLedger
+  }
+
+  private func releaseScope() {
+    guard let scopedURL else { return }
+    stopScope(scopedURL)
+    self.scopedURL = nil
   }
 }

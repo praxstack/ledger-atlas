@@ -48,6 +48,37 @@ import Testing
   #expect(session.screen == .unavailable)
 }
 
+@MainActor
+@Test func securityScopedLedgerAccessLastsUntilTheSessionCloses() async {
+  let url = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
+  let counts = ScopeCounts()
+  let loaded = LedgerSession.Presentation(
+    snapshot: .init(accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0))
+  let session = LedgerSession(
+    testingLoader: { _ in loaded },
+    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStopper: { _ in counts.stop() })
+
+  #expect(session.open(url, requiresSecurityScope: true))
+  for _ in 0..<100 where session.screen == LedgerSession.Screen.loading { try? await Task.sleep(for: .milliseconds(1)) }
+  #expect(session.screen == LedgerSession.Screen.loaded)
+  #expect(counts.started == 1)
+  #expect(counts.stopped == 0)
+
+  session.close()
+  #expect(counts.stopped == 1)
+}
+
+@MainActor
+@Test func deniedSecurityScopedLedgerAccessFailsClosed() {
+  let session = LedgerSession(
+    testingLoader: { _ in fatalError("denied URL must not load") },
+    testingScopeStarter: { _ in false })
+
+  #expect(!session.open(URL(fileURLWithPath: "/synthetic/denied.sqlite"), requiresSecurityScope: true))
+  #expect(session.screen == .unavailable)
+}
+
 private final class LoaderGate: @unchecked Sendable {
   private let condition = NSCondition()
   private var started = false
@@ -71,6 +102,17 @@ private final class LoaderGate: @unchecked Sendable {
       condition.broadcast()
     }
   }
+}
+
+private final class ScopeCounts: @unchecked Sendable {
+  private let lock = NSLock()
+  private var startCount = 0
+  private var stopCount = 0
+
+  var started: Int { lock.withLock { startCount } }
+  var stopped: Int { lock.withLock { stopCount } }
+  func start() { lock.withLock { startCount += 1 } }
+  func stop() { lock.withLock { stopCount += 1 } }
 }
 
 extension NSLocking {

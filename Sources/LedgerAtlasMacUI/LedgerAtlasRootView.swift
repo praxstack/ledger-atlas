@@ -11,6 +11,7 @@ public struct LedgerAtlasRootView: View {
   @State private var isChoosingLedger = false
   @State private var sourceTimeZoneIdentifier = ""
   private let bookmarkStore = SecurityScopedBookmarkStore()
+  private let widgetProjectionPublisher: RedactedWidgetProjectionPublisher?
   private let importReviewSummary: ImportReviewSummary
 
   public init(
@@ -19,6 +20,9 @@ public struct LedgerAtlasRootView: View {
   ) {
     _selection = State(initialValue: initialSelection)
     self.importReviewSummary = importReviewSummary ?? .awaitingSyntheticMetadata
+    widgetProjectionPublisher = FileManager.default.containerURL(
+      forSecurityApplicationGroupIdentifier: RedactedWidgetProjectionStore.appGroupIdentifier)
+      .map { RedactedWidgetProjectionPublisher(store: .init(containerURL: $0)) }
   }
 
   public var body: some View {
@@ -43,20 +47,26 @@ public struct LedgerAtlasRootView: View {
       allowsMultipleSelection: false
     ) { result in
       guard case .success(let urls) = result, let url = urls.first else { return }
-      let accessing = url.startAccessingSecurityScopedResource()
-      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-      do {
-        try bookmarkStore.save(url)
-      } catch {
-        journey.recordFailure("Ledger access could not be retained.")
-        return
-      }
       if selection == .importReview || selection == .onboarding {
+        let accessing = url.startAccessingSecurityScopedResource()
+        guard accessing else {
+          publishWidget(.permissionDenied)
+          journey.recordFailure("Ledger access was not granted.")
+          return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
         guard
           let sourceTimeZone = try? SourceTimeZone(
             ianaIdentifier: sourceTimeZoneIdentifier)
         else {
           journey.recordFailure("Choose the backup's source time zone before import.")
+          return
+        }
+        do {
+          try bookmarkStore.save(url, for: .importSource)
+        } catch {
+          journey.recordFailure("Import access could not be retained.")
+          publishWidget(.reopenRequired)
           return
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -70,16 +80,47 @@ public struct LedgerAtlasRootView: View {
           canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
           sourceTimeZone: sourceTimeZone)
       } else {
+        guard session.open(url, requiresSecurityScope: true) else {
+          publishWidget(.permissionDenied)
+          journey.recordFailure("Ledger access was not granted.")
+          return
+        }
         journey.openLedger(url)
-        session.open(url)
+        guard journey.phase == .imported else {
+          session.close()
+          publishWidget(.reopenRequired)
+          return
+        }
+        do {
+          try bookmarkStore.save(url, for: .canonicalLedger)
+          publishWidget(.ready)
+        } catch {
+          journey.recordFailure("Ledger access could not be retained.")
+          publishWidget(.reopenRequired)
+        }
       }
     }
     .task {
-      guard let url = bookmarkStore.reopenURL() else { return }
-      let accessing = url.startAccessingSecurityScopedResource()
-      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-      journey.openLedger(url)
-      session.open(url)
+      switch bookmarkStore.reopen(.canonicalLedger) {
+      case .missing:
+        publishWidget(.empty)
+      case .corrupt:
+        publishWidget(.reopenRequired)
+        journey.recordFailure("Ledger access needs to be selected again.")
+      case .resolved(let url), .renewed(let url):
+        guard session.open(url, requiresSecurityScope: true) else {
+          publishWidget(.permissionDenied)
+          journey.recordFailure("Ledger access was not granted.")
+          return
+        }
+        journey.openLedger(url)
+        guard journey.phase == .imported else {
+          session.close()
+          publishWidget(.reopenRequired)
+          return
+        }
+        publishWidget(.ready)
+      }
     }
     .frame(minWidth: 720, minHeight: 480)
   }
@@ -89,6 +130,10 @@ public struct LedgerAtlasRootView: View {
     if let sqlite = UTType(filenameExtension: "sqlite") { types.insert(sqlite, at: 0) }
     if let mmbak = UTType(filenameExtension: "mmbak") { types.insert(mmbak, at: 0) }
     return types
+  }
+
+  private func publishWidget(_ state: RedactedWidgetProjection.State) {
+    widgetProjectionPublisher?.publish(state)
   }
 
   @ViewBuilder
@@ -131,6 +176,16 @@ public struct LedgerAtlasRootView: View {
           Button("Approve import") {
             journey.performApprove(into: session)
             if journey.lastFailure == nil {
+              if let url = journey.ledgerURL {
+                do {
+                  try bookmarkStore.save(url, for: .canonicalLedger)
+                  publishWidget(.ready)
+                } catch {
+                  journey.recordFailure("Ledger access could not be retained.")
+                  publishWidget(.reopenRequired)
+                  return
+                }
+              }
               selection = .ledger
             }
           }

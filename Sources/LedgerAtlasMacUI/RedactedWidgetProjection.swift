@@ -17,8 +17,20 @@ public struct RedactedWidgetProjection: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey { case schemaVersion, state }
+  private struct AnyKey: CodingKey {
+    let stringValue: String
+    init?(stringValue: String) { self.stringValue = stringValue }
+    let intValue: Int? = nil
+    init?(intValue: Int) { nil }
+  }
 
   public init(from decoder: any Decoder) throws {
+    let rawValues = try decoder.container(keyedBy: AnyKey.self)
+    guard Set(rawValues.allKeys.map(\.stringValue)) == Set(["schemaVersion", "state"]) else {
+      throw DecodingError.dataCorruptedError(
+        forKey: AnyKey(stringValue: "state")!, in: rawValues,
+        debugDescription: "Unexpected widget projection fields.")
+    }
     let values = try decoder.container(keyedBy: CodingKeys.self)
     let schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
     guard schemaVersion == 1 else {
@@ -64,7 +76,10 @@ public struct RedactedWidgetProjectionStore: Sendable {
       let data = try? Data(contentsOf: url),
       let projection = try? JSONDecoder().decode(RedactedWidgetProjection.self, from: data),
       projection.schemaVersion == 1
-    else { return .empty }
+    else {
+      try? write(.empty)
+      return .empty
+    }
     return projection
   }
 
@@ -72,5 +87,17 @@ public struct RedactedWidgetProjectionStore: Sendable {
     precondition(projection.schemaVersion == 1)
     let data = try JSONEncoder().encode(projection)
     try data.write(to: url, options: .atomic)
+  }
+}
+
+public struct RedactedWidgetProjectionPublisher: Sendable {
+  private let store: RedactedWidgetProjectionStore
+
+  public init(store: RedactedWidgetProjectionStore) {
+    self.store = store
+  }
+
+  public func publish(_ state: RedactedWidgetProjection.State) {
+    try? store.write(.init(state: state))
   }
 }
