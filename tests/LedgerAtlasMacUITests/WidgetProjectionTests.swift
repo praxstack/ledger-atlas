@@ -71,7 +71,7 @@ import Testing
   #expect(!repaired.contains("memo"))
 }
 
-@Test func bookmarksUseTypedPurposesAndRenewStaleCanonicalSelections() throws {
+@Test func staleCanonicalBookmarkWaitsForValidatedOpenBeforeRenewal() throws {
   let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
@@ -88,14 +88,14 @@ import Testing
 
   try store.save(selected, for: .canonicalLedger)
 
-  #expect(store.reopen(.canonicalLedger) == .renewed(selected))
-  #expect(writes == 2)
-  #expect(starts == 1)
-  #expect(stops == 1)
+  #expect(store.reopen(.canonicalLedger) == .stale(selected))
+  #expect(writes == 1)
+  #expect(starts == 0)
+  #expect(stops == 0)
   #expect(store.reopen(.importSource) == .missing)
 }
 
-@Test func staleBookmarkRenewalRetainsScopeAndPreservesTheOriginalWhenDenied() throws {
+@Test func staleBookmarkResolutionDefersScopeAndPreservesTheOriginal() throws {
   let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
@@ -110,10 +110,10 @@ import Testing
     scopeStopper: { _ in stops += 1 })
   try store.save(selected)
 
-  #expect(store.reopen(.canonicalLedger) == .denied(selected))
-  #expect(starts == 1)
+  #expect(store.reopen(.canonicalLedger) == .stale(selected))
+  #expect(starts == 0)
   #expect(stops == 0)
-  #expect(store.reopen(.canonicalLedger) == .denied(selected))
+  #expect(store.reopen(.canonicalLedger) == .stale(selected))
 }
 
 @Test func widgetProjectionPublisherWritesOnlyFixedRuntimeStates() throws {
@@ -137,7 +137,7 @@ import Testing
   #expect(throws: CocoaError.self) { try publisher.publish(.ready) }
 }
 
-@Test func corruptCanonicalBookmarkIsClearedWithoutTouchingImportSelection() throws {
+@Test func corruptCanonicalBookmarkIsPreservedWithoutTouchingImportSelection() throws {
   let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
@@ -152,6 +152,6 @@ import Testing
   defaults.set(Data("corrupt".utf8), forKey: "\(SecurityScopedBookmarkStore.defaultKey).canonicalLedger")
 
   #expect(store.reopen(.canonicalLedger) == .corrupt)
-  #expect(store.reopen(.canonicalLedger) == .missing)
+  #expect(store.reopen(.canonicalLedger) == .corrupt)
   #expect(store.reopen(.importSource) == .resolved(URL(fileURLWithPath: "/synthetic/import.mmbak")))
 }

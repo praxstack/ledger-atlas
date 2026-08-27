@@ -6,10 +6,11 @@ private final class SecurityScopeLease: @unchecked Sendable {
   private let lock = NSLock()
   private let url: URL
   private let stop: (URL) -> Void
-  private var owners = 2
+  private var owners: Int
 
-  init(url: URL, stop: @escaping (URL) -> Void) {
+  init(url: URL, owners: Int = 2, stop: @escaping (URL) -> Void) {
     self.url = url
+    self.owners = owners
     self.stop = stop
   }
 
@@ -154,6 +155,25 @@ package final class LedgerSession {
         self?.finishLoad(generation: generation, presentation: presentation)
       }
     }
+    return true
+  }
+
+  @discardableResult
+  package func openValidated(
+    _ url: URL, snapshot: LedgerStore.LedgerReadSnapshot,
+    requiresSecurityScope: Bool = false
+  ) -> Bool {
+    close()
+    openGeneration &+= 1
+    if requiresSecurityScope {
+      guard startScope(url) else {
+        state = .unavailable
+        return false
+      }
+      scopedLeases.insert(
+        SecurityScopeLease(url: url, owners: 1, stop: stopScope), for: openGeneration)
+    }
+    state = .loaded(Presentation(snapshot: snapshot))
     return true
   }
 

@@ -122,6 +122,27 @@ public final class LedgerJourney {
     }
   }
 
+  package func openValidatedLedger(_ store: LedgerStore, at url: URL) throws
+    -> LedgerStore.LedgerReadSnapshot
+  {
+    disconnectLedger()
+    lastFailure = nil
+    do {
+      let snapshot = try store.readSnapshot()
+      self.snapshot = snapshot
+      openedStore = store
+      ledgerURL = url
+      canonicalURL = url
+      phase = .imported
+      return snapshot
+    } catch {
+      disconnectLedger()
+      lastFailure = "Ledger could not be opened."
+      phase = .failed
+      throw error
+    }
+  }
+
   public func beginEditing(_ url: URL) throws {
     let store = try LedgerStore.openForMutation(at: url)
     mutableStore = store

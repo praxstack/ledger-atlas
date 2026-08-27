@@ -28,8 +28,6 @@ public final class SecurityScopedBookmarkStore {
   private let keyPrefix: String
   private let makeBookmark: (URL) throws -> Data
   private let resolveBookmark: (Data) throws -> ResolvedBookmark
-  private let startScope: (URL) -> Bool
-  private let stopScope: (URL) -> Void
 
   public convenience init() {
     self.init(
@@ -73,8 +71,8 @@ public final class SecurityScopedBookmarkStore {
     keyPrefix = key
     self.makeBookmark = makeBookmark
     resolveBookmark = resolveBookmarkResult
-    startScope = scopeStarter
-    stopScope = scopeStopper
+    _ = scopeStarter
+    _ = scopeStopper
   }
 
   public func save(_ url: URL) throws { try save(url, for: .canonicalLedger) }
@@ -94,15 +92,10 @@ public final class SecurityScopedBookmarkStore {
     let key = key(for: purpose)
     guard let data = defaults.data(forKey: key) else { return .missing }
     guard let resolution = try? resolveBookmark(data) else {
-      defaults.removeObject(forKey: key)
       return .corrupt
     }
     guard resolution.isStale else { return .resolved(resolution.url) }
-    guard startScope(resolution.url) else { return .denied(resolution.url) }
-    defer { stopScope(resolution.url) }
-    guard let renewed = try? makeBookmark(resolution.url) else { return .stale(resolution.url) }
-    defaults.set(renewed, forKey: key)
-    return .renewed(resolution.url)
+    return .stale(resolution.url)
   }
 
   public func clear(_ purpose: Purpose = .canonicalLedger) {

@@ -1,14 +1,33 @@
 import AppKit
 import LedgerCore
+import LedgerStore
 import SwiftUI
 import UniformTypeIdentifiers
 
+package enum LedgerLifecycleOperation: Sendable { case create, open }
+
+package struct LedgerLifecycleOutcome: Equatable, Sendable {
+  package enum Kind: Equatable, Sendable {
+    case cancelled, missingBookmark, created, opened, upgraded, failed
+  }
+
+  package let kind: Kind
+  package let recoveryImageExists: Bool
+  package let message: String?
+}
+
 public struct LedgerAtlasRootView: View {
+  package static let createLedgerActionLabel = "Create Ledger"
+  package static let openLedgerActionLabel = "Open Ledger"
+  package static let createLedgerPanelMessage = "Choose where to save the new ledger."
+  package static let openLedgerPanelMessage = "Choose a Ledger Atlas ledger."
+
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
   @State private var session = LedgerSession()
   @State private var journey = LedgerJourney()
-  @State private var isChoosingLedger = false
+  @State private var isChoosingImportSource = false
+  @State private var lifecycleMessage: String?
   @State private var sourceTimeZoneIdentifier = ""
   private let bookmarkStore = SecurityScopedBookmarkStore()
   private let widgetProjectionPublisher: RedactedWidgetProjectionPublisher?
@@ -42,85 +61,61 @@ public struct LedgerAtlasRootView: View {
           value: selection
         )
     }
+    .toolbar {
+      ToolbarItemGroup {
+        Button("Create Ledger…", action: createLedger)
+          .accessibilityLabel(Self.createLedgerActionLabel)
+          .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
+          .keyboardShortcut("n", modifiers: [.command, .shift])
+        Button("Open Ledger…", action: openLedger)
+          .accessibilityLabel(Self.openLedgerActionLabel)
+          .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
+          .keyboardShortcut("o", modifiers: .command)
+      }
+    }
     .fileImporter(
-      isPresented: $isChoosingLedger, allowedContentTypes: Self.importTypes,
+      isPresented: $isChoosingImportSource, allowedContentTypes: Self.importTypes,
       allowsMultipleSelection: false
     ) { result in
       guard case .success(let urls) = result, let url = urls.first else { return }
-      if selection == .importReview || selection == .onboarding {
-        let accessing = url.startAccessingSecurityScopedResource()
-        guard accessing else {
-          recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
-          return
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
-        guard
-          let sourceTimeZone = try? SourceTimeZone(
-            ianaIdentifier: sourceTimeZoneIdentifier)
-        else {
-          journey.recordFailure("Choose the backup's source time zone before import.")
-          return
-        }
-        do {
-          try bookmarkStore.save(url, for: .importSource)
-        } catch {
-          recordFlowFailure("Import access could not be retained.", publishingWidget: .reopenRequired)
-          return
-        }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-          UUID().uuidString)
-        guard
-          (try? FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)) != nil
-        else { return }
-        journey.performSelectSource(
-          url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
-          canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
-          sourceTimeZone: sourceTimeZone)
-      } else {
-        guard session.open(url, requiresSecurityScope: true) else {
-          recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
-          return
-        }
-        journey.openLedger(url)
-        guard journey.phase == .imported else {
-          session.close()
-          recordFlowFailure(
-            journey.lastFailure ?? "Ledger could not be opened.", publishingWidget: .reopenRequired)
-          return
-        }
-        do {
-          try bookmarkStore.save(url, for: .canonicalLedger)
-          guard publishWidget(.ready) else { session.close(); return }
-        } catch {
-          recordFlowFailure("Ledger access could not be retained.", publishingWidget: .reopenRequired)
-        }
+      let accessing = url.startAccessingSecurityScopedResource()
+      guard accessing else {
+        recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
+        return
       }
+      defer { url.stopAccessingSecurityScopedResource() }
+      guard
+        let sourceTimeZone = try? SourceTimeZone(
+          ianaIdentifier: sourceTimeZoneIdentifier)
+      else {
+        journey.recordFailure("Choose the backup's source time zone before import.")
+        return
+      }
+      do {
+        try bookmarkStore.save(url, for: .importSource)
+      } catch {
+        recordFlowFailure("Import access could not be retained.", publishingWidget: .reopenRequired)
+        return
+      }
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+        UUID().uuidString)
+      guard
+        (try? FileManager.default.createDirectory(
+          at: directory, withIntermediateDirectories: true)) != nil
+      else { return }
+      journey.performSelectSource(
+        url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+        canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+        sourceTimeZone: sourceTimeZone)
     }
     .task {
-      switch bookmarkStore.reopen(.canonicalLedger) {
-      case .missing:
-        _ = publishWidget(.empty)
-      case .corrupt:
-        recordFlowFailure("Ledger access needs to be selected again.", publishingWidget: .reopenRequired)
-      case .stale:
-        recordFlowFailure("Ledger access needs to be selected again.", publishingWidget: .reopenRequired)
-      case .denied:
-        recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
-      case .resolved(let url), .renewed(let url):
-        guard session.open(url, requiresSecurityScope: true) else {
-          recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
-          return
-        }
-        journey.openLedger(url)
-        guard journey.phase == .imported else {
-          session.close()
-          recordFlowFailure(
-            journey.lastFailure ?? "Ledger could not be opened.", publishingWidget: .reopenRequired)
-          return
-        }
-        guard publishWidget(.ready) else { session.close(); return }
-      }
+      let outcome = Self.reopenSavedLedger(
+        bookmarkStore: bookmarkStore, widgetPublisher: widgetProjectionPublisher,
+        journey: journey, session: session,
+        scopeStarter: { $0.startAccessingSecurityScopedResource() },
+        scopeStopper: { $0.stopAccessingSecurityScopedResource() })
+      lifecycleMessage = outcome.message
+      if [.opened, .upgraded].contains(outcome.kind) { selection = .ledger }
     }
     .frame(minWidth: 720, minHeight: 480)
   }
@@ -130,6 +125,46 @@ public struct LedgerAtlasRootView: View {
     if let sqlite = UTType(filenameExtension: "sqlite") { types.insert(sqlite, at: 0) }
     if let mmbak = UTType(filenameExtension: "mmbak") { types.insert(mmbak, at: 0) }
     return types
+  }
+
+  private static var ledgerTypes: [UTType] {
+    if let sqlite = UTType(filenameExtension: "sqlite") { return [sqlite, .database] }
+    return [.database]
+  }
+
+  private func createLedger() {
+    let panel = NSSavePanel()
+    panel.title = Self.createLedgerActionLabel
+    panel.prompt = "Create"
+    panel.message = Self.createLedgerPanelMessage
+    panel.nameFieldLabel = "Ledger file:"
+    panel.nameFieldStringValue = "ledger-atlas.sqlite"
+    panel.allowedContentTypes = Self.ledgerTypes
+    panel.canCreateDirectories = true
+    panel.isExtensionHidden = false
+    performLedgerSelection(.create, url: panel.runModal() == .OK ? panel.url : nil)
+  }
+
+  private func openLedger() {
+    let panel = NSOpenPanel()
+    panel.title = Self.openLedgerActionLabel
+    panel.prompt = "Open"
+    panel.message = Self.openLedgerPanelMessage
+    panel.allowedContentTypes = Self.ledgerTypes
+    panel.allowsMultipleSelection = false
+    panel.canChooseDirectories = false
+    panel.canChooseFiles = true
+    performLedgerSelection(.open, url: panel.runModal() == .OK ? panel.url : nil)
+  }
+
+  private func performLedgerSelection(_ operation: LedgerLifecycleOperation, url: URL?) {
+    let outcome = Self.performLedgerSelection(
+      operation, url: url, bookmarkStore: bookmarkStore,
+      widgetPublisher: widgetProjectionPublisher, journey: journey, session: session,
+      scopeStarter: { $0.startAccessingSecurityScopedResource() },
+      scopeStopper: { $0.stopAccessingSecurityScopedResource() })
+    lifecycleMessage = outcome.message
+    if [.created, .opened, .upgraded].contains(outcome.kind) { selection = .ledger }
   }
 
   @discardableResult
@@ -171,6 +206,132 @@ public struct LedgerAtlasRootView: View {
     widgetPublished ? flowFailure : "Widget status could not be published. \(flowFailure)"
   }
 
+  @MainActor
+  package static func performLedgerSelection(
+    _ operation: LedgerLifecycleOperation, url: URL?,
+    bookmarkStore: SecurityScopedBookmarkStore,
+    widgetPublisher: RedactedWidgetProjectionPublisher?, journey: LedgerJourney,
+    session: LedgerSession, scopeStarter: (URL) -> Bool,
+    scopeStopper: (URL) -> Void,
+    lifecycle: (LedgerLifecycleOperation, URL) throws -> LedgerStoreLifecycle.Result =
+      runLedgerLifecycle
+  ) -> LedgerLifecycleOutcome {
+    guard let url else {
+      return .init(kind: .cancelled, recoveryImageExists: false, message: nil)
+    }
+    return performLedgerLifecycle(
+      operation, at: url, bookmarkStore: bookmarkStore, widgetPublisher: widgetPublisher,
+      journey: journey, session: session, scopeStarter: scopeStarter,
+      scopeStopper: scopeStopper, lifecycle: lifecycle)
+  }
+
+  @MainActor
+  package static func performLedgerLifecycle(
+    _ operation: LedgerLifecycleOperation, at url: URL,
+    bookmarkStore: SecurityScopedBookmarkStore,
+    widgetPublisher: RedactedWidgetProjectionPublisher?, journey: LedgerJourney,
+    session: LedgerSession, scopeStarter: (URL) -> Bool,
+    scopeStopper: (URL) -> Void,
+    lifecycle: (LedgerLifecycleOperation, URL) throws -> LedgerStoreLifecycle.Result =
+      runLedgerLifecycle
+  ) -> LedgerLifecycleOutcome {
+    guard scopeStarter(url) else {
+      session.close()
+      journey.closeLedger()
+      let message = "Ledger access was not granted. Choose the ledger again to retry."
+      journey.recordFailure(
+        failureMessage(
+          widgetPublished: publishWidget(
+            .permissionDenied, publisher: widgetPublisher, journey: journey, session: session),
+          flowFailure: message))
+      return .init(kind: .failed, recoveryImageExists: false, message: message)
+    }
+    defer { scopeStopper(url) }
+    session.close()
+    journey.closeLedger()
+    do {
+      let result = try lifecycle(operation, url)
+      let snapshot = try journey.openValidatedLedger(result.store, at: url)
+      guard session.openValidated(url, snapshot: snapshot, requiresSecurityScope: true) else {
+        throw LedgerLifecycleFlowError.permissionDenied
+      }
+      guard
+        publishWidget(
+          .ready, publisher: widgetPublisher, journey: journey, session: session)
+      else {
+        return .init(
+          kind: .failed, recoveryImageExists: result.recoveryImageURL != nil,
+          message: "Widget status could not be published.")
+      }
+      try bookmarkStore.save(url, for: .canonicalLedger)
+      let kind: LedgerLifecycleOutcome.Kind
+      switch result.disposition {
+      case .created: kind = .created
+      case .opened: kind = .opened
+      case .upgraded: kind = .upgraded
+      }
+      let recoveryExists = result.recoveryImageURL != nil
+      return .init(
+        kind: kind, recoveryImageExists: recoveryExists,
+        message: recoveryExists
+          ? "Ledger upgraded. A validated recovery image is available." : nil)
+    } catch {
+      session.close()
+      journey.closeLedger()
+      let recoveryExists = FileManager.default.fileExists(
+        atPath: LedgerStoreLifecycle.recoveryImageURL(for: url).path)
+      let permissionDenied = error is LedgerLifecycleFlowError
+      let message = permissionDenied
+        ? "Ledger access was not granted. Choose the ledger again to retry."
+        : recoveryExists
+          ? "Ledger could not be opened. A recovery image exists. Choose Open Ledger to retry."
+          : "Ledger could not be opened. Choose Open Ledger to retry."
+      journey.recordFailure(
+        failureMessage(
+          widgetPublished: publishWidget(
+            permissionDenied ? .permissionDenied : .reopenRequired,
+            publisher: widgetPublisher, journey: journey, session: session),
+          flowFailure: message))
+      return .init(kind: .failed, recoveryImageExists: recoveryExists, message: message)
+    }
+  }
+
+  @MainActor
+  package static func reopenSavedLedger(
+    bookmarkStore: SecurityScopedBookmarkStore,
+    widgetPublisher: RedactedWidgetProjectionPublisher?, journey: LedgerJourney,
+    session: LedgerSession, scopeStarter: (URL) -> Bool,
+    scopeStopper: (URL) -> Void,
+    lifecycle: (LedgerLifecycleOperation, URL) throws -> LedgerStoreLifecycle.Result =
+      runLedgerLifecycle
+  ) -> LedgerLifecycleOutcome {
+    switch bookmarkStore.reopen(.canonicalLedger) {
+    case .missing:
+      _ = publishWidget(.empty, publisher: widgetPublisher, journey: journey, session: session)
+      return .init(kind: .missingBookmark, recoveryImageExists: false, message: nil)
+    case .resolved(let url), .renewed(let url), .stale(let url):
+      return performLedgerLifecycle(
+        .open, at: url, bookmarkStore: bookmarkStore, widgetPublisher: widgetPublisher,
+        journey: journey, session: session, scopeStarter: scopeStarter,
+        scopeStopper: scopeStopper, lifecycle: lifecycle)
+    case .denied(let url):
+      return performLedgerLifecycle(
+        .open, at: url, bookmarkStore: bookmarkStore, widgetPublisher: widgetPublisher,
+        journey: journey, session: session, scopeStarter: { _ in false },
+        scopeStopper: { _ in }, lifecycle: lifecycle)
+    case .corrupt:
+      session.close()
+      journey.closeLedger()
+      let message = "Ledger access needs to be selected again. Choose Open Ledger to retry."
+      journey.recordFailure(
+        failureMessage(
+          widgetPublished: publishWidget(
+            .reopenRequired, publisher: widgetPublisher, journey: journey, session: session),
+          flowFailure: message))
+      return .init(kind: .failed, recoveryImageExists: false, message: message)
+    }
+  }
+
   @ViewBuilder
   private var destinationPreview: some View {
     if selection != .importReview, selection != .onboarding, session.screen == .loading {
@@ -183,7 +344,8 @@ public struct LedgerAtlasRootView: View {
         Text("Ledger unavailable").font(.largeTitle.bold())
         Text("The selected ledger could not be opened. No previous ledger remains active.")
           .foregroundStyle(.secondary)
-        Button("Open…") { isChoosingLedger = true }
+        Button("Open Ledger…", action: openLedger)
+          .accessibilityLabel(Self.openLedgerActionLabel)
       }
       .padding(32)
       .accessibilityElement(children: .contain)
@@ -204,7 +366,7 @@ public struct LedgerAtlasRootView: View {
         .accessibilityLabel("Backup source time zone")
         .accessibilityHint("Required to preserve the backup's civil date and time meaning.")
         .disabled(journey.isSourceTimeZoneSelectionLocked)
-        Button("Choose Money Manager backup…") { isChoosingLedger = true }
+        Button("Choose Money Manager backup…") { isChoosingImportSource = true }
           .accessibilityLabel("Choose Money Manager backup")
           .disabled(sourceTimeZoneIdentifier.isEmpty)
         if journey.phase == .reviewing {
@@ -230,7 +392,8 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .ledger {
       LedgerView(
         state: session.state, rows: journey.rows(for: .ledger), isEditing: journey.isEditing,
-        open: { isChoosingLedger = true },
+        open: openLedger,
+        lifecycleMessage: lifecycleMessage,
         lastFailure: journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         saveAmount: { transactionID, amountLiteral in
@@ -250,7 +413,7 @@ public struct LedgerAtlasRootView: View {
         rows: journey.rows(for: .backupRestore),
         emptyMessage: selection.emptyStateMessage,
         lastFailure: journey.lastFailure,
-        open: { isChoosingLedger = true },
+        open: openLedger,
         saveBackup: {
           let panel = NSSavePanel()
           panel.allowedContentTypes = [.database, .data]
@@ -266,7 +429,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .accounts {
       AccountsView(state: session.state, rows: journey.rows(for: .accounts)) {
-        isChoosingLedger = true
+        openLedger()
       }
       .id(selection)
     } else if selection == .search {
@@ -278,7 +441,7 @@ public struct LedgerAtlasRootView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         journey.setSearch(LedgerSearchQuery(textContains: trimmed.isEmpty ? nil : trimmed))
       } open: {
-        isChoosingLedger = true
+        openLedger()
       }
       .id(selection)
     } else if selection == .insights {
@@ -286,15 +449,26 @@ public struct LedgerAtlasRootView: View {
         rows: journey.rows(for: .insights),
         table: journey.insightTable,
         emptyMessage: selection.emptyStateMessage
-      ) { isChoosingLedger = true }
+      ) { openLedger() }
       .id(selection)
     } else {
       DataBackedSurface(
         destination: selection, rows: journey.rows(for: selection),
         emptyMessage: selection.emptyStateMessage
-      ) { isChoosingLedger = true }
+      ) { openLedger() }
       .id(selection)
     }
+  }
+}
+
+private enum LedgerLifecycleFlowError: Error { case permissionDenied }
+
+private func runLedgerLifecycle(_ operation: LedgerLifecycleOperation, at url: URL) throws
+  -> LedgerStoreLifecycle.Result
+{
+  switch operation {
+  case .create: try LedgerStoreLifecycle.create(at: url)
+  case .open: try LedgerStoreLifecycle.open(at: url)
   }
 }
 
@@ -448,6 +622,7 @@ private struct LedgerView: View {
   let rows: [LedgerJourney.SurfaceRow]
   let isEditing: Bool
   let open: () -> Void
+  let lifecycleMessage: String?
   let lastFailure: String?
   let beginEditing: () -> Void
   let saveAmount: (String, String) -> Void
@@ -465,6 +640,12 @@ private struct LedgerView: View {
             Text(row.detail).font(.caption).foregroundStyle(.secondary)
           }
           .tag(row.id)
+        }
+        if let lifecycleMessage {
+          Text(lifecycleMessage)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(lifecycleMessage)
+            .padding(.horizontal, 16)
         }
         if let lastFailure {
           Text(lastFailure)
@@ -524,7 +705,7 @@ private struct LedgerView: View {
       case .loaded(let snapshot) where snapshot.transactions.isEmpty:
         openPrompt(
           title: "No transactions", icon: "list.bullet",
-          description: "This native ledger has no transactions yet.",
+          description: lifecycleMessage ?? "This native ledger has no transactions yet.",
           buttonTitle: "Open another ledger…")
       case .loaded(let snapshot):
         List {

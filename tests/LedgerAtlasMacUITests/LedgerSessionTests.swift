@@ -70,6 +70,25 @@ import Testing
 }
 
 @MainActor
+@Test func validatedLifecycleSnapshotLoadsImmediatelyAndRetainsItsSecurityScope() {
+  let url = URL(fileURLWithPath: "/synthetic/validated.sqlite")
+  let counts = ScopeCounts()
+  let snapshot = LedgerStore.LedgerReadSnapshot(
+    accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0)
+  let session = LedgerSession(
+    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStopper: { _ in counts.stop() })
+
+  #expect(session.openValidated(url, snapshot: snapshot, requiresSecurityScope: true))
+  #expect(session.screen == .loaded)
+  #expect(counts.started == 1)
+  #expect(counts.stopped == 0)
+
+  session.close()
+  #expect(counts.stopped == 1)
+}
+
+@MainActor
 @Test func deniedSecurityScopedLedgerAccessFailsClosed() {
   let session = LedgerSession(
     testingLoader: { _ in fatalError("denied URL must not load") },

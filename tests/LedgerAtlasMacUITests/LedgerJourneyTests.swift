@@ -338,6 +338,22 @@ import Testing
 }
 
 @MainActor
+@Test func journeyAdoptsTheExactStoreReturnedByTheLifecycle() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("validated.sqlite")
+  let result = try LedgerStoreLifecycle.create(at: url)
+  let journey = LedgerJourney()
+
+  let snapshot = try journey.openValidatedLedger(result.store, at: url)
+
+  #expect(journey.phase == .imported)
+  #expect(journey.ledgerURL == url)
+  #expect(snapshot.accounts.isEmpty)
+}
+
+@MainActor
 @Test func journeyDailyFinanceDestinationsFillFromNativeCommands() throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
