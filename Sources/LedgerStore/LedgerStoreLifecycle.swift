@@ -234,7 +234,29 @@ public enum LedgerStoreLifecycle {
       throw Error.pathChanged
     }
     replacementPublished = true
-    try invoke(hook, .afterPublication)
+    do {
+      try invoke(hook, .afterPublication)
+    } catch {
+      do {
+        try requireRecoveryStillSafe(
+          recovery, source: source, leaf: recoveryLeaf,
+          parentDescriptor: destination.parentDescriptor)
+      } catch {
+        _ = restoreDisplacedSource(
+          source, replacement: replacement, destination: destination)
+        throw Error.pathChanged
+      }
+      throw error
+    }
+    do {
+      try requireRecoveryStillSafe(
+        recovery, source: source, leaf: recoveryLeaf,
+        parentDescriptor: destination.parentDescriptor)
+    } catch {
+      _ = restoreDisplacedSource(
+        source, replacement: replacement, destination: destination)
+      throw Error.pathChanged
+    }
     let store = try openPublished(
       at: url, expected: try identity(of: replacement.descriptor))
     if sameEntry(replacement.leaf, identity: source.identity, in: destination.parentDescriptor) {
@@ -291,6 +313,44 @@ public enum LedgerStoreLifecycle {
       safeFile(atPath), sameFile(retained, atPath),
       filesEqual(source.descriptor, recovery.descriptor)
     else { throw Error.pathChanged }
+  }
+
+  private static func restoreDisplacedSource(
+    _ source: PinnedFile, replacement: TemporaryFile, destination: Destination
+  ) -> Bool {
+    guard
+      let published = try? identity(of: replacement.descriptor), safeFile(published),
+      let retainedSource = try? identity(of: source.descriptor), safeFile(retainedSource),
+      sameContentIdentity(source.identity, retainedSource)
+    else { return false }
+    var publishedAtPath = stat()
+    var displacedAtPath = stat()
+    guard
+      fstatat(
+        destination.parentDescriptor, destination.leaf, &publishedAtPath,
+        AT_SYMLINK_NOFOLLOW) == 0,
+      sameFile(published, publishedAtPath),
+      fstatat(
+        destination.parentDescriptor, replacement.leaf, &displacedAtPath,
+        AT_SYMLINK_NOFOLLOW) == 0,
+      sameFile(retainedSource, displacedAtPath),
+      Darwin.renameatx_np(
+        destination.parentDescriptor, replacement.leaf, destination.parentDescriptor,
+        destination.leaf, UInt32(RENAME_SWAP)) == 0,
+      fsync(destination.parentDescriptor) == 0
+    else { return false }
+    var restored = stat()
+    guard
+      fstatat(
+        destination.parentDescriptor, destination.leaf, &restored,
+        AT_SYMLINK_NOFOLLOW) == 0,
+      safeFile(restored), sameFile(retainedSource, restored)
+    else { return false }
+    if sameEntry(replacement.leaf, identity: published, in: destination.parentDescriptor) {
+      _ = unlinkat(destination.parentDescriptor, replacement.leaf, 0)
+      _ = fsync(destination.parentDescriptor)
+    }
+    return true
   }
 
   private static func inspect(_ source: PinnedFile) throws -> Inspection {
