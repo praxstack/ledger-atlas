@@ -16,10 +16,12 @@ public struct CanonicalSchemaObject: Equatable, Sendable {
 }
 
 public enum CanonicalLedgerSchema {
-  public static let version = 10
+  public static let version = 11
   public static let applicationID: Int32 = 0x4C_41_54_31
 
-  public static let expectedObjects: [CanonicalSchemaObject] = [
+  /// Exact v10 schema objects. Keep this array byte-for-byte stable: lifecycle authentication
+  /// relies on it before applying the sole v10-to-v11 migration.
+  public static let legacyV10Objects: [CanonicalSchemaObject] = [
     table(
       "ledger_meta",
       """
@@ -392,10 +394,50 @@ public enum CanonicalLedgerSchema {
       """),
   ].sorted { ($0.type, $0.name) < ($1.type, $1.name) }
 
+  private static let v11Objects: [CanonicalSchemaObject] = [
+    table(
+      "ledger_category_tree",
+      """
+      CREATE TABLE ledger_category_tree(
+        category_id TEXT PRIMARY KEY REFERENCES ledger_category(category_id),
+        parent_category_id TEXT REFERENCES ledger_category(category_id),
+        display_order INTEGER NOT NULL CHECK(display_order >= 0),
+        hidden INTEGER NOT NULL CHECK(hidden IN (0, 1)),
+        CHECK(parent_category_id IS NULL OR parent_category_id != category_id)
+      ) STRICT
+      """),
+    table(
+      "ledger_account_group",
+      """
+      CREATE TABLE ledger_account_group(
+        group_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        display_order INTEGER NOT NULL CHECK(display_order >= 0),
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned'))
+      ) STRICT
+      """),
+    table(
+      "ledger_account_preferences",
+      """
+      CREATE TABLE ledger_account_preferences(
+        account_id TEXT PRIMARY KEY REFERENCES ledger_account(account_id),
+        group_id TEXT REFERENCES ledger_account_group(group_id),
+        display_order INTEGER NOT NULL CHECK(display_order >= 0),
+        hidden INTEGER NOT NULL CHECK(hidden IN (0, 1)),
+        include_in_totals INTEGER NOT NULL CHECK(include_in_totals IN (0, 1)),
+        variant TEXT NOT NULL
+      ) STRICT
+      """),
+  ]
+
+  public static let expectedObjects = (legacyV10Objects + v11Objects).sorted {
+    ($0.type, $0.name) < ($1.type, $1.name)
+  }
+
   public static let creationStatements = expectedObjects.map(\.ddl)
 
   /// Exact v8 import-era schema objects, retained for authenticated additive migration.
-  public static let legacyV8Objects = expectedObjects.filter {
+  public static let legacyV8Objects = legacyV10Objects.filter {
     !$0.name.hasPrefix("ledger_") || $0.name == "ledger_meta"
   }
 
@@ -413,6 +455,9 @@ public enum CanonicalLedgerSchema {
   public static let legacyV8Fingerprint =
     "f5526a4621eeb0e780851c3b50444d0c387f48ea953f1c1860da3204c8db91dc"
 
+  public static let legacyV10Fingerprint =
+    "aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926"
+
   private static let v10TableNames: Set<String> = [
     "ledger_recurrence_rule", "ledger_budget", "ledger_installment_plan",
   ]
@@ -421,20 +466,23 @@ public enum CanonicalLedgerSchema {
   /// This deliberately contains only additive application objects; metadata updates stay with the
   /// committer that owns the migration transaction.
   public static let v8ToV9MigrationStatements =
-    expectedObjects
+    legacyV10Objects
     .filter {
       $0.name.hasPrefix("ledger_") && $0.name != "ledger_meta" && !v10TableNames.contains($0.name)
     }
     .map(\.ddl)
 
   public static let v9ToV10MigrationStatements =
-    expectedObjects.filter { v10TableNames.contains($0.name) }.map(\.ddl)
+    legacyV10Objects.filter { v10TableNames.contains($0.name) }.map(\.ddl)
+
+  public static let v10ToV11MigrationStatements = v11Objects.map(\.ddl)
 
   public static func additiveMigrationStatements(fromVersion: Int) -> [String]? {
     switch fromVersion {
-    case 8: v8ToV9MigrationStatements + v9ToV10MigrationStatements
+    case 8: v8ToV9MigrationStatements
     case 9: v9ToV10MigrationStatements
-    case 10: []
+    case 10: v10ToV11MigrationStatements
+    case 11: []
     default: nil
     }
   }
@@ -452,7 +500,7 @@ public enum CanonicalLedgerSchema {
     return hasher.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
-  public static let checksumQueries: [String] = [
+  public static let legacyV10ChecksumQueries: [String] = [
     "SELECT key, value FROM ledger_meta ORDER BY key",
     "SELECT event_id, account_id, event_kind, amount_literal, currency_unit, instant_milliseconds, local_year, local_month, local_day, local_hour, local_minute, local_second, local_millisecond, timezone_kind, timezone_value, temporal_precision, resolved_offset_seconds, source_record_id, provenance_id FROM economic_event ORDER BY event_id",
     "SELECT event_id, semantic, provenance_id, declared_type, storage_class FROM event_source_binding ORDER BY event_id, semantic",
@@ -476,6 +524,12 @@ public enum CanonicalLedgerSchema {
     "SELECT rule_id, origin_id, account_id, category_id, kind, amount_literal, currency_unit, frequency, interval, day_of_month, timezone_kind, timezone_value, start_year, start_month, start_day, until_year, until_month, until_day, paused, skipped, lifecycle FROM ledger_recurrence_rule ORDER BY rule_id",
     "SELECT budget_id, origin_id, name, category_id, currency_unit, amount_literal, period, rollover, start_year, start_month, start_day, lifecycle FROM ledger_budget ORDER BY budget_id",
     "SELECT plan_id, origin_id, account_id, category_id, principal_literal, currency_unit, occurrence_count, completed_count, lifecycle FROM ledger_installment_plan ORDER BY plan_id",
+  ]
+
+  public static let checksumQueries = legacyV10ChecksumQueries + [
+    "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
+    "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
+    "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
   ]
 
   public static func normalizedDDL(_ ddl: String) -> String {

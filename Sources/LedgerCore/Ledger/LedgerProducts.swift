@@ -269,20 +269,42 @@ public struct LedgerProjection: Equatable, Sendable {
   public func discard() {}
 }
 
+public enum LedgerPortablePackageFormat {
+  public static let version = 1
+  public static let fingerprint =
+    "b2a8537dcfb66549c30e77f2d6318170550fd69d7cba092589f7f0b579711a2e"
+  public static let legacyV10SchemaVersion = 10
+  public static let legacyV10SchemaFingerprint =
+    "aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926"
+}
+
 public struct LedgerExportManifest: Equatable, Sendable {
-  public let schemaVersion: Int
-  public let schemaFingerprint: String
+  public let formatVersion: Int
+  public let formatFingerprint: String
   public let payloadSHA256: String
   public let createdAtMilliseconds: Int64
+
+  /// Source-compatible aliases for callers compiled against the v10-era package API.
+  public var schemaVersion: Int { formatVersion }
+  public var schemaFingerprint: String { formatFingerprint }
+
+  public init(
+    formatVersion: Int, formatFingerprint: String, payloadSHA256: String,
+    createdAtMilliseconds: Int64
+  ) {
+    self.formatVersion = formatVersion
+    self.formatFingerprint = formatFingerprint
+    self.payloadSHA256 = payloadSHA256
+    self.createdAtMilliseconds = createdAtMilliseconds
+  }
 
   public init(
     schemaVersion: Int, schemaFingerprint: String, payloadSHA256: String,
     createdAtMilliseconds: Int64
   ) {
-    self.schemaVersion = schemaVersion
-    self.schemaFingerprint = schemaFingerprint
-    self.payloadSHA256 = payloadSHA256
-    self.createdAtMilliseconds = createdAtMilliseconds
+    self.init(
+      formatVersion: schemaVersion, formatFingerprint: schemaFingerprint,
+      payloadSHA256: payloadSHA256, createdAtMilliseconds: createdAtMilliseconds)
   }
 }
 
@@ -308,8 +330,8 @@ public struct LedgerPreservedSourceRecord: Equatable, Sendable {
 }
 
 public struct LedgerCanonicalPackage: Equatable, Sendable {
-  public let schemaVersion: Int
-  public let schemaFingerprint: String
+  public let formatVersion: Int
+  public let formatFingerprint: String
   public let accounts: [LedgerAccount]
   public let categories: [LedgerCategory]
   public let revisions: [LedgerTransactionRevision]
@@ -319,15 +341,18 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
   public let installmentPlans: [LedgerInstallmentPlan]
   public let preservedSource: [LedgerPreservedSourceRecord]
 
+  public var schemaVersion: Int { formatVersion }
+  public var schemaFingerprint: String { formatFingerprint }
+
   public init(
-    schemaVersion: Int, schemaFingerprint: String, accounts: [LedgerAccount],
+    formatVersion: Int, formatFingerprint: String, accounts: [LedgerAccount],
     categories: [LedgerCategory], revisions: [LedgerTransactionRevision],
     links: [LedgerTransactionLink], recurrenceRules: [LedgerRecurrenceRule],
     budgets: [LedgerBudget], installmentPlans: [LedgerInstallmentPlan],
     preservedSource: [LedgerPreservedSourceRecord] = []
   ) {
-    self.schemaVersion = schemaVersion
-    self.schemaFingerprint = schemaFingerprint
+    self.formatVersion = formatVersion
+    self.formatFingerprint = formatFingerprint
     self.accounts = accounts
     self.categories = categories
     self.revisions = revisions
@@ -336,6 +361,20 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
     self.budgets = budgets
     self.installmentPlans = installmentPlans
     self.preservedSource = preservedSource
+  }
+
+  public init(
+    schemaVersion: Int, schemaFingerprint: String, accounts: [LedgerAccount],
+    categories: [LedgerCategory], revisions: [LedgerTransactionRevision],
+    links: [LedgerTransactionLink], recurrenceRules: [LedgerRecurrenceRule],
+    budgets: [LedgerBudget], installmentPlans: [LedgerInstallmentPlan],
+    preservedSource: [LedgerPreservedSourceRecord] = []
+  ) {
+    self.init(
+      formatVersion: schemaVersion, formatFingerprint: schemaFingerprint, accounts: accounts,
+      categories: categories, revisions: revisions, links: links,
+      recurrenceRules: recurrenceRules, budgets: budgets, installmentPlans: installmentPlans,
+      preservedSource: preservedSource)
   }
 }
 

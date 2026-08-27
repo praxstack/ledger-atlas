@@ -2,7 +2,7 @@
 
 Updated: 2026-08-27
 Status: unaccepted implementation candidate. Repository commits contain an importer,
-canonical-ledger kernel (schema v10), public LedgerApplication commands, redacted CLI,
+canonical-ledger kernel (schema v11), public LedgerApplication commands, redacted CLI,
 and a native Mac journey/session. No real-v19 lossless import
 certificate, or shipped application exists.
 
@@ -45,6 +45,13 @@ restore. Package restore writes accounts, revisions, links, recurrence, budgets,
 and installment plans in one mutate; a mid-restore error leaves the destination
 unchanged. Compatibility certificates can be minted only for registered
 fixture/oracle names; coverage still permits L0 only.
+
+Canonical v11 freezes the exact v10 identity and adds category-tree and account-
+organization storage foundations without changing current account/category behavior.
+`LedgerStoreLifecycle` creates v11 stores and opens or upgrades exact v10 stores through
+descriptor-bound, owner-only, same-directory publication with a validated v10 recovery
+image. Portable packages now carry their own v1 identity; a named legacy decoder accepts
+the frozen v10-era package shape.
 
 Live `mmctl` commands are `inspect`, `coverage`, `stage`, and `reconcile`. On the
 synthetic four-table profile `realbyte-android-v19-synthetic-text-subset-v1`, the

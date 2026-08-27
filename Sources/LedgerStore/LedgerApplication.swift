@@ -401,8 +401,8 @@ public struct LedgerApplication: LedgerClient {
       links[link.id] = link
     }
     let package = LedgerCanonicalPackage(
-      schemaVersion: store.schemaIdentity.version,
-      schemaFingerprint: store.schemaIdentity.fingerprint, accounts: snapshot.accounts,
+      formatVersion: LedgerPortablePackageFormat.version,
+      formatFingerprint: LedgerPortablePackageFormat.fingerprint, accounts: snapshot.accounts,
       categories: snapshot.categories, revisions: snapshot.revisionHistory,
       links: links.values.sorted { $0.id < $1.id }, recurrenceRules: snapshot.recurrenceRules,
       budgets: snapshot.budgets, installmentPlans: snapshot.installmentPlans)
@@ -410,8 +410,8 @@ public struct LedgerApplication: LedgerClient {
     guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
     let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
     let manifest = LedgerExportManifest(
-      schemaVersion: store.schemaIdentity.version,
-      schemaFingerprint: store.schemaIdentity.fingerprint, payloadSHA256: digest,
+      formatVersion: LedgerPortablePackageFormat.version,
+      formatFingerprint: LedgerPortablePackageFormat.fingerprint, payloadSHA256: digest,
       createdAtMilliseconds: 0)
     return (manifest, payload)
   }
@@ -423,9 +423,7 @@ public struct LedgerApplication: LedgerClient {
   public func importPackage(manifest: LedgerExportManifest, payload: Data) throws {
     guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
     let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
-    guard digest == manifest.payloadSHA256,
-      manifest.schemaVersion == store.schemaIdentity.version,
-      manifest.schemaFingerprint == store.schemaIdentity.fingerprint
+    guard digest == manifest.payloadSHA256, supportedPackageManifest(manifest)
     else { throw Error.invalidCommand }
     let existing = try store.readSnapshot()
     if snapshotHasProductRows(existing) {
@@ -445,6 +443,13 @@ private func snapshotHasProductRows(_ snapshot: LedgerStore.LedgerReadSnapshot) 
   !snapshot.accounts.isEmpty || !snapshot.transactions.isEmpty || !snapshot.categories.isEmpty
     || !snapshot.recurrenceRules.isEmpty || !snapshot.budgets.isEmpty
     || !snapshot.installmentPlans.isEmpty
+}
+
+private func supportedPackageManifest(_ manifest: LedgerExportManifest) -> Bool {
+  (manifest.formatVersion == LedgerPortablePackageFormat.version
+    && manifest.formatFingerprint == LedgerPortablePackageFormat.fingerprint)
+    || (manifest.formatVersion == LedgerPortablePackageFormat.legacyV10SchemaVersion
+      && manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV10SchemaFingerprint)
 }
 
 public struct IOSFacingLedgerClient: LedgerClient {
@@ -623,8 +628,8 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
     ]
   }
   let object: [String: Any] = [
-    "schemaVersion": package.schemaVersion,
-    "schemaFingerprint": package.schemaFingerprint,
+    "formatVersion": package.formatVersion,
+    "formatFingerprint": package.formatFingerprint,
     "accounts": accounts,
     "categories": categories,
     "revisions": revisions,
@@ -685,6 +690,36 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
 private func decodePackage(_ data: Data, manifest: LedgerExportManifest) throws
   -> LedgerCanonicalPackage
 {
+  if manifest.formatVersion == LedgerPortablePackageFormat.version,
+    manifest.formatFingerprint == LedgerPortablePackageFormat.fingerprint
+  {
+    return try decodeCurrentPackage(data, manifest: manifest)
+  }
+  if manifest.formatVersion == LedgerPortablePackageFormat.legacyV10SchemaVersion,
+    manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV10SchemaFingerprint
+  {
+    return try decodeLegacyV10Package(data, manifest: manifest)
+  }
+  throw LedgerApplication.Error.invalidCommand
+}
+
+private func decodeCurrentPackage(_ data: Data, manifest: LedgerExportManifest) throws
+  -> LedgerCanonicalPackage
+{
+  try decodePackageShape(
+    data, manifest: manifest, versionKey: "formatVersion", fingerprintKey: "formatFingerprint")
+}
+
+private func decodeLegacyV10Package(_ data: Data, manifest: LedgerExportManifest) throws
+  -> LedgerCanonicalPackage
+{
+  try decodePackageShape(
+    data, manifest: manifest, versionKey: "schemaVersion", fingerprintKey: "schemaFingerprint")
+}
+
+private func decodePackageShape(
+  _ data: Data, manifest: LedgerExportManifest, versionKey: String, fingerprintKey: String
+) throws -> LedgerCanonicalPackage {
   guard hasOnlyUniqueJSONKeys(data),
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
   else {
@@ -735,11 +770,11 @@ private func decodePackage(_ data: Data, manifest: LedgerExportManifest) throws
   try exactKeys(
     object,
     [
-      "schemaVersion", "schemaFingerprint", "accounts", "categories", "revisions", "links",
+      versionKey, fingerprintKey, "accounts", "categories", "revisions", "links",
       "recurrenceRules", "budgets", "installmentPlans", "preservedSource",
     ])
-  guard try jsonInt(object, "schemaVersion") == manifest.schemaVersion,
-    try string(object, "schemaFingerprint") == manifest.schemaFingerprint
+  guard try jsonInt(object, versionKey) == manifest.formatVersion,
+    try string(object, fingerprintKey) == manifest.formatFingerprint
   else { throw LedgerApplication.Error.invalidCommand }
   let accounts = try maps("accounts").map { row in
     try exactKeys(
@@ -927,7 +962,8 @@ private func decodePackage(_ data: Data, manifest: LedgerExportManifest) throws
       payload: payload, reasonCode: try string(row, "reasonCode"))
   }
   return LedgerCanonicalPackage(
-    schemaVersion: manifest.schemaVersion, schemaFingerprint: manifest.schemaFingerprint,
+    formatVersion: LedgerPortablePackageFormat.version,
+    formatFingerprint: LedgerPortablePackageFormat.fingerprint,
     accounts: accounts, categories: categories, revisions: revisions, links: links,
     recurrenceRules: recurrenceRules, budgets: budgets, installmentPlans: installmentPlans,
     preservedSource: preservedSource)

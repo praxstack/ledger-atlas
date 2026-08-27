@@ -1189,7 +1189,15 @@ public struct SQLiteCanonicalCommitter: Sendable {
       && tableNames(database) == legacyTables
       && CanonicalLedgerSchema.schemaFingerprint(for: legacyObjects)
         == CanonicalLedgerSchema.legacyV8Fingerprint
-    guard current || legacy else { throw CanonicalCommitError.incompatibleCanonicalStore }
+    let legacyV10 =
+      allowingLegacyV8
+      && scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_version'") == "10"
+      && scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
+        == CanonicalLedgerSchema.legacyV10Fingerprint
+      && schemaObjects(database) == CanonicalLedgerSchema.legacyV10Objects
+    guard current || legacy || legacyV10 else {
+      throw CanonicalCommitError.incompatibleCanonicalStore
+    }
   }
 
   private func insertMeta(_ database: OpaquePointer, key: String, value: String) throws {

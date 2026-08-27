@@ -34,9 +34,16 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.legacyV8Fingerprint
         == "f5526a4621eeb0e780851c3b50444d0c387f48ea953f1c1860da3204c8db91dc")
     #expect(CanonicalLedgerSchema.legacyV8Fingerprint != CanonicalLedgerSchema.fingerprint)
-    #expect(CanonicalLedgerSchema.version == 10)
-    #expect(CanonicalLedgerSchema.expectedObjects.count == 31)
-    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 31)
+    #expect(CanonicalLedgerSchema.version == 11)
+    #expect(
+      CanonicalLedgerSchema.legacyV10Fingerprint
+        == "aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926")
+    #expect(
+      CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV10Objects)
+        == CanonicalLedgerSchema.legacyV10Fingerprint)
+    #expect(CanonicalLedgerSchema.legacyV10Objects.count == 31)
+    #expect(CanonicalLedgerSchema.expectedObjects.count == 34)
+    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 34)
     #expect(
       Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).isSuperset(of: [
         "receipt_preservation_anchor", "receipt_preservation_payload",
@@ -44,6 +51,7 @@ struct CanonicalPersistenceModelsTests {
         "ledger_origin", "ledger_account", "ledger_category", "ledger_transaction",
         "ledger_transaction_revision", "ledger_transaction_effect",
         "ledger_transaction_source_literal", "ledger_transaction_link",
+        "ledger_category_tree", "ledger_account_group", "ledger_account_preferences",
       ]))
     #expect(
       CanonicalLedgerSchema.creationStatements.allSatisfy {
@@ -57,17 +65,17 @@ struct CanonicalPersistenceModelsTests {
       Issue.record("missing v8-to-v9 migration")
       return
     }
-    #expect(
-      migration
-        == CanonicalLedgerSchema.v8ToV9MigrationStatements
-        + CanonicalLedgerSchema.v9ToV10MigrationStatements)
-    #expect(migration.count == 19)
+    #expect(migration == CanonicalLedgerSchema.v8ToV9MigrationStatements)
     #expect(CanonicalLedgerSchema.v8ToV9MigrationStatements.count == 16)
     #expect(CanonicalLedgerSchema.v9ToV10MigrationStatements.count == 3)
+    #expect(CanonicalLedgerSchema.v10ToV11MigrationStatements.count == 3)
     #expect(
       CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 9)
         == CanonicalLedgerSchema.v9ToV10MigrationStatements)
-    #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 10) == [])
+    #expect(
+      CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 10)
+        == CanonicalLedgerSchema.v10ToV11MigrationStatements)
+    #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 11) == [])
     #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 7) == nil)
     #expect(migration.allSatisfy { $0.localizedCaseInsensitiveContains("CREATE") })
     #expect(migration.allSatisfy { !$0.localizedCaseInsensitiveContains("ALTER TABLE") })
@@ -81,6 +89,30 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.legacyV8Objects.allSatisfy {
         !$0.name.hasPrefix("ledger_") || $0.name == "ledger_meta"
       })
+  }
+
+  @Test("v11 adds category-tree and account-organization storage without changing v10 objects")
+  func v11Foundations() {
+    let objects = Dictionary(
+      uniqueKeysWithValues: CanonicalLedgerSchema.expectedObjects.map { ($0.name, $0.ddl) })
+    let categoryTree = objects["ledger_category_tree"] ?? ""
+    #expect(categoryTree.contains("category_id TEXT PRIMARY KEY REFERENCES ledger_category"))
+    #expect(categoryTree.contains("parent_category_id TEXT REFERENCES ledger_category"))
+    #expect(categoryTree.contains("display_order INTEGER NOT NULL CHECK(display_order >= 0)"))
+    #expect(categoryTree.contains("hidden INTEGER NOT NULL CHECK(hidden IN (0, 1))"))
+    #expect(categoryTree.contains("parent_category_id IS NULL OR parent_category_id != category_id"))
+
+    let groups = objects["ledger_account_group"] ?? ""
+    #expect(groups.contains("group_id TEXT PRIMARY KEY"))
+    #expect(groups.contains("display_order INTEGER NOT NULL CHECK(display_order >= 0)"))
+    #expect(groups.contains("lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned'))"))
+
+    let preferences = objects["ledger_account_preferences"] ?? ""
+    #expect(preferences.contains("account_id TEXT PRIMARY KEY REFERENCES ledger_account"))
+    #expect(preferences.contains("group_id TEXT REFERENCES ledger_account_group"))
+    #expect(preferences.contains("hidden INTEGER NOT NULL CHECK(hidden IN (0, 1))"))
+    #expect(preferences.contains("include_in_totals INTEGER NOT NULL CHECK(include_in_totals IN (0, 1))"))
+    #expect(preferences.contains("variant TEXT NOT NULL"))
   }
 
   @Test("v9 application tables retain exact domain columns and immutable revision history")

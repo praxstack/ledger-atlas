@@ -365,7 +365,7 @@ private func makeApplicationStore() throws -> LedgerStore {
   let report = try app.report(unitCode: "USD")
   #expect(report.accessibleTable.contains("expense"))
   let exported = try app.exportPackage()
-  #expect(exported.manifest.schemaVersion == CanonicalLedgerSchema.version)
+  #expect(exported.manifest.formatVersion == LedgerPortablePackageFormat.version)
   try app.importPackage(manifest: exported.manifest, payload: exported.payload)
   let restored = LedgerApplication(store: try makeApplicationStore())
   try restored.importPackage(manifest: exported.manifest, payload: exported.payload)
@@ -416,6 +416,41 @@ private func makeApplicationStore() throws -> LedgerStore {
   #expect(created[0].draft.occurredAt.localDateTime.date.month == 1)
   #expect(created[1].draft.occurredAt.localDateTime.date.month == 2)
   #expect(created[2].draft.occurredAt.localDateTime.date.month == 3)
+}
+
+@Test func portablePackageIdentityIsIndependentAndFrozenV10PayloadsStillDecode() throws {
+  let source = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Cash", currencyUnit: "USD", origin: origin)
+  try source.createAccount(account)
+
+  let exported = try source.exportPackage()
+  #expect(exported.manifest.formatVersion == LedgerPortablePackageFormat.version)
+  #expect(exported.manifest.formatFingerprint == LedgerPortablePackageFormat.fingerprint)
+  #expect(exported.manifest.formatVersion != CanonicalLedgerSchema.version)
+  let currentObject = try #require(
+    JSONSerialization.jsonObject(with: exported.payload) as? [String: Any])
+  #expect(currentObject["formatVersion"] as? Int == LedgerPortablePackageFormat.version)
+  #expect(currentObject["formatFingerprint"] as? String == LedgerPortablePackageFormat.fingerprint)
+  #expect(currentObject["schemaVersion"] == nil)
+  #expect(currentObject["schemaFingerprint"] == nil)
+
+  var legacyObject = currentObject
+  legacyObject.removeValue(forKey: "formatVersion")
+  legacyObject.removeValue(forKey: "formatFingerprint")
+  legacyObject["schemaVersion"] = LedgerPortablePackageFormat.legacyV10SchemaVersion
+  legacyObject["schemaFingerprint"] = LedgerPortablePackageFormat.legacyV10SchemaFingerprint
+  let legacyPayload = try JSONSerialization.data(withJSONObject: legacyObject, options: [.sortedKeys])
+  let legacyDigest = SHA256.hash(data: legacyPayload).map { String(format: "%02x", $0) }.joined()
+  let legacyManifest = LedgerExportManifest(
+    schemaVersion: LedgerPortablePackageFormat.legacyV10SchemaVersion,
+    schemaFingerprint: LedgerPortablePackageFormat.legacyV10SchemaFingerprint,
+    payloadSHA256: legacyDigest, createdAtMilliseconds: 0)
+  let destination = LedgerApplication(store: try makeApplicationStore())
+  try destination.importPackage(manifest: legacyManifest, payload: legacyPayload)
+  #expect(try destination.snapshot().accounts.map(\.id) == [account.id])
 }
 
 @Test func twelveMonthlyInstallmentsStartingJanuaryStayInTheSameYear() throws {
@@ -1037,9 +1072,9 @@ private func makeApplicationStore() throws -> LedgerStore {
 
   let duplicateKey = try #require(String(data: exported.payload, encoding: .utf8))
     .replacingOccurrences(
-      of: "\"schemaVersion\":\(exported.manifest.schemaVersion)",
+      of: "\"formatVersion\":\(exported.manifest.formatVersion)",
       with:
-        "\"schemaVersion\":\(exported.manifest.schemaVersion),\"schemaVersion\":\(exported.manifest.schemaVersion)",
+        "\"formatVersion\":\(exported.manifest.formatVersion),\"formatVersion\":\(exported.manifest.formatVersion)",
       options: [], range: nil)
   try expectRejected(Data(duplicateKey.utf8))
 
@@ -1101,11 +1136,11 @@ private func makeApplicationStore() throws -> LedgerStore {
   try expectRejected(conflictingOrigin)
 
   var mismatchedVersion = base
-  mismatchedVersion["schemaVersion"] = exported.manifest.schemaVersion + 1
+  mismatchedVersion["formatVersion"] = exported.manifest.formatVersion + 1
   try expectRejected(mismatchedVersion)
 
   var mismatchedFingerprint = base
-  mismatchedFingerprint["schemaFingerprint"] = String(repeating: "0", count: 64)
+  mismatchedFingerprint["formatFingerprint"] = String(repeating: "0", count: 64)
   try expectRejected(mismatchedFingerprint)
 
   let excessiveNesting = Data(

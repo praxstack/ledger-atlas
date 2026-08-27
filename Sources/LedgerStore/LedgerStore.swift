@@ -1301,6 +1301,10 @@ public final class LedgerStore {
     }
   }
 
+  package func matchesPinnedInode(_ expected: stat) -> Bool {
+    pinnedIdentity.map { Self.sameInode($0, expected) } == true
+  }
+
   package static func canonicalChecksum(_ database: OpaquePointer) throws -> String {
     var hasher = SHA256()
     updateChecksum(&hasher, Data("ledger-atlas/canonical-checksum/v1".utf8))

@@ -45,6 +45,7 @@ struct AtomicCanonicalCommitTests {
           try executeTestSQL(database, "DROP TRIGGER \(trigger)")
         }
         for table in [
+          "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
           "ledger_transaction_link", "ledger_transaction_source_literal",
           "ledger_transaction_effect", "ledger_transaction_revision", "ledger_transaction",
           "ledger_category", "ledger_account", "ledger_origin", "ledger_budget",
@@ -68,6 +69,39 @@ struct AtomicCanonicalCommitTests {
           database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
         #expect(version == String(CanonicalLedgerSchema.version))
         #expect(fingerprint == CanonicalLedgerSchema.fingerprint)
+      }
+    }
+  }
+
+  @Test("an exact v10 canonical store extends atomically through v11")
+  func exactV10MigratesToV11() throws {
+    try withCommitDirectory { directory in
+      let fixture = try makeFixture(directory: directory, variant: .first)
+      let committer = SQLiteCanonicalCommitter()
+      _ = try committer.commit(fixture.request)
+      try withDatabase(fixture.request.canonicalDatabaseURL) { database in
+        for table in ["ledger_account_preferences", "ledger_account_group", "ledger_category_tree"] {
+          try executeTestSQL(database, "DROP TABLE \(table)")
+        }
+        try executeTestSQL(
+          database,
+          "UPDATE ledger_meta SET value='10' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.legacyV10Fingerprint)' WHERE key='schema_fingerprint'"
+        )
+      }
+
+      let retry = try committer.commit(fixture.request)
+      #expect(retry.status == .unchanged)
+      try withDatabase(fixture.request.canonicalDatabaseURL) { database in
+        let version = try scalarTestText(
+          database, "SELECT value FROM ledger_meta WHERE key='schema_version'")
+        let fingerprint = try scalarTestText(
+          database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
+        let foundationCount = try scalarTestText(
+          database,
+          "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_category_tree','ledger_account_group','ledger_account_preferences')")
+        #expect(version == "11")
+        #expect(fingerprint == CanonicalLedgerSchema.fingerprint)
+        #expect(foundationCount == "3")
       }
     }
   }
