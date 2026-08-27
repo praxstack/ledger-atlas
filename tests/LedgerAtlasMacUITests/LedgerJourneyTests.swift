@@ -7,16 +7,28 @@ import LedgerStore
 import Testing
 
 @MainActor
-@Test func recordedFailuresRetainWidgetPublicationFailureAlongsideTheFlowFailure() {
+@Test func recordedFailuresReplaceThePreviousFailure() {
   let journey = LedgerJourney()
 
   journey.recordFailure("Widget status could not be published.")
   journey.recordFailure("Ledger access was not granted.")
 
-  #expect(journey.lastFailure == "Widget status could not be published. Ledger access was not granted.")
+  #expect(journey.lastFailure == "Ledger access was not granted.")
 }
 
 @testable import LedgerAtlasMacUI
+
+@MainActor
+@Test func widgetPublicationFailureKeepsTheWidgetAndFlowFailuresTogetherOnce() {
+  #expect(
+    LedgerAtlasRootView.failureMessage(
+      widgetPublished: false, flowFailure: "Ledger access was not granted.")
+      == "Widget status could not be published. Ledger access was not granted.")
+  #expect(
+    LedgerAtlasRootView.failureMessage(
+      widgetPublished: true, flowFailure: "Ledger access was not granted.")
+      == "Ledger access was not granted.")
+}
 
 @MainActor
 @Test func macNativeDateUsesTheDeclaredTimeZoneAtUTCDayBoundary() throws {

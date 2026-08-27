@@ -177,8 +177,7 @@ public final class LedgerJourney {
   }
 
   public func recordFailure(_ message: String) {
-    let combined = lastFailure.map { "\($0) \(message)" } ?? message
-    failClosed(message: combined)
+    failClosed(message: message)
   }
 
   private func failClosed(message: String) {
