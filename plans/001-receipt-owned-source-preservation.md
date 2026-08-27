@@ -1,10 +1,16 @@
 # Plan 001: Add receipt-owned source preservation
 
-> Executor: work test-first and only in the declared paths. Use synthetic SQLite
+> **Superseded on 2026-08-26.** Keep this file as historical design evidence.
+> Do not execute its manifest, fixed-scope, no-commit, or frozen-review instructions.
+> Use the current `prd.json` item and issue tracker instead.
+
+> Historical executor instruction: work test-first and only in the declared paths. Use synthetic SQLite
 > fixtures only. Do not stage, commit, push, merge, deploy, or modify external
 > evidence.
 
 ## Status
+
+- State: SUPERSEDED
 
 - Priority: P0
 - Effort: M
@@ -14,8 +20,8 @@
 - Planned at: unborn `HEAD`, 2026-08-10
 - Baseline manifest: `617fe580de79b4972bfcdcb5e173b59fe62a4e2e546d4854a18a4c3a4cf42440`
 
-Stop before editing if a fresh ordered checksum of the nine Scope files differs
-from that baseline.
+The checksum stop condition below belonged to the superseded plan and no longer
+controls editing or commits.
 
 ## Why this matters
 

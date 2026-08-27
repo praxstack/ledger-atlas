@@ -1,10 +1,16 @@
 # Plan 002: Establish a pending real Android v19 certification cell
 
+> **Superseded on 2026-08-26.** Keep this file as historical design evidence.
+> Do not execute its unborn-HEAD baseline or release-gate language. Use the
+> current `prd.json` import work and issue tracker instead.
+
 > Execute only after Plan 001 is green and reviewed. Keep checked-in fixtures
 > synthetic. Any explicitly authorized external evidence remains read-only and
 > may produce only bounded redacted structural receipts.
 
 ## Status
+
+- State: SUPERSEDED
 
 - Priority: P0
 - Effort: M

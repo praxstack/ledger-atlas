@@ -2,6 +2,11 @@
 > Twin of [[commit-governance-audit.html]] · DecisionCanvas 0.2.0 · canvas `01M0Z3CQVNHC5X3T3F8PB990XC`
 > generated 2026-08-26T13:13:39Z
 
+> **Decision applied.** The stakeholder approved removal on 2026-08-26, and
+> cleanup commit `62772b5` restored normal local commits. The canvas text below
+> is frozen pre-decision history. Its descriptions of current blockers no longer
+> describe the repository.
+
 Verified conclusion: the user requested architecture review, complete specifications, independent review, testing, defect closure, and no commit before those checks passed. The user did not request a custom commit framework, finite atom permits, paired admission commits, provider review for every P0 change, or a six-commit governance bootstrap. Agents inferred and built those controls. The broad bundle entered Git in an auto-sync commit using the user's configured Git identity, which is not proof that the user authored or approved it. No removal is performed by this canvas.
 
 <!-- dcanvas:begin sections -->

@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger Atlas governance remnants audit</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d12;
+      --panel: #101720;
+      --panel-2: #151e29;
+      --line: #2b3948;
+      --text: #eef3f7;
+      --muted: #aab7c4;
+      --good: #63d392;
+      --warn: #f0bd62;
+      --bad: #ff7a78;
+      --info: #67c9dd;
+      --focus: #f5d06f;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "JetBrainsMono Nerd Font", "MesloLGS NF", "Symbols Nerd Font", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 16px;
+      line-height: 1.62;
+    }
+    a { color: var(--info); text-underline-offset: .2em; }
+    a:hover { color: var(--text); }
+    a:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    header {
+      padding: 54px 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: #0c1219;
+    }
+    .eyebrow { color: var(--info); font-size: .82rem; letter-spacing: .08em; text-transform: uppercase; }
+    h1, h2, h3 { line-height: 1.18; }
+    h1 { max-width: 920px; margin: 10px 0 14px; font-size: clamp(2rem, 6vw, 4.8rem); }
+    h2 { margin-top: 0; font-size: clamp(1.45rem, 3vw, 2.25rem); }
+    h3 { font-size: 1.05rem; }
+    p { max-width: 88ch; }
+    .lede { color: var(--muted); font-size: 1.08rem; }
+    .verdict, .callout { padding: 18px 20px; }
+    .verdict { margin-top: 28px; border: 1px solid var(--good); background: #0e2018; color: #dff9e8; }
+    .callout { border-left: 4px solid var(--warn); background: #211a0f; }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 13, 18, .96);
+      backdrop-filter: blur(10px);
+    }
+    nav .shell { display: flex; gap: 22px; overflow-x: auto; padding: 12px 0; }
+    nav a { flex: 0 0 auto; color: var(--muted); font-size: .85rem; text-decoration: none; }
+    main { padding: 34px 0 70px; }
+    section { margin-bottom: 46px; scroll-margin-top: 70px; }
+    .metrics, .cards { display: grid; gap: 12px; }
+    .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 22px; }
+    .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .metric, .card { padding: 18px; border: 1px solid var(--line); background: var(--panel); }
+    .metric { min-height: 128px; }
+    .metric strong { display: block; font-size: 2.4rem; line-height: 1; }
+    .metric span { display: block; margin-top: 10px; color: var(--muted); }
+    .card p:last-child { margin-bottom: 0; }
+    .state { display: inline-block; margin-bottom: 8px; padding: 2px 7px; border: 1px solid currentColor; font-size: .72rem; text-transform: uppercase; }
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .info { color: var(--info); }
+    .example { margin-top: 16px; padding-left: 14px; border-left: 3px solid var(--line); }
+    code, pre { font-family: inherit; }
+    code { color: #d7e8f2; }
+    pre {
+      margin: 10px 0 0;
+      padding: 14px;
+      overflow-x: auto;
+      border: 1px solid #22303e;
+      background: #080b0f;
+      color: #d6e1ea;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .89rem; }
+    th, td { padding: 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #18222e; }
+    td { background: var(--panel); }
+    tr:hover td { background: var(--panel-2); }
+    .path { overflow-wrap: anywhere; }
+    li { margin: .52rem 0; }
+    footer { padding: 24px 0 42px; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
+    @media (max-width: 900px) {
+      .metrics, .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      table { display: block; overflow-x: auto; }
+    }
+    @media (max-width: 560px) {
+      .shell { width: min(100% - 22px, 1180px); }
+      header { padding-top: 34px; }
+      .metrics, .cards { grid-template-columns: 1fr; }
+      .metric { min-height: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <div class="eyebrow">Ledger Atlas / verified governance audit</div>
+      <h1>What still controls work, and what is only leftover text</h1>
+      <p class="lede">Verified against commit <code>62772b5</code> on 27 August 2026 at 11:28 IST. This page lists the active hooks and rules, shows real examples, and names every tracked file that still contains commit-governance vocabulary.</p>
+      <div class="verdict"><strong>Direct answer:</strong> the special commit gate is gone. Ordinary commits work. One Codex safety hook remains because the stakeholder decision kept it. After the documentation cleanup, eighteen tracked files still match the broad governance search terms. They are current rules, labeled history, decision evidence, or harmless terminology.</div>
+    </div>
+  </header>
+
+  <nav aria-label="Page sections">
+    <div class="shell">
+      <a href="#score">Current score</a>
+      <a href="#ordinary">Ordinary commits</a>
+      <a href="#safety">Safety hook</a>
+      <a href="#active">Active rules</a>
+      <a href="#remnants">Original audit files</a>
+      <a href="#cleanup">Cleanup list</a>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="score">
+      <h2>Current score</h2>
+      <div class="metrics">
+        <div class="metric"><strong>0</strong><span>active Git commit blockers</span></div>
+        <div class="metric"><strong>0</strong><span>tracked gate-commit scripts</span></div>
+        <div class="metric"><strong>1</strong><span>active Codex safety hook</span></div>
+        <div class="metric"><strong>18</strong><span>current broad search matches, all classified</span></div>
+      </div>
+    </section>
+
+    <section id="ordinary">
+      <h2>1. "Ordinary commits: working"</h2>
+      <div class="cards">
+        <article class="card">
+          <span class="state good">Current</span>
+          <h3>What it means</h3>
+          <p>A developer can use normal Git commands. No temporary permission, staged-tree receipt, admission record, provider review, or special gate program must approve the commit.</p>
+        </article>
+        <article class="card">
+          <span class="state good">Verified</span>
+          <h3>Mechanical evidence</h3>
+          <p><code>core.hooksPath</code> is unset. <code>.git/hooks</code> has no active hook. The repository tracks no <code>gate-commit.sh</code> or <code>gate_commit.py</code>.</p>
+        </article>
+        <article class="card">
+          <span class="state info">Boundary</span>
+          <h3>What it does not mean</h3>
+          <p>A commit still needs the relevant engineering checks. Push, merge, release, and deployment remain separate actions. This checkout has no configured Git remote.</p>
+        </article>
+      </div>
+      <div class="example">
+        <strong>Example allowed by the remaining Codex hook</strong>
+        <pre>git commit -m "feat: import account mappings"
+Result from .codex/hooks/quality.py: {}</pre>
+      </div>
+    </section>
+
+    <section id="safety">
+      <h2>2. "Private-evidence safety hook: retained"</h2>
+      <p>The active hook is <a href=".codex/hooks/quality.py">.codex/hooks/quality.py</a>. <a href=".codex/hooks.json">.codex/hooks.json</a> runs it at session start and before Codex shell or file-editing tools. It is not a Git hook.</p>
+      <div class="cards">
+        <article class="card">
+          <span class="state good">Allowed</span>
+          <h3>Normal commit</h3>
+          <pre>git commit -m "feat: example"
+Result: allowed</pre>
+        </article>
+        <article class="card">
+          <span class="state good">Allowed</span>
+          <h3>Read original SQLite safely</h3>
+          <pre>sqlite3 "file:/Users/prax/Downloads/money_android.sqlite?mode=ro&amp;immutable=1" .schema
+Result: allowed</pre>
+        </article>
+        <article class="card">
+          <span class="state bad">Blocked</span>
+          <h3>Open original SQLite normally</h3>
+          <pre>sqlite3 /Users/prax/Downloads/money_android.sqlite .schema
+Reason: use mode=ro&amp;immutable=1</pre>
+        </article>
+        <article class="card">
+          <span class="state bad">Blocked</span>
+          <h3>Copy or change an original</h3>
+          <pre>cp /Users/prax/Downloads/money_android.sqlite /tmp/example.sqlite
+Reason: original evidence is read-only</pre>
+        </article>
+        <article class="card">
+          <span class="state bad">Blocked</span>
+          <h3>Destructive Git cleanup</h3>
+          <pre>git reset --hard HEAD~1
+Reason: destructive cleanup needs a separate reviewed action</pre>
+        </article>
+        <article class="card">
+          <span class="state bad">Blocked</span>
+          <h3>Delete or move a test</h3>
+          <pre>rm tests/example.swift
+Reason: do not delete tests to make checks pass</pre>
+        </article>
+      </div>
+      <div class="callout"><strong>Honest limitation.</strong> This hook uses text matching. It can produce a false block, and it does not detect every possible program that could write a file. If its input cannot be parsed, it denies the tool call. It is a guardrail, not proof that evidence is safe.</div>
+    </section>
+
+    <section id="active">
+      <h2>3. Rules that are active now</h2>
+      <table>
+        <thead><tr><th>File</th><th>What it imposes</th><th>Commit blocker?</th></tr></thead>
+        <tbody>
+          <tr><td class="path"><a href="AGENTS.md">AGENTS.md</a></td><td>Keep originals read-only, prevent silent financial loss, use exact money, run relevant checks, and use risk-based review.</td><td><span class="state good">No</span> It explicitly allows normal commits.</td></tr>
+          <tr><td class="path"><a href=".codex/config.toml">.codex/config.toml</a></td><td>Turns Codex hooks and agent profiles on.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href=".codex/hooks.json">.codex/hooks.json</a></td><td>Runs the startup reminder and pre-tool safety check.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href=".codex/hooks/quality.py">.codex/hooks/quality.py</a></td><td>Blocks common writes to named originals, destructive Git cleanup, and test deletion.</td><td><span class="state good">No</span> It allows <code>git commit</code>.</td></tr>
+          <tr><td class="path"><a href="docs/orchestration/RUNBOOK.md">RUNBOOK.md</a></td><td>Describes the current product workflow and normal commit command.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href="scripts/verify.sh">scripts/verify.sh</a></td><td>Validates hook JSON and runs engineering checks when invoked.</td><td><span class="state good">No</span> It is not wired to Git.</td></tr>
+          <tr><td class="path"><a href="tests/orchestration/test_quality_hook.py">test_quality_hook.py</a></td><td>Tests that the hook protects evidence and permits normal commits.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href=".codex/agents/ledger-implementer.toml">ledger-implementer.toml</a></td><td>A delegated worker may edit and test assigned files. The lead owns commits and delivery actions.</td><td><span class="state warn">Worker only</span></td></tr>
+          <tr><td class="path"><a href=".codex/agents/ledger-reviewer.toml">ledger-reviewer.toml</a></td><td>A delegated reviewer is read-only and checks an exact diff against its stated criterion.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href=".codex/agents/ledger-red-team.toml">ledger-red-team.toml</a></td><td>A delegated red-team reviewer is read-only for risky finance and privacy changes.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href=".codex/agents/ledger-scout.toml">ledger-scout.toml</a></td><td>A delegated explorer is read-only and cannot broaden its assigned question.</td><td><span class="state good">No</span></td></tr>
+          <tr><td class="path"><a href=".codex/agents/ledger-validator.toml">ledger-validator.toml</a></td><td>A delegated final validator is read-only and must report missing evidence.</td><td><span class="state good">No</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="remnants">
+      <h2>4. Original audit files and the extra stale plan</h2>
+      <p>The first audit found 19 files. The cleanup removed the false admission claim from <code>specProgress.html</code>, so the same search now finds 18. It also found and superseded Plan 002, which the first governance-word search missed because it used different stale language.</p>
+      <table>
+        <thead><tr><th>File</th><th>Classification</th><th>What remains</th><th>Treatment</th></tr></thead>
+        <tbody>
+          <tr><td class="path"><a href="AGENTS.md">AGENTS.md</a></td><td><span class="state good">Current</span></td><td>Says the old commit system is not required.</td><td>Keep.</td></tr>
+          <tr><td class="path"><a href="CONTEXT.md">CONTEXT.md</a></td><td><span class="state good">Current</span></td><td>Records that the stakeholder removed the custom system.</td><td>Keep.</td></tr>
+          <tr><td class="path"><a href="docs/orchestration/RUNBOOK.md">RUNBOOK.md</a></td><td><span class="state good">Current</span></td><td>Defines normal commits and rejects old paperwork.</td><td>Keep.</td></tr>
+          <tr><td class="path"><a href="status.html">status.html</a></td><td><span class="state good">Current</span></td><td>Says the cleanup was selected and applied.</td><td>Keep.</td></tr>
+          <tr><td class="path"><a href="progress.txt">progress.txt</a></td><td><span class="state info">History</span></td><td>Contains old gate entries and a corrective entry dated 26 August.</td><td>Keep as a dated log.</td></tr>
+          <tr><td class="path"><a href="advisor-plans/README.md">advisor-plans/README.md</a></td><td><span class="state info">History</span></td><td>Says old gate instructions no longer apply.</td><td>Keep.</td></tr>
+          <tr><td class="path"><a href=".codex/agents/ledger-reviewer.toml">ledger-reviewer.toml</a></td><td><span class="state info">Active review</span></td><td>"Frozen criterion" stops a reviewer from changing the task while reviewing.</td><td>Keep. It does not control commits.</td></tr>
+          <tr><td class="path"><a href="docs/specifications/screenshot-functional-parity-v1.md">screenshot-functional-parity-v1.md</a></td><td><span class="state info">False match</span></td><td>"Pre-commit state" means an import state before a ledger transaction commits. It is not a Git rule.</td><td>Keep.</td></tr>
+          <tr><td class="path"><a href="commit-governance-audit.md">commit-governance-audit.md</a></td><td><span class="state info">Labeled history</span></td><td>Contains the original questions and applied decisions.</td><td>Applied banner added.</td></tr>
+          <tr><td class="path"><a href="commit-governance-audit.html">commit-governance-audit.html</a></td><td><span class="state info">Labeled history</span></td><td>The original decision interface remains as evidence.</td><td>Applied banner added. Controls are labeled inactive.</td></tr>
+          <tr><td class="path"><a href="commit-governance-audit.dcanvas.json">commit-governance-audit.dcanvas.json</a></td><td><span class="state warn">Old input</span></td><td>Contains pre-decision questions and defaults.</td><td>Keep beside the decision export, labeled as input.</td></tr>
+          <tr><td class="path"><a href="guide.html">guide.html</a></td><td><span class="state good">Corrected</span></td><td>Now identifies cleanup commit <code>62772b5</code> and the 27 August full verification.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="specProgress.html">specProgress.html</a></td><td><span class="state good">Regenerated</span></td><td>Now reports normal commits and the real-data import blocker.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="plans/README.md">plans/README.md</a></td><td><span class="state info">Superseded</span></td><td>Labels the whole 2026-08-10 plan pack historical and removes its control over current work.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="plans/001-receipt-owned-source-preservation.md">plans/001-receipt-owned-source-preservation.md</a></td><td><span class="state info">Superseded</span></td><td>Keeps the old technical reasoning but disables its manifest and no-commit instructions.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="plans/002-pending-real-v19-certification-cell.md">plans/002-pending-real-v19-certification-cell.md</a></td><td><span class="state info">Superseded</span></td><td>This extra stale unborn-HEAD plan was found during cleanup.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="plans/RUN-2026-08-10.md">plans/RUN-2026-08-10.md</a></td><td><span class="state info">Labeled history</span></td><td>Retains the dated events but states that none control current work.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="docs/orchestration/audit/wave-01/shard-source-requirements.md">shard-source-requirements.md</a></td><td><span class="state info">Labeled history</span></td><td>The old gate recommendation is explicitly rejected for current work.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="docs/orchestration/audit/wave-01/shard-zip-pack-audit.md">shard-zip-pack-audit.md</a></td><td><span class="state info">Labeled history</span></td><td>Documents defects in the removed orchestrion pack.</td><td>Done.</td></tr>
+          <tr><td class="path"><a href="scripts/annotate_parity.py">annotate_parity.py</a></td><td><span class="state good">Retained generator</span></td><td><code>SPEC.md</code> and ADR 0011 still use it. Its gate phrases are input strings that it removes.</td><td>Documented. Deletion would break reproducibility.</td></tr>
+        </tbody>
+      </table>
+      <p><a href="commit-governance-audit.decisions.json">commit-governance-audit.decisions.json</a> does not match the search terms used for the count, but it is relevant decision evidence. Keep it unchanged.</p>
+    </section>
+
+    <section id="cleanup">
+      <h2>5. Cleanup list</h2>
+      <p>The requested documentation cleanup is complete in the working tree.</p>
+      <ol>
+        <li><span class="good">Done.</span> Corrected <code>guide.html</code>.</li>
+        <li><span class="good">Done.</span> Regenerated <code>specProgress.html</code>.</li>
+        <li><span class="good">Done.</span> Superseded the README, Plans 001 and 002, and the dated run log.</li>
+        <li><span class="good">Done.</span> Added the applied-decision banner to the governance audit Markdown and HTML. Decision JSON remains unchanged.</li>
+        <li><span class="good">Done.</span> Labeled both wave-01 audit files as historical analysis.</li>
+        <li><span class="good">Reviewed.</span> Kept <code>scripts/annotate_parity.py</code> because current specifications require it for reproducible tracker generation. Added a plain warning about its legacy input strings.</li>
+      </ol>
+      <div class="callout"><strong>Important:</strong> this should be a small documentation correction, not another multi-day governance project. Product work remains the priority.</div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">Evidence used: live Git configuration, tracked-file search, direct hook probes, current operating contract, current runbook, and commit <code>62772b5</code>. This page does not claim product completion.</div>
+  </footer>
+</body>
+</html>

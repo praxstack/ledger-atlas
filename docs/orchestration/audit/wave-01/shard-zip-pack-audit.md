@@ -1,5 +1,9 @@
 # Wave 01 — Forensic and security audit of `files.zip`
 
+> **Historical analysis of a removed proposal.** This file records why the old
+> orchestrion pack was unsafe. Its gate design and recommendations do not control
+> current Ledger Atlas work.
+
 Date: 2026-08-10  
 Auditor: Codex subagent `zip_pack_audit`  
 Source: `/Users/prax/Downloads/files.zip`  

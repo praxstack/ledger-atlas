@@ -4,13 +4,14 @@
 <title>Ledger Atlas — Progress</title>
 <style>body{font:16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#172033}li{margin:.45rem 0}.done{color:#176c3a}.pending{color:#9b5d00}.blocked{color:#9b1c1c}</style>
 <h1>Ledger Atlas progress</h1>
-<p>Updated 2026-08-17. This is an unaccepted working tree, not a shipped Money Manager clone.</p>
+<p>Updated 2026-08-27. This is a tested implementation candidate, not a shipped Money Manager replacement.</p>
 <ul>
   <li class="done">Implemented candidate: immutable source handling, staging, reconciliation, canonical persistence, redacted inspect/coverage/stage/reconcile CLI, and a synthetic-profile import workspace. <code>mmctl</code> cannot write.</li>
   <li class="done">Implemented candidate: exact money/time primitives, schema v10, LedgerApplication commands, and package export/restore of money, time, links, recurrence, budgets, and installments.</li>
   <li class="done">Implemented candidate: Mac journey select → review → approve → session open → begin editing the imported ledger.</li>
   <li class="pending">Certification: observed Android v19 is classification-only; no real import or L3+ certificate.</li>
-  <li class="blocked">Admission: no accepted baseline commit; governance admission remains separately supervised.</li>
+  <li class="done">Workflow cleanup: the custom commit-permission system was removed in <code>62772b5</code>. Normal commits are available after relevant checks.</li>
+  <li class="blocked">Real-data proof: the supplied Android v19 database and ZIP have not completed lossless import and private reconciliation.</li>
   <li class="pending">Not shipped: daily-finance workbench polish, iOS app, analytics, sync, historical formats.</li>
 </ul>
 <p>Graphify is not a shipped Ledger Atlas module. See <a href="docs/product-status.json">canonical structured status</a>, <a href="spec.html">short specification</a>, <a href="status.html">status.html</a>, and <a href="guide.html">guide.html</a>.</p>

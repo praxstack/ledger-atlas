@@ -4,6 +4,10 @@
 Reads the sealed evidence original read-only; writes the annotated edition into
 ledger-atlas. Refuses to write unless every content assertion passes.
 ADR: docs/decisions/0011-parity-ticket-architecture.md
+
+Retained because SPEC.md and ADR 0011 define this as the reproducible generator.
+Legacy commit-gate phrases below are exact source strings that this script replaces;
+they are never emitted into the generated tracker.
 """
 
 import re

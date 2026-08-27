@@ -1,5 +1,9 @@
 # Wave 01 — source requirements and contradiction audit
 
+> **Historical analysis of a removed proposal.** Commit-gate recommendations in
+> this document were not adopted and do not control current Ledger Atlas work.
+> Current rules live in `AGENTS.md` and `docs/orchestration/RUNBOOK.md`.
+
 **Status:** source audit complete  
 **Scope:** the five textual artifacts assigned to this shard; `files.zip` was deliberately not inspected here.  
 **Method:** every source was read in full. HTML body text, presentation metadata, and embedded scripts were inspected separately. Claims below are either direct source requirements or explicit audit conclusions; they are not a validation of the current Codex installation.
@@ -137,4 +141,3 @@ The resulting Codex-native design should preserve five non-negotiable properties
 3. bounded worktree-isolated delegation with explicit ownership;
 4. deterministic verification plus fresh independent review before any commit path;
 5. autonomous continuation only for objective checks, with iteration/no-progress/cost stops and no merge/deploy/destructive authority.
-
