@@ -8,8 +8,18 @@ public enum SyntheticMoneyManagerOracle {
   public static func compare(
     before: URL, after: URL, action: OracleAction, limits: OracleLimits = .standard
   ) throws -> OracleComparisonReport {
-    let beforeSnapshot = try OracleSnapshot.read(before, limits: limits)
-    let afterSnapshot = try OracleSnapshot.read(after, limits: limits)
+    try compare(before: before, after: after, action: action, limits: limits, testingBeforeFinalValidation: nil)
+  }
+
+  // Internal seam for deterministic source-race regressions. Production callers cannot use it.
+  static func compare(
+    before: URL, after: URL, action: OracleAction, limits: OracleLimits,
+    testingBeforeFinalValidation: (() -> Void)?
+  ) throws -> OracleComparisonReport {
+    let beforeSnapshot = try OracleSnapshot.read(
+      before, limits: limits, testingBeforeFinalValidation: testingBeforeFinalValidation)
+    let afterSnapshot = try OracleSnapshot.read(
+      after, limits: limits, testingBeforeFinalValidation: testingBeforeFinalValidation)
     return OracleComparisonReport(
       action: action, before: beforeSnapshot.evidence, after: afterSnapshot.evidence,
       differences: OracleStructuralDifference.between(beforeSnapshot, afterSnapshot))
@@ -35,6 +45,15 @@ public struct OracleAction: Codable, Equatable, Sendable {
     }
     self.identifier = identifier
   }
+
+  public init(from decoder: Decoder) throws {
+    self = try Self(identifier: decoder.singleValueContainer().decode(String.self))
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(identifier)
+  }
 }
 
 public struct OracleLimits: Equatable, Sendable {
@@ -59,14 +78,25 @@ public struct OracleSnapshotEvidence: Codable, Equatable, Sendable {
   public let sha256: String
   public let sizeBytes: UInt64
   public let schemaSHA256: String
+  public let schemaObjects: [OracleSchemaObjectEvidence]
   public let tables: [OracleTableEvidence]
 }
 
+public enum OracleSchemaObjectKind: String, Codable, Equatable, Sendable {
+  case table, index, trigger, view
+}
+
+/// Every source-controlled identifier and definition is represented only by digests.
+public struct OracleSchemaObjectEvidence: Codable, Equatable, Sendable {
+  public let kind: OracleSchemaObjectKind
+  public let identifier: String
+  public let digest: String
+}
+
 public struct OracleTableEvidence: Codable, Equatable, Sendable {
-  /// A strict identifier, otherwise a stable digest. Never a source value.
   public let identifier: String
   public let rowCount: UInt64
-  public let columns: [String]
+  public let schemaObjectDigest: String
 }
 
 public enum OracleStructuralDifferenceKind: String, Codable, Equatable, Sendable {
@@ -75,7 +105,6 @@ public enum OracleStructuralDifferenceKind: String, Codable, Equatable, Sendable
 
 public struct OracleStructuralDifference: Codable, Equatable, Sendable {
   public let kind: OracleStructuralDifferenceKind
-  /// A strict identifier, otherwise a stable digest. Never a source value.
   public let subject: String
 }
 
@@ -93,15 +122,23 @@ public struct OracleComparisonReport: Codable, Equatable, Sendable {
 }
 
 private struct OracleSnapshot {
+  struct SchemaObject: Equatable {
+    let rawKey: String
+    let evidence: OracleSchemaObjectEvidence
+  }
+
   struct Table: Equatable {
-    let rawName: String
+    let rawKey: String
     let evidence: OracleTableEvidence
   }
 
   let evidence: OracleSnapshotEvidence
+  let schemaObjects: [SchemaObject]
   let tables: [Table]
 
-  static func read(_ url: URL, limits: OracleLimits) throws -> Self {
+  static func read(
+    _ url: URL, limits: OracleLimits, testingBeforeFinalValidation: (() -> Void)?
+  ) throws -> Self {
     let source = try OracleSource(url: url, limits: limits)
     let before = try source.fingerprint()
     guard try source.prefix(count: 16) == Data("SQLite format 3\0".utf8) else {
@@ -114,85 +151,111 @@ private struct OracleSnapshot {
       sqlite3_exec(database, "PRAGMA trusted_schema=OFF", nil, nil, nil) == SQLITE_OK
     else { throw SyntheticMoneyManagerOracleError.invalidSQLite }
 
-    let rawTables = try tableNames(database, limit: limits.maximumTables)
-    var totalColumns = 0
-    var totalRows: UInt64 = 0
-    var tables: [Table] = []
-    tables.reserveCapacity(rawTables.count)
-    for rawName in rawTables {
-      let columns = try columnNames(database, table: rawName)
-      let (nextColumns, columnOverflow) = totalColumns.addingReportingOverflow(columns.count)
-      guard !columnOverflow, nextColumns <= limits.maximumColumns else {
-        throw SyntheticMoneyManagerOracleError.hostileSize
-      }
-      totalColumns = nextColumns
-      let rows = try rowCount(database, table: rawName)
-      let (nextRows, rowOverflow) = totalRows.addingReportingOverflow(rows)
-      guard !rowOverflow, nextRows <= limits.maximumRows else {
-        throw SyntheticMoneyManagerOracleError.hostileSize
-      }
-      totalRows = nextRows
-      tables.append(Table(
-        rawName: rawName,
-        evidence: OracleTableEvidence(
-          identifier: OracleIdentifier.redacted(rawName), rowCount: rows,
-          columns: columns.map(OracleIdentifier.redacted).sorted())))
-    }
-    let schema = SHA256.hash(data: Data(tables.map { table in
-      "\(table.rawName)\u{0}\(table.evidence.columns.joined(separator: "\u{0}"))"
-    }.joined(separator: "\u{0}").utf8)).hex
+    let schemaObjects = try collectSchemaObjects(database, limits: limits)
+    let tables = try collectTables(database, objects: schemaObjects, limits: limits)
+    testingBeforeFinalValidation?()
+    try source.validateCurrentPath()
     let after = try source.fingerprint()
     guard before == after else { throw SyntheticMoneyManagerOracleError.sourceChanged }
+    var objects = schemaObjects.map(\.evidence)
+    objects.sort { lhs, rhs in
+      lhs.kind.rawValue == rhs.kind.rawValue
+        ? lhs.identifier < rhs.identifier : lhs.kind.rawValue < rhs.kind.rawValue
+    }
+    let schemaDigestInput = objects.map { $0.digest }.joined(separator: "\u{0}")
     let evidence = OracleSnapshotEvidence(
-      sha256: before.sha256, sizeBytes: before.sizeBytes, schemaSHA256: schema,
-      tables: tables.map(\.evidence).sorted { $0.identifier < $1.identifier })
-    return OracleSnapshot(evidence: evidence, tables: tables)
+      sha256: before.sha256, sizeBytes: before.sizeBytes,
+      schemaSHA256: SHA256.hash(data: Data(schemaDigestInput.utf8)).hex,
+      schemaObjects: objects, tables: tables.map(\.evidence).sorted { $0.identifier < $1.identifier })
+    return OracleSnapshot(evidence: evidence, schemaObjects: schemaObjects, tables: tables)
   }
 
-  private static func tableNames(_ database: OpaquePointer, limit: Int) throws -> [String] {
-    let sql = "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  private static func collectSchemaObjects(
+    _ database: OpaquePointer, limits: OracleLimits
+  ) throws -> [SchemaObject] {
+    let sql = "SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_schema WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name, tbl_name"
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
       throw SyntheticMoneyManagerOracleError.invalidSQLite
     }
     defer { sqlite3_finalize(statement) }
-    var names: [String] = []
+    var output: [SchemaObject] = []
+    var tableCount = 0
+    var columnCount = 0
     while sqlite3_step(statement) == SQLITE_ROW {
-      guard let name = sqliteText(statement, column: 0) else {
-        throw SyntheticMoneyManagerOracleError.invalidSQLite
+      guard let typeText = sqliteText(statement, column: 0), let kind = OracleSchemaObjectKind(rawValue: typeText),
+        let name = sqliteText(statement, column: 1), let table = sqliteText(statement, column: 2),
+        let sql = sqliteText(statement, column: 3) else { throw SyntheticMoneyManagerOracleError.invalidSQLite }
+      if kind == .table {
+        tableCount += 1
+        guard tableCount <= limits.maximumTables else { throw SyntheticMoneyManagerOracleError.hostileSize }
       }
-      guard names.count < limit else { throw SyntheticMoneyManagerOracleError.hostileSize }
-      names.append(name)
+      let metadata: (serialized: String, count: Int) = kind == .table
+        ? try tableMetadata(database, table: name) : (serialized: "", count: 0)
+      let (nextColumns, overflow) = columnCount.addingReportingOverflow(metadata.count)
+      guard !overflow, nextColumns <= limits.maximumColumns else {
+        throw SyntheticMoneyManagerOracleError.hostileSize
+      }
+      columnCount = nextColumns
+      let rawKey = "\(kind.rawValue)\u{0}\(name)\u{0}\(table)"
+      let digest = digest(["ledger-atlas/oracle-schema-object/v1", rawKey, sql, metadata.serialized])
+      output.append(SchemaObject(
+        rawKey: rawKey,
+        evidence: OracleSchemaObjectEvidence(kind: kind, identifier: OracleIdentifier.digest(rawKey), digest: digest)))
     }
     guard sqlite3_errcode(database) == SQLITE_OK || sqlite3_errcode(database) == SQLITE_DONE else {
       throw SyntheticMoneyManagerOracleError.invalidSQLite
     }
-    return names
+    return output
   }
 
-  private static func columnNames(_ database: OpaquePointer, table: String) throws -> [String] {
+  private static func collectTables(
+    _ database: OpaquePointer, objects: [SchemaObject], limits: OracleLimits
+  ) throws -> [Table] {
+    var totalRows: UInt64 = 0
+    var output: [Table] = []
+    for object in objects where object.evidence.kind == .table {
+      let name = object.rawKey.split(separator: "\u{0}", maxSplits: 2)[1]
+      let rows = try rowCount(database, table: String(name))
+      let (nextRows, overflow) = totalRows.addingReportingOverflow(rows)
+      guard !overflow, nextRows <= limits.maximumRows else { throw SyntheticMoneyManagerOracleError.hostileSize }
+      totalRows = nextRows
+      output.append(Table(
+        rawKey: object.rawKey,
+        evidence: OracleTableEvidence(
+          identifier: object.evidence.identifier, rowCount: rows, schemaObjectDigest: object.evidence.digest)))
+    }
+    return output
+  }
+
+  private static func tableMetadata(_ database: OpaquePointer, table: String) throws -> (serialized: String, count: Int) {
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(database, "PRAGMA table_xinfo(\(quote(table)))", -1, &statement, nil) == SQLITE_OK,
       let statement else { throw SyntheticMoneyManagerOracleError.invalidSQLite }
     defer { sqlite3_finalize(statement) }
-    var names: [String] = []
+    var rows: [String] = []
     while sqlite3_step(statement) == SQLITE_ROW {
-      guard sqlite3_column_type(statement, 6) == SQLITE_INTEGER,
-        sqlite3_column_int64(statement, 6) == 0, let name = sqliteText(statement, column: 1)
+      guard sqlite3_column_type(statement, 0) == SQLITE_INTEGER,
+        let name = sqliteText(statement, column: 1), let type = sqliteText(statement, column: 2),
+        sqlite3_column_type(statement, 3) == SQLITE_INTEGER,
+        sqlite3_column_type(statement, 5) == SQLITE_INTEGER, sqlite3_column_type(statement, 6) == SQLITE_INTEGER
       else { throw SyntheticMoneyManagerOracleError.invalidSQLite }
-      names.append(name)
+      let defaultValue = sqliteOptionalText(statement, column: 4)
+      rows.append([
+        String(sqlite3_column_int64(statement, 0)), name, type, String(sqlite3_column_int64(statement, 3)),
+        defaultValue ?? "<null>", String(sqlite3_column_int64(statement, 5)), String(sqlite3_column_int64(statement, 6)),
+      ].joined(separator: "\u{0}"))
     }
     guard sqlite3_errcode(database) == SQLITE_OK || sqlite3_errcode(database) == SQLITE_DONE else {
       throw SyntheticMoneyManagerOracleError.invalidSQLite
     }
-    return names
+    return (rows.joined(separator: "\u{0}"), rows.count)
   }
 
   private static func rowCount(_ database: OpaquePointer, table: String) throws -> UInt64 {
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM \(quote(table))", -1, &statement, nil) == SQLITE_OK,
-      let statement, sqlite3_step(statement) == SQLITE_ROW,
-      sqlite3_column_type(statement, 0) == SQLITE_INTEGER
+      let statement, sqlite3_step(statement) == SQLITE_ROW, sqlite3_column_type(statement, 0) == SQLITE_INTEGER
     else { throw SyntheticMoneyManagerOracleError.invalidSQLite }
     defer { sqlite3_finalize(statement) }
     let value = sqlite3_column_int64(statement, 0)
@@ -209,27 +272,45 @@ private struct OracleSnapshot {
   private static func sqliteText(_ statement: OpaquePointer, column: Int32) -> String? {
     guard sqlite3_column_type(statement, column) == SQLITE_TEXT,
       let pointer = sqlite3_column_text(statement, column) else { return nil }
-    let count = Int(sqlite3_column_bytes(statement, column))
-    guard count >= 0 else { return nil }
-    return String(data: Data(bytes: pointer, count: count), encoding: .utf8)
+    return String(data: Data(bytes: pointer, count: Int(sqlite3_column_bytes(statement, column))), encoding: .utf8)
+  }
+
+  private static func sqliteOptionalText(_ statement: OpaquePointer, column: Int32) -> String? {
+    sqlite3_column_type(statement, column) == SQLITE_NULL ? nil : sqliteText(statement, column: column)
+  }
+
+  private static func digest(_ values: [String]) -> String {
+    SHA256.hash(data: Data(values.joined(separator: "\u{0}").utf8)).hex
   }
 }
 
 private extension OracleStructuralDifference {
   static func between(_ before: OracleSnapshot, _ after: OracleSnapshot) -> [Self] {
-    let old = Dictionary(uniqueKeysWithValues: before.tables.map { ($0.rawName, $0.evidence) })
-    let new = Dictionary(uniqueKeysWithValues: after.tables.map { ($0.rawName, $0.evidence) })
-    return (Set(old.keys).union(new.keys)).sorted().compactMap { rawName in
-      switch (old[rawName], new[rawName]) {
-      case (nil, .some): Self(kind: .added, subject: OracleIdentifier.redacted(rawName))
-      case (.some, nil): Self(kind: .removed, subject: OracleIdentifier.redacted(rawName))
-      case let (.some(old), .some(new)) where old != new:
-        Self(kind: .changed, subject: OracleIdentifier.redacted(rawName))
-      default: nil
+    var changes: [String: OracleStructuralDifferenceKind] = [:]
+    compare(before.schemaObjects, after.schemaObjects, into: &changes)
+    compare(before.tables, after.tables, into: &changes)
+    return changes.keys.sorted().map { Self(kind: changes[$0]!, subject: OracleIdentifier.digest($0)) }
+  }
+
+  private static func compare<T: OracleDiffable & Equatable>(
+    _ before: [T], _ after: [T], into changes: inout [String: OracleStructuralDifferenceKind]
+  ) {
+    let old = Dictionary(uniqueKeysWithValues: before.map { ($0.rawKey, $0) })
+    let new = Dictionary(uniqueKeysWithValues: after.map { ($0.rawKey, $0) })
+    for key in Set(old.keys).union(new.keys) {
+      switch (old[key], new[key]) {
+      case (nil, .some): changes[key] = .added
+      case (.some, nil): changes[key] = .removed
+      case let (.some(old), .some(new)) where old != new: changes[key] = .changed
+      default: break
       }
     }
   }
 }
+
+private protocol OracleDiffable { var rawKey: String { get } }
+extension OracleSnapshot.SchemaObject: OracleDiffable {}
+extension OracleSnapshot.Table: OracleDiffable {}
 
 private final class OracleSource {
   struct Fingerprint: Equatable {
@@ -241,6 +322,7 @@ private final class OracleSource {
     let mtimeNanoseconds: Int64
   }
 
+  private let url: URL
   private let descriptor: Int32
   private let initial: Fingerprint
 
@@ -250,13 +332,11 @@ private final class OracleSource {
     guard lstat(stableURL.path, &path) == 0, (path.st_mode & S_IFMT) == S_IFREG else {
       throw SyntheticMoneyManagerOracleError.unreadableSource
     }
-    guard path.st_size >= 0, UInt64(path.st_size) <= limits.maximumBytes else {
+    guard path.st_size >= 0, UInt64(path.st_size) <= limits.maximumBytes,
+      UInt64(path.st_size) <= UInt64(Int.max) else {
       throw SyntheticMoneyManagerOracleError.hostileSize
     }
-    guard ["-wal", "-shm", "-journal"].allSatisfy({ suffix in
-      var companion = stat()
-      return lstat(stableURL.path + suffix, &companion) != 0 && errno == ENOENT
-    }) else { throw SyntheticMoneyManagerOracleError.companionFilesPresent }
+    guard Self.companionsAbsent(stableURL) else { throw SyntheticMoneyManagerOracleError.companionFilesPresent }
     let opened = Darwin.open(stableURL.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
     guard opened >= 0 else { throw SyntheticMoneyManagerOracleError.unreadableSource }
     var retainDescriptor = false
@@ -267,6 +347,7 @@ private final class OracleSource {
     guard candidate.device == path.st_dev, candidate.inode == path.st_ino else {
       throw SyntheticMoneyManagerOracleError.unreadableSource
     }
+    self.url = stableURL
     descriptor = opened
     initial = candidate
     retainDescriptor = true
@@ -276,18 +357,35 @@ private final class OracleSource {
 
   func fingerprint() throws -> Fingerprint {
     var start = stat()
-    guard fstat(descriptor, &start) == 0 else { throw SyntheticMoneyManagerOracleError.unreadableSource }
+    guard fstat(descriptor, &start) == 0, same(initial, Self.fingerprint(start, sha256: "")) else {
+      throw SyntheticMoneyManagerOracleError.sourceChanged
+    }
     let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
     handle.seek(toFileOffset: 0)
+    var remaining = Int(initial.sizeBytes)
     var hasher = SHA256()
-    while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty { hasher.update(data: chunk) }
+    while remaining > 0 {
+      let chunk = try handle.read(upToCount: min(1_048_576, remaining)) ?? Data()
+      guard !chunk.isEmpty else { throw SyntheticMoneyManagerOracleError.sourceChanged }
+      hasher.update(data: chunk)
+      remaining -= chunk.count
+    }
     var end = stat()
-    guard fstat(descriptor, &end) == 0,
-      same(Self.fingerprint(start, sha256: ""), Self.fingerprint(end, sha256: "")),
-      same(initial, Self.fingerprint(end, sha256: "")) else {
+    guard fstat(descriptor, &end) == 0, same(initial, Self.fingerprint(end, sha256: "")) else {
       throw SyntheticMoneyManagerOracleError.sourceChanged
     }
     return Self.fingerprint(end, sha256: hasher.finalize().hex)
+  }
+
+  func validateCurrentPath() throws {
+    var path = stat()
+    guard lstat(url.path, &path) == 0, (path.st_mode & S_IFMT) == S_IFREG else {
+      throw SyntheticMoneyManagerOracleError.sourceChanged
+    }
+    guard same(initial, Self.fingerprint(path, sha256: "")) else {
+      throw SyntheticMoneyManagerOracleError.sourceChanged
+    }
+    guard Self.companionsAbsent(url) else { throw SyntheticMoneyManagerOracleError.companionFilesPresent }
   }
 
   func prefix(count: Int) throws -> Data {
@@ -321,25 +419,26 @@ private final class OracleSource {
     lhs.device == rhs.device && lhs.inode == rhs.inode && lhs.sizeBytes == rhs.sizeBytes
       && lhs.mtimeSeconds == rhs.mtimeSeconds && lhs.mtimeNanoseconds == rhs.mtimeNanoseconds
   }
+
+  private static func companionsAbsent(_ source: URL) -> Bool {
+    ["-wal", "-shm", "-journal"].allSatisfy { suffix in
+      var companion = stat()
+      return lstat(source.path + suffix, &companion) != 0 && errno == ENOENT
+    }
+  }
 }
 
 private enum OracleIdentifier {
   static func isSafeAction(_ value: String) -> Bool {
     guard let first = value.unicodeScalars.first,
-      (first.properties.isAlphabetic || first == "_"), value.utf8.count <= 64 else { return false }
-    return value.unicodeScalars.allSatisfy { $0.properties.isAlphabetic || $0.properties.numericType != nil || $0 == "_" || $0 == "-" || $0 == "." }
-  }
-
-  static func redacted(_ value: String) -> String {
-    isSafeSchemaIdentifier(value) ? value : "sha256:\(SHA256.hash(data: Data(value.utf8)).hex)"
-  }
-
-  private static func isSafeSchemaIdentifier(_ value: String) -> Bool {
-    guard let first = value.unicodeScalars.first,
-      (first.properties.isAlphabetic || first == "_"), value.utf8.count <= 64 else { return false }
+      (first.properties.isAlphabetic || first == "_"), value.utf8.count <= 128 else { return false }
     return value.unicodeScalars.allSatisfy {
-      $0.properties.isAlphabetic || $0.properties.numericType != nil || $0 == "_"
+      $0.properties.isAlphabetic || $0.properties.numericType != nil || $0 == "_" || $0 == "-" || $0 == "."
     }
+  }
+
+  static func digest(_ value: String) -> String {
+    "sha256:\(SHA256.hash(data: Data(value.utf8)).hex)"
   }
 }
 
