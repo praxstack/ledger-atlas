@@ -162,6 +162,8 @@ public enum LedgerStoreLifecycle {
       guard filesEqual(source.descriptor, temporary.descriptor) else { throw Error.pathChanged }
       try validate(temporary.descriptor, as: .legacyV10)
       try invoke(hook, .afterRecoveryValidated)
+      try requireTemporaryRecoveryStillSafe(
+        temporary, source: source, parentDescriptor: destination.parentDescriptor)
       guard
         Darwin.renameatx_np(
           destination.parentDescriptor, temporary.leaf, destination.parentDescriptor,
@@ -185,23 +187,33 @@ public enum LedgerStoreLifecycle {
     }
     defer { Darwin.close(recovery.descriptor) }
     if didPublishRecovery { try invoke(hook, .afterRecoveryPublished) }
+    try requireRecoveryStillSafe(
+      recovery, source: source, leaf: recoveryLeaf,
+      parentDescriptor: destination.parentDescriptor)
 
     let replacement = try TemporaryFile(
       parentDescriptor: destination.parentDescriptor, prefix: ".ledger-atlas-upgrade-")
     var replacementPublished = false
     defer { replacement.closeAndRemoveUnlessPublished(replacementPublished) }
     try invoke(hook, .afterReplacementCreated)
+    try requireRecoveryStillSafe(
+      recovery, source: source, leaf: recoveryLeaf,
+      parentDescriptor: destination.parentDescriptor)
     try write(try migratedImage(from: source.descriptor), to: replacement.descriptor)
     try invoke(hook, .afterReplacementMigrated)
+    try requireRecoveryStillSafe(
+      recovery, source: source, leaf: recoveryLeaf,
+      parentDescriptor: destination.parentDescriptor)
     try validate(replacement.descriptor, as: .current)
     try invoke(hook, .afterReplacementValidated)
+    try requireRecoveryStillSafe(
+      recovery, source: source, leaf: recoveryLeaf,
+      parentDescriptor: destination.parentDescriptor)
     try requirePath(url, matches: source.identity)
     try requireNoCompanions(at: url)
-    try requireNoCompanions(leaf: recoveryLeaf, in: destination.parentDescriptor)
-    guard
-      sameEntry(recoveryLeaf, identity: recovery.identity, in: destination.parentDescriptor),
-      filesEqual(source.descriptor, recovery.descriptor)
-    else { throw Error.pathChanged }
+    try requireRecoveryStillSafe(
+      recovery, source: source, leaf: recoveryLeaf,
+      parentDescriptor: destination.parentDescriptor)
 
     guard
       Darwin.renameatx_np(
@@ -252,6 +264,33 @@ public enum LedgerStoreLifecycle {
       Darwin.close(descriptor)
       throw error
     }
+  }
+
+  private static func requireTemporaryRecoveryStillSafe(
+    _ recovery: TemporaryFile, source: PinnedFile, parentDescriptor: Int32
+  ) throws {
+    let retained = try identity(of: recovery.descriptor)
+    var atPath = stat()
+    guard
+      safeFile(retained),
+      fstatat(parentDescriptor, recovery.leaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0,
+      safeFile(atPath), sameFile(retained, atPath),
+      filesEqual(source.descriptor, recovery.descriptor)
+    else { throw Error.pathChanged }
+  }
+
+  private static func requireRecoveryStillSafe(
+    _ recovery: PinnedFile, source: PinnedFile, leaf: String, parentDescriptor: Int32
+  ) throws {
+    try requireNoCompanions(leaf: leaf, in: parentDescriptor)
+    let retained = try identity(of: recovery.descriptor)
+    var atPath = stat()
+    guard
+      safeFile(retained), sameFile(recovery.identity, retained),
+      fstatat(parentDescriptor, leaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0,
+      safeFile(atPath), sameFile(retained, atPath),
+      filesEqual(source.descriptor, recovery.descriptor)
+    else { throw Error.pathChanged }
   }
 
   private static func inspect(_ source: PinnedFile) throws -> Inspection {

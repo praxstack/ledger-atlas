@@ -165,6 +165,46 @@ import Testing
   }
 }
 
+@Test func lifecycleRejectsRecoverySafetyChangesAfterReplacementValidationAndRetries() throws {
+  enum Mutation { case mode, hardLink }
+  for mutation in [Mutation.mode, .hardLink] {
+    try withLifecycleDirectory { directory in
+      let url = directory.appendingPathComponent("ledger.sqlite")
+      _ = try writeV10Ledger(to: url)
+      let original = try Data(contentsOf: url)
+      let recovery = LedgerStoreLifecycle.recoveryImageURL(for: url)
+      let linkedRecovery = directory.appendingPathComponent("linked-recovery.sqlite")
+
+      #expect(throws: LedgerStoreLifecycle.Error.pathChanged) {
+        try LedgerStoreLifecycle.open(at: url) { phase in
+          guard phase == .afterReplacementValidated else { return }
+          switch mutation {
+          case .mode:
+            guard chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR | S_IRGRP)) == 0 else {
+              throw LifecycleTestError.injected
+            }
+          case .hardLink:
+            guard Darwin.link(recovery.path, linkedRecovery.path) == 0 else {
+              throw LifecycleTestError.injected
+            }
+          }
+        }
+      }
+      #expect(try Data(contentsOf: url) == original)
+
+      switch mutation {
+      case .mode:
+        #expect(chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+      case .hardLink:
+        try FileManager.default.removeItem(at: linkedRecovery)
+      }
+      let retried = try LedgerStoreLifecycle.open(at: url)
+      #expect(retried.disposition == .upgraded)
+      #expect(try Data(contentsOf: recovery) == original)
+    }
+  }
+}
+
 @Test func lifecycleRefusesSymlinksCompanionsAndAuthenticatedPathSwaps() throws {
   try withLifecycleDirectory { directory in
     let url = directory.appendingPathComponent("ledger.sqlite")
