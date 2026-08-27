@@ -122,8 +122,8 @@ struct SyntheticMoneyManagerOracleTests {
     }
   }
 
-  @Test("WAL appearance path replacement and growth fail closed during inspection")
-  func sourceChangesDuringInspectionFailClosed() throws {
+  @Test("WAL appearance path replacement and growth after final hash fail closed")
+  func sourceChangesAfterFinalHashFailClosed() throws {
     try withOracleDirectory { directory in
       for mutation in OracleMutation.allCases {
         let source = directory.appendingPathComponent("\(mutation.rawValue).sqlite")
@@ -134,7 +134,7 @@ struct SyntheticMoneyManagerOracleTests {
           _ = try SyntheticMoneyManagerOracle.compare(
             before: source, after: source, action: try .init(identifier: mutation.rawValue),
             limits: .standard,
-            testingBeforeFinalValidation: {
+            testingAfterFinalHash: {
               guard !ran else { return }
               ran = true
               do { try mutation.apply(to: source, directory: directory) }
@@ -143,6 +143,34 @@ struct SyntheticMoneyManagerOracleTests {
         }
         #expect(state.error == nil)
       }
+    }
+  }
+
+  @Test("same-inode growth after open is rejected before source fingerprinting")
+  func sourceGrowthAfterOpenFailsClosed() throws {
+    try withOracleDirectory { directory in
+      let source = directory.appendingPathComponent("source.sqlite")
+      try makeDatabase(at: source, rows: 1, includeExtraColumn: false, secret: "safe")
+      guard let initialBytes = try FileManager.default.attributesOfItem(atPath: source.path)[.size] as? NSNumber else {
+        throw OracleTestError.sqlite
+      }
+      let limits = OracleLimits(
+        maximumBytes: initialBytes.uint64Value, maximumTables: 8, maximumColumns: 8, maximumRows: 8)
+      var ran = false
+
+      #expect(throws: SyntheticMoneyManagerOracleError.hostileSize) {
+        _ = try SyntheticMoneyManagerOracle.compare(
+          before: source, after: source, action: try .init(identifier: "grow-after-open"), limits: limits,
+          testingAfterOpen: {
+            guard !ran else { return }
+            ran = true
+            let handle = try! FileHandle(forWritingTo: source)
+            defer { try? handle.close() }
+            try! handle.seekToEnd()
+            try! handle.write(contentsOf: Data([0]))
+          })
+      }
+      #expect(ran)
     }
   }
 }

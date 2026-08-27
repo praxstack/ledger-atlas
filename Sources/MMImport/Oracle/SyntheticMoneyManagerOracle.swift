@@ -8,18 +8,22 @@ public enum SyntheticMoneyManagerOracle {
   public static func compare(
     before: URL, after: URL, action: OracleAction, limits: OracleLimits = .standard
   ) throws -> OracleComparisonReport {
-    try compare(before: before, after: after, action: action, limits: limits, testingBeforeFinalValidation: nil)
+    try compare(
+      before: before, after: after, action: action, limits: limits,
+      testingAfterOpen: nil, testingAfterFinalHash: nil)
   }
 
   // Internal seam for deterministic source-race regressions. Production callers cannot use it.
   static func compare(
     before: URL, after: URL, action: OracleAction, limits: OracleLimits,
-    testingBeforeFinalValidation: (() -> Void)?
+    testingAfterOpen: (() -> Void)? = nil, testingAfterFinalHash: (() -> Void)? = nil
   ) throws -> OracleComparisonReport {
     let beforeSnapshot = try OracleSnapshot.read(
-      before, limits: limits, testingBeforeFinalValidation: testingBeforeFinalValidation)
+      before, limits: limits, testingAfterOpen: testingAfterOpen,
+      testingAfterFinalHash: testingAfterFinalHash)
     let afterSnapshot = try OracleSnapshot.read(
-      after, limits: limits, testingBeforeFinalValidation: testingBeforeFinalValidation)
+      after, limits: limits, testingAfterOpen: testingAfterOpen,
+      testingAfterFinalHash: testingAfterFinalHash)
     return OracleComparisonReport(
       action: action, before: beforeSnapshot.evidence, after: afterSnapshot.evidence,
       differences: OracleStructuralDifference.between(beforeSnapshot, afterSnapshot))
@@ -137,9 +141,10 @@ private struct OracleSnapshot {
   let tables: [Table]
 
   static func read(
-    _ url: URL, limits: OracleLimits, testingBeforeFinalValidation: (() -> Void)?
+    _ url: URL, limits: OracleLimits, testingAfterOpen: (() -> Void)?,
+    testingAfterFinalHash: (() -> Void)?
   ) throws -> Self {
-    let source = try OracleSource(url: url, limits: limits)
+    let source = try OracleSource(url: url, limits: limits, testingAfterOpen: testingAfterOpen)
     let before = try source.fingerprint()
     guard try source.prefix(count: 16) == Data("SQLite format 3\0".utf8) else {
       throw SyntheticMoneyManagerOracleError.invalidSQLite
@@ -153,9 +158,9 @@ private struct OracleSnapshot {
 
     let schemaObjects = try collectSchemaObjects(database, limits: limits)
     let tables = try collectTables(database, objects: schemaObjects, limits: limits)
-    testingBeforeFinalValidation?()
-    try source.validateCurrentPath()
     let after = try source.fingerprint()
+    testingAfterFinalHash?()
+    try source.validateCurrentPath()
     guard before == after else { throw SyntheticMoneyManagerOracleError.sourceChanged }
     var objects = schemaObjects.map(\.evidence)
     objects.sort { lhs, rhs in
@@ -326,7 +331,7 @@ private final class OracleSource {
   private let descriptor: Int32
   private let initial: Fingerprint
 
-  init(url: URL, limits: OracleLimits) throws {
+  init(url: URL, limits: OracleLimits, testingAfterOpen: (() -> Void)?) throws {
     let stableURL = url.standardizedFileURL
     var path = stat()
     guard lstat(stableURL.path, &path) == 0, (path.st_mode & S_IFMT) == S_IFREG else {
@@ -341,8 +346,12 @@ private final class OracleSource {
     guard opened >= 0 else { throw SyntheticMoneyManagerOracleError.unreadableSource }
     var retainDescriptor = false
     defer { if !retainDescriptor { Darwin.close(opened) } }
+    testingAfterOpen?()
     var openedStat = stat()
     guard fstat(opened, &openedStat) == 0 else { throw SyntheticMoneyManagerOracleError.unreadableSource }
+    guard Self.isBoundedRegularFile(openedStat, limits: limits) else {
+      throw SyntheticMoneyManagerOracleError.hostileSize
+    }
     let candidate = Self.fingerprint(openedStat, sha256: "")
     guard candidate.device == path.st_dev, candidate.inode == path.st_ino else {
       throw SyntheticMoneyManagerOracleError.unreadableSource
@@ -413,6 +422,11 @@ private final class OracleSource {
     Fingerprint(
       sha256: sha256, sizeBytes: UInt64(value.st_size), device: value.st_dev, inode: value.st_ino,
       mtimeSeconds: Int64(value.st_mtimespec.tv_sec), mtimeNanoseconds: Int64(value.st_mtimespec.tv_nsec))
+  }
+
+  private static func isBoundedRegularFile(_ value: stat, limits: OracleLimits) -> Bool {
+    (value.st_mode & S_IFMT) == S_IFREG && value.st_size >= 0
+      && UInt64(value.st_size) <= limits.maximumBytes && UInt64(value.st_size) <= UInt64(Int.max)
   }
 
   private func same(_ lhs: Fingerprint, _ rhs: Fingerprint) -> Bool {
