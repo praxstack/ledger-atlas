@@ -180,6 +180,10 @@ public final class LedgerJourney {
     failClosed(message: message)
   }
 
+  func closeLedger() {
+    disconnectLedger()
+  }
+
   private func failClosed(message: String) {
     lastFailure = message
     if phase == .idle || phase == .reviewing { phase = .failed }

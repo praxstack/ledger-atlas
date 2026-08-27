@@ -31,6 +31,42 @@ import Testing
 }
 
 @MainActor
+@Test func failedWidgetPublicationClosesTheSessionAndOpenedJourney() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try LedgerShell.approve(journey, into: LedgerSession())
+  try journey.performBeginEditing()
+  let stops = TestScopeCounts()
+  let presentation = LedgerSession.Presentation(
+    snapshot: .init(accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0))
+  let session = LedgerSession(
+    testingLoader: { _ in presentation }, testingScopeStarter: { _ in true },
+    testingScopeStopper: { _ in stops.increment() })
+  #expect(session.open(try #require(journey.ledgerURL), requiresSecurityScope: true))
+  for _ in 0..<100 where session.screen == .loading { try? await Task.sleep(for: .milliseconds(1)) }
+
+  let publisher = RedactedWidgetProjectionPublisher(write: { _ in
+    throw CocoaError(.fileWriteNoPermission)
+  })
+  #expect(!LedgerAtlasRootView.publishWidget(
+    .ready, publisher: publisher, journey: journey, session: session))
+
+  #expect(session.screen == .noLedger)
+  #expect(stops.value == 1)
+  #expect(journey.ledgerURL == nil)
+  #expect(journey.snapshot == nil)
+  #expect(!journey.isEditing)
+}
+
+@MainActor
 @Test func macNativeDateUsesTheDeclaredTimeZoneAtUTCDayBoundary() throws {
   let instant = UTCInstant(epochMilliseconds: 1_767_297_600_000)
   let zone = try #require(TimeZone(identifier: "Asia/Kolkata"))
@@ -544,6 +580,14 @@ private func writeSyntheticV19(to url: URL) throws {
   guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
     throw LedgerStore.Error.incompatibleCanonicalStore
   }
+}
+
+private final class TestScopeCounts: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var value: Int { lock.withLock { count } }
+  func increment() { lock.withLock { count += 1 } }
 }
 
 private func writeEmptyCanonicalFile(to url: URL) throws {

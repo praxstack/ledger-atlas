@@ -134,15 +134,28 @@ public struct LedgerAtlasRootView: View {
 
   @discardableResult
   private func publishWidget(_ state: RedactedWidgetProjection.State) -> Bool {
-    guard let widgetProjectionPublisher else {
+    Self.publishWidget(
+      state, publisher: widgetProjectionPublisher, journey: journey, session: session)
+  }
+
+  @discardableResult
+  static func publishWidget(
+    _ state: RedactedWidgetProjection.State, publisher: RedactedWidgetProjectionPublisher?,
+    journey: LedgerJourney, session: LedgerSession
+  ) -> Bool {
+    guard let publisher else {
       journey.recordFailure("Widget status could not be published.")
+      session.close()
+      journey.closeLedger()
       return false
     }
     do {
-      try widgetProjectionPublisher.publish(state)
+      try publisher.publish(state)
       return true
     } catch {
       journey.recordFailure("Widget status could not be published.")
+      session.close()
+      journey.closeLedger()
       return false
     }
   }
