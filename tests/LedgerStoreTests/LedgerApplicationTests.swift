@@ -7,7 +7,7 @@ import Testing
 
 @testable import LedgerStore
 
-private func makeApplicationStore() throws -> LedgerStore {
+private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore {
   var database: OpaquePointer?
   guard sqlite3_open(":memory:", &database) == SQLITE_OK, let database else {
     throw LedgerStore.Error.incompatibleCanonicalStore
@@ -26,6 +26,11 @@ private func makeApplicationStore() throws -> LedgerStore {
       "INSERT INTO ledger_meta(key, value) VALUES('schema_version', '\(CanonicalLedgerSchema.version)'), ('ledger_identity', 'ledger-atlas-canonical'), ('schema_fingerprint', '\(CanonicalLedgerSchema.fingerprint)')",
       nil, nil, nil) == SQLITE_OK
   else { throw LedgerStore.Error.incompatibleCanonicalStore }
+  if let seedSQL,
+    sqlite3_exec(database, seedSQL, nil, nil, nil) != SQLITE_OK
+  {
+    throw LedgerStore.Error.incompatibleCanonicalStore
+  }
   return try LedgerStore(takingOwnershipOfValidatedCanonicalDatabase: database)
 }
 
@@ -366,7 +371,9 @@ private func makeApplicationStore() throws -> LedgerStore {
   #expect(report.accessibleTable.contains("expense"))
   let exported = try app.exportPackage()
   #expect(exported.manifest.formatVersion == LedgerPortablePackageFormat.version)
-  try app.importPackage(manifest: exported.manifest, payload: exported.payload)
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try app.importPackage(manifest: exported.manifest, payload: exported.payload)
+  }
   let restored = LedgerApplication(store: try makeApplicationStore())
   try restored.importPackage(manifest: exported.manifest, payload: exported.payload)
   let restoredTransfer = try #require(
@@ -468,6 +475,91 @@ private func makeApplicationStore() throws -> LedgerStore {
     try store.applyExport(future)
   }
   #expect(try store.readSnapshot().accounts.isEmpty)
+}
+
+@Test func exportRejectsEveryUnrepresentedV11FoundationTableAndStandaloneOrigin() throws {
+  let origin = String(repeating: "1", count: 64)
+  let account = String(repeating: "2", count: 64)
+  let category = String(repeating: "3", count: 64)
+  let group = String(repeating: "4", count: 64)
+  let cases = [
+    "INSERT INTO ledger_account_group VALUES ('\(group)', 'Synthetic', 0, 'active')",
+    """
+    INSERT INTO ledger_origin VALUES ('\(origin)', 'synthetic', NULL);
+    INSERT INTO ledger_category VALUES ('\(category)', 'Synthetic', 'expense', '\(origin)', 'active');
+    INSERT INTO ledger_category_tree VALUES ('\(category)', NULL, 0, 0)
+    """,
+    """
+    INSERT INTO ledger_origin VALUES ('\(origin)', 'synthetic', NULL);
+    INSERT INTO ledger_account VALUES ('\(account)', 'Synthetic', 'USD', '\(origin)', 'active');
+    INSERT INTO ledger_account_preferences VALUES ('\(account)', NULL, 0, 0, 1, 'standard')
+    """,
+    "INSERT INTO ledger_origin VALUES ('\(origin)', 'standalone', NULL)",
+  ]
+  for sql in cases {
+    let application = LedgerApplication(store: try makeApplicationStore(seedSQL: sql))
+    #expect(throws: LedgerApplication.Error.invalidCommand) {
+      try application.exportPackage()
+    }
+  }
+}
+
+@Test func packageImportRejectsAnyPreexistingCanonicalRowWithoutMutation() throws {
+  let source = LedgerApplication(store: try makeApplicationStore())
+  let exported = try source.exportPackage()
+  let origin = String(repeating: "1", count: 64)
+  let account = String(repeating: "2", count: 64)
+  let category = String(repeating: "3", count: 64)
+  let group = String(repeating: "4", count: 64)
+  for sql in [
+    "INSERT INTO ledger_origin VALUES ('\(origin)', 'standalone', NULL)",
+    "INSERT INTO ledger_account_group VALUES ('\(group)', 'Synthetic', 0, 'active')",
+    "INSERT INTO ledger_origin VALUES ('\(origin)', 'synthetic', NULL); INSERT INTO ledger_category VALUES ('\(category)', 'Synthetic', 'expense', '\(origin)', 'active'); INSERT INTO ledger_category_tree VALUES ('\(category)', NULL, 0, 0)",
+    "INSERT INTO ledger_origin VALUES ('\(origin)', 'synthetic', NULL); INSERT INTO ledger_account VALUES ('\(account)', 'Synthetic', 'USD', '\(origin)', 'active'); INSERT INTO ledger_account_preferences VALUES ('\(account)', NULL, 0, 0, 1, 'standard')",
+  ] {
+    let store = try makeApplicationStore(seedSQL: sql)
+    let before = try store.semanticChecksum()
+    #expect(throws: LedgerApplication.Error.invalidCommand) {
+      try LedgerApplication(store: store).importPackage(
+        manifest: exported.manifest, payload: exported.payload)
+    }
+    #expect(try store.semanticChecksum() == before)
+  }
+}
+
+@Test func repeatedPackageImportRejectsAfterPreferenceMutationWithoutMutation() throws {
+  let source = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: String(repeating: "2", count: 64), name: "Synthetic", currencyUnit: "USD", origin: origin)
+  try source.createAccount(account)
+  let exported = try source.exportPackage()
+
+  var database: OpaquePointer?
+  guard sqlite3_open(":memory:", &database) == SQLITE_OK, let database else {
+    throw LedgerStore.Error.incompatibleCanonicalStore
+  }
+  for statement in CanonicalLedgerSchema.creationStatements {
+    #expect(sqlite3_exec(database, statement, nil, nil, nil) == SQLITE_OK)
+  }
+  #expect(
+    sqlite3_exec(
+      database,
+      "PRAGMA application_id=\(CanonicalLedgerSchema.applicationID); INSERT INTO ledger_meta VALUES ('schema_version','11'), ('ledger_identity','ledger-atlas-canonical'), ('schema_fingerprint','\(CanonicalLedgerSchema.fingerprint)')",
+      nil, nil, nil) == SQLITE_OK)
+  let store = try LedgerStore(takingOwnershipOfValidatedCanonicalDatabase: database)
+  let destination = LedgerApplication(store: store)
+  try destination.importPackage(manifest: exported.manifest, payload: exported.payload)
+  #expect(
+    sqlite3_exec(
+      database,
+      "INSERT INTO ledger_account_preferences VALUES ('\(account.id)', NULL, 0, 1, 0, 'synthetic')",
+      nil, nil, nil) == SQLITE_OK)
+  let before = try store.semanticChecksum()
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try destination.importPackage(manifest: exported.manifest, payload: exported.payload)
+  }
+  #expect(try store.semanticChecksum() == before)
 }
 
 @Test func twelveMonthlyInstallmentsStartingJanuaryStayInTheSameYear() throws {
@@ -799,7 +891,9 @@ private func makeApplicationStore() throws -> LedgerStore {
   #expect(restored.revisionHistory.count == 2)
   let second = try destination.exportPackage()
   #expect(second.manifest.payloadSHA256 == first.manifest.payloadSHA256)
-  try destination.importPackage(manifest: second.manifest, payload: second.payload)
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try destination.importPackage(manifest: second.manifest, payload: second.payload)
+  }
 }
 
 @Test func iosFacingAdapterMatchesMacApplicationOnProductCommands() throws {
@@ -970,7 +1064,9 @@ private func makeApplicationStore() throws -> LedgerStore {
   #expect(Set(split.map(\.transactionID)) == Set(restored.transactions.map(\.id)))
   let second = try destination.exportPackage()
   #expect(second.manifest.payloadSHA256 == first.manifest.payloadSHA256)
-  try destination.importPackage(manifest: second.manifest, payload: second.payload)
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try destination.importPackage(manifest: second.manifest, payload: second.payload)
+  }
 }
 
 @Test func unknownPackageDirectionLeavesEmptyDestinationUnchanged() throws {
@@ -1211,14 +1307,17 @@ private func makeApplicationStore() throws -> LedgerStore {
   let eventID = String(repeating: "c", count: 64)
   let accountID = String(repeating: "d", count: 64)
   let artifactID = String(repeating: "a", count: 64)
+  let receiptID = String(repeating: "6", count: 64)
+  let bindingIDs = [provenanceID] + ["e", "f", "1", "2"].map { String(repeating: $0, count: 64) }
+  let provenanceRows = bindingIDs.enumerated().map { index, id in
+    "INSERT INTO provenance_reference VALUES ('\(id)', '\(artifactID)', 'synthetic-profile', 'synthetic-adapter-v1', NULL, 'INOUTCOME', 'event', \(index), 'c\(index)')"
+  }.joined(separator: ";")
+  let bindings = zip(["amount", "currency", "occurred_at", "account", "kind"], bindingIDs)
+    .map { semantic, id in
+      "INSERT INTO event_source_binding VALUES ('\(eventID)', '\(semantic)', '\(id)', 'TEXT', 'text'); INSERT INTO receipt_binding VALUES ('\(receiptID)', '\(eventID)', '\(semantic)', '\(id)')"
+    }.joined(separator: ";")
   let insert = """
-    INSERT INTO provenance_reference(
-      provenance_id, artifact_sha256, profile_id, adapter_version, container_member,
-      source_table, source_record_key, source_column_ordinal, source_column_name
-    ) VALUES (
-      '\(provenanceID)', '\(artifactID)', 'synthetic-profile', 'synthetic-adapter-v1', NULL,
-      'INOUTCOME', 'event', 0, 'uid'
-    );
+    \(provenanceRows);
     INSERT INTO economic_event(
       event_id, account_id, event_kind, amount_literal, currency_unit,
       instant_milliseconds, local_year, local_month, local_day, local_hour, local_minute,
@@ -1229,6 +1328,9 @@ private func makeApplicationStore() throws -> LedgerStore {
       0, 1970, 1, 1, 0, 0, 0, 0, 'fixed', '0', 'millisecond',
       0, '\(eventID)', '\(provenanceID)'
     );
+    INSERT INTO import_receipt VALUES ('\(receiptID)', '\(artifactID)', '\(artifactID)', 'synthetic-profile', 'synthetic-adapter-v1', '\(artifactID)', '\(artifactID)', 1, 8);
+    INSERT INTO receipt_event VALUES ('\(receiptID)', '\(eventID)');
+    \(bindings);
     """
   guard sqlite3_exec(database, insert, nil, nil, nil) == SQLITE_OK else {
     sqlite3_close(database)
@@ -1255,9 +1357,8 @@ private func makeApplicationStore() throws -> LedgerStore {
   }
   sqlite3_close(strippedDatabase)
 
-  let application = LedgerApplication(store: try LedgerStore.openForMutation(at: url))
-  #expect(throws: LedgerApplication.Error.invalidCommand) {
-    _ = try application.exportPackage()
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try LedgerStore.openForMutation(at: url)
   }
 }
 

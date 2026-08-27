@@ -10,6 +10,7 @@ package enum CanonicalLedgerHealth {
   }
 
   static func validate(_ database: OpaquePointer) throws {
+    try validateImportGraph(database)
     _ = try readSnapshot(database)
   }
 
@@ -158,6 +159,69 @@ package enum CanonicalLedgerHealth {
         ($0.transactionID, $0.revision) < ($1.transactionID, $1.revision)
       },
       undisplayedImportedEventCount: 0)
+  }
+
+  private static func validateImportGraph(_ database: OpaquePointer) throws {
+    for row in try rows(
+      database,
+      "SELECT event_id, account_id, event_kind, amount_literal, currency_unit, instant_milliseconds, local_year, local_month, local_day, local_hour, local_minute, local_second, local_millisecond, timezone_kind, timezone_value, temporal_precision, resolved_offset_seconds, source_record_id, provenance_id FROM main.economic_event",
+      { $0 })
+    {
+      guard CanonicalIdentifier.isValid(row.text(0)), CanonicalIdentifier.isValid(row.text(1)),
+        CanonicalIdentifier.isValid(row.text(17)), CanonicalIdentifier.isValid(row.text(18)),
+        ["income", "expense", "transfer_debit", "transfer_credit", "adjustment"]
+          .contains(row.text(2))
+      else { throw HealthError.invalid }
+      _ = try CurrencyAmount(unitCode: row.text(4), amount: ExactDecimal(row.text(3)))
+      let local = try SourceLocalDateTime(
+        date: SourceLocalDate(year: row.int(6), month: row.int(7), day: row.int(8)),
+        hour: row.int(9), minute: row.int(10), second: row.int(11), millisecond: row.int(12))
+      let instant = UTCInstant(epochMilliseconds: row.int64(5))
+      let precision = try enumValue(SourceTemporalPrecision.self, row.text(15))
+      switch row.text(13) {
+      case "iana":
+        _ = try SourceTemporal.validatingPersistedIANA(
+          instant: instant, localDateTime: local, identifier: row.text(14),
+          precision: precision, resolvedOffsetSeconds: row.int(16))
+      case "fixed":
+        guard let offset = Int(row.text(14)), String(offset) == row.text(14) else {
+          throw HealthError.invalid
+        }
+        _ = try SourceTemporal(
+          instant: instant, localDateTime: local,
+          timeZone: SourceTimeZone(fixedOffsetSeconds: offset), precision: precision,
+          resolvedOffsetSeconds: row.int(16))
+      default: throw HealthError.invalid
+      }
+    }
+
+    let invalidQueries = [
+      "SELECT 1 FROM import_receipt WHERE length(idempotency_key)<>64 OR idempotency_key GLOB '*[^0-9a-f]*' OR length(staging_digest)<>64 OR staging_digest GLOB '*[^0-9a-f]*' OR length(artifact_sha256)<>64 OR artifact_sha256 GLOB '*[^0-9a-f]*' OR length(reconciliation_hash)<>64 OR reconciliation_hash GLOB '*[^0-9a-f]*' OR length(event_set_hash)<>64 OR event_set_hash GLOB '*[^0-9a-f]*' OR event_count<0",
+      "SELECT 1 FROM import_receipt r WHERE r.event_count<>(SELECT count(*) FROM receipt_event x WHERE x.idempotency_key=r.idempotency_key)",
+      "SELECT 1 FROM economic_event e WHERE (SELECT count(*) FROM receipt_event r WHERE r.event_id=e.event_id)<>1",
+      "SELECT 1 FROM economic_event e WHERE (SELECT count(*) FROM event_source_binding b WHERE b.event_id=e.event_id)<>5 OR EXISTS (SELECT 1 FROM (SELECT 'amount' semantic UNION ALL SELECT 'currency' UNION ALL SELECT 'occurred_at' UNION ALL SELECT 'account' UNION ALL SELECT 'kind') required WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.event_id=e.event_id AND b.semantic=required.semantic))",
+      "SELECT 1 FROM event_source_binding b WHERE (SELECT count(*) FROM receipt_binding r WHERE r.event_id=b.event_id AND r.semantic=b.semantic AND r.provenance_id=b.provenance_id)<>1",
+      "SELECT 1 FROM receipt_binding b WHERE NOT EXISTS (SELECT 1 FROM receipt_event e WHERE e.idempotency_key=b.idempotency_key AND e.event_id=b.event_id)",
+      "SELECT 1 FROM sidecar_reference s WHERE (SELECT count(*) FROM receipt_sidecar r WHERE r.sidecar_id=s.sidecar_id AND r.event_id=s.event_id AND r.provenance_id=s.provenance_id)<>1",
+      "SELECT 1 FROM receipt_sidecar s WHERE NOT EXISTS (SELECT 1 FROM receipt_event e WHERE e.idempotency_key=s.idempotency_key AND e.event_id=s.event_id)",
+      "SELECT 1 FROM sidecar_reference WHERE provenance_id<>sidecar_id OR format_version<>1 OR length(coalesce(declared_type,''))>1024 OR length(payload)>67108864 OR (storage_class='null' AND length(payload)<>0) OR (storage_class IN ('integer','real') AND length(payload)<>8)",
+      "SELECT 1 FROM receipt_preservation_payload WHERE provenance_id<>source_subject_id OR format_version<>1 OR length(coalesce(declared_type,''))>1024 OR length(payload)>67108864 OR (storage_class='null' AND length(payload)<>0) OR (storage_class IN ('integer','real') AND length(payload)<>8)",
+      "SELECT 1 WHERE (SELECT coalesce(sum(length(payload)),0) FROM sidecar_reference)+(SELECT coalesce(sum(length(payload)),0) FROM receipt_preservation_payload)>536870912",
+      "SELECT 1 FROM receipt_preservation_anchor a LEFT JOIN import_receipt r ON r.idempotency_key=a.idempotency_key WHERE r.idempotency_key IS NULL OR a.artifact_sha256<>r.artifact_sha256 OR a.profile_id<>r.profile_id OR a.adapter_version<>r.adapter_version",
+      "SELECT 1 FROM receipt_preservation_anchor WHERE length(anchor_id)<>64 OR anchor_id GLOB '*[^0-9a-f]*' OR length(source_subject_id)<>64 OR source_subject_id GLOB '*[^0-9a-f]*' OR length(artifact_sha256)<>64 OR artifact_sha256 GLOB '*[^0-9a-f]*'",
+      "SELECT 1 FROM receipt_preservation_payload WHERE length(payload_id)<>64 OR payload_id GLOB '*[^0-9a-f]*' OR length(anchor_id)<>64 OR anchor_id GLOB '*[^0-9a-f]*' OR length(source_subject_id)<>64 OR source_subject_id GLOB '*[^0-9a-f]*' OR length(provenance_id)<>64 OR provenance_id GLOB '*[^0-9a-f]*'",
+      "SELECT 1 FROM receipt_preservation_membership m LEFT JOIN receipt_preservation_anchor a ON a.idempotency_key=m.idempotency_key AND a.anchor_id=m.anchor_id AND a.source_subject_id=m.anchor_subject_id AND a.subject_kind=m.anchor_subject_kind LEFT JOIN receipt_preservation_payload p ON p.idempotency_key=m.idempotency_key AND p.anchor_id=m.anchor_id AND p.payload_id=m.payload_id AND p.source_subject_id=m.source_subject_id WHERE a.anchor_id IS NULL OR (m.subject_kind IN ('table','record') AND (m.payload_id IS NOT NULL OR m.source_subject_id<>m.anchor_subject_id OR m.subject_kind<>m.anchor_subject_kind)) OR (m.subject_kind='field' AND (m.payload_id IS NULL OR p.payload_id IS NULL OR m.source_subject_id=m.anchor_subject_id OR m.anchor_subject_kind<>'record'))",
+      "SELECT 1 FROM receipt_preservation_payload p LEFT JOIN receipt_preservation_anchor a ON a.idempotency_key=p.idempotency_key AND a.anchor_id=p.anchor_id WHERE a.anchor_id IS NULL",
+      "SELECT 1 FROM receipt_preservation_payload x JOIN receipt_preservation_anchor a ON a.idempotency_key=x.idempotency_key AND a.anchor_id=x.anchor_id JOIN provenance_reference p ON p.provenance_id=x.provenance_id WHERE x.provenance_id<>x.source_subject_id OR a.subject_kind<>'record' OR p.artifact_sha256<>a.artifact_sha256 OR p.profile_id<>a.profile_id OR p.adapter_version<>a.adapter_version OR p.source_table<>a.source_table OR p.source_record_key<>a.source_record_key",
+      "SELECT 1 FROM receipt_sidecar r JOIN import_receipt i ON i.idempotency_key=r.idempotency_key JOIN sidecar_reference s ON s.sidecar_id=r.sidecar_id AND s.event_id=r.event_id AND s.provenance_id=r.provenance_id JOIN provenance_reference p ON p.provenance_id=s.provenance_id WHERE s.provenance_id<>s.sidecar_id OR p.artifact_sha256<>i.artifact_sha256 OR p.profile_id<>i.profile_id OR p.adapter_version<>i.adapter_version",
+      "SELECT a.anchor_id FROM receipt_preservation_anchor a LEFT JOIN receipt_preservation_membership m ON m.idempotency_key=a.idempotency_key AND m.anchor_id=a.anchor_id AND m.source_subject_id=a.source_subject_id AND m.payload_id IS NULL GROUP BY a.anchor_id HAVING count(m.idempotency_key)<>1",
+      "SELECT p.payload_id FROM receipt_preservation_payload p LEFT JOIN receipt_preservation_membership m ON m.idempotency_key=p.idempotency_key AND m.payload_id=p.payload_id AND m.source_subject_id=p.source_subject_id GROUP BY p.payload_id HAVING count(m.idempotency_key)<>1",
+      "SELECT 1 FROM import_receipt r WHERE r.event_count=0 AND NOT EXISTS (SELECT 1 FROM receipt_preservation_membership m WHERE m.idempotency_key=r.idempotency_key)",
+      "SELECT 1 FROM provenance_reference p WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM sidecar_reference s WHERE s.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM receipt_preservation_payload x WHERE x.provenance_id=p.provenance_id)",
+    ]
+    for query in invalidQueries where try !rows(database, query, { _ in () }).isEmpty {
+      throw HealthError.invalid
+    }
   }
 
   private enum HealthError: Error { case invalid }

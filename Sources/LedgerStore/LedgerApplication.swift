@@ -388,7 +388,8 @@ public struct LedgerApplication: LedgerClient {
 
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {
     let snapshot = try store.readSnapshot()
-    guard snapshot.undisplayedImportedEventCount == 0, try !store.containsImportHistory(),
+    guard try store.portablePackageExportIsRepresentable(),
+      snapshot.undisplayedImportedEventCount == 0, try !store.containsImportHistory(),
       try store.readPreservedSource().isEmpty, !hasUnsupportedPortableProvenance(snapshot)
     else {
       // The portable package cannot yet encode the canonical receipt/provenance graph.
@@ -425,12 +426,9 @@ public struct LedgerApplication: LedgerClient {
     let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
     guard digest == manifest.payloadSHA256, supportedPackageManifest(manifest)
     else { throw Error.invalidCommand }
+    guard try store.isEmptyForPortablePackageImport() else { throw Error.invalidCommand }
     let existing = try store.readSnapshot()
-    if snapshotHasProductRows(existing) {
-      let current = try exportPackage()
-      if current.manifest.payloadSHA256 == digest { return }
-      throw Error.invalidCommand
-    }
+    guard !snapshotHasProductRows(existing) else { throw Error.invalidCommand }
     do {
       try store.applyExport(try decodePackage(payload, manifest: manifest))
     } catch {

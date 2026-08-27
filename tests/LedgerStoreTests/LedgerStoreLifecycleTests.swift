@@ -94,7 +94,7 @@ import Testing
           if reached == phase { throw LifecycleTestError.injected }
         }
       }
-      if phase == .afterPublication {
+      if phase == .afterPublication || phase == .afterPublishedStoreOpened {
         let inspection = try LedgerStoreLifecycle.inspect(at: url)
         #expect(inspection == .current)
       } else {
@@ -126,7 +126,10 @@ import Testing
       }
 
       let retried = try LedgerStoreLifecycle.open(at: url)
-      #expect(retried.disposition == (phase == .afterPublication ? .opened : .upgraded))
+      #expect(
+        retried.disposition
+          == (phase == .afterPublication || phase == .afterPublishedStoreOpened
+            ? .opened : .upgraded))
       let recovery = LedgerStoreLifecycle.recoveryImageURL(for: url)
       #expect(try Data(contentsOf: recovery) == v10Bytes)
       #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
@@ -289,6 +292,48 @@ import Testing
   }
 }
 
+@Test func lifecycleReauthenticatesRecoveryAfterOpeningPublishedStore() throws {
+  try withLifecycleDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    _ = try writeV10Ledger(to: url)
+    let original = try Data(contentsOf: url)
+    let recovery = LedgerStoreLifecycle.recoveryImageURL(for: url)
+    var corrupted = original
+    corrupted[corrupted.startIndex] ^= 0xff
+
+    #expect(throws: LedgerStoreLifecycle.Error.pathChanged) {
+      try LedgerStoreLifecycle.open(at: url) { phase in
+        guard phase == .afterPublishedStoreOpened else { return }
+        let descriptor = Darwin.open(recovery.path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw LifecycleTestError.injected }
+        defer { Darwin.close(descriptor) }
+        var identity = stat()
+        guard fstat(descriptor, &identity) == 0 else { throw LifecycleTestError.injected }
+        let written = corrupted.withUnsafeBytes { bytes in
+          Darwin.pwrite(descriptor, bytes.baseAddress, bytes.count, 0)
+        }
+        var times = [identity.st_atimespec, identity.st_mtimespec]
+        guard written == corrupted.count, fsync(descriptor) == 0,
+          times.withUnsafeMutableBufferPointer({ futimens(descriptor, $0.baseAddress) }) == 0,
+          chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR)) == 0
+        else {
+          throw LifecycleTestError.injected
+        }
+      }
+    }
+
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
+    let displaced = try #require(
+      FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-upgrade-") })
+    #expect(try Data(contentsOf: displaced) == original)
+    try original.write(to: recovery)
+    #expect(chmod(recovery.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+    #expect(try LedgerStoreLifecycle.open(at: url).disposition == .opened)
+    #expect(try Data(contentsOf: displaced) == original)
+  }
+}
+
 @Test func lifecycleRefusesSymlinksCompanionsAndAuthenticatedPathSwaps() throws {
   try withLifecycleDirectory { directory in
     let url = directory.appendingPathComponent("ledger.sqlite")
@@ -392,6 +437,52 @@ import Testing
   }
 }
 
+@Test func lifecycleRejectsSemanticallyInvalidExactV10ImportGraphsWithoutMutation() throws {
+  try withLifecycleDirectory { directory in
+    let valid = directory.appendingPathComponent("valid.sqlite")
+    try writeV10ImportLedger(to: valid, mutation: "")
+    let bytes = try Data(contentsOf: valid)
+    #expect(try LedgerStoreLifecycle.inspect(at: valid) == .upgradeRequired)
+    #expect(try Data(contentsOf: valid) == bytes)
+  }
+  let mutations = [
+    "UPDATE economic_event SET amount_literal='1..2'",
+    "UPDATE economic_event SET local_day=2",
+    "DELETE FROM receipt_event",
+    "DELETE FROM receipt_binding WHERE semantic='amount'",
+    """
+    INSERT INTO provenance_reference VALUES ('ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'profile', 'adapter', NULL, 'T', 'sidecar', 0, 'x');
+    INSERT INTO sidecar_reference VALUES ('ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 1, 'INTEGER', 'integer', X'01');
+    INSERT INTO receipt_sidecar VALUES ('6666666666666666666666666666666666666666666666666666666666666666', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+    """,
+    """
+    INSERT INTO receipt_preservation_anchor VALUES ('9999999999999999999999999999999999999999999999999999999999999999', '6666666666666666666666666666666666666666666666666666666666666666', '8888888888888888888888888888888888888888888888888888888888888888', 'table', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'wrong-profile', 'adapter', NULL, 'T', NULL);
+    INSERT INTO receipt_preservation_membership VALUES ('6666666666666666666666666666666666666666666666666666666666666666', '8888888888888888888888888888888888888888888888888888888888888888', 'table', '9999999999999999999999999999999999999999999999999999999999999999', '8888888888888888888888888888888888888888888888888888888888888888', 'table', NULL)
+    """,
+  ]
+  for mutation in mutations {
+    try withLifecycleDirectory { directory in
+      let url = directory.appendingPathComponent("ledger.sqlite")
+      try writeV10ImportLedger(to: url, mutation: mutation)
+      let before = try Data(contentsOf: url)
+
+      #expect(throws: LedgerStoreLifecycle.Error.invalidStore) {
+        try LedgerStoreLifecycle.inspect(at: url)
+      }
+      #expect(throws: LedgerStoreLifecycle.Error.invalidStore) {
+        try LedgerStoreLifecycle.open(at: url)
+      }
+      #expect(try Data(contentsOf: url) == before)
+      #expect(!FileManager.default.fileExists(
+        atPath: LedgerStoreLifecycle.recoveryImageURL(for: url).path))
+      #expect(
+        try FileManager.default.contentsOfDirectory(atPath: directory.path).allSatisfy {
+          !$0.hasPrefix(".ledger-atlas-upgrade-")
+        })
+    }
+  }
+}
+
 private func withLifecycleDirectory(_ body: (URL) throws -> Void) throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -427,6 +518,40 @@ private func writeV10Ledger(to url: URL) throws -> String {
     chmod(url.path, mode_t(S_IRUSR | S_IWUSR)) == 0
   else { throw LifecycleTestError.sqlite }
   return accountID
+}
+
+private func writeV10ImportLedger(to url: URL, mutation: String) throws {
+  var database: OpaquePointer?
+  guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+    throw LifecycleTestError.sqlite
+  }
+  for object in CanonicalLedgerSchema.legacyV10Objects {
+    guard sqlite3_exec(database, object.ddl, nil, nil, nil) == SQLITE_OK else {
+      throw LifecycleTestError.sqlite
+    }
+  }
+  let provenances = (1...5).map { String(repeating: String($0), count: 64) }
+  let provenanceSQL = provenances.enumerated().map { index, id in
+    "INSERT INTO provenance_reference VALUES ('\(id)', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'profile', 'adapter', NULL, 'T', 'row', \(index), 'c\(index)')"
+  }.joined(separator: ";")
+  let semantics = ["amount", "currency", "occurred_at", "account", "kind"]
+  let bindings = zip(semantics, provenances).map { semantic, id in
+    "INSERT INTO event_source_binding VALUES ('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '\(semantic)', '\(id)', 'TEXT', 'text'); INSERT INTO receipt_binding VALUES ('6666666666666666666666666666666666666666666666666666666666666666', 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '\(semantic)', '\(id)')"
+  }.joined(separator: ";")
+  let sql = """
+    PRAGMA application_id=\(CanonicalLedgerSchema.applicationID);
+    INSERT INTO ledger_meta VALUES ('schema_version','10'), ('ledger_identity','ledger-atlas-canonical'), ('schema_fingerprint','\(CanonicalLedgerSchema.legacyV10Fingerprint)');
+    \(provenanceSQL);
+    INSERT INTO economic_event VALUES ('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'expense', '1.00', 'USD', 0, 1970, 1, 1, 0, 0, 0, 0, 'fixed', '0', 'millisecond', 0, 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', '\(provenances[0])');
+    INSERT INTO import_receipt VALUES ('6666666666666666666666666666666666666666666666666666666666666666', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'profile', 'adapter', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 1, 8);
+    INSERT INTO receipt_event VALUES ('6666666666666666666666666666666666666666666666666666666666666666', 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
+    \(bindings);
+    \(mutation);
+    """
+  guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK,
+    sqlite3_close(database) == SQLITE_OK,
+    chmod(url.path, mode_t(S_IRUSR | S_IWUSR)) == 0
+  else { throw LifecycleTestError.sqlite }
 }
 
 private func fileMode(_ url: URL) throws -> mode_t {

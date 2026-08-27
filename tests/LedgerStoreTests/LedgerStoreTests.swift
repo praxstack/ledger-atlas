@@ -647,14 +647,12 @@ import Testing
 }
 
 @Test func importedEventLoaderRejectsUnknownKindAndInvalidCivilDates() throws {
-  let unknown = try makeStoreWithImportedEvent(kind: "not-a-kind")
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
-    try unknown.materializeImportedEvents()
+    try makeStoreWithImportedEvent(kind: "not-a-kind")
   }
 
-  let invalidDate = try makeStoreWithImportedEvent(kind: "income", localMonth: 13)
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
-    try invalidDate.materializeImportedEvents()
+    try makeStoreWithImportedEvent(kind: "income", localMonth: 13)
   }
 }
 
@@ -672,16 +670,19 @@ private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throw
   let eventID = String(repeating: "c", count: 64)
   let accountID = String(repeating: "d", count: 64)
   let artifact = String(repeating: "a", count: 64)
+  let receipt = String(repeating: "6", count: 64)
+  let bindingIDs = [provenanceID] + ["e", "f", "1", "2"].map { String(repeating: $0, count: 64) }
+  let provenanceRows = bindingIDs.enumerated().map { index, id in
+    "INSERT INTO provenance_reference VALUES ('\(id)', '\(artifact)', 'synthetic-profile', 'synthetic-adapter-v1', NULL, 'INOUTCOME', 'event', \(index), 'c\(index)')"
+  }.joined(separator: ";")
+  let bindings = zip(["amount", "currency", "occurred_at", "account", "kind"], bindingIDs)
+    .map { semantic, id in
+      "INSERT INTO event_source_binding VALUES ('\(eventID)', '\(semantic)', '\(id)', 'TEXT', 'text'); INSERT INTO receipt_binding VALUES ('\(receipt)', '\(eventID)', '\(semantic)', '\(id)')"
+    }.joined(separator: ";")
   try execute(
     database,
     """
-    INSERT INTO provenance_reference(
-      provenance_id, artifact_sha256, profile_id, adapter_version, container_member,
-      source_table, source_record_key, source_column_ordinal, source_column_name
-    ) VALUES (
-      '\(provenanceID)', '\(artifact)', 'synthetic-profile', 'synthetic-adapter-v1', NULL,
-      'INOUTCOME', 'event', 0, 'uid'
-    );
+    \(provenanceRows);
     INSERT INTO economic_event(
       event_id, account_id, event_kind, amount_literal, currency_unit,
       instant_milliseconds, local_year, local_month, local_day, local_hour, local_minute,
@@ -692,6 +693,9 @@ private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throw
       0, 1970, \(localMonth), 1, 0, 0, 0, 0, 'fixed', '0', 'millisecond',
       0, '\(eventID)', '\(provenanceID)'
     );
+    INSERT INTO import_receipt VALUES ('\(receipt)', '\(artifact)', '\(artifact)', 'synthetic-profile', 'synthetic-adapter-v1', '\(artifact)', '\(artifact)', 1, 8);
+    INSERT INTO receipt_event VALUES ('\(receipt)', '\(eventID)');
+    \(bindings);
     """)
   return try LedgerStore(takingOwnershipOfValidatedCanonicalDatabase: database)
 }

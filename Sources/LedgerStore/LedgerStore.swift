@@ -721,11 +721,10 @@ public final class LedgerStore {
       })
     else { throw Error.incompatibleCanonicalStore }
     _ = try mutate { snapshot in
+      let tables = CanonicalLedgerSchema.expectedObjects
+        .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
       guard snapshot.transactions.isEmpty, snapshot.accounts.isEmpty,
-        try Self.loadCategories(on: database).isEmpty,
-        try Self.loadRecurrenceRules(on: database).isEmpty,
-        try Self.loadBudgets(on: database).isEmpty,
-        try Self.loadInstallmentPlans(on: database).isEmpty
+        try !Self.hasRows(in: tables, on: database)
       else {
         throw Error.incompatibleCanonicalStore
       }
@@ -1100,6 +1099,59 @@ public final class LedgerStore {
       _ = try? Self.execute("ROLLBACK", on: database)
       throw Error.incompatibleCanonicalStore
     }
+  }
+
+  package func portablePackageExportIsRepresentable() throws -> Bool {
+    try Self.execute("BEGIN", on: database)
+    do {
+      // Ponytail: Task 4/5 package encoding removes this temporary refusal once these rows
+      // have a lossless portable representation.
+      let hasFoundationRows = try Self.hasRows(
+        in: ["ledger_category_tree", "ledger_account_group", "ledger_account_preferences"],
+        on: database)
+      guard let standaloneOriginCount = Self.scalarInt(
+        """
+        SELECT EXISTS(
+          SELECT 1 FROM main.ledger_origin o
+          WHERE NOT EXISTS (SELECT 1 FROM main.ledger_account a WHERE a.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_category c WHERE c.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_transaction_revision r WHERE r.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_recurrence_rule r WHERE r.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_budget b WHERE b.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_installment_plan p WHERE p.origin_id=o.origin_id)
+        )
+        """, on: database)
+      else { throw Error.incompatibleCanonicalStore }
+      let hasStandaloneOrigin = standaloneOriginCount == 1
+      try Self.execute("COMMIT", on: database)
+      return !hasFoundationRows && !hasStandaloneOrigin
+    } catch {
+      _ = try? Self.execute("ROLLBACK", on: database)
+      throw Error.incompatibleCanonicalStore
+    }
+  }
+
+  package func isEmptyForPortablePackageImport() throws -> Bool {
+    try Self.execute("BEGIN", on: database)
+    do {
+      let tables = CanonicalLedgerSchema.expectedObjects
+        .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
+      let empty = try !Self.hasRows(in: tables, on: database)
+      try Self.execute("COMMIT", on: database)
+      return empty
+    } catch {
+      _ = try? Self.execute("ROLLBACK", on: database)
+      throw Error.incompatibleCanonicalStore
+    }
+  }
+
+  private static func hasRows(in tables: [String], on database: OpaquePointer) throws -> Bool {
+    for table in tables {
+      guard let count = scalarInt("SELECT EXISTS(SELECT 1 FROM main.\(table))", on: database)
+      else { throw Error.incompatibleCanonicalStore }
+      if count == 1 { return true }
+    }
+    return false
   }
 
   fileprivate static func loadPreservedSource(on database: OpaquePointer) throws

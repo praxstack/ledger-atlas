@@ -36,6 +36,7 @@ public enum LedgerStoreLifecycle {
     case afterReplacementMigrated
     case afterReplacementValidated
     case afterPublication
+    case afterPublishedStoreOpened
 
     package static let creationPhases: [Self] = [
       .afterTemporaryCreated, .afterTemporaryValidated, .afterPublication,
@@ -44,6 +45,7 @@ public enum LedgerStoreLifecycle {
       .afterSourceAuthenticated, .afterRecoveryCreated, .afterRecoveryValidated,
       .afterRecoveryPublished, .afterReplacementCreated, .afterReplacementMigrated,
       .afterReplacementValidated, .afterPublication,
+      .afterPublishedStoreOpened,
     ]
   }
 
@@ -261,6 +263,10 @@ public enum LedgerStoreLifecycle {
     }
     let store = try openPublished(
       at: url, expected: try identity(of: replacement.descriptor))
+    try invoke(hook, .afterPublishedStoreOpened)
+    try requireRecoveryStillSafe(
+      recovery, source: source, leaf: recoveryLeaf,
+      parentDescriptor: destination.parentDescriptor)
     if sameEntry(replacement.leaf, identity: source.identity, in: destination.parentDescriptor) {
       _ = unlinkat(destination.parentDescriptor, replacement.leaf, 0)
       _ = fsync(destination.parentDescriptor)
