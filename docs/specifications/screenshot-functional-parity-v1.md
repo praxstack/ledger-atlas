@@ -4,6 +4,10 @@ Status: Reviewed v1; implementation not started
 Date: 2026-08-26
 Scope: Native macOS product, 25 supplied Money Manager Android screenshots, and the supplied Android v19 reference corpus
 
+Release-one authority: `ledger-atlas-mac-completion-v2.md` governs scope conflicts.
+In particular, release-one backups are warned plaintext mode-0600 packages, the
+local portal binds to loopback, and browser ledger editing is excluded.
+
 ## 1. Problem Statement
 
 Ledger Atlas has a substantial canonical ledger and synthetic test candidate, but the native app does not expose the complete user workflows visible in the supplied Money Manager screenshots. The exact supplied Android v19 database is recognized but does not populate a Ledger Atlas ledger.
@@ -408,7 +412,7 @@ The Local Web Access route replaces the observed PC Manager capability with a se
 Defaults:
 
 - `enabled`: `false`.
-- `bind_scope`: `local_network` after explicit user approval.
+- `bind_scope`: `loopback`.
 - `session_idle_timeout_seconds`: `900`.
 - `maximum_failed_logins`: `5` per 15 minutes per source address.
 - `maximum_concurrent_sessions`: `2`.
@@ -434,6 +438,9 @@ The Backup Hub must provide distinct routes for:
 11. Contents-only reset.
 
 Every destructive or importing route must expose preview, confirm, progress, cancel where safe, success, retryable error, terminal error, and rollback result.
+
+Release-one backup creation shows a plaintext warning, writes a checksum manifest,
+and publishes atomically with mode `0600`. Encryption is outside release-one scope.
 
 Complete reset creates a new empty ledger and atomically swaps it into place after authentication. Contents-only reset preserves user presentation settings and removes canonical financial content through the same create-and-swap boundary.
 
@@ -584,7 +591,7 @@ No personal content may appear in the receipt.
 | `orphaned_relationship` | Linked canonical object is missing | Stop and fix mapping | None |
 | `balance_mismatch` | Reconciled account/report totals differ | Stop and inspect aggregate diff | Roll back import |
 | `destination_not_empty` | Fresh-import mode targets non-empty ledger | Choose new destination or explicit merge workflow | None |
-| `backup_integrity_failed` | Hash, manifest, or authenticated payload fails | Reject backup | None |
+| `backup_integrity_failed` | Hash or manifest validation fails | Reject backup | None |
 | `restore_version_unsupported` | Package version is newer than supported | Keep destination unchanged | None |
 | `permission_denied` | User denies file, photo, notification, local-network, or biometric permission | Explain and offer system-settings path | None |
 | `validation_failed` | Form field fails typed validation | Keep form state and focus invalid field | None |
@@ -659,7 +666,7 @@ Required for the supplied Android v19 claim:
 
 Required only for extensions that ship:
 
-- Local web browser CRUD.
+- Local web browser CRUD or any browser mutation route.
 - Google Drive API integration beyond user-selected folders.
 - iOS import.
 - Historical Android profiles.
@@ -697,7 +704,7 @@ No extension may inherit certification from another profile or platform.
 7. Implement Configuration destinations.
 8. Implement app lock.
 9. Implement Backup Hub and private reconciliation surface.
-10. Implement Local Web Access idle/start/stop states; ship browser CRUD only under Extension Conformance.
+10. Implement Local Web Access idle/start/stop states; keep browser CRUD excluded from release one.
 11. Add synthetic UI capture harness and accessibility checks.
 12. Run the supplied v19 integration profile and two-cycle restore.
 13. Close independent risk-based review findings for product, finance, privacy, and accessibility changes.

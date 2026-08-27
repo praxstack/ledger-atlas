@@ -1,7 +1,37 @@
 {
   "schema_version": 1,
-  "project": "ledger-atlas-milestone-one",
-  "acceptance": "implementation candidate; done means its acceptance criteria and recorded evidence passed, not release, shipment, or compatibility certification",
+  "project": "ledger-atlas-mac-completion-v2",
+  "acceptance": "implementation candidate; done means the named ticket acceptance and recorded evidence passed, not release, shipment, or compatibility certification",
+  "release_one": {
+    "specification": "docs/specifications/ledger-atlas-mac-completion-v2.md",
+    "backup_contract": "warned plaintext, checksum manifest, atomic mode-0600 publication",
+    "portal_contract": "read-only loopback; no browser ledger editing",
+    "tickets": [
+      {"id":"MACV2-01","deps":[],"github":37,"linear":"PRA-69","status":"done"},
+      {"id":"MACV2-02","deps":["MACV2-01"],"github":38,"linear":"PRA-72","status":"todo"},
+      {"id":"MACV2-03","deps":["MACV2-02"],"github":39,"linear":"PRA-68","status":"todo"},
+      {"id":"MACV2-04","deps":["MACV2-03"],"github":40,"linear":"PRA-70","status":"todo"},
+      {"id":"MACV2-05","deps":["MACV2-03"],"github":41,"linear":"PRA-71","status":"todo"},
+      {"id":"MACV2-06","deps":["MACV2-04","MACV2-05"],"github":42,"linear":"PRA-73","status":"todo"},
+      {"id":"MACV2-07","deps":["MACV2-06"],"github":43,"linear":"PRA-74","status":"todo"},
+      {"id":"MACV2-08","deps":["MACV2-04","MACV2-05","MACV2-06"],"github":44,"linear":"PRA-75","status":"todo"},
+      {"id":"MACV2-09","deps":["MACV2-06","MACV2-07","MACV2-08"],"github":45,"linear":"PRA-78","status":"todo"},
+      {"id":"MACV2-10","deps":["MACV2-05","MACV2-09"],"github":46,"linear":"PRA-76","status":"todo"},
+      {"id":"MACV2-11","deps":["MACV2-04","MACV2-05","MACV2-09"],"github":47,"linear":"PRA-77","status":"todo"},
+      {"id":"MACV2-12","deps":["MACV2-06","MACV2-09"],"github":48,"linear":"PRA-79","status":"todo"},
+      {"id":"MACV2-13","deps":["MACV2-03","MACV2-05"],"github":49,"linear":"PRA-80","status":"todo"},
+      {"id":"MACV2-14","deps":["MACV2-02","MACV2-03","MACV2-13"],"github":50,"linear":"PRA-81","status":"todo"},
+      {"id":"MACV2-15","deps":["MACV2-03","MACV2-07","MACV2-08","MACV2-11","MACV2-12"],"github":51,"linear":"PRA-82","status":"todo"},
+      {"id":"MACV2-16","deps":["MACV2-01"],"github":52,"linear":"PRA-83","status":"todo"},
+      {"id":"MACV2-17","deps":["MACV2-16"],"github":53,"linear":"PRA-84","status":"todo","human":true},
+      {"id":"MACV2-18","deps":["MACV2-03","MACV2-05","MACV2-08","MACV2-15","MACV2-17"],"github":54,"linear":"PRA-85","status":"todo"},
+      {"id":"MACV2-19","deps":["MACV2-07","MACV2-08","MACV2-14","MACV2-15"],"github":55,"linear":"PRA-86","status":"todo"},
+      {"id":"MACV2-20","deps":["MACV2-10","MACV2-13","MACV2-14","MACV2-15"],"github":56,"linear":"PRA-87","status":"todo"},
+      {"id":"MACV2-21","deps":["MACV2-09","MACV2-10","MACV2-11","MACV2-12","MACV2-13","MACV2-14","MACV2-15","MACV2-18","MACV2-19","MACV2-20"],"github":57,"linear":"PRA-88","status":"todo"},
+      {"id":"MACV2-22","deps":["MACV2-17","MACV2-18","MACV2-21"],"github":58,"linear":"PRA-89","status":"todo","human":true},
+      {"id":"MACV2-23","deps":["MACV2-22"],"github":59,"linear":"PRA-90","status":"todo","human":true}
+    ]
+  },
   "atoms": [
     {
       "id": "ORC-001",
@@ -171,8 +201,8 @@
     },
     {
       "id": "PAR-001",
-      "title": "Security and app lock (issue 26)",
-      "criterion": "Passcode/biometric lock with keychain-held secret; escalating lockout persisted in the keychain at five attempts to one minute and ten attempts to fifteen minutes, surviving restart; encrypted backup packages open by decrypt-to-memory feeding applyExport through the pinned writer, never whole-file replacement; restore rejects tampered payloads; biometric failure falls back to passcode.",
+      "title": "Security and app lock parent (issue 26)",
+      "criterion": "Passcode and biometric lock with a keychain-held secret; escalating lockout persists at five attempts for one minute and ten attempts for fifteen minutes across restart; locked app, widget, notifications, portal, and app switcher redact private content; biometric failure falls back to passcode. Release-one backup security is governed by MACV2-15: warned plaintext, checksum manifest, and atomic mode-0600 publication. Encrypted backup packages are excluded from release one.",
       "status": "todo",
       "deps": [],
       "p0": true,

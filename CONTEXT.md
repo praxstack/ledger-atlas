@@ -1,6 +1,6 @@
 # Ledger Atlas durable context
 
-Updated: 2026-08-18
+Updated: 2026-08-27
 Status: unaccepted implementation candidate. Repository commits contain an importer,
 canonical-ledger kernel (schema v10), public LedgerApplication commands, redacted CLI,
 and a native Mac journey/session. No real-v19 lossless import
@@ -79,3 +79,16 @@ commit-governance system was removed by an explicit stakeholder decision on
 2026-08-26. Product work now follows the technical and architecture checks in
 `AGENTS.md` and `docs/orchestration/RUNBOOK.md`. No shipped product, L3+, or
 real-v19 certificate is claimed.
+
+## Release-one completion contract
+
+`docs/specifications/ledger-atlas-mac-completion-v2.md` is the accepted release-one
+product contract. It adds 33 user stories and a 23-ticket dependency graph without
+claiming that the current candidate implements them. GitHub Issues #37 through #59
+are the canonical tracer tickets; the earlier issues remain broader parents and
+foundations.
+
+The accepted release-one backup is plaintext. Creation must show a warning and
+publish a checksummed complete package atomically with mode 0600. Encryption is
+excluded from release one. The accepted local portal binds to loopback and exposes
+read-only report routes; browser ledger editing is excluded.

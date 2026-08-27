@@ -69,6 +69,11 @@ def test_direct_screenshot_checklist_matches_supplied_private_evidence() -> None
     assert all(set(capture["visible_control_ids"]) <= control_contracts for capture in captures)
     assert all("synthetic_capture_path" in capture for capture in captures)
     assert value["evidence_grade"] == "observed"
+    assert value["completion_spec"] == ("docs/specifications/ledger-atlas-mac-completion-v2.md")
+    assert value["release_one_capture_ticket"] == (
+        "https://github.com/praxstack/ledger-atlas/issues/57"
+    )
+    assert value["source_screenshots_read_only"] is True
     if os.environ.get("LEDGER_ATLAS_VERIFY_PRIVATE_EVIDENCE") == "1":
         assert private_root.is_dir()
         assert set(filenames) == {path.name for path in private_root.glob("*.png")}

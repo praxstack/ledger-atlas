@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en" data-source-sha256="fc983ed2743bbc0a267fc2bd2d291cd72c856ff10ac072881d1e726ad78a9c18">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="source-sha256" content="fc983ed2743bbc0a267fc2bd2d291cd72c856ff10ac072881d1e726ad78a9c18">
+<meta name="generated-at" content="2026-08-27T13:01:10Z">
+<title>Ledger Atlas Mac Completion v2</title>
+<style>
+:root { color-scheme: light dark; --ink:#17201d; --muted:#53635e; --paper:#f7f7f2;
+  --panel:#eceee8; --rule:#c7cec8; --accent:#17695d; --code:#e2e7e1; }
+@media (prefers-color-scheme:dark) { :root { --ink:#edf2ed; --muted:#aab8b0;
+  --paper:#151a17; --panel:#202722; --rule:#3d4942; --accent:#70c3b1; --code:#29332d; } }
+* { box-sizing:border-box }
+html { scroll-behavior:smooth }
+body { margin:0; color:var(--ink); background:var(--paper); font:15px/1.55 -apple-system,
+  BlinkMacSystemFont,"Segoe UI",sans-serif }
+a { color:var(--accent); text-underline-offset:3px }
+a:focus-visible { outline:3px solid var(--accent); outline-offset:3px }
+.skip { position:absolute; left:-10000px; top:auto }
+.skip:focus { left:1rem; top:1rem; z-index:3; padding:.6rem .8rem; background:var(--paper) }
+header { border-bottom:1px solid var(--rule); background:var(--panel); padding:2rem max(1rem,4vw) }
+header p { margin:.3rem 0; color:var(--muted) }
+.layout { display:grid; grid-template-columns:minmax(15rem,22rem) minmax(0,56rem); gap:3rem;
+  max-width:86rem; margin:0 auto; padding:2rem max(1rem,4vw) 5rem }
+aside { align-self:start; position:sticky; top:1rem; max-height:calc(100vh - 2rem); overflow:auto }
+nav ul { list-style:none; padding:0; margin:0 }
+nav li { margin:.2rem 0 } nav .level-3 { padding-left:1rem; font-size:.9rem }
+main { min-width:0 } h1 { margin:0 0 .5rem; font-size:2rem } h2 { margin-top:3rem }
+h3 { margin-top:2rem } h2,h3,h4 { scroll-margin-top:1rem }
+code,pre,.meta { font-family:"JetBrainsMono Nerd Font","MesloLGS NF","SFMono-Regular",
+  Menlo,Consolas,monospace }
+code { background:var(--code); padding:.1rem .25rem; border-radius:3px }
+pre { overflow:auto; background:var(--code); padding:1rem; border-radius:6px }
+pre code { padding:0 } blockquote { border-left:4px solid var(--accent); margin:1rem 0;
+  padding:.1rem 1rem; color:var(--muted) }
+.table-scroll { overflow:auto; border:1px solid var(--rule); border-radius:6px }
+table { border-collapse:collapse; width:100%; min-width:42rem } th,td { padding:.55rem .7rem;
+  border-bottom:1px solid var(--rule); text-align:left; vertical-align:top } th { background:var(--panel) }
+.check input { margin-right:.35rem } footer { border-top:1px solid var(--rule); padding:1.5rem max(1rem,4vw);
+  color:var(--muted) }
+@media (max-width:900px) { .layout { grid-template-columns:1fr } aside { position:static;
+  max-height:none } }
+@media print { :root { color-scheme:light; --ink:#000; --muted:#333; --paper:#fff;
+  --panel:#f2f2f2; --rule:#aaa; --accent:#000; --code:#f4f4f4 } .layout { display:block;
+  max-width:none; padding:0 } aside,.skip { display:none } header,footer { padding:1rem 0 }
+  a { color:#000 } h2,h3,h4 { break-after:avoid } table,pre,blockquote { break-inside:avoid } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to specification</a>
+<header role="banner">
+<h1>Ledger Atlas Mac Completion v2</h1>
+<p class="meta">Markdown SHA-256: fc983ed2743bbc0a267fc2bd2d291cd72c856ff10ac072881d1e726ad78a9c18</p>
+<p class="meta">Generated: 2026-08-27T13:01:10Z</p>
+</header>
+<div class="layout">
+<aside><nav aria-label="Specification sections"><h2>Contents</h2><ul><li class="level-2"><a href="#product-contract">Product contract</a></li>
+<li class="level-3"><a href="#objective">Objective</a></li>
+<li class="level-3"><a href="#financial-truth">Financial truth</a></li>
+<li class="level-3"><a href="#canonical-and-adapter-boundaries">Canonical and adapter boundaries</a></li>
+<li class="level-3"><a href="#native-product-boundary">Native product boundary</a></li>
+<li class="level-3"><a href="#daily-finance-behavior">Daily finance behavior</a></li>
+<li class="level-3"><a href="#privacy-and-security">Privacy and security</a></li>
+<li class="level-3"><a href="#backup-restore-and-reset">Backup, restore, and reset</a></li>
+<li class="level-3"><a href="#compatibility-and-certification">Compatibility and certification</a></li>
+<li class="level-3"><a href="#accessibility-and-performance">Accessibility and performance</a></li>
+<li class="level-3"><a href="#delivery-definition">Delivery definition</a></li>
+<li class="level-2"><a href="#assumptions">Assumptions</a></li>
+<li class="level-2"><a href="#exclusions">Exclusions</a></li>
+<li class="level-2"><a href="#implementation-decisions">Implementation decisions</a></li>
+<li class="level-3"><a href="#d-01-one-native-product">D-01 — One native product</a></li>
+<li class="level-3"><a href="#d-02-sole-write-boundary">D-02 — Sole write boundary</a></li>
+<li class="level-3"><a href="#d-03-atomic-v11-migration">D-03 — Atomic v11 migration</a></li>
+<li class="level-3"><a href="#d-04-independent-package-versions">D-04 — Independent package versions</a></li>
+<li class="level-3"><a href="#d-05-first-class-compound-purchase">D-05 — First-class compound purchase</a></li>
+<li class="level-3"><a href="#d-06-exact-transfers-and-fx">D-06 — Exact transfers and FX</a></li>
+<li class="level-3"><a href="#d-07-plaintext-release-one-backup">D-07 — Plaintext release-one backup</a></li>
+<li class="level-3"><a href="#d-08-local-attachment-and-ocr-path">D-08 — Local attachment and OCR path</a></li>
+<li class="level-3"><a href="#d-09-redacted-widget-projection">D-09 — Redacted widget projection</a></li>
+<li class="level-3"><a href="#d-10-authenticated-app-intents">D-10 — Authenticated App Intents</a></li>
+<li class="level-3"><a href="#d-11-read-only-loopback-portal">D-11 — Read-only loopback portal</a></li>
+<li class="level-3"><a href="#d-12-owner-assisted-semantic-oracle">D-12 — Owner-assisted semantic oracle</a></li>
+<li class="level-3"><a href="#d-13-representability-gated-vendor-export">D-13 — Representability-gated vendor export</a></li>
+<li class="level-3"><a href="#d-14-synthetic-ui-proof">D-14 — Synthetic UI proof</a></li>
+<li class="level-3"><a href="#d-15-exact-delivery-artifact">D-15 — Exact delivery artifact</a></li>
+<li class="level-2"><a href="#user-stories">User stories</a></li>
+<li class="level-3"><a href="#us-01-create-a-ledger">US-01 Create a ledger</a></li>
+<li class="level-3"><a href="#us-02-open-or-upgrade-a-ledger">US-02 Open or upgrade a ledger</a></li>
+<li class="level-3"><a href="#us-03-manage-accounts">US-03 Manage accounts</a></li>
+<li class="level-3"><a href="#us-04-manage-account-groups">US-04 Manage account groups</a></li>
+<li class="level-3"><a href="#us-05-manage-category-trees">US-05 Manage category trees</a></li>
+<li class="level-3"><a href="#us-06-record-income">US-06 Record income</a></li>
+<li class="level-3"><a href="#us-07-record-an-expense">US-07 Record an expense</a></li>
+<li class="level-3"><a href="#us-08-split-a-purchase">US-08 Split a purchase</a></li>
+<li class="level-3"><a href="#us-09-transfer-between-accounts">US-09 Transfer between accounts</a></li>
+<li class="level-3"><a href="#us-10-record-fx-and-fees">US-10 Record FX and fees</a></li>
+<li class="level-3"><a href="#us-11-browse-daily-activity">US-11 Browse daily activity</a></li>
+<li class="level-3"><a href="#us-12-use-the-calendar-view">US-12 Use the calendar view</a></li>
+<li class="level-3"><a href="#us-13-use-monthly-and-total-views">US-13 Use monthly and total views</a></li>
+<li class="level-3"><a href="#us-14-browse-notes">US-14 Browse notes</a></li>
+<li class="level-3"><a href="#us-15-search-and-filter">US-15 Search and filter</a></li>
+<li class="level-3"><a href="#us-16-edit-from-the-ledger">US-16 Edit from the ledger</a></li>
+<li class="level-3"><a href="#us-17-inspect-statistics">US-17 Inspect statistics</a></li>
+<li class="level-3"><a href="#us-18-export-a-pdf-statement">US-18 Export a PDF statement</a></li>
+<li class="level-3"><a href="#us-19-plan-budgets">US-19 Plan budgets</a></li>
+<li class="level-3"><a href="#us-20-plan-recurrence">US-20 Plan recurrence</a></li>
+<li class="level-3"><a href="#us-21-plan-installments">US-21 Plan installments</a></li>
+<li class="level-3"><a href="#us-22-attach-a-receipt">US-22 Attach a receipt</a></li>
+<li class="level-3"><a href="#us-23-confirm-ocr-suggestions">US-23 Confirm OCR suggestions</a></li>
+<li class="level-3"><a href="#us-24-configure-presentation">US-24 Configure presentation</a></li>
+<li class="level-3"><a href="#us-25-configure-behavior">US-25 Configure behavior</a></li>
+<li class="level-3"><a href="#us-26-lock-the-product">US-26 Lock the product</a></li>
+<li class="level-3"><a href="#us-27-back-up-and-restore">US-27 Back up and restore</a></li>
+<li class="level-3"><a href="#us-28-exchange-xlsx-and-reset">US-28 Exchange XLSX and reset</a></li>
+<li class="level-3"><a href="#us-29-import-money-manager-v19">US-29 Import Money Manager v19</a></li>
+<li class="level-3"><a href="#us-30-use-the-widget">US-30 Use the widget</a></li>
+<li class="level-3"><a href="#us-31-use-app-intents">US-31 Use App Intents</a></li>
+<li class="level-3"><a href="#us-32-use-local-reports-and-reminders">US-32 Use local reports and reminders</a></li>
+<li class="level-3"><a href="#us-33-install-the-release">US-33 Install the release</a></li>
+<li class="level-2"><a href="#test-seams">Test seams</a></li>
+<li class="level-3"><a href="#ts-01-application-command-seam">TS-01 Application command seam</a></li>
+<li class="level-3"><a href="#ts-02-descriptor-bound-store-seam">TS-02 Descriptor-bound store seam</a></li>
+<li class="level-3"><a href="#ts-03-compatibility-laboratory-seam">TS-03 Compatibility laboratory seam</a></li>
+<li class="level-3"><a href="#ts-04-native-presentation-seam">TS-04 Native presentation seam</a></li>
+<li class="level-3"><a href="#ts-05-delivery-seam">TS-05 Delivery seam</a></li>
+<li class="level-2"><a href="#delivery-tickets">Delivery tickets</a></li>
+<li class="level-3"><a href="#macv2-01-freeze-completion-specification-and-traceability">MACV2-01 Freeze completion specification and traceability</a></li>
+<li class="level-3"><a href="#macv2-02-launch-the-sandboxed-mac-app-and-widget-container">MACV2-02 Launch the sandboxed Mac app and widget container</a></li>
+<li class="level-3"><a href="#macv2-03-create-open-and-upgrade-a-ledger">MACV2-03 Create, open, and upgrade a ledger</a></li>
+<li class="level-3"><a href="#macv2-04-manage-accounts-and-account-groups">MACV2-04 Manage accounts and account groups</a></li>
+<li class="level-3"><a href="#macv2-05-manage-arbitrary-depth-category-trees">MACV2-05 Manage arbitrary-depth category trees</a></li>
+<li class="level-3"><a href="#macv2-06-enter-and-edit-income-or-single-category-expenses">MACV2-06 Enter and edit income or single-category expenses</a></li>
+<li class="level-3"><a href="#macv2-07-split-one-expense-across-multiple-categories">MACV2-07 Split one expense across multiple categories</a></li>
+<li class="level-3"><a href="#macv2-08-create-transfers-fx-conversions-and-fees">MACV2-08 Create transfers, FX conversions, and fees</a></li>
+<li class="level-3"><a href="#macv2-09-browse-search-and-edit-the-transaction-ledger">MACV2-09 Browse, search, and edit the transaction ledger</a></li>
+<li class="level-3"><a href="#macv2-10-inspect-statistics-and-export-pdf-statements">MACV2-10 Inspect statistics and export PDF statements</a></li>
+<li class="level-3"><a href="#macv2-11-plan-budgets-recurrence-and-installments">MACV2-11 Plan budgets, recurrence, and installments</a></li>
+<li class="level-3"><a href="#macv2-12-attach-receipts-and-confirm-local-ocr-suggestions">MACV2-12 Attach receipts and confirm local OCR suggestions</a></li>
+<li class="level-3"><a href="#macv2-13-configure-locale-and-product-behavior">MACV2-13 Configure locale and product behavior</a></li>
+<li class="level-3"><a href="#macv2-14-lock-and-redact-the-product">MACV2-14 Lock and redact the product</a></li>
+<li class="level-3"><a href="#macv2-15-back-up-restore-exchange-xlsx-and-reset-safely">MACV2-15 Back up, restore, exchange XLSX, and reset safely</a></li>
+<li class="level-3"><a href="#macv2-16-build-the-synthetic-money-manager-oracle-harness">MACV2-16 Build the synthetic Money Manager oracle harness</a></li>
+<li class="level-3"><a href="#macv2-17-run-the-owner-assisted-money-manager-oracle-session">MACV2-17 Run the owner-assisted Money Manager oracle session</a></li>
+<li class="level-3"><a href="#macv2-18-certify-the-supplied-v19-import-and-representable-export">MACV2-18 Certify the supplied v19 import and representable export</a></li>
+<li class="level-3"><a href="#macv2-19-ship-the-widget-and-five-app-intents">MACV2-19 Ship the widget and five App Intents</a></li>
+<li class="level-3"><a href="#macv2-20-ship-localhost-access-notifications-and-diagnostics">MACV2-20 Ship localhost access, notifications, and diagnostics</a></li>
+<li class="level-3"><a href="#macv2-21-close-synthetic-ui-accessibility-privacy-and-performance-proof">MACV2-21 Close synthetic UI, accessibility, privacy, and performance proof</a></li>
+<li class="level-3"><a href="#macv2-22-run-the-private-supplied-corpus-delivery-proof">MACV2-22 Run the private supplied-corpus delivery proof</a></li>
+<li class="level-3"><a href="#macv2-23-build-and-smoke-test-the-delivery-dmg">MACV2-23 Build and smoke-test the delivery DMG</a></li>
+<li class="level-2"><a href="#traceability">Traceability</a></li>
+<li class="level-3"><a href="#synchronized-project-artifacts">Synchronized project artifacts</a></li>
+<li class="level-3"><a href="#status-boundary">Status boundary</a></li></ul></nav></aside>
+<main id="main" tabindex="-1"><h1 id="ledger-atlas-mac-app-completion-v2">Ledger Atlas Mac App Completion v2</h1>
+<p>Status: accepted release-one product contract; implementation remains incomplete Version: 2.0 Date: 2026-08-27 Scope: native macOS 15+ Apple-silicon product, Money Manager Android v19 perimeter compatibility, widget, local integrations, and signed DMG delivery Authority: this versioned specification governs release-one scope; GitHub Issues govern ticket state</p>
+<h2 id="product-contract">Product contract</h2>
+<h3 id="objective">Objective</h3>
+<p>Ledger Atlas release one gives a Mac user a complete local personal-finance product. The user can create or import a ledger, manage daily financial activity, inspect exact reports, protect private data, back up and restore the ledger, use a redacted widget, and install a signed application. Money Manager data enters through a versioned compatibility adapter and never defines the canonical domain.</p>
+<p>Release-one completion requires all 23 delivery tickets to meet their acceptance text. Passing a focused test, rendering an HTML board, creating a ticket, or committing code proves only that named result. A release claim also requires the private supplied-corpus proof and the signed, notarized, installed DMG smoke proof.</p>
+<h3 id="financial-truth">Financial truth</h3>
+<ul>
+<li>Canonical money uses exact decimal or integer minor units. Binary floating point never represents financial truth.</li>
+<li>Each amount preserves its raw literal, currency or commodity unit, scale, and rounding rule.</li>
+<li>Each temporal value preserves the local date, wall time, timezone identifier, resolved offset, calendar, and instant when the source provides them.</li>
+<li>Revisions append correction history. Tombstones preserve identity and links.</li>
+<li>A source record may create several canonical effects. <code>SourceEffectIdentity</code> binds the source profile, table, record identifier, effect ordinal, adapter version, and canonical effect identifier.</li>
+<li>Transactions, split lines, transfer effects, fees, generated occurrences, attachments, budgets, and provenance keep stable identities through edit, backup, restore, and reopen.</li>
+</ul>
+<h3 id="canonical-and-adapter-boundaries">Canonical and adapter boundaries</h3>
+<ol>
+<li>Versioned source adapters classify immutable compatibility inputs.</li>
+<li>Staging and loss accounting map, sidecar-preserve, intentionally exclude with a visible reason, or block each source item.</li>
+<li><code>LedgerApplication</code> owns typed commands and queries. Native views, App Intents, the widget, and the local portal do not write SQLite.</li>
+<li><code>LedgerStore</code> owns descriptor-bound SQLite access, transactions, migration, rollback, checksum, backup, and restore.</li>
+<li>Search indexes, report snapshots, widget projections, PDFs, and diagnostics remain rebuildable derivatives.</li>
+<li>Vendor tables, codes, filenames, and lifecycle assumptions stay inside versioned Money Manager adapters and compatibility evidence.</li>
+</ol>
+<h3 id="native-product-boundary">Native product boundary</h3>
+<ul>
+<li>The first client is a sandboxed native macOS 15+ Apple-silicon app built with SwiftUI and AppKit conventions.</li>
+<li>The app and widget share an App Group. The shared container holds only a redacted projection.</li>
+<li>Security-scoped bookmarks retain user-selected ledger, import, backup, attachment, and export locations.</li>
+<li><code>LedgerJourney</code> owns onboarding and open-ledger transitions. <code>LedgerSession</code> owns one opened ledger and its presentation state.</li>
+<li>The product uses typed destinations for Overview, Transactions, Accounts, Plans, Reports, Import, Backup, and Settings.</li>
+<li>Each command has a visible control or menu item. Keyboard shortcuts supplement those controls.</li>
+</ul>
+<h3 id="daily-finance-behavior">Daily finance behavior</h3>
+<ul>
+<li>Users can manage accounts, account groups, arbitrary-depth category trees, income, expenses, split purchases, transfers, foreign exchange, fees, budgets, recurrence, installments, notes, and receipt attachments.</li>
+<li>The transaction ledger supplies Daily, Calendar, Monthly, Total, and Note modes with paging, filters, stable selection, edit return position, and conflict display.</li>
+<li>Statistics derive from one immutable report snapshot. Category ancestors roll up child effects once. Transfers remain neutral where the report defines them as neutral.</li>
+<li>PDF statements and XLSX exchange use versioned projections. They never become canonical truth.</li>
+<li>Local OCR produces suggestions. Only a user-confirmed command can create or change financial truth.</li>
+</ul>
+<h3 id="privacy-and-security">Privacy and security</h3>
+<ul>
+<li>Real financial content, credentials, SMS, photos, names, notes, transaction values, source paths, and source rows stay out of Git, prompts, logs, screenshots, diagnostics, and routine test output.</li>
+<li>Tracked fixtures and UI captures use synthetic data.</li>
+<li>Passcode secrets and failure counters live in Keychain. Five failed attempts lock for 60 seconds; ten lock for 900 seconds. The state survives restart.</li>
+<li>Locking redacts the app, widget, notifications, local portal, and app-switcher representation.</li>
+<li>The local portal binds to loopback, exposes read-only routes, and stops on lock, sleep, inactivity, or ledger switch.</li>
+<li>The app requests notification, biometric, local-network, photo, and file access only at the action that needs it. Denial preserves state and offers recovery.</li>
+</ul>
+<h3 id="backup-restore-and-reset">Backup, restore, and reset</h3>
+<ul>
+<li>Release-one Ledger Atlas backups are plaintext by accepted product decision.</li>
+<li>Backup creation shows a visible plaintext warning, writes a complete versioned payload, records checksums, publishes with mode <code>0600</code>, and fsyncs the file and containing directory before success.</li>
+<li>Package format versioning remains independent from canonical schema versioning.</li>
+<li>Restore validates format, checksum, identity, provenance, attachments, and conflicts before mutation. Merge and overwrite are separate reviewed operations.</li>
+<li>Two restore cycles preserve the declared canonical checksum and attachment set.</li>
+<li>Complete reset and contents-only reset create a replacement ledger and publish it through an atomic swap. An interrupted reset leaves the current ledger usable.</li>
+</ul>
+<h3 id="compatibility-and-certification">Compatibility and certification</h3>
+<ul>
+<li>Original backups, exports, screenshots, and the reverse-engineering repository remain read-only evidence outside this repository.</li>
+<li>SQLite sources open with read-only and immutable flags. Before and after SHA-256 hashes must match.</li>
+<li>Direct SQLite and ZIP access to the same payload must create the same canonical result.</li>
+<li>The five supplied XLSX files are overlapping report views and never append duplicate events.</li>
+<li>Unknown type <code>7</code>, budget period <code>6</code>, category-depth behavior, and compound-purchase representation require owner-supervised synthetic oracle evidence before mapping.</li>
+<li>A certificate names the platform, app version and build, container, schema fingerprint, fixture or oracle, adapter version, locale, currency, and achieved compatibility level.</li>
+<li>The vendor writer rejects any compound canonical purchase that the named Money Manager profile cannot represent without loss.</li>
+</ul>
+<h3 id="accessibility-and-performance">Accessibility and performance</h3>
+<ul>
+<li>Every screen supports keyboard completion, visible focus, logical focus order, row-level VoiceOver, 200 percent text, high contrast, reduced motion, and non-color state cues.</li>
+<li>Each chart has an exact accessible table and spoken summary.</li>
+<li>All 25 screenshot traceability records receive synthetic privacy-safe Ledger Atlas captures. The source screenshots never enter the repository.</li>
+<li>Ledger browsing, search, and report paths remain paged on a 100000-entry synthetic ledger and meet the ticketed response targets.</li>
+</ul>
+<h3 id="delivery-definition">Delivery definition</h3>
+<p>Delivery requires the reviewed final commit, passing focused and full checks, closed risk-review findings, the private supplied-corpus proof, a Developer ID Application signature, Apple notarization and stapling, Gatekeeper verification, clean-account installation, and the accepted installed smoke suite. Credentials and owner authorization remain external gates.</p>
+<h2 id="assumptions">Assumptions</h2>
+<ol>
+<li>The release target is macOS 15 or newer on Apple silicon.</li>
+<li>The product owner can supervise the synthetic Money Manager oracle session and the private supplied-corpus proof.</li>
+<li>The supplied Android v19 SQLite, ZIP, five XLSX reports, and 25 screenshots remain available at their read-only private locations for authorized proof runs.</li>
+<li>Apple Developer ID Application credentials and notarization access will be available for MACV2-23. Their current absence blocks delivery but does not change product scope.</li>
+<li>Users choose durable local or mounted folder destinations and grant security-scoped access. Ledger Atlas does not request a cloud-provider credential.</li>
+<li>Release-one migration starts from the current canonical v10 store and publishes canonical v11 through one named atomic migration.</li>
+<li>Existing v10 stores, older supported packages, and single-category transaction callers remain supported through their declared compatibility seams.</li>
+<li>GitHub repository <code>praxstack/ledger-atlas</code> remains canonical; the Linear Ledger Atlas project remains its planning mirror.</li>
+</ol>
+<h2 id="exclusions">Exclusions</h2>
+<ul>
+<li>Browser-based ledger editing or browser mutation APIs.</li>
+<li>Sync, cloud accounts, telemetry, ML classification of financial truth, and multi-user collaboration.</li>
+<li>Shipped iOS, Android, Windows, or web clients.</li>
+<li>Universal Money Manager compatibility, historical profile claims, or source semantics without a named tested cell.</li>
+<li>Encrypted Ledger Atlas backups in release one. A later version may add authenticated encryption without changing the plaintext release-one contract retroactively.</li>
+<li>Copying Money Manager branding, advertising, proprietary assets, or pixel layout.</li>
+<li>Writing a vendor backup that flattens splits, drops provenance, or changes unsupported canonical structures.</li>
+<li>Widget writes to the canonical database.</li>
+<li>OCR, notification, widget, portal, or diagnostic output that changes financial truth.</li>
+<li>Release claims based on development signing, queued CI, local HTML, ticket creation, or test output alone.</li>
+</ul>
+<h2 id="implementation-decisions">Implementation decisions</h2>
+<h3 id="d-01-one-native-product">D-01 — One native product</h3>
+<p>Release one ships one sandboxed Mac app, one widget extension, five App Intents, and one signed DMG. No browser editor ships.</p>
+<h3 id="d-02-sole-write-boundary">D-02 — Sole write boundary</h3>
+<p><code>LedgerApplication</code> owns all canonical commands. <code>LedgerStore</code> owns SQLite. Views, intents, the widget, portal, OCR, and notifications submit typed requests or consume projections.</p>
+<h3 id="d-03-atomic-v11-migration">D-03 — Atomic v11 migration</h3>
+<p>Canonical schema v11 uses an explicit migration from pinned v10. The store validates a recovery image and performs descriptor-bound migration and publication with rollback.</p>
+<h3 id="d-04-independent-package-versions">D-04 — Independent package versions</h3>
+<p>Canonical schema, Ledger Atlas backup package, report export, widget projection, and Money Manager adapter versions advance independently.</p>
+<h3 id="d-05-first-class-compound-purchase">D-05 — First-class compound purchase</h3>
+<p>A split purchase has one stable purchase identity and ordered line identities over linked canonical effects. Existing single-category tuple callers remain compatible.</p>
+<h3 id="d-06-exact-transfers-and-fx">D-06 — Exact transfers and FX</h3>
+<p>Transfers create linked source and destination effects in one transaction. FX retains both amounts and currencies, the rate literal, rounding rule, and fee effects.</p>
+<h3 id="d-07-plaintext-release-one-backup">D-07 — Plaintext release-one backup</h3>
+<p>The release-one backup format is plaintext with a warning, checksum manifest, atomic mode-<code>0600</code> publication, and full provenance and attachment coverage.</p>
+<h3 id="d-08-local-attachment-and-ocr-path">D-08 — Local attachment and OCR path</h3>
+<p>The app bounds attachment decode, hashes bytes, runs OCR on device, and presents suggestions. A user confirms each financial change.</p>
+<h3 id="d-09-redacted-widget-projection">D-09 — Redacted widget projection</h3>
+<p>The app publishes a small redacted App Group projection. The widget never opens or mutates the canonical ledger.</p>
+<h3 id="d-10-authenticated-app-intents">D-10 — Authenticated App Intents</h3>
+<p>Add Expense, Add Income, Add Transfer, Create Backup, and Open Budgets route through app-owned commands. Locked write intents open the app for authentication.</p>
+<h3 id="d-11-read-only-loopback-portal">D-11 — Read-only loopback portal</h3>
+<p>The local portal binds to loopback and serves report snapshots without mutation routes. Lock, sleep, inactivity, and ledger switch terminate it.</p>
+<h3 id="d-12-owner-assisted-semantic-oracle">D-12 — Owner-assisted semantic oracle</h3>
+<p>An agent builds the synthetic structural harness. The owner performs original-app actions for type <code>7</code>, budget period <code>6</code>, category depth, transfers, and attempted three-category purchases.</p>
+<h3 id="d-13-representability-gated-vendor-export">D-13 — Representability-gated vendor export</h3>
+<p>The Money Manager writer emits only structures the named adapter can represent. It rejects compound purchases and unknown states that would lose meaning.</p>
+<h3 id="d-14-synthetic-ui-proof">D-14 — Synthetic UI proof</h3>
+<p>The UI proof uses 25 synthetic captures keyed by the existing screenshot traceability manifest, plus keyboard, VoiceOver, contrast, text-scale, reduced-motion, privacy, and performance checks.</p>
+<h3 id="d-15-exact-delivery-artifact">D-15 — Exact delivery artifact</h3>
+<p>The release receipt binds the reviewed commit, archive, DMG, signature, notarization, staple, Gatekeeper result, installation, and smoke run by hashes.</p>
+<h2 id="user-stories">User stories</h2>
+<h3 id="us-01-create-a-ledger">US-01 Create a ledger</h3>
+<p>As a Mac user, I can create an empty ledger at a durable location so my financial data survives app restart.</p>
+<h3 id="us-02-open-or-upgrade-a-ledger">US-02 Open or upgrade a ledger</h3>
+<p>As a returning user, I can open a supported ledger or upgrade v10 to v11 without losing the prior store if migration fails.</p>
+<h3 id="us-03-manage-accounts">US-03 Manage accounts</h3>
+<p>As a user, I can create, edit, reorder, hide, include in totals, tombstone, restore, and classify accounts.</p>
+<h3 id="us-04-manage-account-groups">US-04 Manage account groups</h3>
+<p>As a user, I can organize accounts into ordered groups without changing transaction history or balances.</p>
+<h3 id="us-05-manage-category-trees">US-05 Manage category trees</h3>
+<p>As a user, I can maintain arbitrary-depth income and expense category trees while reports preserve stable historical links.</p>
+<h3 id="us-06-record-income">US-06 Record income</h3>
+<p>As a user, I can enter, validate, copy, correct, and tombstone exact income through a native form.</p>
+<h3 id="us-07-record-an-expense">US-07 Record an expense</h3>
+<p>As a user, I can enter, validate, copy, correct, and tombstone a single-category expense through the same canonical command seam.</p>
+<h3 id="us-08-split-a-purchase">US-08 Split a purchase</h3>
+<p>As a user, I can split one expense across ordered category lines that sum exactly to the purchase total.</p>
+<h3 id="us-09-transfer-between-accounts">US-09 Transfer between accounts</h3>
+<p>As a user, I can move value between two accounts as linked effects that cannot drift apart.</p>
+<h3 id="us-10-record-fx-and-fees">US-10 Record FX and fees</h3>
+<p>As a user, I can record both sides of a currency conversion with the rate, rounding, and separate fee effects.</p>
+<h3 id="us-11-browse-daily-activity">US-11 Browse daily activity</h3>
+<p>As a user, I can browse a paged daily ledger with exact totals, indicators, and stable selection.</p>
+<h3 id="us-12-use-the-calendar-view">US-12 Use the calendar view</h3>
+<p>As a user, I can select a calendar day and inspect its income, expense, net, and contributing entries.</p>
+<h3 id="us-13-use-monthly-and-total-views">US-13 Use monthly and total views</h3>
+<p>As a user, I can compare monthly groups and exact totals for a selected range.</p>
+<h3 id="us-14-browse-notes">US-14 Browse notes</h3>
+<p>As a user, I can find transaction notes and standalone memos without mixing their identities.</p>
+<h3 id="us-15-search-and-filter">US-15 Search and filter</h3>
+<p>As a user, I can search and filter by account, date, amount, category, memo, tag, status, and correction history.</p>
+<h3 id="us-16-edit-from-the-ledger">US-16 Edit from the ledger</h3>
+<p>As a user, I can edit a selected item and return to the same ledger position, with stale revision conflicts shown.</p>
+<h3 id="us-17-inspect-statistics">US-17 Inspect statistics</h3>
+<p>As a user, I can inspect exact category roll-up, trends, total balance, and contributing entries through charts and tables.</p>
+<h3 id="us-18-export-a-pdf-statement">US-18 Export a PDF statement</h3>
+<p>As a user, I can export a redaction-aware PDF from one immutable report snapshot.</p>
+<h3 id="us-19-plan-budgets">US-19 Plan budgets</h3>
+<p>As a user, I can create, edit, roll over, pause, and tombstone budgets whose totals derive from canonical effects.</p>
+<h3 id="us-20-plan-recurrence">US-20 Plan recurrence</h3>
+<p>As a user, I can generate, pause, skip, resume, and scope edits to recurring occurrences without duplicating history.</p>
+<h3 id="us-21-plan-installments">US-21 Plan installments</h3>
+<p>As a user, I can manage installment schedules and future edits without rewriting completed effects.</p>
+<h3 id="us-22-attach-a-receipt">US-22 Attach a receipt</h3>
+<p>As a user, I can add a private receipt from supported Mac sources and retain its hash and ledger linkage through backup and restore.</p>
+<h3 id="us-23-confirm-ocr-suggestions">US-23 Confirm OCR suggestions</h3>
+<p>As a user, I can review local multi-line OCR category suggestions before any suggestion changes financial truth.</p>
+<h3 id="us-24-configure-presentation">US-24 Configure presentation</h3>
+<p>As a user, I can choose locale, date, time, number, appearance, colors, period starts, and start screen without changing canonical literals.</p>
+<h3 id="us-25-configure-behavior">US-25 Configure behavior</h3>
+<p>As a user, I can choose carry-over, quick actions, reminders, privacy redaction, and reduced motion through typed settings.</p>
+<h3 id="us-26-lock-the-product">US-26 Lock the product</h3>
+<p>As a user, I can set, unlock, change, or remove a passcode and use biometric fallback under persistent lockout rules.</p>
+<h3 id="us-27-back-up-and-restore">US-27 Back up and restore</h3>
+<p>As a user, I can create a warned plaintext backup, preview restore, choose merge or overwrite, and verify two restore cycles.</p>
+<h3 id="us-28-exchange-xlsx-and-reset">US-28 Exchange XLSX and reset</h3>
+<p>As a user, I can preview XLSX exchange, move attachment sidecars, and run complete or contents-only reset without partial state.</p>
+<h3 id="us-29-import-money-manager-v19">US-29 Import Money Manager v19</h3>
+<p>As a migrating user, I can import the named supplied v19 profile only after immutable review, loss accounting, owner oracle evidence, and reconciliation.</p>
+<h3 id="us-30-use-the-widget">US-30 Use the widget</h3>
+<p>As a user, I can view a redacted widget summary while the canonical ledger stays private and read-only to the extension.</p>
+<h3 id="us-31-use-app-intents">US-31 Use App Intents</h3>
+<p>As a user, I can add expense, add income, add transfer, create backup, or open budgets through authenticated app-owned actions.</p>
+<h3 id="us-32-use-local-reports-and-reminders">US-32 Use local reports and reminders</h3>
+<p>As a user, I can open a read-only loopback report, receive redacted reminders, and export content-free diagnostics.</p>
+<h3 id="us-33-install-the-release">US-33 Install the release</h3>
+<p>As a Mac user, I can install a Developer ID signed and notarized DMG that passes Gatekeeper and the clean-account smoke suite.</p>
+<h2 id="test-seams">Test seams</h2>
+<h3 id="ts-01-application-command-seam">TS-01 Application command seam</h3>
+<p>Drive account, category, transaction, split, transfer, planning, attachment-confirmation, settings, lock, backup, and reset behavior through <code>LedgerApplication</code>. Tests assert exact readback, stable identity, typed failure, idempotency, and unchanged state after invalid commands.</p>
+<h3 id="ts-02-descriptor-bound-store-seam">TS-02 Descriptor-bound store seam</h3>
+<p>Drive schema migration, transactions, checksums, atomic file publication, package decode, restore, and rollback through <code>LedgerStore</code>. Tests inject failure at each mutation and publication boundary and compare destination checksums.</p>
+<h3 id="ts-03-compatibility-laboratory-seam">TS-03 Compatibility laboratory seam</h3>
+<p>Drive immutable classification, staging, <code>LossReport</code>, stable one-to-many mapping, reconciliation, oracle diffs, and certificate registry through versioned adapters. Routine tests use synthetic inputs; the named private profile runs only under owner-authorized proof.</p>
+<h3 id="ts-04-native-presentation-seam">TS-04 Native presentation seam</h3>
+<p>Drive typed routes, forms, keyboard commands, accessibility trees, redaction states, widget projections, App Intent routing, and localhost lifecycle with synthetic ledgers. Tests verify persisted effects through TS-01 instead of inspecting view internals.</p>
+<h3 id="ts-05-delivery-seam">TS-05 Delivery seam</h3>
+<p>Bind the final commit to build, archive, DMG, signature, notarization, staple, Gatekeeper, installation, privacy-safe captures, performance, and smoke receipts. This seam cannot substitute development signing or queued CI for installed proof.</p>
+<h2 id="delivery-tickets">Delivery tickets</h2>
+<h3 id="macv2-01-freeze-completion-specification-and-traceability">MACV2-01 Freeze completion specification and traceability</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/37">#37</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-69">PRA-69</a> Blocked by: none. Acceptance: Markdown and HTML contain the full v2 contract, 33 stories, decisions, five seams, 23 linked tickets, assumptions, and exclusions; parity and tracker publication checks pass.</p>
+<h3 id="macv2-02-launch-the-sandboxed-mac-app-and-widget-container">MACV2-02 Launch the sandboxed Mac app and widget container</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/38">#38</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-72">PRA-72</a> Blocked by: MACV2-01. Acceptance: the app and widget launch under sandboxing, and the shared container contains only a redacted projection.</p>
+<h3 id="macv2-03-create-open-and-upgrade-a-ledger">MACV2-03 Create, open, and upgrade a ledger</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/39">#39</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-68">PRA-68</a> Blocked by: MACV2-02. Acceptance: interrupted, invalid, or unsupported migration leaves the original ledger unchanged and older packages still decode.</p>
+<h3 id="macv2-04-manage-accounts-and-account-groups">MACV2-04 Manage accounts and account groups</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/40">#40</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-70">PRA-70</a> Blocked by: MACV2-03. Acceptance: totals, reports, and search honor every account state.</p>
+<h3 id="macv2-05-manage-arbitrary-depth-category-trees">MACV2-05 Manage arbitrary-depth category trees</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/41">#41</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-71">PRA-71</a> Blocked by: MACV2-03. Acceptance: cycles and destructive parent operations fail atomically, and ancestor roll-up never double-counts.</p>
+<h3 id="macv2-06-enter-and-edit-income-or-single-category-expenses">MACV2-06 Enter and edit income or single-category expenses</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/42">#42</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-73">PRA-73</a> Blocked by: MACV2-04 and MACV2-05. Acceptance: duplicate submission is idempotent and stale revisions remain visible conflicts.</p>
+<h3 id="macv2-07-split-one-expense-across-multiple-categories">MACV2-07 Split one expense across multiple categories</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/43">#43</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-74">PRA-74</a> Blocked by: MACV2-06. Acceptance: lines equal the total in one currency, any failure rolls back the group, existing tuple callers remain compatible, and the UI presents one expandable purchase.</p>
+<h3 id="macv2-08-create-transfers-fx-conversions-and-fees">MACV2-08 Create transfers, FX conversions, and fees</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/44">#44</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-75">PRA-75</a> Blocked by: MACV2-04, MACV2-05, and MACV2-06. Acceptance: invalid currency, account, rate, or fee leaves every account unchanged.</p>
+<h3 id="macv2-09-browse-search-and-edit-the-transaction-ledger">MACV2-09 Browse, search, and edit the transaction ledger</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/45">#45</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-78">PRA-78</a> Blocked by: MACV2-06, MACV2-07, and MACV2-08. Acceptance: a 100000-entry synthetic ledger stays paged and meets the accepted response targets.</p>
+<h3 id="macv2-10-inspect-statistics-and-export-pdf-statements">MACV2-10 Inspect statistics and export PDF statements</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/46">#46</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-76">PRA-76</a> Blocked by: MACV2-05 and MACV2-09. Acceptance: split lines count once and every aggregate reconciles to one immutable report snapshot.</p>
+<h3 id="macv2-11-plan-budgets-recurrence-and-installments">MACV2-11 Plan budgets, recurrence, and installments</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/47">#47</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-77">PRA-77</a> Blocked by: MACV2-04, MACV2-05, and MACV2-09. Acceptance: generated entries remain exact and idempotent across restart and restore.</p>
+<h3 id="macv2-12-attach-receipts-and-confirm-local-ocr-suggestions">MACV2-12 Attach receipts and confirm local OCR suggestions</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/48">#48</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-79">PRA-79</a> Blocked by: MACV2-06 and MACV2-09. Acceptance: OCR cannot write financial truth without confirmation and private content never enters tracked output or logs.</p>
+<h3 id="macv2-13-configure-locale-and-product-behavior">MACV2-13 Configure locale and product behavior</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/49">#49</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-80">PRA-80</a> Blocked by: MACV2-03 and MACV2-05. Acceptance: formatted display strings are never reparsed into canonical truth.</p>
+<h3 id="macv2-14-lock-and-redact-the-product">MACV2-14 Lock and redact the product</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/50">#50</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-81">PRA-81</a> Blocked by: MACV2-02, MACV2-03, and MACV2-13. Acceptance: app, widget, notifications, portal, and app switcher reveal no private content while locked.</p>
+<h3 id="macv2-15-back-up-restore-exchange-xlsx-and-reset-safely">MACV2-15 Back up, restore, exchange XLSX, and reset safely</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/51">#51</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-82">PRA-82</a> Blocked by: MACV2-03, MACV2-07, MACV2-08, MACV2-11, and MACV2-12. Acceptance: two restore cycles preserve canonical checksum and attachments, and every interrupted path preserves the existing ledger.</p>
+<h3 id="macv2-16-build-the-synthetic-money-manager-oracle-harness">MACV2-16 Build the synthetic Money Manager oracle harness</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/52">#52</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-83">PRA-83</a> Blocked by: MACV2-01. Acceptance: the harness reports schemas, counts, structural differences, and hashes without copying or logging source values.</p>
+<h3 id="macv2-17-run-the-owner-assisted-money-manager-oracle-session">MACV2-17 Run the owner-assisted Money Manager oracle session</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/53">#53</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-84">PRA-84</a> Blocked by: MACV2-16 and the product owner. Acceptance: each conclusion has an action record, before/after synthetic backup pair, structural diff, and versioned decision.</p>
+<h3 id="macv2-18-certify-the-supplied-v19-import-and-representable-export">MACV2-18 Certify the supplied v19 import and representable export</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/54">#54</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-85">PRA-85</a> Blocked by: MACV2-03, MACV2-05, MACV2-08, MACV2-15, and MACV2-17. Acceptance: source hashes remain unchanged, duplicates and orphans are zero, every source item is accounted for, and unsupported vendor export fails visibly without flattening or loss.</p>
+<h3 id="macv2-19-ship-the-widget-and-five-app-intents">MACV2-19 Ship the widget and five App Intents</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/55">#55</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-86">PRA-86</a> Blocked by: MACV2-07, MACV2-08, MACV2-14, and MACV2-15. Acceptance: the widget never writes the canonical database and locked writes open authentication.</p>
+<h3 id="macv2-20-ship-localhost-access-notifications-and-diagnostics">MACV2-20 Ship localhost access, notifications, and diagnostics</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/56">#56</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-87">PRA-87</a> Blocked by: MACV2-10, MACV2-13, MACV2-14, and MACV2-15. Acceptance: the portal has no mutation routes and stops on lock, sleep, inactivity, or ledger switch.</p>
+<h3 id="macv2-21-close-synthetic-ui-accessibility-privacy-and-performance-proof">MACV2-21 Close synthetic UI, accessibility, privacy, and performance proof</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/57">#57</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-88">PRA-88</a> Blocked by: MACV2-09 through MACV2-15 and MACV2-18 through MACV2-20. Acceptance: every traceability entry and required state has a passing privacy-safe capture and executable check.</p>
+<h3 id="macv2-22-run-the-private-supplied-corpus-delivery-proof">MACV2-22 Run the private supplied-corpus delivery proof</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/58">#58</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-89">PRA-89</a> Blocked by: MACV2-17, MACV2-18, MACV2-21, and owner-authorized private evidence access. Acceptance: source hashes remain unchanged, aggregate receipts contain no private values, and the named profile certificate matches the tested bytes and adapter version.</p>
+<h3 id="macv2-23-build-and-smoke-test-the-delivery-dmg">MACV2-23 Build and smoke-test the delivery DMG</h3>
+<p>GitHub: <a href="https://github.com/praxstack/ledger-atlas/issues/59">#59</a> Linear: <a href="https://linear.app/prax-lannister/issue/PRA-90">PRA-90</a> Blocked by: MACV2-22 and release credentials. Acceptance: the external release receipt matches the commit and artifact hashes, and every installed smoke scenario passes.</p>
+<h2 id="traceability">Traceability</h2>
+<div class="table-scroll"><table><thead><tr>
+<th scope="col">Contract area</th>
+<th scope="col">User stories</th>
+<th scope="col">Delivery tickets</th>
+<th scope="col">Primary test seam</th>
+</tr></thead><tbody>
+<tr>
+<td>App container and ledger lifecycle</td>
+<td>US-01, US-02</td>
+<td>MACV2-02, MACV2-03</td>
+<td>TS-02, TS-04</td>
+</tr>
+<tr>
+<td>Accounts and categories</td>
+<td>US-03 through US-05</td>
+<td>MACV2-04, MACV2-05</td>
+<td>TS-01, TS-04</td>
+</tr>
+<tr>
+<td>Daily transactions</td>
+<td>US-06 through US-16</td>
+<td>MACV2-06 through MACV2-09</td>
+<td>TS-01, TS-04</td>
+</tr>
+<tr>
+<td>Reports and PDF</td>
+<td>US-17, US-18</td>
+<td>MACV2-10</td>
+<td>TS-01, TS-04</td>
+</tr>
+<tr>
+<td>Planning</td>
+<td>US-19 through US-21</td>
+<td>MACV2-11</td>
+<td>TS-01, TS-02</td>
+</tr>
+<tr>
+<td>Attachments and OCR</td>
+<td>US-22, US-23</td>
+<td>MACV2-12</td>
+<td>TS-01, TS-02</td>
+</tr>
+<tr>
+<td>Settings and lock</td>
+<td>US-24 through US-26</td>
+<td>MACV2-13, MACV2-14</td>
+<td>TS-01, TS-04</td>
+</tr>
+<tr>
+<td>Backup, exchange, and reset</td>
+<td>US-27, US-28</td>
+<td>MACV2-15</td>
+<td>TS-02</td>
+</tr>
+<tr>
+<td>Money Manager compatibility</td>
+<td>US-29</td>
+<td>MACV2-16 through MACV2-18, MACV2-22</td>
+<td>TS-03, TS-05</td>
+</tr>
+<tr>
+<td>Widget and integrations</td>
+<td>US-30 through US-32</td>
+<td>MACV2-19, MACV2-20</td>
+<td>TS-04</td>
+</tr>
+<tr>
+<td>Product proof and delivery</td>
+<td>US-33</td>
+<td>MACV2-21 through MACV2-23</td>
+<td>TS-05</td>
+</tr>
+</tbody></table></div>
+<h3 id="synchronized-project-artifacts">Synchronized project artifacts</h3>
+<ul>
+<li><code>CONTEXT.md</code> states the current unshipped implementation boundary and links this release-one contract.</li>
+<li><code>SPEC.md</code> points milestone-two completion work at this v2 contract and records plaintext release-one backup scope.</li>
+<li><code>prd.json</code> records this specification and the MACV2 dependency graph.</li>
+<li><a href="screenshot-functional-parity-v1.md">Screenshot functional parity v1</a> defers release-one conflicts to this v2 contract.</li>
+<li><a href="screenshot-traceability-v1.json">Screenshot traceability v1</a> records the 25 private-source filenames and future synthetic capture targets.</li>
+<li><code>.scratch/ledger-atlas-end-to-end/issues/</code> holds one recovery Markdown file per ticket.</li>
+</ul>
+<h3 id="status-boundary">Status boundary</h3>
+<p>This contract and its tracker graph are published. Product implementation, real-v19 certification, private delivery proof, signing, notarization, installation, smoke proof, and shipment remain incomplete until their tickets close with current evidence.</p></main>
+</div>
+<footer>Generated from ledger-atlas-mac-completion-v2.md. GitHub Issues remain the canonical work records.</footer>
+</body>
+</html>

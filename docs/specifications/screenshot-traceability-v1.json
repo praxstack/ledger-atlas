@@ -1,5 +1,8 @@
 {
   "schema_version": 1,
+  "completion_spec": "docs/specifications/ledger-atlas-mac-completion-v2.md",
+  "release_one_capture_ticket": "https://github.com/praxstack/ledger-atlas/issues/57",
+  "source_screenshots_read_only": true,
   "private_root": "/Users/prax/Developer/money-manager-reverse-engineering/docs/real-app-screenshots",
   "evidence_grade": "observed",
   "control_contract_ids": [
