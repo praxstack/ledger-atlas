@@ -50,7 +50,7 @@ public struct LedgerAtlasRootView: View {
       if selection == .importReview || selection == .onboarding {
         let accessing = url.startAccessingSecurityScopedResource()
         guard accessing else {
-          publishWidget(.permissionDenied)
+          _ = publishWidget(.permissionDenied)
           journey.recordFailure("Ledger access was not granted.")
           return
         }
@@ -66,7 +66,7 @@ public struct LedgerAtlasRootView: View {
           try bookmarkStore.save(url, for: .importSource)
         } catch {
           journey.recordFailure("Import access could not be retained.")
-          publishWidget(.reopenRequired)
+          _ = publishWidget(.reopenRequired)
           return
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -81,45 +81,51 @@ public struct LedgerAtlasRootView: View {
           sourceTimeZone: sourceTimeZone)
       } else {
         guard session.open(url, requiresSecurityScope: true) else {
-          publishWidget(.permissionDenied)
+          _ = publishWidget(.permissionDenied)
           journey.recordFailure("Ledger access was not granted.")
           return
         }
         journey.openLedger(url)
         guard journey.phase == .imported else {
           session.close()
-          publishWidget(.reopenRequired)
+          _ = publishWidget(.reopenRequired)
           return
         }
         do {
           try bookmarkStore.save(url, for: .canonicalLedger)
-          publishWidget(.ready)
+          guard publishWidget(.ready) else { session.close(); return }
         } catch {
           journey.recordFailure("Ledger access could not be retained.")
-          publishWidget(.reopenRequired)
+          _ = publishWidget(.reopenRequired)
         }
       }
     }
     .task {
       switch bookmarkStore.reopen(.canonicalLedger) {
       case .missing:
-        publishWidget(.empty)
+        _ = publishWidget(.empty)
       case .corrupt:
-        publishWidget(.reopenRequired)
+        _ = publishWidget(.reopenRequired)
         journey.recordFailure("Ledger access needs to be selected again.")
+      case .stale:
+        _ = publishWidget(.reopenRequired)
+        journey.recordFailure("Ledger access needs to be selected again.")
+      case .denied:
+        _ = publishWidget(.permissionDenied)
+        journey.recordFailure("Ledger access was not granted.")
       case .resolved(let url), .renewed(let url):
         guard session.open(url, requiresSecurityScope: true) else {
-          publishWidget(.permissionDenied)
+          _ = publishWidget(.permissionDenied)
           journey.recordFailure("Ledger access was not granted.")
           return
         }
         journey.openLedger(url)
         guard journey.phase == .imported else {
           session.close()
-          publishWidget(.reopenRequired)
+          _ = publishWidget(.reopenRequired)
           return
         }
-        publishWidget(.ready)
+        guard publishWidget(.ready) else { session.close(); return }
       }
     }
     .frame(minWidth: 720, minHeight: 480)
@@ -132,8 +138,19 @@ public struct LedgerAtlasRootView: View {
     return types
   }
 
-  private func publishWidget(_ state: RedactedWidgetProjection.State) {
-    widgetProjectionPublisher?.publish(state)
+  @discardableResult
+  private func publishWidget(_ state: RedactedWidgetProjection.State) -> Bool {
+    guard let widgetProjectionPublisher else {
+      journey.recordFailure("Widget status could not be published.")
+      return false
+    }
+    do {
+      try widgetProjectionPublisher.publish(state)
+      return true
+    } catch {
+      journey.recordFailure("Widget status could not be published.")
+      return false
+    }
   }
 
   @ViewBuilder
@@ -179,10 +196,10 @@ public struct LedgerAtlasRootView: View {
               if let url = journey.ledgerURL {
                 do {
                   try bookmarkStore.save(url, for: .canonicalLedger)
-                  publishWidget(.ready)
+                  guard publishWidget(.ready) else { return }
                 } catch {
                   journey.recordFailure("Ledger access could not be retained.")
-                  publishWidget(.reopenRequired)
+                  _ = publishWidget(.reopenRequired)
                   return
                 }
               }

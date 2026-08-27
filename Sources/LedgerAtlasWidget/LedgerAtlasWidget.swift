@@ -52,6 +52,6 @@ private struct ProjectionWidgetView: View {
     }
     .containerBackground(.fill.tertiary, for: .widget)
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("Ledger Atlas. \(projection.message)")
+    .accessibilityLabel(projection.accessibilityLabel)
   }
 }

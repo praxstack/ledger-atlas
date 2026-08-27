@@ -16,5 +16,6 @@ def test_widget_extension_has_a_discoverable_widgetkit_extension_point() -> None
 
 def test_local_swift_package_is_relative_and_has_a_stable_group() -> None:
     project = (ROOT / "project.yml").read_text(encoding="utf-8")
-    assert "path: LedgerAtlasPackage" in project
-    assert (ROOT / "LedgerAtlasPackage").is_symlink()
+    assert "path: ." in project
+    assert "postGenCommand:" in project
+    assert "LedgerAtlasPackage" not in project

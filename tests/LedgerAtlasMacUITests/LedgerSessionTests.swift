@@ -79,6 +79,51 @@ import Testing
   #expect(session.screen == .unavailable)
 }
 
+@MainActor
+@Test func closeDefersScopeReleaseUntilABlockedReadFinishes() async {
+  let url = URL(fileURLWithPath: "/synthetic/blocked.sqlite")
+  let gate = LoaderGate()
+  let counts = ScopeCounts()
+  let session = LedgerSession(
+    testingLoader: { _ in gate.blockUntilReleased(); return nil },
+    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStopper: { _ in counts.stop() })
+
+  #expect(session.open(url, requiresSecurityScope: true))
+  for _ in 0..<100 where !gate.hasStarted { try? await Task.sleep(for: .milliseconds(1)) }
+  session.close()
+  #expect(counts.stopped == 0)
+
+  gate.release()
+  for _ in 0..<100 where counts.stopped == 0 { try? await Task.sleep(for: .milliseconds(1)) }
+  #expect(counts.stopped == 1)
+}
+
+@MainActor
+@Test func replacingABlockedOpenRetainsItsScopeUntilItsReadFinishes() async {
+  let blocked = URL(fileURLWithPath: "/synthetic/blocked.sqlite")
+  let replacement = URL(fileURLWithPath: "/synthetic/replacement.sqlite")
+  let gate = LoaderGate()
+  let counts = ScopeCounts()
+  let session = LedgerSession(
+    testingLoader: { url in
+      if url == blocked { gate.blockUntilReleased() }
+      return nil
+    },
+    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStopper: { _ in counts.stop() })
+
+  #expect(session.open(blocked, requiresSecurityScope: true))
+  for _ in 0..<100 where !gate.hasStarted { try? await Task.sleep(for: .milliseconds(1)) }
+  #expect(session.open(replacement, requiresSecurityScope: true))
+  for _ in 0..<100 where session.screen == .loading { try? await Task.sleep(for: .milliseconds(1)) }
+  #expect(counts.stopped == 1)
+
+  gate.release()
+  for _ in 0..<100 where counts.stopped < 2 { try? await Task.sleep(for: .milliseconds(1)) }
+  #expect(counts.stopped == 2)
+}
+
 private final class LoaderGate: @unchecked Sendable {
   private let condition = NSCondition()
   private var started = false

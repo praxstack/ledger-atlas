@@ -56,6 +56,8 @@ public struct RedactedWidgetProjection: Codable, Equatable, Sendable {
     }
   }
 
+  public var accessibilityLabel: String { "Ledger Atlas. \(message)" }
+
   public static let empty = Self(state: .empty)
   public static let permissionDenied = Self(state: .permissionDenied)
   public static let reopenRequired = Self(state: .reopenRequired)
@@ -91,13 +93,17 @@ public struct RedactedWidgetProjectionStore: Sendable {
 }
 
 public struct RedactedWidgetProjectionPublisher: Sendable {
-  private let store: RedactedWidgetProjectionStore
+  private let write: @Sendable (RedactedWidgetProjection) throws -> Void
 
   public init(store: RedactedWidgetProjectionStore) {
-    self.store = store
+    write = store.write
   }
 
-  public func publish(_ state: RedactedWidgetProjection.State) {
-    try? store.write(.init(state: state))
+  public init(write: @escaping @Sendable (RedactedWidgetProjection) throws -> Void) {
+    self.write = write
+  }
+
+  public func publish(_ state: RedactedWidgetProjection.State) throws {
+    try write(.init(state: state))
   }
 }

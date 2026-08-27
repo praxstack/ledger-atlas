@@ -59,7 +59,9 @@ package final class LedgerSession {
   private let load: @Sendable (URL) -> Presentation?
   private let startScope: (URL) -> Bool
   private let stopScope: (URL) -> Void
-  private var scopedURL: URL?
+  private var scopedURLs: [Int: URL] = [:]
+  private var loadingGenerations: Set<Int> = []
+  private var loads: [Int: Task<Void, Never>] = [:]
 
   package init(
     testingLoader: (@Sendable (URL) -> Presentation?)? = nil,
@@ -95,15 +97,14 @@ package final class LedgerSession {
         state = .unavailable
         return false
       }
-      scopedURL = url
+      scopedURLs[generation] = url
     }
     let load = load
-    Task.detached { [weak self] in
+    loadingGenerations.insert(generation)
+    loads[generation] = Task.detached { [weak self] in
       let presentation = load(url)
       await MainActor.run {
-        guard self?.openGeneration == generation else { return }
-        self?.state = presentation.map(State.loaded) ?? .unavailable
-        if presentation == nil { self?.releaseScope() }
+        self?.finishLoad(generation: generation, presentation: presentation)
       }
     }
     return true
@@ -111,13 +112,31 @@ package final class LedgerSession {
 
   package func close() {
     openGeneration &+= 1
-    releaseScope()
+    loads.values.forEach { $0.cancel() }
+    releaseCompletedScopes()
     state = .noLedger
   }
 
-  private func releaseScope() {
-    guard let scopedURL else { return }
+  private func finishLoad(generation: Int, presentation: Presentation?) {
+    loadingGenerations.remove(generation)
+    loads[generation] = nil
+    guard generation == openGeneration else {
+      releaseScope(for: generation)
+      return
+    }
+    state = presentation.map(State.loaded) ?? .unavailable
+    if presentation == nil { releaseScope(for: generation) }
+  }
+
+  private func releaseCompletedScopes() {
+    let completed = scopedURLs.keys.filter { !loadingGenerations.contains($0) }
+    for generation in completed {
+      releaseScope(for: generation)
+    }
+  }
+
+  private func releaseScope(for generation: Int) {
+    guard let scopedURL = scopedURLs.removeValue(forKey: generation) else { return }
     stopScope(scopedURL)
-    self.scopedURL = nil
   }
 }

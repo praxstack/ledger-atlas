@@ -31,6 +31,19 @@ import Testing
   #expect(RedactedWidgetProjection(state: .ready).message == "Ledger Atlas is ready.")
 }
 
+@Test func redactedWidgetProjectionUsesFixedVoiceOverCopyForEveryState() {
+  let expected: [(RedactedWidgetProjection.State, String)] = [
+    (.empty, "Ledger Atlas. Open Ledger Atlas to get started."),
+    (.permissionDenied, "Ledger Atlas. Allow access in Ledger Atlas to continue."),
+    (.ready, "Ledger Atlas. Ledger Atlas is ready."),
+    (.reopenRequired, "Ledger Atlas. Open Ledger Atlas to continue."),
+  ]
+
+  for (state, label) in expected {
+    #expect(RedactedWidgetProjection(state: state).accessibilityLabel == label)
+  }
+}
+
 @Test func securityScopedBookmarkStorePersistsAndReopensTheUserSelection() throws {
   let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
   let defaults = try #require(UserDefaults(suiteName: suite))
@@ -64,16 +77,43 @@ import Testing
   defer { defaults.removePersistentDomain(forName: suite) }
   let selected = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
   var writes = 0
+  var starts = 0
+  var stops = 0
   let store = SecurityScopedBookmarkStore(
     defaults: defaults,
     makeBookmark: { _ in writes += 1; return Data("renewed".utf8) },
-    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) })
+    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) },
+    scopeStarter: { _ in starts += 1; return true },
+    scopeStopper: { _ in stops += 1 })
 
   try store.save(selected, for: .canonicalLedger)
 
   #expect(store.reopen(.canonicalLedger) == .renewed(selected))
   #expect(writes == 2)
+  #expect(starts == 1)
+  #expect(stops == 1)
   #expect(store.reopen(.importSource) == .missing)
+}
+
+@Test func staleBookmarkRenewalRetainsScopeAndPreservesTheOriginalWhenDenied() throws {
+  let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let selected = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
+  var starts = 0
+  var stops = 0
+  let store = SecurityScopedBookmarkStore(
+    defaults: defaults,
+    makeBookmark: { Data($0.path.utf8) },
+    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) },
+    scopeStarter: { _ in starts += 1; return false },
+    scopeStopper: { _ in stops += 1 })
+  try store.save(selected)
+
+  #expect(store.reopen(.canonicalLedger) == .denied(selected))
+  #expect(starts == 1)
+  #expect(stops == 0)
+  #expect(store.reopen(.canonicalLedger) == .denied(selected))
 }
 
 @Test func widgetProjectionPublisherWritesOnlyFixedRuntimeStates() throws {
@@ -83,10 +123,18 @@ import Testing
   let store = RedactedWidgetProjectionStore(containerURL: directory)
   let publisher = RedactedWidgetProjectionPublisher(store: store)
 
-  publisher.publish(.permissionDenied)
+  try publisher.publish(.permissionDenied)
   #expect(store.read().state == .permissionDenied)
-  publisher.publish(.ready)
+  try publisher.publish(.ready)
   #expect(store.read().state == .ready)
+}
+
+@Test func widgetProjectionPublisherReturnsWriteFailures() {
+  let publisher = RedactedWidgetProjectionPublisher(write: { _ in
+    throw CocoaError(.fileWriteNoPermission)
+  })
+
+  #expect(throws: CocoaError.self) { try publisher.publish(.ready) }
 }
 
 @Test func corruptCanonicalBookmarkIsClearedWithoutTouchingImportSelection() throws {

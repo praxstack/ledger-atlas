@@ -17,6 +17,8 @@ public final class SecurityScopedBookmarkStore {
     case missing
     case resolved(URL)
     case renewed(URL)
+    case stale(URL)
+    case denied(URL)
     case corrupt
   }
 
@@ -26,6 +28,8 @@ public final class SecurityScopedBookmarkStore {
   private let keyPrefix: String
   private let makeBookmark: (URL) throws -> Data
   private let resolveBookmark: (Data) throws -> ResolvedBookmark
+  private let startScope: (URL) -> Bool
+  private let stopScope: (URL) -> Void
 
   public convenience init() {
     self.init(
@@ -41,7 +45,9 @@ public final class SecurityScopedBookmarkStore {
           resolvingBookmarkData: data, options: .withSecurityScope,
           relativeTo: nil, bookmarkDataIsStale: &stale)
         return .init(url: url, isStale: stale)
-      })
+      },
+      scopeStarter: { $0.startAccessingSecurityScopedResource() },
+      scopeStopper: { $0.stopAccessingSecurityScopedResource() })
   }
 
   public convenience init(
@@ -51,18 +57,24 @@ public final class SecurityScopedBookmarkStore {
   ) {
     self.init(
       defaults: defaults, key: key, makeBookmark: makeBookmark,
-      resolveBookmarkResult: { try .init(url: resolveBookmark($0), isStale: false) })
+      resolveBookmarkResult: { try .init(url: resolveBookmark($0), isStale: false) },
+      scopeStarter: { $0.startAccessingSecurityScopedResource() },
+      scopeStopper: { $0.stopAccessingSecurityScopedResource() })
   }
 
   public init(
     defaults: UserDefaults, key: String = "LedgerAtlas.selectedLedgerBookmark",
     makeBookmark: @escaping (URL) throws -> Data,
-    resolveBookmarkResult: @escaping (Data) throws -> ResolvedBookmark
+    resolveBookmarkResult: @escaping (Data) throws -> ResolvedBookmark,
+    scopeStarter: @escaping (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
+    scopeStopper: @escaping (URL) -> Void = { $0.stopAccessingSecurityScopedResource() }
   ) {
     self.defaults = defaults
     keyPrefix = key
     self.makeBookmark = makeBookmark
     resolveBookmark = resolveBookmarkResult
+    startScope = scopeStarter
+    stopScope = scopeStopper
   }
 
   public func save(_ url: URL) throws { try save(url, for: .canonicalLedger) }
@@ -74,7 +86,7 @@ public final class SecurityScopedBookmarkStore {
   public func reopenURL() -> URL? {
     switch reopen(.canonicalLedger) {
     case .resolved(let url), .renewed(let url): url
-    case .missing, .corrupt: nil
+    case .missing, .stale, .denied, .corrupt: nil
     }
   }
 
@@ -86,10 +98,9 @@ public final class SecurityScopedBookmarkStore {
       return .corrupt
     }
     guard resolution.isStale else { return .resolved(resolution.url) }
-    guard let renewed = try? makeBookmark(resolution.url) else {
-      defaults.removeObject(forKey: key)
-      return .corrupt
-    }
+    guard startScope(resolution.url) else { return .denied(resolution.url) }
+    defer { stopScope(resolution.url) }
+    guard let renewed = try? makeBookmark(resolution.url) else { return .stale(resolution.url) }
     defaults.set(renewed, forKey: key)
     return .renewed(resolution.url)
   }
