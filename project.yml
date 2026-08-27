@@ -1,0 +1,46 @@
+name: LedgerAtlas
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    ARCHS: arm64
+    SUPPORTED_PLATFORMS: macosx
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+packages:
+  LedgerAtlas:
+    path: .
+targets:
+  LedgerAtlas:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/LedgerAtlasMac
+    dependencies:
+      - package: LedgerAtlas
+        product: LedgerAtlasMacUI
+      - target: LedgerAtlasWidget
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.praxstack.ledgeratlas
+        CODE_SIGN_ENTITLEMENTS: LedgerAtlas.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 57GGJTRSFG
+        GENERATE_INFOPLIST_FILE: YES
+  LedgerAtlasWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Sources/LedgerAtlasWidget
+      - path: Sources/LedgerAtlasMacUI/RedactedWidgetProjection.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.praxstack.ledgeratlas.widget
+        CODE_SIGN_ENTITLEMENTS: LedgerAtlasWidget.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 57GGJTRSFG
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        SKIP_INSTALL: YES

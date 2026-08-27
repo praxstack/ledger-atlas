@@ -10,6 +10,7 @@ public struct LedgerAtlasRootView: View {
   @State private var journey = LedgerJourney()
   @State private var isChoosingLedger = false
   @State private var sourceTimeZoneIdentifier = ""
+  private let bookmarkStore = SecurityScopedBookmarkStore()
   private let importReviewSummary: ImportReviewSummary
 
   public init(
@@ -44,6 +45,12 @@ public struct LedgerAtlasRootView: View {
       guard case .success(let urls) = result, let url = urls.first else { return }
       let accessing = url.startAccessingSecurityScopedResource()
       defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+      do {
+        try bookmarkStore.save(url)
+      } catch {
+        journey.recordFailure("Ledger access could not be retained.")
+        return
+      }
       if selection == .importReview || selection == .onboarding {
         guard
           let sourceTimeZone = try? SourceTimeZone(
@@ -66,6 +73,13 @@ public struct LedgerAtlasRootView: View {
         journey.openLedger(url)
         session.open(url)
       }
+    }
+    .task {
+      guard let url = bookmarkStore.reopenURL() else { return }
+      let accessing = url.startAccessingSecurityScopedResource()
+      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+      journey.openLedger(url)
+      session.open(url)
     }
     .frame(minWidth: 720, minHeight: 480)
   }
