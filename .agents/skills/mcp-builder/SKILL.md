@@ -1,7 +1,6 @@
 ---
 name: mcp-builder
-description: Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).
-license: Complete terms in LICENSE.txt
+description: Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP), Node/TypeScript (MCP SDK), or C#/.NET (Microsoft MCP SDK).
 ---
 
 # MCP Server Development Guide
@@ -9,6 +8,43 @@ license: Complete terms in LICENSE.txt
 ## Overview
 
 Create MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. The quality of an MCP server is measured by how well it enables LLMs to accomplish real-world tasks.
+
+---
+
+## Microsoft MCP Ecosystem
+
+Microsoft provides extensive MCP infrastructure for Azure and Foundry services. Understanding this ecosystem helps you decide whether to build custom servers or leverage existing ones.
+
+### Server Types
+
+| Type | Transport | Use Case | Example |
+|------|-----------|----------|---------|
+| **Local** | stdio | Desktop apps, single-user, local dev | Azure MCP Server via NPM/Docker |
+| **Remote** | Streamable HTTP | Cloud services, multi-tenant, Agent Service | `https://mcp.ai.azure.com` (Foundry) |
+
+### Microsoft MCP Servers
+
+Before building a custom server, check if Microsoft already provides one:
+
+| Server | Type | Description |
+|--------|------|-------------|
+| **Azure MCP** | Local | 48+ Azure services (Storage, KeyVault, Cosmos, SQL, etc.) |
+| **Foundry MCP** | Remote | `https://mcp.ai.azure.com` - Models, deployments, evals, agents |
+| **Fabric MCP** | Local | Microsoft Fabric APIs, OneLake, item definitions |
+| **Playwright MCP** | Local | Browser automation and testing |
+| **GitHub MCP** | Remote | `https://api.githubcopilot.com/mcp` |
+
+**Full ecosystem:** See [🔷 Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md) for complete server catalog and patterns.
+
+### When to Use Microsoft vs Custom
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Azure service integration | Use **Azure MCP Server** (48 services covered) |
+| AI Foundry agents/evals | Use **Foundry MCP** remote server |
+| Custom internal APIs | Build **custom server** (this guide) |
+| Third-party SaaS integration | Build **custom server** (this guide) |
+| Extending Azure MCP | Follow [Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md)
 
 ---
 
@@ -49,9 +85,20 @@ Key pages to review:
 
 #### 1.3 Study Framework Documentation
 
-**Recommended stack:**
-- **Language**: TypeScript (high-quality SDK support and good compatibility in many execution environments e.g. MCPB. Plus AI models are good at generating TypeScript code, benefiting from its broad usage, static typing and good linting tools)
-- **Transport**: Streamable HTTP for remote servers, using stateless JSON (simpler to scale and maintain, as opposed to stateful sessions and streaming responses). stdio for local servers.
+**Language Selection:**
+
+| Language | Best For | SDK |
+|----------|----------|-----|
+| **TypeScript** (recommended) | General MCP servers, broad compatibility | `@modelcontextprotocol/sdk` |
+| **Python** | Data/ML pipelines, FastAPI integration | `mcp` (FastMCP) |
+| **C#/.NET** | Azure/Microsoft ecosystem, enterprise | `Microsoft.Mcp.Core` |
+
+**Transport Selection:**
+
+| Transport | Use Case | Characteristics |
+|-----------|----------|-----------------|
+| **Streamable HTTP** | Remote servers, multi-tenant, Agent Service | Stateless, scalable, requires auth |
+| **stdio** | Local servers, desktop apps | Simple, single-user, no network |
 
 **Load framework documentation:**
 
@@ -64,6 +111,9 @@ Key pages to review:
 **For Python:**
 - **Python SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`
 - [🐍 Python Guide](./reference/python_mcp_server.md) - Python patterns and examples
+
+**For C#/.NET (Microsoft ecosystem):**
+- [🔷 Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md) - C# patterns, Azure MCP architecture, command hierarchy
 
 #### 1.4 Plan Your Implementation
 
@@ -82,6 +132,7 @@ Prioritize comprehensive API coverage. List endpoints to implement, starting wit
 See language-specific guides for project setup:
 - [⚡ TypeScript Guide](./reference/node_mcp_server.md) - Project structure, package.json, tsconfig.json
 - [🐍 Python Guide](./reference/python_mcp_server.md) - Module organization, dependencies
+- [🔷 Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md) - C# project structure, command hierarchy
 
 #### 2.2 Implement Core Infrastructure
 
@@ -208,9 +259,18 @@ Load these resources as needed during development:
   - Transport selection (streamable HTTP vs stdio)
   - Security and error handling standards
 
+### Microsoft MCP Documentation (For Azure/Foundry)
+- [🔷 Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md) - Microsoft-specific patterns including:
+  - Azure MCP Server architecture (48+ Azure services)
+  - C#/.NET command implementation patterns
+  - Remote MCP with Foundry Agent Service
+  - Authentication (Entra ID, OBO flow, Managed Identity)
+  - Testing infrastructure with Bicep templates
+
 ### SDK Documentation (Load During Phase 1/2)
 - **Python SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`
 - **TypeScript SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`
+- **Microsoft MCP SDK**: See [Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md) for C#/.NET
 
 ### Language-Specific Implementation Guides (Load During Phase 2)
 - [🐍 Python Implementation Guide](./reference/python_mcp_server.md) - Complete Python/FastMCP guide with:
@@ -226,6 +286,13 @@ Load these resources as needed during development:
   - Tool registration with `server.registerTool`
   - Complete working examples
   - Quality checklist
+
+- [🔷 Microsoft MCP Patterns](./reference/microsoft_mcp_patterns.md) - Complete C#/.NET guide with:
+  - Command hierarchy (BaseCommand → GlobalCommand → SubscriptionCommand)
+  - Naming conventions (`{Resource}{Operation}Command`)
+  - Option handling with `.AsRequired()` / `.AsOptional()`
+  - Azure Functions remote MCP deployment
+  - Live test patterns with Bicep
 
 ### Evaluation Guide (Load During Phase 4)
 - [✅ Evaluation Guide](./reference/evaluation.md) - Complete evaluation creation guide with:

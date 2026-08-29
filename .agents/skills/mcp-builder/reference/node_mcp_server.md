@@ -968,3 +968,18 @@ Before finalizing your Node/TypeScript MCP server implementation, ensure:
 - [ ] Server runs: `node dist/index.js --help`
 - [ ] All imports resolve correctly
 - [ ] Sample tool calls work as expected
+
+---
+
+## Related Resources
+
+### Other Language Guides
+- **Python**: [Python MCP Server Guide](./python_mcp_server.md) - FastMCP patterns and Pydantic schemas
+- **C#/.NET**: [Microsoft MCP Patterns](./microsoft_mcp_patterns.md) - Azure MCP Server architecture, command hierarchy, Foundry integration
+
+### Microsoft-Specific Patterns
+If building MCP servers for Azure services or integrating with Foundry Agent Service, see [Microsoft MCP Patterns](./microsoft_mcp_patterns.md) for:
+- Azure Functions remote MCP deployment
+- Entra ID authentication patterns
+- Tool approval and Agent Service integration
+- C# command implementation patterns

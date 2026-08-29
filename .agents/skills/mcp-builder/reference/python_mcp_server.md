@@ -717,3 +717,18 @@ Before finalizing your Python MCP server implementation, ensure:
 - [ ] All imports resolve correctly
 - [ ] Sample tool calls work as expected
 - [ ] Error scenarios handled gracefully
+
+---
+
+## Related Resources
+
+### Other Language Guides
+- **TypeScript**: [Node/TypeScript MCP Server Guide](./node_mcp_server.md) - Zod schemas, Express.js patterns
+- **C#/.NET**: [Microsoft MCP Patterns](./microsoft_mcp_patterns.md) - Azure MCP Server architecture, command hierarchy, Foundry integration
+
+### Microsoft-Specific Patterns
+If building MCP servers for Azure services or integrating with Foundry Agent Service, see [Microsoft MCP Patterns](./microsoft_mcp_patterns.md) for:
+- Azure Functions remote MCP deployment
+- Entra ID authentication patterns
+- Tool approval and Agent Service integration
+- C# command implementation patterns

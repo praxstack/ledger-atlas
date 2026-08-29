@@ -1,295 +1,405 @@
 ---
 name: codeql
-description: >-
-  Scans a codebase for security vulnerabilities using CodeQL's interprocedural data flow and
-  taint tracking analysis. Triggers on "run codeql", "codeql scan", "build codeql database",
-  "SAST scan", "taint analysis", "dataflow analysis", or "find vulnerabilities in this repo".
-  Covers Python, JavaScript/TypeScript, Go, Java/Kotlin, C/C++, C#, Ruby, and Swift. Supports
-  "run all" (security-and-quality + security-experimental) and "important only"
-  (high-precision) scan modes, and creates data extension models for project-specific sources
-  and sinks. For fast single-file pattern matching, or when no build is available for a
-  compiled language, use the semgrep skill; to parse SARIF that already exists rather than
-  produce it, use the sarif-parsing skill.
-allowed-tools: Bash Read Write Edit Glob Grep AskUserQuestion TaskCreate TaskList TaskUpdate TaskGet
+description: Comprehensive guide for setting up and configuring CodeQL code scanning via GitHub Actions workflows and the CodeQL CLI. This skill should be used when users need help with code scanning configuration, CodeQL workflow files, CodeQL CLI commands, SARIF output, security analysis setup, or troubleshooting CodeQL analysis.
 ---
 
-# CodeQL Analysis
+# CodeQL Code Scanning
 
-Supported languages: Python, JavaScript/TypeScript, Go, Java/Kotlin, C/C++, C#, Ruby, Swift.
+This skill provides procedural guidance for configuring and running CodeQL code scanning — both through GitHub Actions workflows and the standalone CodeQL CLI.
 
-**Skill resources:** Reference files and templates are located at `{baseDir}/references/` and `{baseDir}/workflows/`.
+## When to Use This Skill
 
-## Essential Principles
+Use this skill when the request involves:
 
-1. **Database quality is non-negotiable.** A database that builds is not automatically good — a cached build extracts nothing while reporting success.
+- Creating or customizing a `codeql.yml` GitHub Actions workflow
+- Choosing between default setup and advanced setup for code scanning
+- Configuring CodeQL language matrix, build modes, or query suites
+- Running CodeQL CLI locally (`codeql database create`, `database analyze`, `github upload-results`)
+- Understanding or interpreting SARIF output from CodeQL
+- Troubleshooting CodeQL analysis failures (build modes, compiled languages, runner requirements)
+- Setting up CodeQL for monorepos with per-component scanning
+- Configuring dependency caching, custom query packs, or model packs
 
-2. **Data extensions catch what CodeQL misses.** Django, Spring, and Express projects still wrap database calls, request parsing, and shell execution in project-specific APIs that no shipped model covers.
+## Supported Languages
 
-3. **Explicit suite references prevent silent query dropping.** Never pass pack names to `codeql database analyze` — each pack's `defaultSuiteFile` applies hidden filters that can produce zero results. Always generate a `.qls`.
+CodeQL supports the following language identifiers:
 
-4. **Zero findings needs investigation, not celebration.** It can mean poor extraction, missing models, the wrong packs, or suite filtering. Run `{baseDir}/scripts/check_db_quality.py` after the build, confirm `{baseDir}/scripts/verify_query_suite.py` exited zero for the suite in use — the generation scripts run it, so invoke it by hand only for a reused or hand-edited suite — and say in the report that both passed.
+| Language | Identifier | Alternatives |
+|---|---|---|
+| C/C++ | `c-cpp` | `c`, `cpp` |
+| C# | `csharp` | — |
+| Go | `go` | — |
+| Java/Kotlin | `java-kotlin` | `java`, `kotlin` |
+| JavaScript/TypeScript | `javascript-typescript` | `javascript`, `typescript` |
+| Python | `python` | — |
+| Ruby | `ruby` | — |
+| Rust | `rust` | — |
+| Swift | `swift` | — |
+| GitHub Actions | `actions` | — |
 
-5. **macOS Apple Silicon requires workarounds for compiled languages.** Exit code 137 is an `arm64e`/`arm64` mismatch, not a build failure. Try Homebrew arm64 tools or Rosetta before falling back to `build-mode=none`.
+> Alternative identifiers are equivalent to the standard identifier (e.g., `javascript` does not exclude TypeScript analysis).
 
-6. **Follow workflows step by step.** Each phase gates the next; skipping quality assessment or data extensions leaves the gap invisible in the results.
+## Core Workflow — GitHub Actions
 
-## Each Bash call is a fresh shell
+### Step 1: Choose Setup Type
 
-Nothing carries across a Bash call: not variables, not arrays, not functions sourced from
-`build_log.sh`. Every block below that uses a value must re-establish it in the same block.
-The workflows point back here rather than repeating it; what they do state is the specific
-damage at that site, because each one fails differently and silently:
+- **Default setup** — Enable from repository Settings → Advanced Security → CodeQL analysis. Best for getting started quickly. Uses `none` build mode for most languages.
+- **Advanced setup** — Create a `.github/workflows/codeql.yml` file for full control over triggers, build modes, query suites, and matrix strategies.
 
-- a lost **function** makes `run_logged` exit 127, which the build ladder reads as a failed
-  method and walks down to `--build-mode=none`, never having invoked CodeQL
-- a lost **array** expands to nothing, so every `--threat-model` and `--model-packs` the user
-  chose is dropped while the final report still lists them as used
-- a lost **scalar** under `set -u` aborts the block with `unbound variable`
+To switch from default to advanced: disable default setup first, then commit the workflow file.
 
-## Output Directory
+### Step 2: Configure Workflow Triggers
 
-All generated files (database, build logs, diagnostics, extensions, results) are stored in a single output directory.
+Define when scanning runs:
 
-- **If the user specifies an output directory** in their prompt, use it as `OUTPUT_DIR`.
-- **If not specified**, default to `./static_analysis_codeql_1`. If that already exists, increment to `_2`, `_3`, etc.
+```yaml
+on:
+  push:
+    branches: [main, protected]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '30 6 * * 1'  # Weekly Monday 6:30 UTC
+```
 
-In both cases, **always create the directory** with `mkdir -p` before writing any files.
+- `push` — scans on every push to specified branches; results appear in Security tab
+- `pull_request` — scans PR merge commits; results appear as PR check annotations
+- `schedule` — periodic scans of the default branch (cron must exist on default branch)
+- `merge_group` — add if repository uses merge queues
 
-Set `USER_SPECIFIED_DIR` to the literal path from the user's prompt before running this,
-or leave it unset to auto-increment. Nothing else assigns it.
+To skip scans for documentation-only PRs:
+
+```yaml
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+```
+
+> `paths-ignore` controls whether the workflow runs, not which files are analyzed.
+
+### Step 3: Configure Permissions
+
+Set least-privilege permissions:
+
+```yaml
+permissions:
+  security-events: write   # Required to upload SARIF results
+  contents: read            # Required to checkout code
+  actions: read             # Required for private repos using codeql-action
+```
+
+### Step 4: Configure Language Matrix
+
+Use a matrix strategy to analyze each language in parallel:
+
+```yaml
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+```
+
+For compiled languages, set the appropriate `build-mode`:
+- `none` — no build required (supported for C/C++, C#, Java, Rust)
+- `autobuild` — automatic build detection
+- `manual` — custom build commands (advanced setup only)
+
+> For detailed per-language autobuild behavior and runner requirements, search `references/compiled-languages.md`.
+
+### Step 5: Configure CodeQL Init and Analysis
+
+```yaml
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+
+  - name: Initialize CodeQL
+    uses: github/codeql-action/init@v4
+    with:
+      languages: ${{ matrix.language }}
+      build-mode: ${{ matrix.build-mode }}
+      queries: security-extended
+      dependency-caching: true
+
+  - name: Perform CodeQL Analysis
+    uses: github/codeql-action/analyze@v4
+    with:
+      category: "/language:${{ matrix.language }}"
+```
+
+**Query suite options:**
+- `security-extended` — default security queries plus additional coverage
+- `security-and-quality` — security plus code quality queries
+- Custom query packs via `packs:` input (e.g., `codeql/javascript-queries:AlertSuppression.ql`)
+
+**Dependency caching:** Set `dependency-caching: true` on the `init` action to cache restored dependencies across runs.
+
+**Analysis category:** Use `category` to distinguish SARIF results in monorepos (e.g., per-language, per-component).
+
+### Step 6: Monorepo Configuration
+
+For monorepos with multiple components, use the `category` parameter to separate SARIF results:
+
+```yaml
+category: "/language:${{ matrix.language }}/component:frontend"
+```
+
+To restrict analysis to specific directories, use a CodeQL configuration file (`.github/codeql/codeql-config.yml`):
+
+```yaml
+paths:
+  - apps/
+  - services/
+paths-ignore:
+  - node_modules/
+  - '**/test/**'
+```
+
+Reference it in the workflow:
+
+```yaml
+- uses: github/codeql-action/init@v4
+  with:
+    config-file: .github/codeql/codeql-config.yml
+```
+
+### Step 7: Manual Build Steps (Compiled Languages)
+
+If `autobuild` fails or custom build commands are needed:
+
+```yaml
+- language: c-cpp
+  build-mode: manual
+```
+
+Then add explicit build steps between `init` and `analyze`:
+
+```yaml
+- if: matrix.build-mode == 'manual'
+  name: Build
+  run: |
+    make bootstrap
+    make release
+```
+
+## Core Workflow — CodeQL CLI
+
+### Step 1: Install the CodeQL CLI
+
+Download the CodeQL bundle (includes CLI + precompiled queries):
 
 ```bash
-# Resolve output directory
-USER_SPECIFIED_DIR="${USER_SPECIFIED_DIR:-}"   # substitute the user's path here, if any
-if [ -n "$USER_SPECIFIED_DIR" ]; then
-  OUTPUT_DIR="$USER_SPECIFIED_DIR"
-else
-  BASE="static_analysis_codeql"
-  N=1
-  while [ -e "${BASE}_${N}" ]; do
-    N=$((N + 1))
-  done
-  OUTPUT_DIR="${BASE}_${N}"
-fi
-mkdir -p "$OUTPUT_DIR"
+# Download from https://github.com/github/codeql-action/releases
+# Extract and add to PATH
+export PATH="$HOME/codeql:$PATH"
+
+# Verify installation
+codeql resolve packs
+codeql resolve languages
 ```
 
-The output directory is resolved **once** at the start before any workflow executes. All workflows receive `$OUTPUT_DIR` and store their artifacts there:
+> Always use the CodeQL bundle, not a standalone CLI download. The bundle ensures query compatibility and provides precompiled queries for better performance.
 
-```
-$OUTPUT_DIR/
-├── rulesets.txt                 # Selected query packs (logged after Step 3)
-├── codeql.db/                   # CodeQL database (dir containing codeql-database.yml)
-├── build.log                    # Build log
-├── codeql-config.yml            # Exclusion config (interpreted languages)
-├── diagnostics/                 # Diagnostic queries and CSVs
-├── extensions/                  # Data extension YAMLs
-├── raw/                         # Unfiltered analysis output
-│   ├── results.sarif
-│   └── run-all.qls | important-only.qls
-└── results/                     # Final results (filtered for important-only, copied for run-all)
-    └── results.sarif
-```
-
-### Database Discovery
-
-A CodeQL database is identified by the presence of a `codeql-database.yml` marker file inside its directory. When searching for existing databases, **always collect all matches** — there may be multiple databases from previous runs or for different languages.
-
-**Discovery command.** `find_databases.sh` prints one database path per line, filtering
-out the marker files a failed build leaves behind. Build the array **in the same block
-that selects from it** — each Bash call is a fresh shell, so an array built here is empty
-by the next call, and the run concludes there is no database:
+### Step 2: Create a CodeQL Database
 
 ```bash
-# Command substitution, not `done < <(...)`: a process substitution discards the script's
-# exit status, so "codeql is not on this shell's PATH" (exit 2) would arrive as an empty
-# list and route to "build a new database" with three good ones sitting on disk.
-if ! DB_LIST=$("{baseDir}/scripts/find_databases.sh" "${OUTPUT_DIR:-.}" .); then
-  echo "ERROR: database discovery failed — see the message above" >&2
-  exit 1
-fi
+# Single language
+codeql database create codeql-db \
+  --language=javascript-typescript \
+  --source-root=src
 
-FOUND_DBS=()
-while IFS= read -r db; do
-  [ -n "$db" ] || continue
-  FOUND_DBS+=("$db")
-done <<<"$DB_LIST"
-
-echo "Found ${#FOUND_DBS[@]} existing database(s)"
-
-# The metadata the selection prompt needs, collected here rather than in a block of its
-# own: FOUND_DBS is gone by the next Bash call, and a loop over an array that no longer
-# exists prints nothing and reports success.
-for db in "${FOUND_DBS[@]}"; do
-  CODEQL_LANG=$(codeql resolve database --format=json -- "$db" 2>/dev/null | jq -r '.languages[0]')
-  CREATED=$(grep '^creationMetadata:' -A5 "$db/codeql-database.yml" 2>/dev/null | grep 'creationTime' | awk '{print $2}')
-  echo "$db — language: $CODEQL_LANG, created: $CREATED"
-done
+# Multiple languages (cluster mode)
+codeql database create codeql-dbs \
+  --db-cluster \
+  --language=java,python \
+  --command=./build.sh \
+  --source-root=src
 ```
 
-Never assume a database is named `codeql.db` — discover it by its marker file.
+For compiled languages, provide the build command via `--command`.
 
-**When multiple databases are found:** use `AskUserQuestion` to let the user select which database to use, or to build a new one, from the language and creation time printed above. `AskUserQuestion` takes at most four options, so with more databases than that, offer the three most recent plus "Build a new database" and list the rest in the prompt text. **Skip `AskUserQuestion` if the user explicitly stated which database to use or to build a new one in their prompt.**
-
-## Quick Start
-
-For the common case ("scan this codebase for vulnerabilities"):
+### Step 3: Analyze the Database
 
 ```bash
-# Verify CodeQL is installed. Stop here if it is not — every later command fails with
-# a less informative error, and the run wastes a build cycle before saying why.
-if ! command -v codeql >/dev/null 2>&1; then
-  echo "ERROR: codeql not found on PATH. Install it with one of:" >&2
-  echo "  gh extension install github/gh-codeql   # then: gh codeql install-stub" >&2
-  echo "  brew install --cask codeql" >&2
-  echo "  https://github.com/github/codeql-action/releases  (codeql-bundle)" >&2
-  exit 1
-fi
-
-# jq parses `codeql resolve database --format=json` in the very next step. Without it
-# CODEQL_LANG comes back empty and the run continues against the wrong language.
-if ! command -v jq >/dev/null 2>&1; then
-  echo "ERROR: jq not found on PATH (brew install jq / apt install jq)" >&2
-  exit 1
-fi
-
-# uv runs both guard scripts and both suite generators. Check it here rather than at
-# suite generation, which is after the build — otherwise a machine without uv spends
-# the whole build before failing.
-if ! command -v uv >/dev/null 2>&1; then
-  echo "ERROR: uv not found on PATH (https://docs.astral.sh/uv/getting-started/)" >&2
-  exit 1
-fi
-
-codeql --version
+codeql database analyze codeql-db \
+  javascript-code-scanning.qls \
+  --format=sarif-latest \
+  --sarif-category=javascript \
+  --output=results.sarif
 ```
 
-Then resolve `OUTPUT_DIR` using the block in [Output Directory](#output-directory) above —
-it honours a user-specified directory, which a bare auto-increment does not.
+Common query suites: `<language>-code-scanning.qls`, `<language>-security-extended.qls`, `<language>-security-and-quality.qls`.
 
-Then execute the full pipeline: **build database → create data extensions → run analysis** using the workflows below.
+### Step 4: Upload Results to GitHub
 
-## Rationalizations to Reject
-
-These shortcuts lead to missed findings. Do not accept them:
-
-- **"security-extended is enough"** - It is the baseline. Always check if Trail of Bits packs and Community Packs are available for the language. They catch categories `security-extended` misses entirely.
-- **"security-and-quality is the broadest suite"** - `security-and-quality` excludes all `experimental/` query paths. For run-all mode, import both `security-and-quality` and `security-experimental`. The delta is 1–52 queries depending on the language.
-- **"The database built, so it's good"** - A database that builds does not mean it extracted well. Always run quality assessment and check file counts against expected source files.
-- **"Data extensions aren't needed for standard frameworks"** - Even Django/Spring apps have custom wrappers that CodeQL does not model. Skipping extensions means missing vulnerabilities.
-- **"build-mode=none is fine for compiled languages"** - It produces severely incomplete analysis. Only use as an absolute last resort. On macOS, try the arm64 toolchain workaround or Rosetta first.
-- **"The build fails on macOS, just use build-mode=none"** - Exit code 137 is caused by `arm64e`/`arm64` mismatch, not a fundamental build failure. See [macos-arm64e-workaround.md](references/macos-arm64e-workaround.md).
-- **"No findings means the code is secure"** - Run `check_db_quality.py` and `verify_query_suite.py` and report that they passed. Without them, zero findings and a database that extracted nothing are the same output.
-- **"I'll just run the default suite"** / **"I'll just pass the pack names directly"** - Each pack's `defaultSuiteFile` applies hidden filters and can produce zero results. Always use an explicit suite reference.
-- **"I'll put files in the current directory"** - All generated files must go in `$OUTPUT_DIR`. Scattering files in the working directory makes cleanup impossible and risks overwriting previous runs.
-- **"Just use the first database I find"** - Multiple databases may exist for different languages or from previous runs. When more than one is found, present all options to the user. Only skip the prompt when the user already specified which database to use.
-- **"The user said 'scan', that means they want me to pick a database"** - "Scan" is not database selection. If multiple databases exist and the user didn't name one, ask.
-
----
-
-## Workflow Selection
-
-This skill has three workflows. **Once a workflow is selected, execute it step by step without skipping phases.**
-
-These runs are long. A database build has four fallback methods, so use the task tools to
-track progress. Decide which steps are worth tracking based on the run.
-
-| Workflow | Purpose |
-|----------|---------|
-| [build-database](workflows/build-database.md) | Create CodeQL database using build methods in sequence |
-| [create-data-extensions](workflows/create-data-extensions.md) | Detect or generate data extension models for project APIs |
-| [run-analysis](workflows/run-analysis.md) | Select rulesets, execute queries, process results |
-
-### Building unattended
-
-This plugin ships `/static-analysis:codeql-build`, which runs the build-database steps
-end to end: detect the language and toolchain, walk the method ladder applying fixes from
-[build-fixes.md](references/build-fixes.md) between rungs, and enforce the quality gate.
-
-```
-/static-analysis:codeql-build {"target": "/abs/path", "lang": "cpp"}
+```bash
+codeql github upload-results \
+  --repository=owner/repo \
+  --ref=refs/heads/main \
+  --commit=<commit-sha> \
+  --sarif=results.sarif
 ```
 
-It asks nothing. Every method failing, and a database that built but sits below the quality
-threshold, come back as statuses — `no-method-succeeded` and `built-below-threshold` — for you
-to act on here, because whether the remaining extractor errors are confined to code nobody
-needs analysed is a judgement call the run cannot make.
+Requires `GITHUB_TOKEN` environment variable with `security-events: write` permission.
 
-Use it when the build is the long, uncertain part and you want it driven to a conclusion. Work
-[build-database.md](workflows/build-database.md) by hand when you want a say in which method is
-tried, or when a build failure needs interpreting as it happens.
+### CLI Server Mode
 
-### Auto-Detection Logic
+To avoid repeated JVM initialization when running multiple commands:
 
-**If user explicitly specifies** what to do (e.g., "build a database", "run analysis on ./my-db"), execute that workflow directly. **Do NOT call `AskUserQuestion` for database selection if the user's prompt already makes their intent clear** — e.g., "build a new database", "analyze the codeql database in static_analysis_codeql_2", "run a full scan from scratch".
+```bash
+codeql execute cli-server
+```
 
-**Default pipeline for "test", "scan", "analyze", or similar:** Discover existing databases
-using the command in [Database Discovery](#database-discovery) above, then decide.
+> For detailed CLI command reference, search `references/cli-commands.md`.
 
-| Condition | Action |
-|-----------|--------|
-| No databases found | Resolve new `$OUTPUT_DIR`, execute build → extensions → analysis (full pipeline) |
-| One database found | Use `AskUserQuestion`: reuse it or build new? |
-| Multiple databases found | Use `AskUserQuestion`, capped at four options — see [Database Discovery](#database-discovery) |
-| User explicitly stated intent | Skip `AskUserQuestion`, act on their instructions directly |
+## Alert Management
 
-### Database Selection Prompt
+### Severity Levels
 
-When existing databases are found **and the user did not explicitly specify which to use**,
-present them via `AskUserQuestion` under the header "Existing CodeQL Databases". Label each
-option with the path, language, and creation time collected above — `./static_analysis_codeql_1/codeql.db
-(language: python, created: 2026-02-24)` — and make the last option "Build a new database".
+Alerts have two severity dimensions:
+- **Standard severity:** `Error`, `Warning`, `Note`
+- **Security severity:** `Critical`, `High`, `Medium`, `Low` (derived from CVSS scores; takes display precedence)
 
-After selection:
-- **If user picks an existing database:** Set `$OUTPUT_DIR` to its parent directory (or the directory containing it), set `$DB_NAME` to the selected path, then proceed to extensions → analysis.
-- **If user picks "Build new":** Resolve a new `$OUTPUT_DIR`, execute build → extensions → analysis.
+### Copilot Autofix
 
-### General Decision Prompt
+GitHub Copilot Autofix generates fix suggestions for CodeQL alerts in pull requests automatically — no Copilot subscription required. Review suggestions carefully before committing.
 
-If neither the database nor the workflow is clear from the prompt, offer the four
-workflows via `AskUserQuestion` — full scan (recommended), build database, create data
-extensions, run analysis — naming any databases found and the resolved `$OUTPUT_DIR`.
+### Alert Triage in PRs
 
----
+- Alerts appear as check annotations on changed lines
+- Check fails by default for `error`/`critical`/`high` severity alerts
+- Configure merge protection rulesets to customize the threshold
+- Dismiss false positives with a documented reason for audit trail
 
-## Reference Index
+> For detailed alert management guidance, search `references/alert-management.md`.
 
-| File | Content |
-|------|---------|
-| **Scripts** | |
-| [scripts/verify_query_suite.py](scripts/verify_query_suite.py) | Fails a suite that resolves to zero queries. The generation scripts run it; invoke by hand only for a reused or hand-edited suite |
-| [scripts/check_db_quality.py](scripts/check_db_quality.py) | Fails a database with no analysable source. Run after every build |
-| [scripts/build_log.sh](scripts/build_log.sh) | `log_step`/`run_logged` helpers; source before any build step |
-| [scripts/find_databases.sh](scripts/find_databases.sh) | Prints every database that `codeql resolve database` accepts, one per line. Build your array from it in the block that reads it |
-| [scripts/generate_suite.sh](scripts/generate_suite.sh) | Writes the run-all or important-only `.qls` and verifies it resolves to a non-zero query count |
-| **References** — the three workflows are listed under [Workflow Selection](#workflow-selection) | |
-| [references/macos-arm64e-workaround.md](references/macos-arm64e-workaround.md) | Apple Silicon build tracing workarounds |
-| [references/build-fixes.md](references/build-fixes.md) | Build failure fix catalog |
-| [references/quality-assessment.md](references/quality-assessment.md) | Database quality metrics and improvements |
-| [references/extension-yaml-format.md](references/extension-yaml-format.md) | Data extension YAML column definitions and examples |
-| [references/sarif-processing.md](references/sarif-processing.md) | jq commands for SARIF output processing |
-| [references/diagnostic-query-templates.md](references/diagnostic-query-templates.md) | QL queries for source/sink enumeration |
-| [references/important-only-suite.md](references/important-only-suite.md) | Important-only suite template and generation |
-| [references/run-all-suite.md](references/run-all-suite.md) | Run-all suite template |
-| [references/ruleset-catalog.md](references/ruleset-catalog.md) | Available query packs by language |
-| [references/threat-models.md](references/threat-models.md) | Threat model configuration |
-| [references/language-details.md](references/language-details.md) | Language-specific build and extraction details |
-| [references/performance-tuning.md](references/performance-tuning.md) | Memory, threading, and timeout configuration |
+## Custom Queries and Packs
 
----
+### Using Custom Query Packs
 
-## Success Criteria
+```yaml
+- uses: github/codeql-action/init@v4
+  with:
+    packs: |
+      my-org/my-security-queries@1.0.0
+      codeql/javascript-queries:AlertSuppression.ql
+```
 
-A complete CodeQL analysis run should satisfy:
+### Creating Custom Query Packs
 
-- [ ] Output directory resolved (user-specified or auto-incremented default)
-- [ ] All generated files stored inside `$OUTPUT_DIR`
-- [ ] Database built (discovered via `codeql-database.yml` marker) and `{baseDir}/scripts/check_db_quality.py` exited zero
-- [ ] Data extensions evaluated — either created in `$OUTPUT_DIR/extensions/` or explicitly skipped with justification
-- [ ] Analysis run with explicit suite reference (not default pack suite), and `{baseDir}/scripts/verify_query_suite.py` exited zero for it
-- [ ] All installed query packs (official + Trail of Bits + Community) used or explicitly excluded
-- [ ] Selected query packs logged to `$OUTPUT_DIR/rulesets.txt`
-- [ ] Unfiltered results preserved in `$OUTPUT_DIR/raw/results.sarif`
-- [ ] Final results in `$OUTPUT_DIR/results/results.sarif` (filtered for important-only, copied for run-all)
-- [ ] Zero-finding results investigated (database quality, model coverage, suite selection)
-- [ ] Build log preserved at `$OUTPUT_DIR/build.log` with all commands, fixes, and quality assessments
+Use the CodeQL CLI to create and publish packs:
+
+```bash
+# Initialize a new pack
+codeql pack init my-org/my-queries
+
+# Install dependencies
+codeql pack install
+
+# Publish to GitHub Container Registry
+codeql pack publish
+```
+
+### CodeQL Configuration File
+
+For advanced query and path configuration, create `.github/codeql/codeql-config.yml`:
+
+```yaml
+paths:
+  - apps/
+  - services/
+paths-ignore:
+  - '**/test/**'
+  - node_modules/
+queries:
+  - uses: security-extended
+packs:
+  javascript-typescript:
+    - my-org/my-custom-queries
+```
+
+## Code Scanning Logs
+
+### Summary Metrics
+
+Workflow logs include key metrics:
+- **Lines of code in codebase** — baseline before extraction
+- **Lines extracted** — including external libraries and auto-generated files
+- **Extraction errors/warnings** — files that failed or produced warnings during extraction
+
+### Debug Logging
+
+To enable detailed diagnostics:
+- **GitHub Actions:** re-run the workflow with "Enable debug logging" checked
+- **CodeQL CLI:** use `--verbosity=progress++` and `--logdir=codeql-logs`
+
+## Troubleshooting
+
+### Common Issues
+
+| Problem | Solution |
+|---|---|
+| Workflow not triggering | Verify `on:` triggers match event; check `paths`/`branches` filters; ensure workflow exists on target branch |
+| `Resource not accessible` error | Add `security-events: write` and `contents: read` permissions |
+| Autobuild failure | Switch to `build-mode: manual` and add explicit build commands |
+| No source code seen | Verify `--source-root`, build command, and language identifier |
+| C# compiler failure | Check for `/p:EmitCompilerGeneratedFiles=true` conflicts with `.sqlproj` or legacy projects |
+| Fewer lines scanned than expected | Switch from `none` to `autobuild`/`manual`; verify build compiles all source |
+| Kotlin in no-build mode | Disable and re-enable default setup to switch to `autobuild` |
+| Cache miss every run | Verify `dependency-caching: true` on `init` action |
+| Out of disk/memory | Use larger runners; reduce analysis scope via `paths` config; use `build-mode: none` |
+| SARIF upload fails | Ensure token has `security-events: write`; check 10 MB file size limit |
+| SARIF results exceed limits | Split across multiple uploads with different `--sarif-category`; reduce query scope |
+| Two CodeQL workflows | Disable default setup if using advanced setup, or remove old workflow file |
+| Slow analysis | Enable dependency caching; use `--threads=0`; reduce query suite scope |
+
+> For comprehensive troubleshooting with detailed solutions, search `references/troubleshooting.md`.
+
+### Hardware Requirements (Self-Hosted Runners)
+
+| Codebase Size | RAM | CPU |
+|---|---|---|
+| Small (<100K LOC) | 8 GB+ | 2 cores |
+| Medium (100K–1M LOC) | 16 GB+ | 4–8 cores |
+| Large (>1M LOC) | 64 GB+ | 8 cores |
+
+All sizes: SSD with ≥14 GB free disk space.
+
+### Action Versioning
+
+Pin CodeQL actions to a specific major version:
+
+```yaml
+uses: github/codeql-action/init@v4      # Recommended
+uses: github/codeql-action/autobuild@v4
+uses: github/codeql-action/analyze@v4
+```
+
+For maximum security, pin to a full commit SHA instead of a version tag.
+
+## Reference Files
+
+For detailed documentation, load the following reference files as needed:
+
+- `references/workflow-configuration.md` — Full workflow trigger, runner, and configuration options
+  - Search patterns: `trigger`, `schedule`, `paths-ignore`, `db-location`, `model packs`, `alert severity`, `merge protection`, `concurrency`, `config file`
+- `references/cli-commands.md` — Complete CodeQL CLI command reference
+  - Search patterns: `database create`, `database analyze`, `upload-results`, `resolve packs`, `cli-server`, `installation`, `CI integration`
+- `references/sarif-output.md` — SARIF v2.1.0 object model, upload limits, and third-party support
+  - Search patterns: `sarifLog`, `result`, `location`, `region`, `codeFlow`, `fingerprint`, `suppression`, `upload limits`, `third-party`, `precision`, `security-severity`
+- `references/compiled-languages.md` — Build modes and autobuild behavior per language
+  - Search patterns: `C/C++`, `C#`, `Java`, `Go`, `Rust`, `Swift`, `autobuild`, `build-mode`, `hardware`, `dependency caching`
+- `references/troubleshooting.md` — Comprehensive error diagnosis and resolution
+  - Search patterns: `no source code`, `out of disk`, `out of memory`, `403`, `C# compiler`, `analysis too long`, `fewer lines`, `Kotlin`, `extraction errors`, `debug logging`, `SARIF upload`, `SARIF limits`
+- `references/alert-management.md` — Alert severity, triage, Copilot Autofix, and dismissal
+  - Search patterns: `severity`, `security severity`, `CVSS`, `Copilot Autofix`, `dismiss`, `triage`, `PR alerts`, `data flow`, `merge protection`, `REST API`

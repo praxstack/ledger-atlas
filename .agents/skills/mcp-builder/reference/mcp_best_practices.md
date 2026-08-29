@@ -5,11 +5,13 @@
 ### Server Naming
 - **Python**: `{service}_mcp` (e.g., `slack_mcp`)
 - **Node/TypeScript**: `{service}-mcp-server` (e.g., `slack-mcp-server`)
+- **C#/.NET (Microsoft)**: `{Service}.Mcp.Server` (e.g., `Azure.Mcp.Server`)
 
 ### Tool Naming
 - Use snake_case with service prefix
 - Format: `{service}_{action}_{resource}`
 - Example: `slack_send_message`, `github_create_issue`
+- **C# Commands**: `{Resource}{Operation}Command` (e.g., `StorageContainerGetCommand`)
 
 ### Response Formats
 - Support both JSON and Markdown formats
@@ -22,9 +24,47 @@
 - Default to 20-50 items
 
 ### Transport
-- **Streamable HTTP**: For remote servers, multi-client scenarios
+- **Streamable HTTP**: For remote servers, multi-client scenarios, Agent Service
 - **stdio**: For local integrations, command-line tools
 - Avoid SSE (deprecated in favor of streamable HTTP)
+
+---
+
+## Remote vs Local MCP Servers
+
+### Remote MCP Servers (Production/Multi-tenant)
+
+Remote servers are hosted in the cloud and accessible via HTTPS. Required for Azure AI Agent Service integration.
+
+**Characteristics:**
+- Stateless request handling (no session state)
+- Thread-safe command execution
+- Transport-agnostic command design
+- Authentication required (Entra ID, API keys)
+
+**Hosting Options:**
+
+| Platform | Transport | Auth | Best For |
+|----------|-----------|------|----------|
+| **Azure Functions** | HTTP streamable | Built-in/Custom | Serverless, auto-scale |
+| **Azure Container Apps** | HTTP POST/GET | Custom | Containers, long-running |
+| **App Service** | HTTP | Custom | Full control |
+
+**Endpoint formats:**
+- Azure Functions: `https://{app}.azurewebsites.net/runtime/webhooks/mcp`
+- Foundry MCP: `https://mcp.ai.azure.com`
+- GitHub MCP: `https://api.githubcopilot.com/mcp`
+
+### Local MCP Servers
+
+Local servers run as subprocesses communicating via stdio.
+
+**Characteristics:**
+- Single-user, single-session
+- No network configuration needed
+- Simpler authentication (inherit user context)
+
+**Important:** stdio servers must NOT log to stdout (use stderr for logging).
 
 ---
 
@@ -149,6 +189,56 @@ Example pagination response:
 
 ---
 
+## Authentication Patterns
+
+### For Remote MCP Servers
+
+Remote MCP servers require authentication. Choose based on your scenario:
+
+| Method | User Context | Best For |
+|--------|--------------|----------|
+| **API Key** | No | Simple integrations, internal tools |
+| **Entra ID (agent identity)** | No | Azure services with shared identity |
+| **Entra ID (managed identity)** | No | Azure-hosted servers |
+| **OAuth passthrough (OBO)** | Yes | Multi-tenant, user-specific permissions |
+
+### Microsoft Entra ID (Recommended for Azure)
+
+**On-Behalf-Of (OBO) Flow** - Preserves user identity through the call chain:
+
+```
+User → Agent Service → MCP Server → Azure Resource
+         (OBO token)    (validates)   (user context)
+```
+
+**Configuration:**
+```
+token_url: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token
+auth_url: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/authorize
+refresh_url: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token
+```
+
+### DefaultAzureCredential Chain
+
+For servers that need to call Azure APIs, use the credential chain:
+
+1. `EnvironmentCredential` - CI/CD (service principal vars)
+2. `VisualStudioCredential` - VS login
+3. `AzureCliCredential` - `az login`
+4. `AzurePowerShellCredential` - `Connect-AzAccount`
+5. `AzureDeveloperCliCredential` - `azd auth login`
+6. `InteractiveBrowserCredential` - Fallback
+
+### For Local MCP Servers
+
+Local servers typically inherit the user's authentication context:
+
+- **Azure CLI**: Use `AzureCliCredential` after `az login`
+- **Environment Variables**: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`
+- **API Keys**: Store in environment variables, validate on startup
+
+---
+
 ## Security Best Practices
 
 ### Authentication and Authorization
@@ -199,6 +289,78 @@ Provide annotations to help clients understand tool behavior:
 | `openWorldHint` | boolean | true | Tool interacts with external entities |
 
 **Important**: Annotations are hints, not security guarantees. Clients should not make security-critical decisions based solely on annotations.
+
+---
+
+## Tool Approval Patterns (Agent Service)
+
+When integrating with Azure AI Agent Service, configure approval requirements:
+
+### Approval Configuration
+
+```python
+# Always require approval (default - safest)
+require_approval = "always"
+
+# Never require approval (trusted tools only)
+require_approval = "never"
+
+# Selective approval
+require_approval = {"never": ["read_data", "list_items"]}  # Skip for read-only
+require_approval = {"always": ["delete_resource", "update_config"]}  # Require for destructive
+```
+
+### Best Practices for Approval
+
+- **Prefer allow-lists** using `allowed_tools` parameter
+- **Require approval** for destructive operations (delete, update, create)
+- **Skip approval** only for read-only, non-sensitive operations
+- **Log all approvals** for audit trails
+
+### Tool Management (Runtime)
+
+```python
+# Dynamically manage tools
+mcp_tool.allow_tool("search_api_code")
+mcp_tool.disallow_tool("delete_resource")
+mcp_tool.set_approval_mode("never")
+mcp_tool.update_headers("Authorization", "Bearer ...")
+```
+
+---
+
+## Tool Quality Validation
+
+Microsoft's MCP evaluator validates tool descriptions for discoverability.
+
+### Quality Criteria
+
+Tool descriptions must:
+1. **Rank in top 3** when evaluated against similar tools
+2. **Achieve ≥0.4 confidence** in relevance scoring
+3. **Narrowly and unambiguously** describe functionality
+4. **Precisely match** actual implementation behavior
+
+### Writing Effective Descriptions
+
+**Good:**
+```
+"List all storage containers in an Azure Storage account. Returns container names, 
+last modified dates, and public access levels. Requires storage account name."
+```
+
+**Bad:**
+```
+"Gets storage stuff"  // Too vague
+"Manages containers"  // Ambiguous - create? delete? list?
+```
+
+### Testing Tool Discoverability
+
+Before deployment, test that your tool descriptions:
+- Are selected by the model for relevant queries
+- Are NOT selected for unrelated queries
+- Don't conflict with similar tools from other servers
 
 ---
 
