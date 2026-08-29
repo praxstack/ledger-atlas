@@ -228,6 +228,8 @@ Vendor clone (gitignored): `vendor/skills-repos/gstack`. Runtime binaries live u
 
 Note: `--host cursor` does not apply `--no-prefix` today (generated `.cursor/skills/gstack-*` trees keep the prefix). Use `sync-gstack-skills.sh` for short names in this repo.
 
+If another skill already owns a name (e.g. this repo’s session `/retro` from continual-learning), the sync script skips the gstack skill and prints a warning.
+
 ## Project agent configuration
 
 Matt Pocock skills read from:
