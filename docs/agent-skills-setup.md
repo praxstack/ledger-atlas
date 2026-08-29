@@ -2,33 +2,63 @@
 
 This repository ships a curated, project-local skill library under `.agents/skills/` so Cloud Agents and local Cursor sessions share the same workflows.
 
-## Layered architecture
+## Layered architecture (2026 stack)
 
-Skills are organized into layers that mirror a full engineering lifecycle:
+Three layers stack together: **skills** (committed workflows), **repo tools** (OpenSpec, Spec Kit), and an optional **MCP** layer (live docs, code intelligence, graph memory). Cloud Agents load project `.agents/skills/` only — not `~/.cursor/skills/`.
 
 ```mermaid
-flowchart LR
-  D[Discover] --> I[Interrogate / Spec]
-  I --> P[Plan]
-  P --> M[Implement]
-  M --> R[Review]
-  R --> S[Security]
-  S --> Q[Browser QA]
-  Q --> H[Ship]
-  H --> L[Learn]
+flowchart TB
+  subgraph skills ["Layer 1 — Skills (.agents/skills/)"]
+    D[Discover] --> I[Interrogate / Spec]
+    I --> P[Plan]
+    P --> M[Implement]
+    M --> R[Review]
+    R --> S[Security]
+    S --> Q[Browser QA]
+    Q --> H[Ship]
+    H --> L[Learn]
+  end
+
+  subgraph tools ["Layer 2 — Repo tools"]
+    OS[OpenSpec openspec/]
+    SK[Spec Kit .specify/]
+    IS[install-skills.sh]
+    GS[sync-gstack-skills.sh]
+  end
+
+  subgraph mcp ["Layer 3 — Optional MCP (user keys)"]
+    C7[Context7 — live library docs]
+    SE[Serena — LSP / symbol graph]
+    GF[Graphify — code graph memory]
+  end
+
+  skills --> tools
+  tools -.->|optional| mcp
 ```
 
-| Layer | Purpose | Key skills |
+| Layer | Purpose | Key skills / tools |
 | --- | --- | --- |
-| **Discover** | Find the right skill or pattern | `/find-skills`, `/improve quick` |
-| **Interrogate / Spec** | Align requirements before coding | `/grill-me`, `/grill-with-docs`, `/to-spec`, `/interrogate` |
-| **Plan** | Design and break down work | `/brainstorming`, `/writing-plans`, `/ce-plan`, `/poteto-mode` |
-| **Implement** | Build with rigor | `/poteto-mode`, `/tdd`, `/implement`, `/ce-work` |
+| **Discover** | Find the right skill or pattern | `/find-skills`, `/improve quick`, `/last30days` |
+| **Interrogate / Spec** | Align requirements before coding | `/grill-me`, `/grill-with-docs`, `/to-spec`, `/interrogate`, OpenSpec `/openspec-propose` |
+| **Plan** | Design and break down work | `/brainstorming`, `/writing-plans`, `/ce-plan`, `/poteto-mode`, `/hallmark` |
+| **Implement** | Build with rigor | `/poteto-mode`, `/tdd`, `/implement`, `/ce-work`, Remotion skills |
 | **Review** | Catch issues before merge | `/review`, `/code-review`, `/ce-code-review`, `/interrogate` |
-| **Security** | Audit sensitive paths | Trail of Bits skills, `/semgrep`, `/codeql` |
+| **Security** | Audit sensitive paths | Trail of Bits skills, `/semgrep`, `/codeql`, `/cso` |
 | **Browser QA** | Prove changes in the real app | `/qa`, `/agent-browser`, `/ce-test-browser`, `/webapp-testing` |
 | **Ship** | Land the PR | `/ship`, `/ce-commit-push-pr`, `/ce-babysit-pr` |
-| **Learn** | Compound knowledge for next time | `/ce-compound`, `/continual-learning`, `/ce-compound-refresh` |
+| **Learn** | Compound knowledge for next time | `/ce-compound`, `/continual-learning`, `/deep-research` |
+
+### Optional MCP layer
+
+These are **not** installed by default — they need user API keys or local services. Add them in Cursor Settings → MCP when you want live docs or code-graph context:
+
+| MCP | Purpose | Keys / setup |
+| --- | --- | --- |
+| **Context7** | Up-to-date library documentation via MCP | [context7.com](https://context7.com) API key |
+| **Serena** | Language-server symbol search and refactoring | `uvx` launch; no cloud key for local LSP |
+| **Graphify** | Persistent code-graph memory across sessions | User-provided Graphify endpoint / key |
+
+Skills such as `ce-plan` and `ce-compound` reference Context7 when the MCP server is connected; they fall back to web search otherwise.
 
 ## Core 10 (daily driver)
 
@@ -73,8 +103,14 @@ These ten commands cover most non-trivial work:
 | **Supabase** | [supabase/agent-skills](https://github.com/supabase/agent-skills) | 2 | Postgres best practices, Supabase patterns |
 | **AWS Agent Toolkit** | [aws/agent-toolkit-for-aws](https://github.com/aws/agent-toolkit-for-aws) | 55 | Bedrock, CDK, IAM, serverless, security agents, data lake |
 | **Spec Kit** | [github/spec-kit](https://github.com/github/spec-kit) | 10 | Spec-driven dev: `/speckit-specify`, `/speckit-plan`, `/speckit-implement` (in `.cursor/skills/`) |
+| **Hallmark** | [nutlope/hallmark](https://github.com/nutlope/hallmark) | 1 | Anti-AI-slop design: `/hallmark`, audit, redesign |
+| **Last 30 Days** | [mvanhorn/last30days-skill](https://github.com/mvanhorn/last30days-skill) | 1 | Research what changed in a domain over the last month |
+| **Deep Research** | [24601/agent-deep-research](https://github.com/24601/agent-deep-research) | 1 | Multi-step research with citations |
+| **NVIDIA** | [nvidia/skills](https://github.com/nvidia/skills) | 4 (selective) | RAG blueprint, AIQ research, cuDF, cuOpt |
+| **Remotion** | [remotion-dev/skills](https://github.com/remotion-dev/skills) | 3 | Video creation: best practices, create, render |
+| **OpenSpec** | [@fission-ai/openspec](https://github.com/Fission-AI/OpenSpec) | 6 | Spec-driven changes in `openspec/` |
 
-**Total:** 818 skills in `.agents/skills/` plus 10 Spec Kit skills in `.cursor/skills/` (up from ~306).
+**Total:** ~830 skills in `.agents/skills/` plus Spec Kit skills in `.cursor/skills/`.
 
 ### Already present (skipped on re-install)
 
@@ -141,7 +177,15 @@ npm run build
 
 ## Install / update skills
 
-Skills are managed with the [skills CLI](https://github.com/vercel-labs/skills):
+**One command** (idempotent — skips packs already in `skills-lock.json`):
+
+```bash
+./scripts/install-skills.sh
+```
+
+This script installs curated packs, syncs gstack short names, and runs `openspec init` when Node ≥ 20.19.
+
+Individual packs can still be added with the [skills CLI](https://github.com/vercel-labs/skills):
 
 ```bash
 # Skill discovery (install first in any new repo)
@@ -172,6 +216,19 @@ npx skills add aws/agent-toolkit-for-aws --agent cursor -y --copy
 uv tool install specify-cli
 specify init --here --integration cursor-agent --force
 
+# 2026 curated additions
+npx skills add nutlope/hallmark --skill hallmark --agent cursor -y --copy
+npx skills add mvanhorn/last30days-skill --skill last30days --agent cursor -y --copy
+npx skills add 24601/agent-deep-research --skill deep-research --agent cursor -y --copy
+npx skills add nvidia/skills --skill rag-blueprint --skill aiq-research --agent cursor -y --copy
+npx skills add remotion-dev/skills --skill remotion-best-practices --agent cursor -y --copy
+
+# OpenSpec (Node >= 20.19) — creates openspec/ in repo
+npx @fission-ai/openspec init -y
+
+# gstack short slash names (required for Cloud Agents)
+./scripts/sync-gstack-skills.sh
+
 # Add a new ecosystem
 npx skills add owner/repo --agent cursor -y --copy
 
@@ -196,6 +253,51 @@ npx skills add expo/skills --agent cursor -y --copy
 ```
 
 Browse the public index at [skills.sh](https://skills.sh).
+
+### gstack (virtual eng team)
+
+<<<<<<< Updated upstream
+gstack’s `./setup --host cursor` installs skills under `~/.cursor/skills/gstack-*` (prefixed folder names). Slash commands like `/plan-ceo-review` and `/review` need **short folder names** (`plan-ceo-review/`, `review/`, …). Cloud Agents only load project `.agents/skills/` — not global `~/.cursor/skills/`.
+=======
+gstack's `./setup --host cursor` installs skills under `~/.cursor/skills/gstack-*` (prefixed folder names). Slash commands like `/plan-ceo-review` and `/review` need **short folder names** (`plan-ceo-review/`, `review/`, …). Cloud Agents only load project `.agents/skills/` — not global `~/.cursor/skills/`.
+>>>>>>> Stashed changes
+
+After cloning or updating the vendor repo:
+
+```bash
+<<<<<<< Updated upstream
+# One-time / refresh — copies 54 skills with short names to .agents/skills/ and ~/.cursor/skills/
+=======
+# One-time / refresh — copies 50+ skills with short names to .agents/skills/
+>>>>>>> Stashed changes
+./scripts/sync-gstack-skills.sh
+```
+
+Vendor clone (gitignored): `vendor/skills-repos/gstack`. Runtime binaries live under `.agents/skills/gstack/` (symlinks into the vendor tree).
+
+**Key slash commands:**
+
+| Command | Purpose |
+| --- | --- |
+| `/office-hours` | Product interrogation — start here for new ideas |
+| `/plan-ceo-review` | CEO/founder strategic plan review |
+| `/plan-eng-review` | Engineering architecture plan review |
+| `/plan-design-review` | Design plan review |
+| `/review` | Pre-landing PR / diff review |
+| `/qa` | Browser QA on a staging URL |
+| `/ship` | Land the PR with checks |
+| `/investigate` | Root-cause debugging |
+| `/autoplan` | End-to-end planning workflow |
+| `/cso` | Security audit (OWASP + STRIDE) |
+| `/gstack-upgrade` | Update gstack install |
+
+Note: `--host cursor` does not apply `--no-prefix` today (generated `.cursor/skills/gstack-*` trees keep the prefix). Use `sync-gstack-skills.sh` for short names in this repo.
+
+<<<<<<< Updated upstream
+If another skill already owns a name (e.g. this repo’s session `/retro` from continual-learning), the sync script skips the gstack skill and prints a warning.
+=======
+If another skill already owns a name (e.g. this repo's session `/retro` from continual-learning), the sync script skips the gstack skill and prints a warning.
+>>>>>>> Stashed changes
 
 ## Project agent configuration
 
@@ -222,15 +324,25 @@ For project-local browser verification harnesses, run `/create-verification-skil
   agent-browser/
   poteto-mode/
   ce-work/
-  aws-cdk/
+  plan-ceo-review/       # gstack (short slash names)
+  review/
+  qa/
+  ship/
   ...
-.cursor/skills/          # Spec Kit workflow skills (speckit-*)
+.cursor/skills/          # Spec Kit + OpenSpec workflow skills
+.openspec/               # OpenSpec config, specs, changes (after init)
 .specify/                # Spec Kit templates, scripts, constitution
 docs/agents/             # Per-repo agent configuration
-  issue-tracker.md
-  triage-labels.md
-  domain.md
+  praxstack-personas.md
+  high-end-operator.md
+scripts/
+  install-skills.sh          # Full project skills installer
+  install-praxstack-skills.sh # Praxstack skills-and-personas only
+  sync-gstack-skills.sh      # gstack → short slash-command names
 vendor/skills-repos/     # Git clones for reference (gitignored)
+  skills-and-personas/   # praxstack/skills-and-personas
+.cursor/rules/
+  praxstack-skills.mdc   # Always-on skill routing
 .cursor/environment.json # Cloud Agent environment config
 CLAUDE.md                # Agent skills entry point
 ```
@@ -238,8 +350,10 @@ CLAUDE.md                # Agent skills entry point
 ## Notes
 
 - Project skills in `.agents/skills/` are loaded by Cursor automatically ([docs](https://cursor.com/docs/skills)).
-- Global skills in `~/.cursor/skills/` are **not** copied to Cloud Agents — keep workflows in the repo.
+- Global skills in `~/.cursor/skills/` are **not** copied to Cloud Agents — keep workflows in the repo (run `./scripts/sync-gstack-skills.sh` to mirror gstack into `.agents/skills/` with short slash names).
 - `agent-browser` CLI: install with `npm install -g agent-browser --prefix ~/.npm-global` then `agent-browser install`.
 - gstack's browse binary is installed globally; browser QA skills need Playwright/Chrome.
 - Review skill security assessments at [skills.sh](https://skills.sh) before enabling in sensitive repos.
-- Microsoft skills: only 9 of 175+ installed selectively to avoid context rot. Install more on demand with `--skill <name>`.
+- Microsoft skills: only 5 of 175+ installed selectively to avoid context rot. Install more on demand with `--skill <name>`.
+- **Not installed** (context rot): full `microsoft/skills`, full `wshobson` 94-plugin pack, global `everything-claude-code`.
+- NVIDIA: only 4 of 340+ skills installed. Add more with `--skill <name>` on demand.

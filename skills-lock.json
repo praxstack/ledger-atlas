@@ -7,6 +7,12 @@
       "skillPath": "skills/academy-guide/SKILL.md",
       "computedHash": "07075be5acc7c54fd6b06a1e7636608fa195b83eb98cbddb02e61b9ac1356889"
     },
+    "accelerated-computing-cudf": {
+      "source": "nvidia/skills",
+      "sourceType": "github",
+      "skillPath": "skills/accelerated-computing-cudf/SKILL.md",
+      "computedHash": "d373532ba6e389d8cee27e37500c56cae0c413e15d9527bdaa412ee6be2778c5"
+    },
     "acquire-codebase-knowledge": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -186,6 +192,12 @@
       "sourceType": "github",
       "skillPath": "skills/ai-team-orchestration/SKILL.md",
       "computedHash": "3a56a0e33d7c5b68a5d05d862b2c13c4a06f2f500e770f15552d16dd341dd677"
+    },
+    "aiq-research": {
+      "source": "nvidia/skills",
+      "sourceType": "github",
+      "skillPath": "skills/aiq-research/SKILL.md",
+      "computedHash": "fd2e99f928f13fc462d1eb9e22145804448c1695088dfdb1ce3d5e7c2493e918"
     },
     "algorand-vulnerability-scanner": {
       "source": "trailofbits/skills",
@@ -1387,6 +1399,12 @@
       "skillPath": "skills/csharp-xunit/SKILL.md",
       "computedHash": "3c224e79f92ec027de3d5f44d0ca3077f076cb1e1bfff6b0db5b09c34c3aecd2"
     },
+    "cuopt-developer": {
+      "source": "nvidia/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cuopt-developer/SKILL.md",
+      "computedHash": "5d4abbe69c1a134e004c48d20c4fdcdec73f4662be36b51ea0bd704ad1bbeba0"
+    },
     "d365-solution-blueprint": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -1458,6 +1476,12 @@
       "sourceType": "github",
       "skillPath": "skills/declarative-agents/SKILL.md",
       "computedHash": "cbfcbb1f6916629db484acc9d08f0895f55158cc38d5c3f506dc317639eb917f"
+    },
+    "deep-research": {
+      "source": "24601/agent-deep-research",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "73f047e4f2346b0fa7156c81e973d1392afbff84d51a089a8ee8b4b044daeaf0"
     },
     "dependabot": {
       "source": "github/awesome-copilot",
@@ -2131,6 +2155,12 @@
       "skillPath": "plugins/building-secure-contracts/skills/guidelines-advisor/SKILL.md",
       "computedHash": "1b63b6db44862d3b71c6f283c5a667191e5cf8b8b8e30cca0d44961753ff107f"
     },
+    "hallmark": {
+      "source": "nutlope/hallmark",
+      "sourceType": "github",
+      "skillPath": "skills/hallmark/SKILL.md",
+      "computedHash": "579f86b27cdd7eb972107f7aecedd537f472891c5fd7c7c821bea15f64e0fe86"
+    },
     "handoff": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -2316,6 +2346,12 @@
       "sourceType": "github",
       "skillPath": "skills/landing-page-conversion-audit/SKILL.md",
       "computedHash": "55925d3c6953ea31247b0b091b7e98fd85ea1de16e6ce7219068d3629b1fcf72"
+    },
+    "last30days": {
+      "source": "mvanhorn/last30days-skill",
+      "sourceType": "github",
+      "skillPath": "skills/last30days/SKILL.md",
+      "computedHash": "26794b00df666a1715eb5e92a2241a813ca04d2a90f46e5e4f35ad03c1095f97"
     },
     "latchshot-page-capture": {
       "source": "github/awesome-copilot",
@@ -2989,6 +3025,12 @@
       "skillPath": "plugins/aws-data-analytics/skills/querying-data-lake/SKILL.md",
       "computedHash": "9066b51fba9b03f7389fd394d55d79c0ad40ca6ec81bbc7a95def26033433448"
     },
+    "rag-blueprint": {
+      "source": "nvidia/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rag-blueprint/SKILL.md",
+      "computedHash": "5c057a857193fdd137a8f040cfb95cf033c74fbc27eb5346c5255a5b34e1459b"
+    },
     "react-audit-grep-patterns": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -3108,6 +3150,24 @@
       "sourceType": "github",
       "skillPath": "skills/remember-interactive-programming/SKILL.md",
       "computedHash": "cdc356396df6b494231f2c1e40a0647e8d3ca572bbc66469f5acff7c1728f510"
+    },
+    "remotion-best-practices": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "skillPath": "skills/remotion-best-practices/SKILL.md",
+      "computedHash": "2ce7c26fc2fa60ad4585ac62f60b9c8d92094f3f76f5f35881b0ea0d74a615ed"
+    },
+    "remotion-create": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "skillPath": "skills/remotion-create/SKILL.md",
+      "computedHash": "51cfe9bb6456267718149f66a8ba3b6a8fd779f1d5854192df6a99e0b82b678e"
+    },
+    "remotion-render": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "skillPath": "skills/remotion-render/SKILL.md",
+      "computedHash": "7438fdffee058438306ebb4bcfa961f125336d3c483b573af919ad3483c10c77"
     },
     "repo-standardizer": {
       "source": "github/awesome-copilot",

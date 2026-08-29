@@ -1,0 +1,56 @@
+---
+description: Praxstack skills-and-personas routing — invoke installed skills by slash command
+globs:
+alwaysApply: true
+---
+
+# Praxstack skill routing
+
+When a request matches a skill, invoke it. Do not answer ad-hoc if a skill exists.
+
+## Think / product
+
+- New idea, "is this worth building" → `/office-hours`
+- Lost the thread → wait-what + blank-stare; see `docs/agents/high-end-operator.md`
+- Cross-functional planning → `/constellation-team`
+
+## Plan
+
+- Spec / ticket / backlog item → `/spec` or `/speckit-specify`
+- Implementation plan from a spec, do not code → `/writing-plans`
+- Technical blueprint → `/blueprint-creator` or `/spec-creator`
+
+## Build
+
+- Implement a slice → `/tdd` or test-driven-development (failing test first)
+- Backend work → `/backend-pe` or language-specific `backend-pe-*`
+- Frontend work → `/frontend-pe` or `/frontend-design-excellence`
+
+## Review
+
+- Diff / pre-landing → `/review`
+- Live UI polish → `/design-review`
+- Security / OWASP → `/cso` or `/qa-security-engineer`
+- Architecture lock → `/kingmode` or `/plan-eng-review` (plan mode)
+- Principal engineer checkpoint → `/principal-engineer`
+
+## Test / ship
+
+- Report only → `/qa-only`
+- Find and fix → `/qa`
+- Create PR → `/ship`
+
+## Debug
+
+- Broken / unexpected → `/investigate` or `/systematic-debugging`
+
+## Praxstack-specific
+
+- Deep architecture → `/kingmode`, `/super-mode-core`
+- Teaching → `/techtutor`, `/teach-pro-max`
+- Agent handoff → `/cross-agent-handoff`
+- Bounded improvement loop → `/superimprove`
+- Personal journal / ideas → `/chronicle`, `/idea-capturer`
+
+Full persona catalog: `docs/agents/praxstack-personas.md`
+Install/refresh: `./scripts/install-praxstack-skills.sh`

@@ -10,7 +10,7 @@ Execute in the order below unless dependencies say otherwise. Each executor: rea
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 001 | Add CI workflow for app verification | P1 | S | — | TODO |
-| 002 | Exclude agent skills from ESLint scope | P1 | S | — | TODO |
+| 002 | Exclude agent skills from ESLint scope | P1 | S | — | DONE |
 | 003 | Add ledger persistence integration tests | P1 | M | — | TODO |
 | 004 | Fix ledger read-modify-write race | P1 | M | 003 | TODO |
 | 005 | Add API route tests for transactions | P2 | M | 003 | TODO |
