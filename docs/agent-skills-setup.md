@@ -256,20 +256,12 @@ Browse the public index at [skills.sh](https://skills.sh).
 
 ### gstack (virtual eng team)
 
-<<<<<<< Updated upstream
-gstack’s `./setup --host cursor` installs skills under `~/.cursor/skills/gstack-*` (prefixed folder names). Slash commands like `/plan-ceo-review` and `/review` need **short folder names** (`plan-ceo-review/`, `review/`, …). Cloud Agents only load project `.agents/skills/` — not global `~/.cursor/skills/`.
-=======
 gstack's `./setup --host cursor` installs skills under `~/.cursor/skills/gstack-*` (prefixed folder names). Slash commands like `/plan-ceo-review` and `/review` need **short folder names** (`plan-ceo-review/`, `review/`, …). Cloud Agents only load project `.agents/skills/` — not global `~/.cursor/skills/`.
->>>>>>> Stashed changes
 
 After cloning or updating the vendor repo:
 
 ```bash
-<<<<<<< Updated upstream
-# One-time / refresh — copies 54 skills with short names to .agents/skills/ and ~/.cursor/skills/
-=======
-# One-time / refresh — copies 50+ skills with short names to .agents/skills/
->>>>>>> Stashed changes
+# One-time / refresh — copies 50 gstack skills with short names to .agents/skills/ (and ~/.cursor/skills/ when present)
 ./scripts/sync-gstack-skills.sh
 ```
 
@@ -293,11 +285,7 @@ Vendor clone (gitignored): `vendor/skills-repos/gstack`. Runtime binaries live u
 
 Note: `--host cursor` does not apply `--no-prefix` today (generated `.cursor/skills/gstack-*` trees keep the prefix). Use `sync-gstack-skills.sh` for short names in this repo.
 
-<<<<<<< Updated upstream
-If another skill already owns a name (e.g. this repo’s session `/retro` from continual-learning), the sync script skips the gstack skill and prints a warning.
-=======
 If another skill already owns a name (e.g. this repo's session `/retro` from continual-learning), the sync script skips the gstack skill and prints a warning.
->>>>>>> Stashed changes
 
 ## Project agent configuration
 

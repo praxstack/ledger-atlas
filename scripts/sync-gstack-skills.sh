@@ -151,13 +151,6 @@ install_skills_to "$AGENTS"
 if [ -d "$(dirname "$CURSOR_SKILLS")" ]; then
   mkdir -p "$CURSOR_SKILLS"
   # Global Cursor skills: symlink directly to vendor generated trees (no git commit).
-  for skill_dir in "$GSTACK/.cursor/skills"/gstack*/; do
-    [ -f "$skill_dir/SKILL.md" ] || continue
-    cursor_name="$(basename "$skill_dir")"
-    [ "$cursor_name" = "gstack" ] && continue
-    skill_name="$(grep -m1 '^name:' "$skill_dir/SKILL.md" | sed 's/^name:[[:space:]]*//' | tr -d '[:space:]')"
-    [ -n "$skill_name" ] || continue
-  done
   rm -rf "$CURSOR_SKILLS"/gstack-*
   install_gstack_runtime "$CURSOR_SKILLS/gstack"
   for skill_dir in "$GSTACK/.cursor/skills"/gstack*/; do
