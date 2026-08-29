@@ -1,5 +1,6 @@
 {
   "name": "Ledger Atlas",
+  "snapshot": "snapshot-20260829-6d607db6-16e1-44ee-be1a-2ad2bcaa6c1b",
   "install": ".cursor/scripts/install.sh",
   "terminals": [
     {
