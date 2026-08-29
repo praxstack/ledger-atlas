@@ -197,6 +197,37 @@ npx skills add expo/skills --agent cursor -y --copy
 
 Browse the public index at [skills.sh](https://skills.sh).
 
+### gstack (virtual eng team)
+
+gstack’s `./setup --host cursor` installs skills under `~/.cursor/skills/gstack-*` (prefixed folder names). Slash commands like `/plan-ceo-review` and `/review` need **short folder names** (`plan-ceo-review/`, `review/`, …). Cloud Agents only load project `.agents/skills/` — not global `~/.cursor/skills/`.
+
+After cloning or updating the vendor repo:
+
+```bash
+# One-time / refresh — copies 54 skills with short names to .agents/skills/ and ~/.cursor/skills/
+./scripts/sync-gstack-skills.sh
+```
+
+Vendor clone (gitignored): `vendor/skills-repos/gstack`. Runtime binaries live under `.agents/skills/gstack/` (symlinks into the vendor tree).
+
+**Key slash commands:**
+
+| Command | Purpose |
+| --- | --- |
+| `/office-hours` | Product interrogation — start here for new ideas |
+| `/plan-ceo-review` | CEO/founder strategic plan review |
+| `/plan-eng-review` | Engineering architecture plan review |
+| `/plan-design-review` | Design plan review |
+| `/review` | Pre-landing PR / diff review |
+| `/qa` | Browser QA on a staging URL |
+| `/ship` | Land the PR with checks |
+| `/investigate` | Root-cause debugging |
+| `/autoplan` | End-to-end planning workflow |
+| `/cso` | Security audit (OWASP + STRIDE) |
+| `/gstack-upgrade` | Update gstack install |
+
+Note: `--host cursor` does not apply `--no-prefix` today (generated `.cursor/skills/gstack-*` trees keep the prefix). Use `sync-gstack-skills.sh` for short names in this repo.
+
 ## Project agent configuration
 
 Matt Pocock skills read from:
@@ -238,7 +269,7 @@ CLAUDE.md                # Agent skills entry point
 ## Notes
 
 - Project skills in `.agents/skills/` are loaded by Cursor automatically ([docs](https://cursor.com/docs/skills)).
-- Global skills in `~/.cursor/skills/` are **not** copied to Cloud Agents — keep workflows in the repo.
+- Global skills in `~/.cursor/skills/` are **not** copied to Cloud Agents — keep workflows in the repo (run `./scripts/sync-gstack-skills.sh` to mirror gstack into `.agents/skills/` with short slash names).
 - `agent-browser` CLI: install with `npm install -g agent-browser --prefix ~/.npm-global` then `agent-browser install`.
 - gstack's browse binary is installed globally; browser QA skills need Playwright/Chrome.
 - Review skill security assessments at [skills.sh](https://skills.sh) before enabling in sensitive repos.
