@@ -113,13 +113,11 @@ install_if_missing hallmark nutlope/hallmark --skill hallmark
 install_if_missing last30days mvanhorn/last30days-skill --skill last30days
 install_if_missing deep-research 24601/agent-deep-research --skill deep-research
 
-for nv_skill in rag-blueprint aiq-research accelerated-computing-cudf cuopt-developer; do
+for nv_skill in data-designer cudaq-guide cuopt-numerical-optimization-api; do
   install_if_missing "$nv_skill" nvidia/skills --skill "$nv_skill" || true
 done
 
-for rem_skill in remotion-best-practices remotion-create remotion-render; do
-  install_if_missing "$rem_skill" remotion-dev/skills --skill "$rem_skill" || true
-done
+install_if_missing remotion-best-practices remotion-dev/skills --skill remotion-best-practices || true
 
 # gstack — short slash-command names (/review, /qa, /ship, …)
 if [ -x "$ROOT/scripts/sync-gstack-skills.sh" ]; then
