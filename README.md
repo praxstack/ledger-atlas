@@ -27,6 +27,10 @@ Open [http://localhost:3000](http://localhost:3000).
 - `GET /api/transactions` — list transactions and current balance
 - `POST /api/transactions` — add a transaction (`description`, `amount`)
 
+## Agent skills
+
+This repo ships 818+ project-local agent skills under `.agents/skills/` plus Spec Kit workflows in `.cursor/skills/`. See [docs/agent-skills-setup.md](docs/agent-skills-setup.md) for the full layered pipeline, core 10 commands, and install/update instructions.
+
 ## Cloud Agent environment
 
 Repository-managed environment configuration lives in `.cursor/environment.json`. The install script at `.cursor/scripts/install.sh` runs `npm ci` after checkout.

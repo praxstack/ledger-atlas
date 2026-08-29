@@ -71,8 +71,10 @@ These ten commands cover most non-trivial work:
 | **Awesome Copilot** | [github/awesome-copilot](https://github.com/github/awesome-copilot) | 417 | Broad toolbox: specs, testing, Azure, GitHub, docs |
 | **Microsoft** | [microsoft/skills](https://github.com/microsoft/skills) | 9 (selective) | MCP builder, docs, frontend review, issue creation |
 | **Supabase** | [supabase/agent-skills](https://github.com/supabase/agent-skills) | 2 | Postgres best practices, Supabase patterns |
+| **AWS Agent Toolkit** | [aws/agent-toolkit-for-aws](https://github.com/aws/agent-toolkit-for-aws) | 55 | Bedrock, CDK, IAM, serverless, security agents, data lake |
+| **Spec Kit** | [github/spec-kit](https://github.com/github/spec-kit) | 10 | Spec-driven dev: `/speckit-specify`, `/speckit-plan`, `/speckit-implement` (in `.cursor/skills/`) |
 
-**Total:** ~763 skills in `.agents/skills/` (up from ~306).
+**Total:** 818 skills in `.agents/skills/` plus 10 Spec Kit skills in `.cursor/skills/` (up from ~306).
 
 ### Already present (skipped on re-install)
 
@@ -163,6 +165,13 @@ npx skills add microsoft/skills \
 # Supabase / Postgres
 npx skills add supabase/agent-skills --agent cursor -y --copy
 
+# AWS development patterns (full toolkit)
+npx skills add aws/agent-toolkit-for-aws --agent cursor -y --copy
+
+# GitHub Spec Kit (spec-driven development — also installs .specify/ templates)
+uv tool install specify-cli
+specify init --here --integration cursor-agent --force
+
 # Add a new ecosystem
 npx skills add owner/repo --agent cursor -y --copy
 
@@ -179,12 +188,6 @@ npx skills find "react performance"
 ### Optional stack-specific packs
 
 ```bash
-# AWS development patterns
-npx skills add aws-samples/agent-skills --agent cursor -y --copy
-
-# GitHub Spec Kit (spec-driven development)
-npx skills add github/spec-kit --agent cursor -y --copy
-
 # Sentry error monitoring
 npx skills add getsentry/sentry-skills --agent cursor -y --copy
 
@@ -219,7 +222,10 @@ For project-local browser verification harnesses, run `/create-verification-skil
   agent-browser/
   poteto-mode/
   ce-work/
+  aws-cdk/
   ...
+.cursor/skills/          # Spec Kit workflow skills (speckit-*)
+.specify/                # Spec Kit templates, scripts, constitution
 docs/agents/             # Per-repo agent configuration
   issue-tracker.md
   triage-labels.md

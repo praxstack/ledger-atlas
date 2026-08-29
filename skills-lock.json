@@ -37,6 +37,12 @@
       "skillPath": "skills/ad-campaign-analyzer/SKILL.md",
       "computedHash": "f68442debc84551a69f25c9abebbbac65ada3702b733e3b0c6a10dafc5e5204d"
     },
+    "add-community-extension": {
+      "source": "github/spec-kit",
+      "sourceType": "github",
+      "skillPath": ".github/skills/add-community-extension/SKILL.md",
+      "computedHash": "4ba13e73cde458791574ed096d2812cf2a3ba7ac37a2fe3c0f2df1991036950f"
+    },
     "add-educational-comments": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -109,6 +115,54 @@
       "skillPath": ".github/skills/agentic-workflows/SKILL.md",
       "computedHash": "f0c90d536526973b1f63c34cdbaf6e5911a027b5fdb827429d34ed73105d5042"
     },
+    "agents-build": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-build/SKILL.md",
+      "computedHash": "577cc78a7c70089b3906037098599ad14da57ebaef4c5a7eb340587fedd394d7"
+    },
+    "agents-connect": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-connect/SKILL.md",
+      "computedHash": "cea438a5e1659acec605ee83949d95dd4d47f5fd16e9864774740f3b57d95a02"
+    },
+    "agents-debug": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-debug/SKILL.md",
+      "computedHash": "4d7b12d5948f89ca25e0df9290f3e4454501e252671aa07ba5cce8d885fbe61e"
+    },
+    "agents-deploy": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-deploy/SKILL.md",
+      "computedHash": "087c4f8831cc136053422986866ce9a6634bb0a836ed61d205c5faee2ecc98d3"
+    },
+    "agents-get-started": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-get-started/SKILL.md",
+      "computedHash": "7c41e3311565a21d53e130de1bb2b9b47085a2fc36015cfe5773224caa94ec26"
+    },
+    "agents-harden": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-harden/SKILL.md",
+      "computedHash": "163d71b4459ba2e396aa518f4973bc3a8dfc780749bbf1b9cb850ee5e4133956"
+    },
+    "agents-optimize": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-optimize/SKILL.md",
+      "computedHash": "438777454dd381afe831c00ffdc8e61f29810562aa251170ddb0c2714c5580cb"
+    },
+    "agents-pay": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents/skills/agents-pay/SKILL.md",
+      "computedHash": "d8f916c051233f1867ef5c6ce74d3ba3c6e92689b3e58734959bb3ffe373d54c"
+    },
     "agents-sdk": {
       "source": "cloudflare/skills",
       "sourceType": "github",
@@ -144,6 +198,24 @@
       "sourceType": "github",
       "skillPath": "skills/algorithmic-art/SKILL.md",
       "computedHash": "b2ca295de7f9c86c444f1fa21239e22e0eb7013ced1c652169b9402cc96ff744"
+    },
+    "amazon-bedrock": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/amazon-bedrock/SKILL.md",
+      "computedHash": "a8237913e5c42ae09095d8a8682f984862ffb68698fb5e46e4ef6553ac362c6c"
+    },
+    "amazon-opensearch-service": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/amazon-opensearch-service/SKILL.md",
+      "computedHash": "45d4244c34a5695b98ac4d06859bfecfaec0a8d9cd97a6b900982fb07f93794b"
+    },
+    "analyzing-release-readiness": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/analyzing-release-readiness/SKILL.md",
+      "computedHash": "43cc10f54945bc80552ef42872849213be2179036d20d111a4caa25b10ef7000"
     },
     "anti-ui-slop": {
       "source": "github/awesome-copilot",
@@ -295,11 +367,47 @@
       "skillPath": "skills/autoresearch/SKILL.md",
       "computedHash": "8bfae087ef27eb37092d94caf1da3406b500aa908756772bb1349a1ac70823dd"
     },
+    "aws-ai-ml": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-ai-ml/SKILL.md",
+      "computedHash": "a231c4a22acb5dada0067e61c7a7e3d55a78aaf3c01a4558f47306d47bde8a68"
+    },
+    "aws-auth": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-auth/SKILL.md",
+      "computedHash": "00c682191927f4d13fa26cff9feee40b2e3feb894bac102329ba6bda00139992"
+    },
+    "aws-billing-and-cost-management": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-billing-and-cost-management/SKILL.md",
+      "computedHash": "3ba0125ac6c2cf7487ae01a3b8e78b247fe227c2935c92e0284d5b2577c48844"
+    },
+    "aws-blocks": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-blocks/SKILL.md",
+      "computedHash": "6ad103a2905e99a428c6038e9383b3023dbea2599ba6561c5230af3fee5f857c"
+    },
+    "aws-cdk": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-cdk/SKILL.md",
+      "computedHash": "4480c20e15885a356ba96334c50b0e726d0e89b533872ad92c03a767972ef28d"
+    },
     "aws-cdk-python-setup": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
       "skillPath": "skills/aws-cdk-python-setup/SKILL.md",
       "computedHash": "6aa92139f8058346ee07e49a9f2bdfb6e743ed128eeab86a6176f86e3fc080a4"
+    },
+    "aws-cloudformation": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-cloudformation/SKILL.md",
+      "computedHash": "1dd48ba1351c2d631c512ef0034d5118dcf9a9acd9a3b8440b00446f6efff77f"
     },
     "aws-cloudwatch-investigation": {
       "source": "github/awesome-copilot",
@@ -307,11 +415,59 @@
       "skillPath": "skills/aws-cloudwatch-investigation/SKILL.md",
       "computedHash": "4e7be1e0d2a9050330ecc882393d70e3c6b0fd2ca032b7bedce9b0b6475fd6ae"
     },
+    "aws-compute": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-compute/SKILL.md",
+      "computedHash": "df3051739b9a0d561439f03b1dc3c639ad2aeb52b69b51fe9d777e8b87772181"
+    },
+    "aws-containers": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-containers/SKILL.md",
+      "computedHash": "a265d458448000007bf1a57bb8585a63c75156f083b502b39b97a51071269793"
+    },
     "aws-cost-optimize": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
       "skillPath": "skills/aws-cost-optimize/SKILL.md",
       "computedHash": "a4034e859ce1f297df4fa504c8cb4561499e4d663a9480223dbf0c49a0b832fa"
+    },
+    "aws-database": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-database/SKILL.md",
+      "computedHash": "bf02a97d62b3489e867a2f5c0e02cde899a1835678c5b73d922fa7f71f65cc18"
+    },
+    "aws-deployment": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-deployment/SKILL.md",
+      "computedHash": "0505084fb5e7bf6c5c1b3c4f9bc87c1f712f86edb221d19b8de0ddeff313b51a"
+    },
+    "aws-iam": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-iam/SKILL.md",
+      "computedHash": "b2823e620706ccd7286ec37c68c7fb954db11e0d7154915ea640f81ee1cd6eaa"
+    },
+    "aws-messaging-and-streaming": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-messaging-and-streaming/SKILL.md",
+      "computedHash": "eb6447e0414f40367be7ed95eeb6fd1684da28ebfe200c8c2369ec8b35360962"
+    },
+    "aws-networking": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-networking/SKILL.md",
+      "computedHash": "3604b9bda23780a03dac19801c4954782c0f849e7e220949301e1ed3beec9860"
+    },
+    "aws-observability": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-observability/SKILL.md",
+      "computedHash": "fdcc252cef2f61c3775cbd0bf6a2ed758fd5e5d16a1d10f36479b584b4ee4098"
     },
     "aws-resource-health-diagnose": {
       "source": "github/awesome-copilot",
@@ -324,6 +480,48 @@
       "sourceType": "github",
       "skillPath": "skills/aws-resource-query/SKILL.md",
       "computedHash": "7e01b067764fe6debe6ce1590b34bf56dbe394703a8faa9e69f5539c195e3c3a"
+    },
+    "aws-sdk-js-v3-usage": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-sdk-js-v3-usage/SKILL.md",
+      "computedHash": "b2c5175e7e8951cb6b2d65ddda09187906feb222cdd97a3757a82f7fa142a873"
+    },
+    "aws-sdk-python-usage": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-sdk-python-usage/SKILL.md",
+      "computedHash": "cdd24e3232b66ff9c25859cd4c540d65fab74e0ddf7d5fd1b39576692463038f"
+    },
+    "aws-sdk-swift-usage": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-sdk-swift-usage/SKILL.md",
+      "computedHash": "bfc13ff6360a40657a4ee62496efd5360f7b0f8324af19f66441621227ca0904"
+    },
+    "aws-secrets-manager": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-core/skills/aws-secrets-manager/SKILL.md",
+      "computedHash": "d8910c1086c8337494cc2876d8e2cb79096e5e99130bd33357660e71d81d2f5d"
+    },
+    "aws-security": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-security/SKILL.md",
+      "computedHash": "4470bb1e21ab14c3a3bed38fa6ac539784d7efb11da4ba5ecb78cea211e7e0a7"
+    },
+    "aws-serverless": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-serverless/SKILL.md",
+      "computedHash": "da04d6caff23d104fc40559f2cee624dceacbc05e4af2e70cd84e1a9e14415e3"
+    },
+    "aws-storage": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/aws-storage/SKILL.md",
+      "computedHash": "66616c2ed7cbabccb21bf03a87783278c84b852bf1dc5aa151270e556dc4be52"
     },
     "aws-well-architected-review": {
       "source": "github/awesome-copilot",
@@ -739,6 +937,12 @@
       "skillPath": "skills/centos-linux-triage/SKILL.md",
       "computedHash": "cc32685413a75070d297a6531f0f2cb3e8b842d82015a5f9564fb14ac05451ab"
     },
+    "chatting-with-aws-devops-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/chatting-with-aws-devops-agent/SKILL.md",
+      "computedHash": "d3340956a851380c03f9bc60c9afd28190a3e3ccd6dbee9354da35057635202f"
+    },
     "chrome-devtools": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -883,6 +1087,12 @@
       "skillPath": "skills/connect-required-verification-information/SKILL.md",
       "computedHash": "2aab50320b9ebde437ef8ae3d963a70c189b8f400855fe4e3fab2eadbca7db60"
     },
+    "connecting-to-data-source": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/connecting-to-data-source/SKILL.md",
+      "computedHash": "293458b42c2b808914243354a12d63b7f9a4d4d4f00c3083509d104836a25d64"
+    },
     "constant-time-analysis": {
       "source": "trailofbits/skills",
       "sourceType": "github",
@@ -960,6 +1170,12 @@
       "sourceType": "github",
       "skillPath": "skills/convert-word-to-md/SKILL.md",
       "computedHash": "c7d1a1f8f07c77606b447881e491c656078fd2f8f56533892e3d447046d8b6f3"
+    },
+    "coordinating-multi-space-devops-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/coordinating-multi-space-devops-agent/SKILL.md",
+      "computedHash": "1a0c0eb968929b95e6e89a1d0417fd4c82978bc49bd6dc76ee741418aefba917"
     },
     "copilot-cli-quickstart": {
       "source": "github/awesome-copilot",
@@ -1104,6 +1320,12 @@
       "sourceType": "github",
       "skillPath": "skills/create-tldr-page/SKILL.md",
       "computedHash": "9d929bc6ed3e9f90576986628758c8c39b7c9f110cd7863f87fa2ae6003f74ac"
+    },
+    "creating-data-lake-table": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/creating-data-lake-table/SKILL.md",
+      "computedHash": "0b29a2bda9a6a3513fb4e2baee276ecf5c1a121944bf1aabe44afa549dd0d2be"
     },
     "creating-oracle-to-postgres-master-migration-plan": {
       "source": "github/awesome-copilot",
@@ -1291,6 +1513,12 @@
       "skillPath": "plugins/trailmark/skills/diagramming-code/SKILL.md",
       "computedHash": "1a06f8075f613b2f0cd3dbff163895cf2af9e4d27c2bb3e8463c2fa6c7ffafe6"
     },
+    "diff-scanning-with-aws-security-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/diff-scanning-with-aws-security-agent/SKILL.md",
+      "computedHash": "d43f743d791a64a0e7703a6f61ea3a2a83ef2b22050df9b481a6a7a9ad6246e6"
+    },
     "differential-review": {
       "source": "trailofbits/skills",
       "sourceType": "github",
@@ -1471,6 +1699,12 @@
       "skillPath": "skills/executing-plans/SKILL.md",
       "computedHash": "78a07800ee99a5861ae10be59d79fad085fdca10444e8aaeb2691597e357cff8"
     },
+    "exploring-data-catalog": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/exploring-data-catalog/SKILL.md",
+      "computedHash": "0e925e2bb7279957adbeb05688a3ee686da8353de47988a0410a07dad5c7a57f"
+    },
     "eyeball": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -1500,6 +1734,12 @@
       "sourceType": "github",
       "skillPath": "skills/find-skills/SKILL.md",
       "computedHash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf"
+    },
+    "finding-data-lake-assets": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/finding-data-lake-assets/SKILL.md",
+      "computedHash": "29a85498a49190a8894ae2037b0f20dc488809c7de671376b70a812cc0cb6600"
     },
     "finishing-a-development-branch": {
       "source": "obra/superpowers",
@@ -1963,6 +2203,12 @@
       "skillPath": "skills/incident-postmortem/SKILL.md",
       "computedHash": "007d7bb94f77b0e9793dddda5bff89ebad57059750c8691188b956732a08e1ce"
     },
+    "ingesting-into-data-lake": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/ingesting-into-data-lake/SKILL.md",
+      "computedHash": "b716e97d89f9bb34496beb0c0a46705ee534c94ef2680065bc68ee05eed3d6e3"
+    },
     "integrate-context-matic": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -1980,6 +2226,12 @@
       "sourceType": "github",
       "skillPath": "plugins/culture-index/skills/interpreting-culture-index/SKILL.md",
       "computedHash": "50f7b27bfce1a04614103b8045ec4f78287013d9f87b3c4ec29a62a4511ef68a"
+    },
+    "investigating-incidents-with-aws-devops-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/investigating-incidents-with-aws-devops-agent/SKILL.md",
+      "computedHash": "436938ec201ffe30bd3affb0a497e9cc25ac9658e04d7d15453db404309ab312"
     },
     "issue-fields-migration": {
       "source": "github/awesome-copilot",
@@ -2070,6 +2322,12 @@
       "sourceType": "github",
       "skillPath": "skills/latchshot-page-capture/SKILL.md",
       "computedHash": "7a1698a7b721fef755bed41b9cf179f280bba1fe29c0fb17c475c9802fbd112a"
+    },
+    "launch-with-aws": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/launch-with-aws/SKILL.md",
+      "computedHash": "930070c9d1e213203f70357b7128171fce2630c47ed947b0ae71069cea49a002"
     },
     "legacy-circuit-mockups": {
       "source": "github/awesome-copilot",
@@ -2425,6 +2683,12 @@
       "skillPath": "skills/penpot-uiux-design/SKILL.md",
       "computedHash": "cd29e08bb7d2d4b9212582bcd9b70823619fbc6397078b8ba853962054ba4230"
     },
+    "pentesting-with-aws-security-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/pentesting-with-aws-security-agent/SKILL.md",
+      "computedHash": "f6d98b75b2757f17541d0bd989022ba6e1af675a1fdd9480fbd3f33f57c9f3d9"
+    },
     "performance-review-writer": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -2719,6 +2983,12 @@
       "skillPath": "skills/quasi-coder/SKILL.md",
       "computedHash": "954dfd6b818d8b88708cdae77b3cb2d5986480bcd489902d9d9a4f0ad921577d"
     },
+    "querying-data-lake": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/querying-data-lake/SKILL.md",
+      "computedHash": "9066b51fba9b03f7389fd394d55d79c0ad40ca6ec81bbc7a95def26033433448"
+    },
     "react-audit-grep-patterns": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -2797,6 +3067,12 @@
       "skillPath": "skills/receiving-code-review/SKILL.md",
       "computedHash": "59361179fc9225173e0c145ffd9bafbf9fdbf8b43ce3dc308497a0b4f83a6063"
     },
+    "redshift-guide": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/redshift-guide/SKILL.md",
+      "computedHash": "52b43f29555f8bd23be9e5bc4705965849f7bd71bfe68b3a84e8007c948650ca"
+    },
     "refactor": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -2814,6 +3090,12 @@
       "sourceType": "github",
       "skillPath": "skills/refactor-plan/SKILL.md",
       "computedHash": "26f32d34d48e9a40e5dd91d877319c94c6b8537e204d95d187ba45b443276868"
+    },
+    "remediating-with-aws-security-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/remediating-with-aws-security-agent/SKILL.md",
+      "computedHash": "1cb79f809e77196ab1fb336abbaf3153ed4f00a97e6092719a0b3ae62c7a568f"
     },
     "remember": {
       "source": "github/awesome-copilot",
@@ -2923,6 +3205,12 @@
       "skillPath": "skills/ruff-recursive-fix/SKILL.md",
       "computedHash": "a6f4b355dd277d24f9ea95cb0f6f181fb4fc77fa8080d1e4f649af21d2095f2a"
     },
+    "running-release-tests": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/running-release-tests/SKILL.md",
+      "computedHash": "f636a60734503186c7f76e2f76a05a78aa75e0d8b038609650e974673a434258"
+    },
     "rust-mcp-server-generator": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -3001,6 +3289,12 @@
       "skillPath": "skills/scaffolding-oracle-to-postgres-migration-test-project/SKILL.md",
       "computedHash": "85f7027bf84288a9e1621eec2160b6ef02ec80ef71c2900c7bd2c94652f1361f"
     },
+    "scanning-with-aws-security-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/scanning-with-aws-security-agent/SKILL.md",
+      "computedHash": "7f1d335cf423f3202aeffe6c2131c2d27adf9c0ce761127dcf7f559b40fa2808"
+    },
     "scoutqa-test": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -3067,6 +3361,18 @@
       "skillPath": "skills/server-side-conversion-tracking/SKILL.md",
       "computedHash": "7e7e012d88e4af05b07dbe723d73566d47a69408a2435fb33df742838fa4fbbb"
     },
+    "setup": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/setup/SKILL.md",
+      "computedHash": "a9d9e9de069d7ed042c7f69df9559ae802b22ecda8b14a3d19f065db7c330dae"
+    },
+    "setup-devops-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/setup-devops-agent/SKILL.md",
+      "computedHash": "2af7a187130ae368c3bf0f53482f0c628f265e8427beaaf9e5d88c99447fe926"
+    },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -3084,6 +3390,12 @@
       "sourceType": "github",
       "skillPath": "skills/misc/setup-pre-commit/SKILL.md",
       "computedHash": "7fc7b680161a5cb834b165e36efc2378ff63a1f80df0a9efd18448d366bea98a"
+    },
+    "setup-security-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/setup-security-agent/SKILL.md",
+      "computedHash": "8c04ff39a4c1b632acc6caad553041881eb12e87b3fc66ece19f7866bd700b9c"
     },
     "setup-ts-deep-modules": {
       "source": "mattpocock/skills",
@@ -3114,6 +3426,12 @@
       "sourceType": "github",
       "skillPath": "skills/signal-write/SKILL.md",
       "computedHash": "f24e94755f8707acad2481adb5a1079e738e8e954ce27312b51562ae65eef61b"
+    },
+    "signing-in-to-aws": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "skills/core-skills/signing-in-to-aws/SKILL.md",
+      "computedHash": "721b70d3e162a1d6b76567ff183ff49a1368e3c25b5c9792371668b7e9256857"
     },
     "skill-creator": {
       "source": "microsoft/skills",
@@ -3210,6 +3528,12 @@
       "sourceType": "github",
       "skillPath": "skills/steno-mode/SKILL.md",
       "computedHash": "3c55c1345411e5ee6cbf9ee9563d69c91929ea27de6d74923a05c7699bfa73b8"
+    },
+    "storing-and-querying-vectors": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-data-analytics/skills/storing-and-querying-vectors/SKILL.md",
+      "computedHash": "cda8321aaf5b7272c5bc817e3989257b3a7127be8a8ed86832909d5405e01339"
     },
     "stripe-apps": {
       "source": "stripe/ai",
@@ -3384,6 +3708,12 @@
       "sourceType": "github",
       "skillPath": "skills/threat-model-analyst/SKILL.md",
       "computedHash": "abd264e1f7c545f4d1248ed471b519525359bdc9f2bc239ec02a7f76f88ab0b0"
+    },
+    "threat-modeling-with-aws-security-agent": {
+      "source": "aws/agent-toolkit-for-aws",
+      "sourceType": "github",
+      "skillPath": "plugins/aws-agents-for-devsecops/skills/threat-modeling-with-aws-security-agent/SKILL.md",
+      "computedHash": "70df878fbb50696e3c217575761b053c1a85c9327ebb94bb42c35bb21438ab1a"
     },
     "tiny-stepping": {
       "source": "github/awesome-copilot",
