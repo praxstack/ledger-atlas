@@ -37,3 +37,6 @@ next-env.d.ts
 
 # ledger data (local dev state)
 /data/transactions.json
+
+# cloned skill source repos (installed copies live in .agents/skills)
+/vendor/
