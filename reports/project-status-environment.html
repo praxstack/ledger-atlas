@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger Atlas — Project Status and Environment Report</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { border-bottom: 2px solid #333; padding-bottom: 0.5rem; }
+    h2 { margin-top: 2rem; color: #333; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+    th { background: #f4f4f4; }
+    .ok { color: #0a6b0a; }
+    .warn { color: #8a6d00; }
+    .fail { color: #b00020; }
+    .meta { color: #555; font-size: 0.9rem; }
+    ul { padding-left: 1.25rem; }
+    code { background: #f0f0f0; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+
+<h1>Ledger Atlas — Project Status and Environment Report</h1>
+<p class="meta">Repository: <a href="https://github.com/praxstack/ledger-atlas">github.com/praxstack/ledger-atlas</a> · Generated: 2026-08-30T16:01:10Z UTC · Branch inspected: <code>main</code> (HEAD <code>5120a47</code>)</p>
+
+<section id="summary">
+  <h2>1. Overall Project Status Summary</h2>
+  <p>The Ledger Atlas Next.js application is <strong>functional and passing all local verification gates</strong> (lint, typecheck, unit tests, production build). The repository has undergone a major agent-skills and Cloud Agent environment rollout over 2026-08-29, with six PRs merged (#60–#65). Core app improvements identified by the <code>/improve</code> audit remain largely <strong>unstarted</strong> (plans 001, 003–005). There is <strong>no CI workflow</strong> at the repo root yet.</p>
+  <table>
+    <thead>
+      <tr><th>Area</th><th>Status</th><th>Evidence</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Next.js app</td><td class="ok">Healthy</td><td><code>npm run lint</code>, <code>typecheck</code>, <code>test</code> (3/3), <code>build</code> all pass</td></tr>
+      <tr><td>Agent skills stack</td><td class="ok">Installed</td><td>879 <code>SKILL.md</code> files under <code>.agents/skills/</code></td></tr>
+      <tr><td>Cloud Agent environment</td><td class="ok">Configured</td><td><code>.cursor/environment.json</code> with snapshot + <code>npm ci</code> install</td></tr>
+      <tr><td>CI / automated gates</td><td class="fail">Missing</td><td>No <code>.github/workflows/</code> at repo root (plan 001 TODO)</td></tr>
+      <tr><td>Open PRs</td><td class="ok">None</td><td><code>gh pr list --state open</code> returns empty</td></tr>
+      <tr><td>Working tree</td><td class="warn">Dirty</td><td>2 unstaged skill file edits (<code>tdd</code>, <code>teach</code>)</td></tr>
+      <tr><td>Branch <code>deb</code></td><td class="fail">Does not exist</td><td>Not found locally or on <code>origin</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="completed">
+  <h2>2. Completed Items</h2>
+  <ul>
+    <li><strong>Ledger Atlas app</strong> — Next.js 15 + React 19 ledger with REST API (<code>GET/POST /api/transactions</code>), 3 unit tests in <code>lib/ledger.test.ts</code>.</li>
+    <li><strong>Cloud Agent development environment</strong> (PR #60) — <code>.cursor/environment.json</code>, install script (<code>.cursor/scripts/install.sh</code> → <code>npm ci</code>), dev-server terminal on port 3000, snapshot pinned.</li>
+    <li><strong>Curated pro developer agent skills workflow</strong> (PR #61) — base skill layers and documentation.</li>
+    <li><strong>Super-pro agent skills layers</strong> (PR #62) — discover → ship → learn pipeline, browser QA, compound engineering skills.</li>
+    <li><strong>/improve audit plans</strong> (PR #63) — five implementation plans in <code>plans/</code> with README tracking.</li>
+    <li><strong>Plan 002: Exclude agent skills from ESLint</strong> — DONE; <code>eslint.config.mjs</code> ignores <code>.agents/**</code>.</li>
+    <li><strong>gstack slash commands + 2026 skills stack</strong> (PR #64) — gstack visibility fixes, skills-and-personas integration.</li>
+    <li><strong>Merge conflict marker hotfix</strong> (PR #65) — resolved conflict markers in <code>docs/agent-skills-setup.md</code>.</li>
+    <li><strong>Skills install scripts</strong> — <code>scripts/install-skills.sh</code> (4823 bytes) and <code>scripts/install-praxstack-skills.sh</code> (2561 bytes) present and executable.</li>
+    <li><strong>2026 skills architecture docs</strong> (commit <code>5120a47</code>, direct to main) — layered architecture diagram, optional MCP layer docs, selective NVIDIA/remotion trimming in installer.</li>
+  </ul>
+</section>
+
+<section id="pending">
+  <h2>3. Pending Items</h2>
+  <table>
+    <thead>
+      <tr><th>Item</th><th>Priority</th><th>Status</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Plan 001 — Add CI workflow</td><td>P1</td><td>TODO</td><td>No <code>.github/workflows/</code> at repo root; blocks automated gates for future PRs</td></tr>
+      <tr><td>Plan 003 — Ledger persistence integration tests</td><td>P1</td><td>TODO</td><td>Prerequisite for plans 004 and 005</td></tr>
+      <tr><td>Plan 004 — Fix ledger read-modify-write race</td><td>P1</td><td>TODO</td><td>Depends on plan 003</td></tr>
+      <tr><td>Plan 005 — API route tests for transactions</td><td>P2</td><td>TODO</td><td>Depends on plan 003</td></tr>
+      <tr><td>Optional MCP setup</td><td>—</td><td>Not started</td><td>OpenSpec, Graphify, Serena, Context7 documented as optional in <code>docs/agent-skills-setup.md</code></td></tr>
+      <tr><td>Next.js 16 migration</td><td>—</td><td>Deferred</td><td>Rejected in improve batch; PostCSS advisory requires major bump</td></tr>
+      <tr><td>Architecture review follow-ups</td><td>P2/P3</td><td>Not tracked in plans</td><td>Referenced in <code>plans/README.md</code> (<code>/tmp/architecture-review-20260829-143906.html</code>); duplicate Transaction type in page.tsx noted but not planified</td></tr>
+      <tr><td>Commit unstaged skill edits</td><td>—</td><td>Local only</td><td><code>.agents/skills/tdd/SKILL.md</code>, <code>.agents/skills/teach/SKILL.md</code> modified, not committed</td></tr>
+      <tr><td>Stale remote feature branches</td><td>—</td><td>Cleanup optional</td><td><code>prax/agent-skills-workflow-f419</code>, <code>prax/gstack-skills-fix-f419</code>, etc. merged but not deleted on remote</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="user-gated">
+  <h2>4. User-Gated Items</h2>
+  <ul>
+    <li><strong>CodeRabbit authentication</strong> — CodeRabbit CLI/plugin requires user login; automated CodeRabbit reviews cannot run without credentials. A dedicated agent ("CodeRabbit review merge PR63") completed in IDLE state; event logs were empty, so review outcome is unverified from this environment.</li>
+    <li><strong>MCP API keys / server setup</strong> — Optional MCP layer (OpenSpec, Graphify, Serena, Context7) requires user configuration in Cursor Settings → MCP. Skills degrade gracefully without them.</li>
+    <li><strong>Personal Cloud Agent environment</strong> — Active environment is source "Personal"; <code>environment.json</code> is owner-restricted and not exposed via cloud API in this run.</li>
+    <li><strong>GitHub PR creation from agents</strong> — <code>ManagePullRequest</code> and some <code>gh</code> API operations may require elevated token scopes; parent agent may need to create PR for this report branch.</li>
+    <li><strong>Browser demo / GUI testing</strong> — "Demo ledger UI in browser" agent ended in ERROR status; likely requires interactive desktop session or browser MCP auth.</li>
+  </ul>
+</section>
+
+<section id="subagents">
+  <h2>5. Sub-Agent / Multitask Status</h2>
+  <p>14 Cloud Agents were found for this repository (cursor-cloud API, 2026-08-30). Summary by outcome:</p>
+  <table>
+    <thead>
+      <tr><th>Agent</th><th>Status</th><th>Outcome / Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>HTML project status report (this run)</td><td>RUNNING</td><td>Producing this report</td></tr>
+      <tr><td>New development environment</td><td>WAITING_FOR_BACKGROUND_WORK</td><td>Parent/orchestrator on <code>prax/ledger-env-setup-f419</code>; awaiting background sub-agent completion</td></tr>
+      <tr><td>Code review PR #64</td><td>IDLE</td><td>Completed; no event detail available</td></tr>
+      <tr><td>CodeRabbit review merge PR63</td><td>IDLE</td><td>Completed; CodeRabbit rate limits and auth issues are plausible blockers for unattended review — event log empty, cannot confirm rate-limit hit from evidence</td></tr>
+      <tr><td>Integrate praxstack/skills-and-personas</td><td>IDLE</td><td>Work landed via PR #64 commits on main</td></tr>
+      <tr><td>Merge PR64 full skills stack (×2)</td><td>IDLE</td><td>PR #64 merged successfully</td></tr>
+      <tr><td>Fix gstack Cursor skills</td><td>IDLE</td><td>Contributed to PR #64</td></tr>
+      <tr><td>Commit plans directory PR</td><td>IDLE</td><td>PR #63 merged</td></tr>
+      <tr><td>Review merge improve all repos</td><td>IDLE</td><td>Completed</td></tr>
+      <tr><td>Complete skills PR merge</td><td>IDLE</td><td>PRs #61–#62 merged</td></tr>
+      <tr><td>Install super-pro skill layers</td><td>IDLE</td><td>Completed</td></tr>
+      <tr><td>Verify build in fresh agent</td><td>IDLE</td><td>Completed</td></tr>
+      <tr><td>Demo ledger UI in browser</td><td class="fail">ERROR</td><td>Failed — likely environment/browser access limitation; no transcript events captured</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Known friction (reported in prior sessions, not re-verified here):</strong></p>
+  <ul>
+    <li><strong>CodeRabbit rate limits</strong> — Free-tier or unauthenticated CodeRabbit usage can throttle automated reviews; agents may complete without a full review artifact.</li>
+    <li><strong><code>gh</code> PR API permission failures</strong> — Some cloud-agent tokens lack <code>pull_requests:write</code> or org-level permissions, causing PR create/merge API calls to fail even when git push succeeds.</li>
+    <li><strong>Agents with no usable response</strong> — Event logs for fetched agents were empty (<code>count: 0</code>); detailed success/failure narratives are not recoverable from this environment.</li>
+  </ul>
+</section>
+
+<section id="deb-branch">
+  <h2>6. Branch <code>deb</code> vs <code>main</code></h2>
+  <p><strong>Current branch:</strong> <code>main</code> (not <code>deb</code>).</p>
+  <p><strong>Does <code>deb</code> exist?</strong> <span class="fail">No.</span> Neither a local nor remote <code>deb</code> branch was found:</p>
+  <ul>
+    <li><code>git branch -a | grep deb</code> — no matches</li>
+    <li><code>git rev-parse --verify deb</code> — fatal: Needed a single revision</li>
+    <li><code>git rev-parse --verify origin/deb</code> — fatal: Needed a single revision</li>
+    <li>GitHub API branch list — no <code>deb</code> branch</li>
+  </ul>
+  <p><strong>Why not on <code>deb</code>:</strong> The branch does not exist in this repository; there is nothing to check out or compare. Work proceeds on <code>main</code> and feature branches named <code>prax/*</code>.</p>
+  <p><strong><code>main</code> state:</strong> Up to date with <code>origin/main</code> at <code>5120a47</code>. Recent commits:</p>
+  <table>
+    <thead><tr><th>Commit</th><th>Message</th></tr></thead>
+    <tbody>
+      <tr><td><code>5120a47</code></td><td>docs: 2026 skills architecture, selective NVIDIA/remotion in installer</td></tr>
+      <tr><td><code>271260d</code></td><td>Merge pull request #65 (docs conflict hotfix)</td></tr>
+      <tr><td><code>e41e7c4</code></td><td>fix: resolve merge conflict markers in agent-skills-setup docs</td></tr>
+      <tr><td><code>fd75f0c</code></td><td>Merge PR #64: gstack slash commands + 2026 skills stack setup</td></tr>
+      <tr><td><code>ea978c1</code></td><td>Integrate praxstack/skills-and-personas into ledger-atlas</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="prs">
+  <h2>7. PR Merge Status</h2>
+  <p><code>gh pr list --state all --limit 15</code> — all six recent PRs are <strong>MERGED</strong>; zero open.</p>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Title</th><th>Branch</th><th>State</th><th>Merged</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>65</td><td>fix: resolve merge conflict markers in agent-skills-setup</td><td><code>prax/docs-conflict-hotfix-f419</code></td><td class="ok">MERGED</td><td>2026-08-29</td></tr>
+      <tr><td>64</td><td>Fix gstack slash commands for Cursor and Cloud Agents</td><td><code>prax/gstack-skills-fix-f419</code></td><td class="ok">MERGED</td><td>2026-08-29</td></tr>
+      <tr><td>63</td><td>Add /improve audit plans for ledger-atlas</td><td><code>prax/improve-plans-f419</code></td><td class="ok">MERGED</td><td>2026-08-29</td></tr>
+      <tr><td>62</td><td>Add super-pro agent skills layers</td><td><code>prax/super-pro-skills-f419</code></td><td class="ok">MERGED</td><td>2026-08-29</td></tr>
+      <tr><td>61</td><td>Add curated pro developer agent skills workflow</td><td><code>prax/agent-skills-workflow-f419</code></td><td class="ok">MERGED</td><td>2026-08-29</td></tr>
+      <tr><td>60</td><td>Set up Ledger Atlas Cloud Agent development environment</td><td><code>prax/ledger-env-setup-f419</code></td><td class="ok">MERGED</td><td>2026-08-29</td></tr>
+    </tbody>
+  </table>
+  <p class="warn"><strong>Notable:</strong> Commit <code>5120a47</code> ("docs: 2026 skills architecture…") landed on <code>main</code> <em>without</em> an associated PR in the <code>gh pr list</code> output — a direct push to <code>main</code>.</p>
+</section>
+
+<section id="environment">
+  <h2>8. Environment Freshness</h2>
+  <table>
+    <thead>
+      <tr><th>Check</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>git fetch origin</code></td><td>Success</td></tr>
+      <tr><td>Local vs <code>origin/main</code></td><td>Up to date (before this report branch commit)</td></tr>
+      <tr><td>Node.js</td><td>v22.14.0</td></tr>
+      <tr><td>npm</td><td>10.9.7</td></tr>
+      <tr><td><code>node_modules/</code></td><td>Present</td></tr>
+      <tr><td>Install script re-run needed?</td><td>No — dependencies installed; <code>npm ci</code> not required unless <code>package-lock.json</code> changes</td></tr>
+      <tr><td><code>npm run lint</code></td><td class="ok">Pass (eslint exits 0)</td></tr>
+      <tr><td><code>npm test</code></td><td class="ok">Pass — 1 file, 3 tests</td></tr>
+      <tr><td><code>npm run typecheck</code></td><td class="ok">Pass</td></tr>
+      <tr><td><code>npm run build</code></td><td class="ok">Pass</td></tr>
+    </tbody>
+  </table>
+  <h3><code>.cursor/environment.json</code></h3>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>name</td><td>Ledger Atlas</td></tr>
+      <tr><td>snapshot</td><td><code>snapshot-20260829-6d607db6-16e1-44ee-be1a-2ad2bcaa6c1b</code></td></tr>
+      <tr><td>install</td><td><code>.cursor/scripts/install.sh</code> (runs <code>npm ci</code>)</td></tr>
+      <tr><td>terminals</td><td>dev-server → <code>npm run dev</code> on port 3000</td></tr>
+      <tr><td>ports</td><td>web: 3000</td></tr>
+    </tbody>
+  </table>
+  <p>Cloud environment source: Personal (recorded 2026-08-29). No environment build snapshot booted for this run (<code>build: null</code>).</p>
+</section>
+
+<section id="delays">
+  <h2>9. Honest Delays and Missing Updates</h2>
+  <ul>
+    <li><strong>No <code>deb</code> branch</strong> — If work was expected on a <code>deb</code> branch, it was never created or was deleted/renamed; all merged work is on <code>main</code> via <code>prax/*</code> branches.</li>
+    <li><strong>Direct push to main (<code>5120a47</code>)</strong> — Post-PR #65 documentation and installer changes bypassed PR review and CI (which does not exist yet anyway).</li>
+    <li><strong>Merge conflict markers</strong> — Were present in <code>docs/agent-skills-setup.md</code> and fixed in PR #65; indicates concurrent merge pressure during rapid skills integration.</li>
+    <li><strong>Improve plans stalled</strong> — Four of five plans (001, 003–005) remain TODO since 2026-08-29; only ESLint scope fix (002) shipped.</li>
+    <li><strong>No CI</strong> — Without plan 001, regressions in the Next.js app are caught only by manual agent runs, not on every push.</li>
+    <li><strong>Uncommitted local edits</strong> — Two skill files modified in working tree; not part of any PR.</li>
+    <li><strong>CodeRabbit coverage gaps</strong> — Automated review depends on user auth; agents may idle without producing review output.</li>
+    <li><strong>Browser demo failure</strong> — GUI verification agent errored; no screen recording or browser test artifact produced.</li>
+    <li><strong>Stale remote branches</strong> — Merged <code>prax/*</code> branches remain on origin; cosmetic clutter only.</li>
+    <li><strong>README skill count drift</strong> — README says "818+" skills; live count is 879 <code>SKILL.md</code> files (installer changes after README last edit).</li>
+  </ul>
+</section>
+
+<footer>
+  <p class="meta">Report generated by Cloud Agent bc-9de214bc-71f6-5121-bab2-eb2209c5acbb · Evidence commands run in <code>/workspace</code> on 2026-08-30.</p>
+</footer>
+
+</body>
+</html>
