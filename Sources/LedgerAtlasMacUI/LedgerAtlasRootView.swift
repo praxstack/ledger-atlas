@@ -99,6 +99,7 @@ public struct LedgerAtlasRootView: View {
   @State private var appLock = LedgerAppLock()
   @State private var journey = LedgerJourney()
   @State private var productSettings = LedgerProductSettings.load()
+  @State private var pendingIntent: LedgerIntentRequest?
   @State private var isChoosingImportSource = false
   @State private var lifecycleMessage: String?
   @State private var lifecycleRetryOperation: LedgerLifecycleOperation?
@@ -194,6 +195,12 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: sourceTimeZone)
     }
     .task { startSavedLedgerReopen() }
+    .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
+      consumePendingIntentIfUnlocked()
+    }
+    .onChange(of: appLock.isLocked) { _, locked in
+      if !locked { consumePendingIntentIfUnlocked() }
+    }
     .onDisappear { lifecycleTask?.cancel() }
     .frame(minWidth: 720, minHeight: 480)
   }
@@ -751,6 +758,8 @@ public struct LedgerAtlasRootView: View {
         accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
         splitPurchases: splitPurchases,
         splitTransactionIDs: splitTransactionIDs,
+        intentRequest: pendingIntent,
+        consumeIntent: { pendingIntent = nil },
         open: openLedger,
         lifecycleMessage: lifecycleMessage,
         lastFailure: journey.lastFailure,
@@ -1003,6 +1012,25 @@ public struct LedgerAtlasRootView: View {
     _ = publishWidget(.reopenRequired)
   }
 
+  private func consumePendingIntentIfUnlocked() {
+    guard !appLock.isLocked, pendingIntent == nil,
+      let request = LedgerIntentBridge.consume()
+    else { return }
+    switch request.kind {
+    case .addExpense, .addIncome:
+      pendingIntent = request
+      selection = .ledger
+    case .addTransfer:
+      lifecycleMessage = "Transfer request received. Open Transfers and choose New transfer to review it."
+      selection = .transfers
+    case .createBackup:
+      lifecycleMessage = "Backup request received. Choose a destination to create it."
+      selection = .backupRestore
+    case .openBudgets:
+      selection = .budgets
+    }
+  }
+
   private func exportDiagnostics() {
     guard let snapshot = journey.snapshot else {
       journey.recordFailure("Open a ledger before exporting diagnostics.")
@@ -1245,6 +1273,8 @@ private struct LedgerView: View {
   let categories: [LedgerCategory]
   let splitPurchases: [LedgerSplitPurchase]
   let splitTransactionIDs: Set<String>
+  let intentRequest: LedgerIntentRequest?
+  let consumeIntent: () -> Void
   let open: () -> Void
   let lifecycleMessage: String?
   let lastFailure: String?
@@ -1364,11 +1394,18 @@ private struct LedgerView: View {
       }
       .navigationTitle("Ledger")
       .sheet(isPresented: $showingTransactionForm) {
-        NativeTransactionForm(accounts: accounts, categories: categories, onSave: createTransaction)
+        NativeTransactionForm(
+          accounts: accounts, categories: categories, intent: intentRequest,
+          onSave: { amount, kind, accountID, categoryID, note in
+            createTransaction(amount, kind, accountID, categoryID, note)
+            if intentRequest != nil { consumeIntent() }
+          })
       }
       .sheet(isPresented: $showingSplitForm) {
         SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
       }
+      .onAppear { presentIntentIfNeeded() }
+      .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
     } else {
       switch state {
       case .noLedger:
@@ -1411,6 +1448,12 @@ private struct LedgerView: View {
         .navigationTitle("Ledger")
       }
     }
+  }
+
+  private func presentIntentIfNeeded() {
+    guard let intentRequest, !showingTransactionForm else { return }
+    guard intentRequest.kind == .addExpense || intentRequest.kind == .addIncome else { return }
+    showingTransactionForm = true
   }
 
   private func openPrompt(
@@ -1589,6 +1632,7 @@ private struct NativeTransferForm: View {
 private struct NativeTransactionForm: View {
   let accounts: [LedgerAccount]
   let categories: [LedgerCategory]
+  let intent: LedgerIntentRequest?
   let onSave: (String, LedgerTransactionKind, String, String?, String?) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var amount = ""
@@ -1596,6 +1640,19 @@ private struct NativeTransactionForm: View {
   @State private var accountID = ""
   @State private var categoryID: String?
   @State private var note = ""
+
+  init(
+    accounts: [LedgerAccount], categories: [LedgerCategory], intent: LedgerIntentRequest? = nil,
+    onSave: @escaping (String, LedgerTransactionKind, String, String?, String?) -> Void
+  ) {
+    self.accounts = accounts
+    self.categories = categories
+    self.intent = intent
+    self.onSave = onSave
+    _amount = State(initialValue: intent?.amountLiteral ?? "")
+    _kind = State(initialValue: intent?.kind == .addIncome ? .income : .expense)
+    _note = State(initialValue: intent?.note ?? "")
+  }
 
   private var availableCategories: [LedgerCategory] {
     categories.filter {

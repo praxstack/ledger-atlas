@@ -33,6 +33,10 @@ targets:
         CODE_SIGN_ENTITLEMENTS: LedgerAtlas.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 57GGJTRSFG
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-framework"
+          - AppIntents
         GENERATE_INFOPLIST_FILE: YES
         MARKETING_VERSION: 1.0
         CURRENT_PROJECT_VERSION: 1

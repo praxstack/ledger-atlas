@@ -11,6 +11,7 @@
 		1330C9AB18BC3C02B98CB027 /* LedgerAtlasWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */; };
 		3139F6937C4243F36056EF8A /* LedgerAtlasWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		49921E2A145BF6413F4ACE49 /* LedgerAtlasMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = F54C1341B767FDABE89BB321 /* LedgerAtlasMacUI */; };
+		793118580FC787BF9CCCE2F6 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070F3A60D31441FDBFE96E80 /* AppIntents.swift */; };
 		8275EE13370A16F2216FF01D /* RedactedWidgetProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */; };
 /* End PBXBuildFile section */
 
@@ -39,6 +40,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		070F3A60D31441FDBFE96E80 /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
 		0B2E6D4C5DAD29CF53544AE9 /* LedgerAtlas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LedgerAtlas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerAtlasWidget.swift; sourceTree = "<group>"; };
 		262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedactedWidgetProjection.swift; sourceTree = "<group>"; };
@@ -80,6 +82,7 @@
 		7EE26042D6EC5647053770E6 /* LedgerAtlasMac */ = {
 			isa = PBXGroup;
 			children = (
+				070F3A60D31441FDBFE96E80 /* AppIntents.swift */,
 				B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */,
 			);
 			name = LedgerAtlasMac;
@@ -203,6 +206,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				793118580FC787BF9CCCE2F6 /* AppIntents.swift in Sources */,
 				0818B7A5F0BE84CB90F6C8B4 /* LedgerAtlasMacApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -233,6 +237,11 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					AppIntents,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.praxstack.ledgeratlas;
 				SDKROOT = macosx;
 			};
@@ -330,6 +339,11 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					AppIntents,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.praxstack.ledgeratlas;
 				SDKROOT = macosx;
 			};

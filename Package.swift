@@ -38,7 +38,9 @@ let package = Package(
         .linkedFramework("Vision"),
       ]),
     .executableTarget(name: "mmctl", dependencies: ["LedgerCore", "MMImport"]),
-    .executableTarget(name: "LedgerAtlasMac", dependencies: ["LedgerAtlasMacUI"]),
+    .executableTarget(
+      name: "LedgerAtlasMac", dependencies: ["LedgerAtlasMacUI"],
+      linkerSettings: [.linkedFramework("AppIntents")]),
     .testTarget(name: "LedgerCoreTests", dependencies: ["LedgerCore", "MMImport", "MMFixtures"]),
     .testTarget(
       name: "LedgerStoreTests",
