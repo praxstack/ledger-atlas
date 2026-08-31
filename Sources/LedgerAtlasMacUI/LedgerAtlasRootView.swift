@@ -666,6 +666,8 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .ledger {
       LedgerView(
         state: session.state, rows: journey.rows(for: .ledger), isEditing: journey.isEditing,
+        splitPurchases: splitPurchases,
+        splitTransactionIDs: splitTransactionIDs,
         open: openLedger,
         lifecycleMessage: lifecycleMessage,
         lastFailure: journey.lastFailure,
@@ -735,6 +737,19 @@ public struct LedgerAtlasRootView: View {
       ) { openLedger() }
       .id(selection)
     }
+  }
+
+  private var splitPurchases: [LedgerSplitPurchase] {
+    guard let snapshot = journey.snapshot else { return [] }
+    return (try? LedgerApplication.splitPurchases(from: snapshot)) ?? []
+  }
+
+  private var splitTransactionIDs: Set<String> {
+    guard let snapshot = journey.snapshot else { return [] }
+    return Set(
+      snapshot.transactions.filter { transaction in
+        transaction.links.contains { $0.kind == .split }
+      }.map(\.id))
   }
 }
 
@@ -950,6 +965,8 @@ private struct LedgerView: View {
   let state: LedgerSession.State
   let rows: [LedgerJourney.SurfaceRow]
   let isEditing: Bool
+  let splitPurchases: [LedgerSplitPurchase]
+  let splitTransactionIDs: Set<String>
   let open: () -> Void
   let lifecycleMessage: String?
   let lastFailure: String?
@@ -963,12 +980,40 @@ private struct LedgerView: View {
   var body: some View {
     if !rows.isEmpty {
       VStack(alignment: .leading, spacing: 12) {
-        List(rows, selection: $selectedID) { row in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(row.title)
-            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+        List(selection: $selectedID) {
+          ForEach(rows.filter { !splitTransactionIDs.contains($0.id) }) { row in
+            VStack(alignment: .leading, spacing: 4) {
+              Text(row.title)
+              Text(row.detail).font(.caption).foregroundStyle(.secondary)
+            }
+            .tag(row.id)
           }
-          .tag(row.id)
+          ForEach(splitPurchases, id: \.id) { purchase in
+            DisclosureGroup {
+              ForEach(purchase.lines, id: \.id) { line in
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(line.description ?? "Split line")
+                  Text("Category \(line.categoryID) · \(line.amount.amount.rawLiteral) \(line.amount.unitCode)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(
+                  "\(line.description ?? "Split line"), category \(line.categoryID), \(line.amount.amount.rawLiteral) \(line.amount.unitCode)"
+                )
+              }
+            } label: {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("Split purchase")
+                Text("\(purchase.parentAmount.amount.rawLiteral) \(purchase.parentAmount.unitCode) · \(purchase.lines.count) categories")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+            }
+            .accessibilityLabel(
+              "Split purchase, \(purchase.parentAmount.amount.rawLiteral) \(purchase.parentAmount.unitCode), \(purchase.lines.count) categories"
+            )
+          }
         }
         if let lifecycleMessage {
           Text(lifecycleMessage)
