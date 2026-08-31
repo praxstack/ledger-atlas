@@ -594,6 +594,59 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(try app.snapshot().transactions.isEmpty)
 }
 
+@Test func firstClassSplitPurchaseKeepsStableLinesAndRoundTrips() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "9", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Cash", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let groceries = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Groceries", kind: .expense, origin: origin)
+  let health = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Health", kind: .expense, origin: origin)
+  try app.createCategory(groceries)
+  try app.createCategory(health)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 8, day: 31)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  let purchaseID = String(repeating: "d", count: 64)
+  let groceryLineID = try StableLedgerID.splitLine(
+    origin: origin, localKey: String(repeating: "1", count: 64))
+  let healthLineID = try StableLedgerID.splitLine(
+    origin: origin, localKey: String(repeating: "2", count: 64))
+  let draft = try LedgerSplitDraft(
+    id: purchaseID, accountID: account.id,
+    parentAmount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("10.00")),
+    lines: [
+      try LedgerSplitLine(
+        id: groceryLineID,
+        amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("6.25")),
+        categoryID: groceries.id, description: "Food", displayOrder: 1),
+      try LedgerSplitLine(
+        id: healthLineID,
+        amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("3.75")),
+        categoryID: health.id, description: "Medicine", displayOrder: 0),
+    ], occurredAt: when, note: "Market receipt", origin: origin)
+  let created = try app.createSplit(draft, createdAt: UTCInstant(epochMilliseconds: 1))
+  let retried = try app.createSplit(draft, createdAt: UTCInstant(epochMilliseconds: 1))
+  #expect(created == retried)
+  #expect(created.id == purchaseID)
+  #expect(created.lines.map(\.id) == [healthLineID, groceryLineID])
+  #expect(created.lines.map(\.displayOrder) == [0, 1])
+  #expect(created.lines.map(\.description) == ["Medicine", "Food"])
+  #expect(created.note == "Market receipt")
+  #expect(try app.splitPurchases() == [created])
+
+  let exported = try app.exportPackage()
+  let restored = LedgerApplication(store: try makeApplicationStore())
+  try restored.importPackage(manifest: exported.manifest, payload: exported.payload)
+  #expect(try restored.splitPurchases() == [created])
+  #expect(try restored.checksum() == app.checksum())
+}
+
 @Test func applicationTransfersSplitsInstallmentsRecurrenceBudgetsSearchAndExport() throws {
   let store = try makeApplicationStore()
   let app = LedgerApplication(store: store)

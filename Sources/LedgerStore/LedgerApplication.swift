@@ -156,6 +156,146 @@ public struct LedgerApplication: LedgerClient {
     return try store.createLinkedTransactions(requests, linkKind: .split).map(\.revision)
   }
 
+  public func createSplit(_ draft: LedgerSplitDraft, createdAt: UTCInstant) throws
+    -> LedgerSplitPurchase
+  {
+    let expected = try LedgerSplitPurchase(
+      id: draft.id, accountID: draft.accountID, parentAmount: draft.parentAmount,
+      lines: draft.lines, occurredAt: draft.occurredAt, note: draft.note, origin: draft.origin)
+    if let existing = try Self.splitPurchases(from: store.readSnapshot()).first(where: {
+      $0.id == draft.id
+    }) {
+      guard existing == expected else { throw Error.invalidCommand }
+      return existing
+    }
+    _ = try store.createLinkedTransactions(
+      try Self.splitRequests(for: draft, createdAt: createdAt), linkKind: .split)
+    guard let purchase = try splitPurchases().first(where: { $0.id == draft.id }) else {
+      throw Error.invalidCommand
+    }
+    return purchase
+  }
+
+  public func splitPurchases() throws -> [LedgerSplitPurchase] {
+    try Self.splitPurchases(from: store.readSnapshot())
+  }
+
+  private static func splitRequests(
+    for draft: LedgerSplitDraft, createdAt: UTCInstant
+  ) throws -> [LedgerStore.CreateTransactionRequest] {
+    try draft.lines.map { line in
+      var literals = [
+        try LedgerSourceLiteral(field: "split.purchaseID", literal: draft.id),
+        try LedgerSourceLiteral(field: "split.lineID", literal: line.id),
+        try LedgerSourceLiteral(field: "split.lineOrder", literal: String(line.displayOrder)),
+      ]
+      if let note = draft.note {
+        literals.append(try LedgerSourceLiteral(field: "split.note", literal: note))
+      }
+      if let description = line.description {
+        literals.append(
+          try LedgerSourceLiteral(field: "split.description", literal: description))
+      }
+      let lineDraft = try LedgerTransactionDraft(
+        effects: [
+          try LedgerTransactionEffect(
+            accountID: draft.accountID, direction: .decrease, amount: line.amount)
+        ], categoryID: line.categoryID, kind: .expense, occurredAt: draft.occurredAt,
+        note: line.description ?? draft.note, sourceLiterals: literals, origin: draft.origin)
+      return LedgerStore.CreateTransactionRequest(
+        idempotencyKey: line.id, draft: lineDraft, createdAt: createdAt)
+    }
+  }
+
+  public static func splitPurchases(
+    from snapshot: LedgerStore.LedgerReadSnapshot
+  ) throws -> [LedgerSplitPurchase] {
+    let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
+    let links = snapshot.transactions.flatMap(\.links).filter { $0.kind == .split }
+    let parentIDs = Set(links.map(\.fromTransactionID)).sorted()
+    return try parentIDs.map { parentID in
+      let linkedIDs = [parentID]
+        + links.filter { $0.fromTransactionID == parentID }.map(\.toTransactionID)
+      let uniqueIDs = Array(Set(linkedIDs)).sorted()
+      guard uniqueIDs.count >= 2,
+        let members = uniqueIDs.compactMap({ transactions[$0] }) as [LedgerTransactionSnapshot]?,
+        members.count == uniqueIDs.count
+      else { throw Error.invalidCommand }
+      guard let first = members.first,
+        first.currentRevision.draft.kind == .expense,
+        first.currentRevision.draft.effects.count == 1
+      else { throw Error.invalidCommand }
+      let firstDraft = first.currentRevision.draft
+      let firstEffect = firstDraft.effects[0]
+      var total = try ExactDecimal("0")
+      var records: [
+        (id: String, order: Int, amount: CurrencyAmount, categoryID: String, description: String?)
+      ] = []
+      var purchaseID: String?
+      var purchaseNote: String?
+      var purchaseMetadataCount = 0
+      var noteMetadataCount = 0
+      var lineMetadataCount = 0
+      var orderMetadataCount = 0
+      for (index, member) in members.enumerated() {
+        let draft = member.currentRevision.draft
+        guard draft.kind == .expense, draft.effects.count == 1,
+          draft.occurredAt == firstDraft.occurredAt, draft.origin == firstDraft.origin
+        else { throw Error.invalidCommand }
+        let effect = draft.effects[0]
+        guard effect.accountID == firstEffect.accountID,
+          effect.amount.unitCode == firstEffect.amount.unitCode
+        else { throw Error.invalidCommand }
+        let fields = Dictionary(uniqueKeysWithValues: draft.sourceLiterals.map {
+          ($0.field, $0.literal)
+        })
+        if let value = fields["split.purchaseID"] {
+          purchaseMetadataCount += 1
+          guard CanonicalIdentifier.isValid(value), purchaseID == nil || purchaseID == value else {
+            throw Error.invalidCommand
+          }
+          purchaseID = value
+        }
+        if let value = fields["split.note"] {
+          noteMetadataCount += 1
+          guard purchaseNote == nil || purchaseNote == value else { throw Error.invalidCommand }
+          purchaseNote = value
+        }
+        if fields["split.lineID"] != nil { lineMetadataCount += 1 }
+        if fields["split.lineOrder"] != nil { orderMetadataCount += 1 }
+        let lineID = fields["split.lineID"] ?? member.id
+        let order: Int
+        if let raw = fields["split.lineOrder"] {
+          guard let parsed = Int(raw), parsed >= 0 else { throw Error.invalidCommand }
+          order = parsed
+        } else {
+          order = index
+        }
+        let description = fields["split.description"]
+          ?? (fields["split.lineID"] == nil ? draft.note : nil)
+        records.append((lineID, order, effect.amount, draft.categoryID ?? "", description))
+        total = try total.adding(effect.amount.amount)
+      }
+      guard
+        [purchaseMetadataCount, noteMetadataCount, lineMetadataCount, orderMetadataCount]
+          .allSatisfy({ $0 == 0 || $0 == members.count }),
+        (lineMetadataCount == 0) == (orderMetadataCount == 0)
+      else { throw Error.invalidCommand }
+      guard records.allSatisfy({ CanonicalIdentifier.isValid($0.id) && CanonicalIdentifier.isValid($0.categoryID) }) else {
+        throw Error.invalidCommand
+      }
+      let lines = try records.sorted { ($0.order, $0.id) < ($1.order, $1.id) }.map { record in
+        try LedgerSplitLine(
+          id: record.id, amount: record.amount, categoryID: record.categoryID,
+          description: record.description, displayOrder: record.order)
+      }
+      let parentAmount = try CurrencyAmount(unitCode: firstEffect.amount.unitCode, amount: total)
+      return try LedgerSplitPurchase(
+        id: purchaseID ?? parentID, accountID: firstEffect.accountID, parentAmount: parentAmount,
+        lines: lines, occurredAt: firstDraft.occurredAt, note: purchaseNote, origin: firstDraft.origin)
+    }
+  }
+
   public func createInstallmentPlan(
     _ plan: LedgerInstallmentPlan, occurredAt: SourceTemporal, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision] {
@@ -613,6 +753,13 @@ public struct IOSFacingLedgerClient: LedgerClient {
     try application.createSplit(
       idempotencyKey: idempotencyKey, accountID: accountID, parentAmount: parentAmount,
       components: components, occurredAt: occurredAt, origin: origin, createdAt: createdAt)
+  }
+  public func createSplit(_ draft: LedgerSplitDraft, createdAt: UTCInstant) throws
+    -> LedgerSplitPurchase {
+    try application.createSplit(draft, createdAt: createdAt)
+  }
+  public func splitPurchases() throws -> [LedgerSplitPurchase] {
+    try application.splitPurchases()
   }
   public func createInstallmentPlan(
     _ plan: LedgerInstallmentPlan, occurredAt: SourceTemporal, createdAt: UTCInstant

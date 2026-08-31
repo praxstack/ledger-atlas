@@ -52,6 +52,104 @@ public struct LedgerConversion: Equatable, Sendable {
   }
 }
 
+public struct LedgerSplitLine: Equatable, Sendable {
+  public let id: String
+  public let amount: CurrencyAmount
+  public let categoryID: String
+  public let description: String?
+  public let displayOrder: Int
+
+  public init(
+    id: String, amount: CurrencyAmount, categoryID: String, description: String? = nil,
+    displayOrder: Int = 0
+  ) throws {
+    let zero = try ExactDecimal("0")
+    guard CanonicalIdentifier.isValid(id), CanonicalIdentifier.isValid(categoryID),
+      amount.amount > zero, displayOrder >= 0,
+      description.map({ LedgerValidation.text($0, maximum: 4_096) }) != false
+    else { throw LedgerCommandError.invalidSplit }
+    self.id = id
+    self.amount = amount
+    self.categoryID = categoryID
+    self.description = description
+    self.displayOrder = displayOrder
+  }
+
+  public init(
+    id: String, amount: CurrencyAmount, categoryID: String, description: String? = nil, order: Int
+  ) throws {
+    try self.init(
+      id: id, amount: amount, categoryID: categoryID, description: description,
+      displayOrder: order)
+  }
+}
+
+public struct LedgerSplitDraft: Equatable, Sendable {
+  public let id: String
+  public let accountID: String
+  public let parentAmount: CurrencyAmount
+  public let lines: [LedgerSplitLine]
+  public let occurredAt: SourceTemporal
+  public let note: String?
+  public let origin: LedgerOrigin
+
+  public var purchaseID: String { id }
+  public var total: CurrencyAmount { parentAmount }
+
+  public init(
+    id: String, accountID: String, parentAmount: CurrencyAmount, lines: [LedgerSplitLine],
+    occurredAt: SourceTemporal, note: String? = nil, origin: LedgerOrigin
+  ) throws {
+    let zero = try ExactDecimal("0")
+    guard CanonicalIdentifier.isValid(id), CanonicalIdentifier.isValid(accountID),
+      !lines.isEmpty, lines.count <= 64, parentAmount.amount > zero,
+      note.map({ LedgerValidation.text($0, maximum: 4_096) }) != false,
+      Set(lines.map(\.id)).count == lines.count,
+      Set(lines.map(\.displayOrder)).count == lines.count,
+      lines.allSatisfy({ $0.amount.unitCode == parentAmount.unitCode })
+    else { throw LedgerCommandError.invalidSplit }
+    var total = zero
+    for line in lines { total = try total.adding(line.amount.amount) }
+    guard total == parentAmount.amount else { throw LedgerCommandError.invalidSplit }
+    self.id = id
+    self.accountID = accountID
+    self.parentAmount = parentAmount
+    self.lines = lines.sorted { ($0.displayOrder, $0.id) < ($1.displayOrder, $1.id) }
+    self.occurredAt = occurredAt
+    self.note = note
+    self.origin = origin
+  }
+}
+
+public struct LedgerSplitPurchase: Equatable, Sendable {
+  public let id: String
+  public let accountID: String
+  public let parentAmount: CurrencyAmount
+  public let lines: [LedgerSplitLine]
+  public let occurredAt: SourceTemporal
+  public let note: String?
+  public let origin: LedgerOrigin
+
+  public var purchaseID: String { id }
+  public var total: CurrencyAmount { parentAmount }
+
+  public init(
+    id: String, accountID: String, parentAmount: CurrencyAmount, lines: [LedgerSplitLine],
+    occurredAt: SourceTemporal, note: String? = nil, origin: LedgerOrigin
+  ) throws {
+    let draft = try LedgerSplitDraft(
+      id: id, accountID: accountID, parentAmount: parentAmount, lines: lines,
+      occurredAt: occurredAt, note: note, origin: origin)
+    self.id = draft.id
+    self.accountID = draft.accountID
+    self.parentAmount = draft.parentAmount
+    self.lines = draft.lines
+    self.occurredAt = draft.occurredAt
+    self.note = draft.note
+    self.origin = draft.origin
+  }
+}
+
 public enum LedgerRecurrenceFrequency: String, CaseIterable, Sendable {
   case daily
   case weekly
@@ -426,6 +524,8 @@ public protocol LedgerClient {
     components: [(amount: CurrencyAmount, categoryID: String)], occurredAt: SourceTemporal,
     origin: LedgerOrigin, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision]
+  func createSplit(_ draft: LedgerSplitDraft, createdAt: UTCInstant) throws -> LedgerSplitPurchase
+  func splitPurchases() throws -> [LedgerSplitPurchase]
   func createInstallmentPlan(
     _ plan: LedgerInstallmentPlan, occurredAt: SourceTemporal, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision]

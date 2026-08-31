@@ -374,6 +374,11 @@ public enum StableLedgerID {
     return digest(["ledger-atlas:v1:installment-plan", origin.id, localKey])
   }
 
+  public static func splitLine(origin: LedgerOrigin, localKey: String) throws -> String {
+    guard CanonicalIdentifier.isValid(localKey) else { throw LedgerDomainError.invalidIdentifier }
+    return digest(["ledger-atlas:v1:split-line", origin.id, localKey])
+  }
+
   private static func digest(_ components: [String]) -> String {
     var hasher = SHA256()
     for component in components {
@@ -385,7 +390,7 @@ public enum StableLedgerID {
   }
 }
 
-private enum LedgerValidation {
+enum LedgerValidation {
   static func text(_ value: String, maximum: Int) -> Bool {
     !value.isEmpty && value.utf8.count <= maximum && !value.contains("\u{0}")
   }
