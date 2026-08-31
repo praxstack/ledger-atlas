@@ -344,6 +344,13 @@ public enum StableCanonicalID {
     return digest(["ledger-atlas/account/v1", profileID, sourceAccountID])
   }
 
+  public static func category(profileID: String, sourceCategoryID: String) throws -> String {
+    guard !profileID.isEmpty, profileID.utf8.count <= 256,
+      !sourceCategoryID.isEmpty, sourceCategoryID.utf8.count <= 1024
+    else { throw CanonicalPersistenceError.invalidIdentifier }
+    return digest(["ledger-atlas/category/v1", profileID, sourceCategoryID])
+  }
+
   public static func preservationAnchor(
     stagingID: String, sourceSubjectID: String, kind: CanonicalPreservationSubjectKind
   ) throws -> String {

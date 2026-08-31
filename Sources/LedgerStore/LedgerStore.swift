@@ -1124,7 +1124,8 @@ public final class LedgerStore {
   }
 
   package static func materializeImportedEvents(
-    on database: OpaquePointer, knownTransactionIDs: Set<String>? = nil
+    on database: OpaquePointer, knownTransactionIDs: Set<String>? = nil,
+    categoryIDsByTransactionID: [String: String] = [:]
   ) throws {
     let origin = try LedgerOrigin(id: String(repeating: "e", count: 64), label: "imported")
     try ensureOrigin(origin, on: database)
@@ -1152,6 +1153,14 @@ public final class LedgerStore {
           ], on: database)
         knownAccounts.insert(event.accountID)
       }
+      let categoryID = categoryIDsByTransactionID[event.id]
+      if let categoryID {
+        guard Self.categoryIsActive(
+          categoryID,
+          for: event.kind == .income ? .income : .expense,
+          on: database)
+        else { throw Error.incompatibleCanonicalStore }
+      }
       let revision = try LedgerTransactionRevision(
         id: StableLedgerID.revision(transactionID: event.id, revision: 1),
         transactionID: event.id, revision: 1, predecessorID: nil,
@@ -1159,7 +1168,7 @@ public final class LedgerStore {
           effects: [
             try LedgerTransactionEffect(
               accountID: event.accountID, direction: event.direction, amount: event.amount)
-          ], categoryID: nil, kind: event.kind, occurredAt: event.occurredAt,
+          ], categoryID: categoryID, kind: event.kind, occurredAt: event.occurredAt,
           sourceLiterals: [
             try LedgerSourceLiteral(field: "import.eventID", literal: event.id)
           ], origin: origin),

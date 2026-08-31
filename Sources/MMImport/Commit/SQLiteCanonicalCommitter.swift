@@ -315,7 +315,10 @@ public struct SQLiteCanonicalCommitter: Sendable {
       }
       try insertReceiptMembership(request: request, plan: plan, into: database)
       do {
-        try LedgerStore.materializeImportedEvents(on: database)
+        let importedCategoryIDs = try materializeMoneyManagerV19Entities(
+          graph: prepared.graph, request: request, database: database)
+        try LedgerStore.materializeImportedEvents(
+          on: database, categoryIDsByTransactionID: importedCategoryIDs)
       } catch {
         throw CanonicalCommitError.canonicalWriteFailed
       }
@@ -490,7 +493,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
         throw CanonicalCommitError.unauthenticatedStaging
       }
       try snapshot.validatePathIdentity()
-      return PreparedCommit(snapshot: snapshot, plan: plan, report: report)
+      return PreparedCommit(snapshot: snapshot, graph: graph, plan: plan, report: report)
     } catch {
       snapshot.close()
       throw error
@@ -914,6 +917,287 @@ public struct SQLiteCanonicalCommitter: Sendable {
     case .kind:
       return literal == event.kind.rawValue
     }
+  }
+
+  /// Materializes the vendor's account and category entities from the authenticated staging
+  /// graph before event revisions are created. Events keep the source row as their provenance;
+  /// this pass only supplies the stable canonical references needed by the native ledger.
+  private func materializeMoneyManagerV19Entities(
+    graph: StagingGraph, request: CanonicalCommitRequest, database: OpaquePointer
+  ) throws -> [String: String] {
+    guard request.isObservedV19AdapterAuthorized else { return [:] }
+    let origin = try LedgerOrigin.imported()
+    try run(
+      database,
+      sql: "INSERT INTO main.ledger_origin(origin_id, label, provenance_id) VALUES (?, ?, ?) ON CONFLICT(origin_id) DO NOTHING",
+      values: [.text(origin.id), .text(origin.label), .optionalText(origin.provenanceID)])
+    guard try importedOriginMatches(origin, database: database) else {
+      throw CanonicalCommitError.unsafeMapping
+    }
+
+    func fields(for recordID: String) -> [StagedFieldTarget] {
+      graph.fields.values.filter { $0.recordID == recordID }
+    }
+    func literal(_ fields: [StagedFieldTarget], aliases: [String]) -> String? {
+      for alias in aliases {
+        guard let field = fields.first(where: {
+          $0.columnName.caseInsensitiveCompare(alias) == .orderedSame
+        }) else { continue }
+        return MoneyManagerV19Vocabulary.mappingLiteral(
+          storageClass: field.storageClass, payload: field.payload)
+      }
+      return nil
+    }
+    func nonEmpty(_ value: String?) -> String? {
+      guard let value, !value.isEmpty, value != "NULL", value != "null" else { return nil }
+      return value
+    }
+    func validText(_ value: String, maximum: Int) -> Bool {
+      !value.isEmpty && value.utf8.count <= maximum && !value.contains("\u{0}")
+    }
+
+    let currencyRecords = graph.records.values.filter {
+      MoneyManagerV19Vocabulary.currencyTables.contains(graph.tables[$0.tableID]?.name ?? "")
+    }
+    var currenciesByUID: [String: String] = [:]
+    for record in currencyRecords {
+      let sourceFields = fields(for: record.recordKey == "" ? "" : recordID(for: record, graph: graph))
+      guard let uid = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.uidAliases)),
+        let iso = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.isoAliases)),
+        validText(iso, maximum: 64),
+        (try? CurrencyAmount(unitCode: iso, amount: ExactDecimal("0"))) != nil,
+        currenciesByUID[uid] == nil
+      else { throw CanonicalCommitError.unsafeMapping }
+      currenciesByUID[uid] = iso
+    }
+
+    let accountRecords = graph.records.values.filter {
+      MoneyManagerV19Vocabulary.accountTables.contains(graph.tables[$0.tableID]?.name ?? "")
+    }
+    for record in accountRecords.sorted(by: { $0.recordKey < $1.recordKey }) {
+      let sourceRecordID = recordID(for: record, graph: graph)
+      let sourceFields = fields(for: sourceRecordID)
+      guard let uid = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.uidAliases))
+      else { throw CanonicalCommitError.unsafeMapping }
+      let accountID = try StableCanonicalID.account(
+        profileID: request.expectedManifest.profileID, sourceAccountID: uid)
+      let name = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.nameAliases)) ?? uid
+      guard validText(name, maximum: 256) else { throw CanonicalCommitError.unsafeMapping }
+      let explicitCurrencyUID = nonEmpty(
+        literal(sourceFields, aliases: MoneyManagerV19Vocabulary.currencyUIDAliases))
+      let explicitCurrency = explicitCurrencyUID.flatMap { currenciesByUID[$0] }
+      if explicitCurrencyUID != nil && explicitCurrency == nil {
+        throw CanonicalCommitError.unsafeMapping
+      }
+      let eventUnits = Set(
+        request.events.filter { $0.accountID == accountID }.map { $0.amount.unitCode })
+      let inferredCurrency: String?
+      if let explicitCurrency {
+        inferredCurrency = explicitCurrency
+      } else if eventUnits.count == 1 {
+        inferredCurrency = eventUnits.first
+      } else if currenciesByUID.count == 1 {
+        inferredCurrency = currenciesByUID.values.first
+      } else {
+        inferredCurrency = nil
+      }
+      guard let currency = inferredCurrency,
+        (try? CurrencyAmount(unitCode: currency, amount: ExactDecimal("0"))) != nil
+      else { throw CanonicalCommitError.unsafeMapping }
+      try insertImportedAccount(
+        id: accountID, name: name, currency: currency, origin: origin, database: database)
+    }
+
+    let categoryRecords = graph.records.values.filter {
+      MoneyManagerV19Vocabulary.categoryTables.contains(graph.tables[$0.tableID]?.name ?? "")
+    }
+    let categoryRecordIDsByUID: [String: String] = try Dictionary(
+      uniqueKeysWithValues: categoryRecords.map { record in
+        let sourceRecordID = recordID(for: record, graph: graph)
+        let sourceFields = fields(for: sourceRecordID)
+        guard let uid = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.uidAliases))
+        else { throw CanonicalCommitError.unsafeMapping }
+        return (uid, sourceRecordID)
+      })
+    var usageByCategory: [String: Set<String>] = [:]
+    var categoryUIDByEventID: [String: String] = [:]
+    for event in request.events {
+      let sourceFields = fields(for: event.sourceRecordID)
+      guard let categoryUID = nonEmpty(
+        literal(sourceFields, aliases: MoneyManagerV19Vocabulary.categoryAliases)),
+        categoryRecordIDsByUID[categoryUID] != nil
+      else { throw CanonicalCommitError.unsafeMapping }
+      let kind = event.kind == .income ? LedgerTransactionKind.income.rawValue
+        : LedgerTransactionKind.expense.rawValue
+      usageByCategory[categoryUID, default: []].insert(kind)
+      categoryUIDByEventID[event.eventID] = categoryUID
+    }
+
+    var categoryRows: [ImportedCategoryRow] = []
+    var siblingOrders: [String: Int] = [:]
+    for record in categoryRecords.sorted(by: { recordID(for: $0, graph: graph) < recordID(for: $1, graph: graph) }) {
+      let sourceRecordID = recordID(for: record, graph: graph)
+      let sourceFields = fields(for: sourceRecordID)
+      guard let uid = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.uidAliases))
+      else { throw CanonicalCommitError.unsafeMapping }
+      let parentUID = normalizedParentUID(
+        nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.parentCategoryAliases)))
+      guard parentUID != uid, parentUID == nil || categoryRecordIDsByUID[parentUID!] != nil
+      else { throw CanonicalCommitError.unsafeMapping }
+      let name = nonEmpty(literal(sourceFields, aliases: MoneyManagerV19Vocabulary.nameAliases)) ?? uid
+      guard validText(name, maximum: 256) else { throw CanonicalCommitError.unsafeMapping }
+      let kind: LedgerCategoryKind
+      switch usageByCategory[uid, default: []] {
+      case [LedgerTransactionKind.income.rawValue]: kind = .income
+      case [LedgerTransactionKind.expense.rawValue]: kind = .expense
+      default: kind = .neutral
+      }
+      let siblingKey = parentUID ?? ""
+      let displayOrder = siblingOrders[siblingKey, default: 0]
+      siblingOrders[siblingKey] = displayOrder + 1
+      categoryRows.append(
+        ImportedCategoryRow(
+          uid: uid, id: try StableCanonicalID.category(
+            profileID: request.expectedManifest.profileID, sourceCategoryID: uid),
+          name: name, kind: kind, parentUID: parentUID, displayOrder: displayOrder))
+    }
+    let categoryIDsByUID = Dictionary(uniqueKeysWithValues: categoryRows.map { ($0.uid, $0.id) })
+    var pending = categoryRows
+    var insertedUIDs: Set<String> = []
+    while !pending.isEmpty {
+      let ready = pending.filter { $0.parentUID == nil || insertedUIDs.contains($0.parentUID!) }
+      guard !ready.isEmpty else { throw CanonicalCommitError.unsafeMapping }
+      for row in ready.sorted(by: { $0.id < $1.id }) {
+        let parentID = row.parentUID.flatMap { categoryIDsByUID[$0] }
+        try insertImportedCategory(
+          id: row.id, name: row.name, kind: row.kind, parentID: parentID,
+          displayOrder: row.displayOrder, origin: origin, database: database)
+        insertedUIDs.insert(row.uid)
+      }
+      pending.removeAll { insertedUIDs.contains($0.uid) }
+    }
+
+    var eventCategoryIDs: [String: String] = [:]
+    for event in request.events {
+      guard let categoryUID = categoryUIDByEventID[event.eventID],
+        let row = categoryRows.first(where: { $0.uid == categoryUID })
+      else { throw CanonicalCommitError.unsafeMapping }
+      let compatible = (row.kind == .income && event.kind == .income)
+        || (row.kind == .expense && event.kind == .expense)
+      if compatible { eventCategoryIDs[event.eventID] = row.id }
+    }
+    return eventCategoryIDs
+  }
+
+  private func recordID(for record: StagedRecordTarget, graph: StagingGraph) -> String {
+    graph.records.first(where: { $0.value.recordKey == record.recordKey && $0.value.tableID == record.tableID })?.key
+      ?? ""
+  }
+
+  private func normalizedParentUID(_ value: String?) -> String? {
+    guard let value else { return nil }
+    switch value.trimmingCharacters(in: .whitespacesAndNewlines) {
+    case "", "0", "-1", "NULL", "null": return nil
+    default: return value
+    }
+  }
+
+  private func importedOriginMatches(_ origin: LedgerOrigin, database: OpaquePointer) throws -> Bool {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(
+      database,
+      "SELECT label, provenance_id FROM main.ledger_origin WHERE origin_id=?",
+      -1, &statement, nil) == SQLITE_OK,
+      let statement, bind(.text(origin.id), to: statement, at: 1)
+    else { throw CanonicalCommitError.canonicalWriteFailed }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else { return false }
+    return columnText(statement, 0) == origin.label
+      && columnOptionalText(statement, 1) == origin.provenanceID
+  }
+
+  private func insertImportedAccount(
+    id: String, name: String, currency: String, origin: LedgerOrigin, database: OpaquePointer
+  ) throws {
+    guard try countRows(
+      database, sql: "SELECT count(*) FROM main.ledger_account WHERE account_id=?",
+      values: [.text(id)]) == 0 else {
+      guard try accountMatches(id: id, name: name, currency: currency, origin: origin, database: database)
+      else { throw CanonicalCommitError.unsafeMapping }
+      return
+    }
+    try run(
+      database,
+      sql: "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+      values: [
+        .text(id), .text(name), .text(currency), .text(origin.id),
+        .text(LedgerLifecycleState.active.rawValue),
+      ])
+  }
+
+  private func accountMatches(
+    id: String, name: String, currency: String, origin: LedgerOrigin, database: OpaquePointer
+  ) throws -> Bool {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(
+      database,
+      "SELECT name, currency_unit, origin_id, lifecycle FROM main.ledger_account WHERE account_id=?",
+      -1, &statement, nil) == SQLITE_OK,
+      let statement, bind(.text(id), to: statement, at: 1)
+    else { throw CanonicalCommitError.canonicalReadFailed }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else { return false }
+    return columnText(statement, 0) == name && columnText(statement, 1) == currency
+      && columnText(statement, 2) == origin.id
+      && columnText(statement, 3) == LedgerLifecycleState.active.rawValue
+  }
+
+  private func insertImportedCategory(
+    id: String, name: String, kind: LedgerCategoryKind, parentID: String?, displayOrder: Int,
+    origin: LedgerOrigin, database: OpaquePointer
+  ) throws {
+    let existing = try countRows(
+      database, sql: "SELECT count(*) FROM main.ledger_category WHERE category_id=?",
+      values: [.text(id)])
+    if existing == 0 {
+      try run(
+        database,
+        sql: "INSERT INTO main.ledger_category(category_id, name, kind, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+        values: [
+          .text(id), .text(name), .text(kind.rawValue), .text(origin.id),
+          .text(LedgerLifecycleState.active.rawValue),
+        ])
+      try run(
+        database,
+        sql: "INSERT INTO main.ledger_category_tree(category_id, parent_category_id, display_order, hidden) VALUES (?, ?, ?, ?)",
+        values: [.text(id), .optionalText(parentID), .int(displayOrder), .int(0)])
+    }
+    guard try categoryMatches(
+      id: id, name: name, kind: kind, parentID: parentID, displayOrder: displayOrder,
+      origin: origin, database: database)
+    else { throw CanonicalCommitError.unsafeMapping }
+  }
+
+  private func categoryMatches(
+    id: String, name: String, kind: LedgerCategoryKind, parentID: String?, displayOrder: Int,
+    origin: LedgerOrigin, database: OpaquePointer
+  ) throws -> Bool {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(
+      database,
+      "SELECT c.name, c.kind, c.origin_id, c.lifecycle, t.parent_category_id, t.display_order, t.hidden FROM main.ledger_category c LEFT JOIN main.ledger_category_tree t ON t.category_id=c.category_id WHERE c.category_id=?",
+      -1, &statement, nil) == SQLITE_OK,
+      let statement, bind(.text(id), to: statement, at: 1)
+    else { throw CanonicalCommitError.canonicalReadFailed }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else { return false }
+    let storedParent = columnOptionalText(statement, 4)
+    let storedOrder = sqlite3_column_type(statement, 5) == SQLITE_NULL ? 0 : Int(sqlite3_column_int64(statement, 5))
+    let storedHidden = sqlite3_column_type(statement, 6) == SQLITE_NULL ? false : sqlite3_column_int(statement, 6) == 1
+    return columnText(statement, 0) == name && columnText(statement, 1) == kind.rawValue
+      && columnText(statement, 2) == origin.id
+      && columnText(statement, 3) == LedgerLifecycleState.active.rawValue
+      && storedParent == parentID && storedOrder == displayOrder && !storedHidden
   }
 
   private func temporalBindingLiteral(_ value: SourceTemporal) -> String {
@@ -2902,6 +3186,16 @@ private final class StagingSnapshot: @unchecked Sendable {
 
 private struct PreparedCommit {
   let snapshot: StagingSnapshot
+  let graph: StagingGraph
   let plan: TrustedCommitPlan
   let report: ReconciliationReport
+}
+
+private struct ImportedCategoryRow {
+  let uid: String
+  let id: String
+  let name: String
+  let kind: LedgerCategoryKind
+  let parentUID: String?
+  let displayOrder: Int
 }

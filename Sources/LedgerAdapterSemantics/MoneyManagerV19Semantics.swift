@@ -28,6 +28,10 @@ public enum MoneyManagerV19Semantics {
   public static let uidAliases = ["uid", "UID", "ZUID", "Z_PK"]
   public static let isoAliases = ["ISO", "ZISO", "CODE"]
   public static let nameAliases = ["name", "NAME", "ZNAME"]
+  public static let parentCategoryAliases = [
+    "pUid", "PUID", "ZPUID", "parentUid", "PARENT_UID", "ZPARENTUID",
+    "parentCategoryUid", "PARENT_CATEGORY_UID", "ZPARENTCATEGORYUID",
+  ]
   public static let assetAliases = ["assetUid", "ASSET_UID", "ZASSETUID", "ZASSET"]
   public static let currencyUIDAliases = [
     "currencyUid", "CURRENCY_UID", "ZCURRENCYUID", "ZCURRENCY",
