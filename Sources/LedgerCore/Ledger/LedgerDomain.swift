@@ -15,6 +15,13 @@ public enum LedgerLifecycleState: String, CaseIterable, Sendable {
   case tombstoned
 }
 
+public enum LedgerAccountVariant: String, CaseIterable, Sendable {
+  case standard
+  case loan
+  case overdraft
+  case investment
+}
+
 public enum LedgerCategoryKind: String, CaseIterable, Sendable {
   case income
   case expense
@@ -95,18 +102,51 @@ public struct LedgerAccount: Equatable, Sendable {
   public let currencyUnit: String
   public let origin: LedgerOrigin
   public let lifecycle: LedgerLifecycleState
+  public let groupID: String?
+  public let displayOrder: Int
+  public let hidden: Bool
+  public let includeInTotals: Bool
+  public let variant: LedgerAccountVariant
 
   public init(
     id: String, name: String, currencyUnit: String, origin: LedgerOrigin,
-    lifecycle: LedgerLifecycleState = .active
+    lifecycle: LedgerLifecycleState = .active, groupID: String? = nil, displayOrder: Int = 0,
+    hidden: Bool = false, includeInTotals: Bool = true,
+    variant: LedgerAccountVariant = .standard
   ) throws {
     guard CanonicalIdentifier.isValid(id), LedgerValidation.text(name, maximum: 256),
-      (try? CurrencyAmount(unitCode: currencyUnit, amount: ExactDecimal("0"))) != nil
+      (try? CurrencyAmount(unitCode: currencyUnit, amount: ExactDecimal("0"))) != nil,
+      groupID.map(CanonicalIdentifier.isValid) != false, displayOrder >= 0
     else { throw LedgerDomainError.invalidReference }
     self.id = id
     self.name = name
     self.currencyUnit = currencyUnit
     self.origin = origin
+    self.lifecycle = lifecycle
+    self.groupID = groupID
+    self.displayOrder = displayOrder
+    self.hidden = hidden
+    self.includeInTotals = includeInTotals
+    self.variant = variant
+  }
+}
+
+public struct LedgerAccountGroup: Equatable, Sendable {
+  public let id: String
+  public let name: String
+  public let displayOrder: Int
+  public let lifecycle: LedgerLifecycleState
+
+  public init(
+    id: String, name: String, displayOrder: Int = 0,
+    lifecycle: LedgerLifecycleState = .active
+  ) throws {
+    guard CanonicalIdentifier.isValid(id), LedgerValidation.text(name, maximum: 256),
+      displayOrder >= 0
+    else { throw LedgerDomainError.invalidReference }
+    self.id = id
+    self.name = name
+    self.displayOrder = displayOrder
     self.lifecycle = lifecycle
   }
 }
@@ -117,12 +157,18 @@ public struct LedgerCategory: Equatable, Sendable {
   public let kind: LedgerCategoryKind
   public let origin: LedgerOrigin
   public let lifecycle: LedgerLifecycleState
+  public let parentID: String?
+  public let displayOrder: Int
+  public let hidden: Bool
 
   public init(
     id: String, name: String, kind: LedgerCategoryKind, origin: LedgerOrigin,
-    lifecycle: LedgerLifecycleState = .active
+    lifecycle: LedgerLifecycleState = .active, parentID: String? = nil, displayOrder: Int = 0,
+    hidden: Bool = false
   ) throws {
-    guard CanonicalIdentifier.isValid(id), LedgerValidation.text(name, maximum: 256) else {
+    guard CanonicalIdentifier.isValid(id), LedgerValidation.text(name, maximum: 256),
+      parentID.map(CanonicalIdentifier.isValid) != false, parentID != id, displayOrder >= 0
+    else {
       throw LedgerDomainError.invalidReference
     }
     self.id = id
@@ -130,6 +176,9 @@ public struct LedgerCategory: Equatable, Sendable {
     self.kind = kind
     self.origin = origin
     self.lifecycle = lifecycle
+    self.parentID = parentID
+    self.displayOrder = displayOrder
+    self.hidden = hidden
   }
 }
 

@@ -178,6 +178,8 @@ public struct LedgerInstallmentPlan: Equatable, Sendable {
 
 public struct LedgerSearchQuery: Equatable, Sendable {
   public var accountID: String?
+  public var accountHidden: Bool?
+  public var accountIncludedInTotals: Bool?
   public var categoryID: String?
   public var noteContains: String?
   public var tagContains: String?
@@ -193,7 +195,8 @@ public struct LedgerSearchQuery: Equatable, Sendable {
   public var includeTombstones: Bool
 
   public init(
-    accountID: String? = nil, categoryID: String? = nil, noteContains: String? = nil,
+    accountID: String? = nil, accountHidden: Bool? = nil,
+    accountIncludedInTotals: Bool? = nil, categoryID: String? = nil, noteContains: String? = nil,
     tagContains: String? = nil, textContains: String? = nil, kind: LedgerTransactionKind? = nil,
     lifecycle: LedgerLifecycleState? = nil, occurredOnOrAfter: SourceLocalDate? = nil,
     occurredOnOrBefore: SourceLocalDate? = nil, minimumAmount: ExactDecimal? = nil,
@@ -201,6 +204,8 @@ public struct LedgerSearchQuery: Equatable, Sendable {
     includeTombstones: Bool = false
   ) {
     self.accountID = accountID
+    self.accountHidden = accountHidden
+    self.accountIncludedInTotals = accountIncludedInTotals
     self.categoryID = categoryID
     self.noteContains = noteContains
     self.tagContains = tagContains
@@ -236,16 +241,18 @@ public struct LedgerReportRow: Equatable, Sendable, Identifiable {
 public struct LedgerReport: Equatable, Sendable {
   public let title: String
   public let rows: [LedgerReportRow]
+  public let categoryRows: [LedgerReportRow]
   public let inventory: [LedgerReportRow]
   public let totalLiteral: String
   public let unitCode: String
 
   public init(
     title: String, rows: [LedgerReportRow], totalLiteral: String, unitCode: String,
-    inventory: [LedgerReportRow] = []
+    inventory: [LedgerReportRow] = [], categoryRows: [LedgerReportRow] = []
   ) {
     self.title = title
     self.rows = rows
+    self.categoryRows = categoryRows
     self.inventory = inventory
     self.totalLiteral = totalLiteral
     self.unitCode = unitCode
@@ -253,8 +260,11 @@ public struct LedgerReport: Equatable, Sendable {
 
   public var accessibleTable: String {
     let activity = rows.map { "\($0.label): \($0.amountLiteral) \($0.unitCode) (\($0.count))" }
+    let categories = categoryRows.map {
+      "Category \($0.label): \($0.amountLiteral) \($0.unitCode) (\($0.count))"
+    }
     let counts = inventory.map { "\($0.label): \($0.count)" }
-    return ([title] + activity + ["Total: \(totalLiteral) \(unitCode)"] + counts)
+    return ([title] + activity + categories + ["Total: \(totalLiteral) \(unitCode)"] + counts)
       .joined(separator: "\n")
   }
 }
@@ -270,8 +280,11 @@ public struct LedgerProjection: Equatable, Sendable {
 }
 
 public enum LedgerPortablePackageFormat {
-  public static let version = 1
+  public static let version = 2
   public static let fingerprint =
+    "5625a6dea5c0103a7bdaf216491d0e96397887eaf2cf93b73261f242d1b8766c"
+  public static let legacyV1Version = 1
+  public static let legacyV1Fingerprint =
     "b2a8537dcfb66549c30e77f2d6318170550fd69d7cba092589f7f0b579711a2e"
   public static let legacyV10SchemaVersion = 10
   public static let legacyV10SchemaFingerprint =
@@ -333,6 +346,7 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
   public let formatVersion: Int
   public let formatFingerprint: String
   public let accounts: [LedgerAccount]
+  public let accountGroups: [LedgerAccountGroup]
   public let categories: [LedgerCategory]
   public let revisions: [LedgerTransactionRevision]
   public let links: [LedgerTransactionLink]
@@ -346,6 +360,7 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
 
   public init(
     formatVersion: Int, formatFingerprint: String, accounts: [LedgerAccount],
+    accountGroups: [LedgerAccountGroup] = [],
     categories: [LedgerCategory], revisions: [LedgerTransactionRevision],
     links: [LedgerTransactionLink], recurrenceRules: [LedgerRecurrenceRule],
     budgets: [LedgerBudget], installmentPlans: [LedgerInstallmentPlan],
@@ -354,6 +369,7 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
     self.formatVersion = formatVersion
     self.formatFingerprint = formatFingerprint
     self.accounts = accounts
+    self.accountGroups = accountGroups
     self.categories = categories
     self.revisions = revisions
     self.links = links
@@ -365,6 +381,7 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
 
   public init(
     schemaVersion: Int, schemaFingerprint: String, accounts: [LedgerAccount],
+    accountGroups: [LedgerAccountGroup] = [],
     categories: [LedgerCategory], revisions: [LedgerTransactionRevision],
     links: [LedgerTransactionLink], recurrenceRules: [LedgerRecurrenceRule],
     budgets: [LedgerBudget], installmentPlans: [LedgerInstallmentPlan],
@@ -372,6 +389,7 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
   ) {
     self.init(
       formatVersion: schemaVersion, formatFingerprint: schemaFingerprint, accounts: accounts,
+      accountGroups: accountGroups,
       categories: categories, revisions: revisions, links: links,
       recurrenceRules: recurrenceRules, budgets: budgets, installmentPlans: installmentPlans,
       preservedSource: preservedSource)
@@ -380,7 +398,13 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
 
 public protocol LedgerClient {
   func createAccount(_ account: LedgerAccount) throws
+  func createAccountGroup(_ group: LedgerAccountGroup) throws
+  func updateAccount(_ account: LedgerAccount) throws
+  func updateAccountGroup(_ group: LedgerAccountGroup) throws
+  func tombstoneAccount(_ accountID: String) throws
   func createCategory(_ category: LedgerCategory) throws
+  func updateCategory(_ category: LedgerCategory) throws
+  func tombstoneCategory(_ categoryID: String) throws
   func createTransaction(
     idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant
   ) throws -> LedgerTransactionRevision

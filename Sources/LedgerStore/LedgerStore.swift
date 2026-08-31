@@ -8,6 +8,7 @@ import LedgerCore
 public final class LedgerStore {
   public struct LedgerReadSnapshot: Sendable {
     public let accounts: [LedgerAccount]
+    public let accountGroups: [LedgerAccountGroup]
     public let transactions: [LedgerTransactionSnapshot]
     public let revisionHistory: [LedgerTransactionRevision]
     public let undisplayedImportedEventCount: Int
@@ -18,13 +19,15 @@ public final class LedgerStore {
     public let preservedSource: [LedgerPreservedSourceRecord]
 
     public init(
-      accounts: [LedgerAccount], transactions: [LedgerTransactionSnapshot],
+      accounts: [LedgerAccount], accountGroups: [LedgerAccountGroup] = [],
+      transactions: [LedgerTransactionSnapshot],
       revisionHistory: [LedgerTransactionRevision], undisplayedImportedEventCount: Int,
       categories: [LedgerCategory] = [], recurrenceRules: [LedgerRecurrenceRule] = [],
       budgets: [LedgerBudget] = [], installmentPlans: [LedgerInstallmentPlan] = [],
       preservedSource: [LedgerPreservedSourceRecord] = []
     ) {
       self.accounts = accounts
+      self.accountGroups = accountGroups
       self.transactions = transactions
       self.revisionHistory = revisionHistory
       self.undisplayedImportedEventCount = undisplayedImportedEventCount
@@ -54,7 +57,19 @@ public final class LedgerStore {
   public enum Error: Swift.Error, Equatable, Sendable {
     case backupPublicationCompleted
     case incompatibleCanonicalStore
+    case categoryCycleDetected
+    case categoryHasActiveChildren
+    case accountGroupHasActiveAccounts
     case sqliteFailure(code: Int32)
+
+    fileprivate var preservesMutationError: Bool {
+      switch self {
+      case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts:
+        true
+      default:
+        false
+      }
+    }
   }
 
   package enum MutationTestPhase: Equatable, Sendable {
@@ -387,10 +402,11 @@ public final class LedgerStore {
       Self.scalarInt("SELECT count(*) FROM main.economic_event", on: database) ?? -1
     guard importedCount >= 0 else { throw Error.incompatibleCanonicalStore }
     return .init(
-      accounts: snapshot.accounts, transactions: snapshot.transactions,
+      accounts: snapshot.accounts, accountGroups: snapshot.accountGroups,
+      transactions: snapshot.transactions,
       revisionHistory: snapshot.revisionHistory,
       undisplayedImportedEventCount: importedCount,
-      categories: try Self.loadCategories(on: database),
+      categories: snapshot.categories,
       recurrenceRules: try Self.loadRecurrenceRules(on: database),
       budgets: try Self.loadBudgets(on: database),
       installmentPlans: try Self.loadInstallmentPlans(on: database),
@@ -575,26 +591,133 @@ public final class LedgerStore {
         }
         return try Self.placeholderResult(origin: account.origin, status: .unchanged)
       }
+      try Self.ensureAccountGroup(account.groupID, in: snapshot)
       try Self.ensureOrigin(account.origin, on: database)
       try Self.run(
         "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
         values: [
-          .text(account.id), .text(account.name), .text(account.currencyUnit),
-          .text(account.origin.id), .text(account.lifecycle.rawValue),
+            .text(account.id), .text(account.name), .text(account.currencyUnit),
+            .text(account.origin.id), .text(account.lifecycle.rawValue),
+          ], on: database)
+      try Self.writeAccountPreferences(account, on: database)
+      return try Self.placeholderResult(origin: account.origin)
+    }
+  }
+
+  public func createAccountGroup(_ group: LedgerAccountGroup) throws {
+    _ = try mutate { snapshot in
+      if let existing = snapshot.accountGroups.first(where: { $0.id == group.id }) {
+        guard existing == group else { throw Error.incompatibleCanonicalStore }
+        return try Self.placeholderResult(origin: try LedgerOrigin.macNative(), status: .unchanged)
+      }
+      try Self.run(
+        "INSERT INTO main.ledger_account_group(group_id, name, display_order, lifecycle) VALUES (?, ?, ?, ?)",
+        values: [
+          .text(group.id), .text(group.name), .int(group.displayOrder),
+          .text(group.lifecycle.rawValue),
         ], on: database)
+      return try Self.placeholderResult(origin: try LedgerOrigin.macNative())
+    }
+  }
+
+  public func updateAccount(_ account: LedgerAccount) throws {
+    _ = try mutate { snapshot in
+      guard let existing = snapshot.accounts.first(where: { $0.id == account.id }),
+        existing.origin == account.origin,
+        existing.currencyUnit == account.currencyUnit
+      else { throw Error.incompatibleCanonicalStore }
+      try Self.ensureAccountGroup(account.groupID, in: snapshot)
+      try Self.run(
+        "UPDATE main.ledger_account SET name=?, lifecycle=? WHERE account_id=?",
+        values: [.text(account.name), .text(account.lifecycle.rawValue), .text(account.id)],
+        on: database)
+      try Self.writeAccountPreferences(account, on: database)
+      return try Self.placeholderResult(origin: account.origin)
+    }
+  }
+
+  public func updateAccountGroup(_ group: LedgerAccountGroup) throws {
+    _ = try mutate { snapshot in
+      guard snapshot.accountGroups.contains(where: { $0.id == group.id }) else {
+        throw Error.incompatibleCanonicalStore
+      }
+      if group.lifecycle == .tombstoned,
+        snapshot.accounts.contains(where: { $0.groupID == group.id && $0.lifecycle == .active })
+      {
+        throw Error.accountGroupHasActiveAccounts
+      }
+      try Self.run(
+        "UPDATE main.ledger_account_group SET name=?, display_order=?, lifecycle=? WHERE group_id=?",
+        values: [
+          .text(group.name), .int(group.displayOrder), .text(group.lifecycle.rawValue),
+          .text(group.id),
+        ], on: database)
+      return try Self.placeholderResult(origin: try LedgerOrigin.macNative())
+    }
+  }
+
+  public func tombstoneAccount(_ accountID: String) throws {
+    _ = try mutate { snapshot in
+      guard let account = snapshot.accounts.first(where: { $0.id == accountID }) else {
+        throw Error.incompatibleCanonicalStore
+      }
+      try Self.run(
+        "UPDATE main.ledger_account SET lifecycle=? WHERE account_id=?",
+        values: [.text(LedgerLifecycleState.tombstoned.rawValue), .text(account.id)],
+        on: database)
       return try Self.placeholderResult(origin: account.origin)
     }
   }
 
   public func createCategory(_ category: LedgerCategory) throws {
     _ = try mutate { snapshot in
+      if let existing = snapshot.categories.first(where: { $0.id == category.id }) {
+        guard existing == category else { throw Error.incompatibleCanonicalStore }
+        return try Self.placeholderResult(origin: category.origin, status: .unchanged)
+      }
+      try Self.ensureCategoryParent(category, in: snapshot)
       try Self.ensureOrigin(category.origin, on: database)
       try Self.run(
         "INSERT INTO main.ledger_category(category_id, name, kind, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
         values: [
-          .text(category.id), .text(category.name), .text(category.kind.rawValue),
-          .text(category.origin.id), .text(category.lifecycle.rawValue),
-        ], on: database)
+            .text(category.id), .text(category.name), .text(category.kind.rawValue),
+            .text(category.origin.id), .text(category.lifecycle.rawValue),
+          ], on: database)
+      try Self.writeCategoryTree(category, on: database)
+      return try Self.placeholderResult(origin: category.origin)
+    }
+  }
+
+  public func updateCategory(_ category: LedgerCategory) throws {
+    _ = try mutate { snapshot in
+      guard let existing = snapshot.categories.first(where: { $0.id == category.id }),
+        existing.origin == category.origin, existing.kind == category.kind
+      else { throw Error.incompatibleCanonicalStore }
+      try Self.ensureCategoryParent(category, in: snapshot)
+      try Self.ensureCategoryMutation(category, in: snapshot)
+      try Self.run(
+        "UPDATE main.ledger_category SET name=?, lifecycle=? WHERE category_id=?",
+        values: [.text(category.name), .text(category.lifecycle.rawValue), .text(category.id)],
+        on: database)
+      try Self.writeCategoryTree(category, on: database)
+      return try Self.placeholderResult(origin: category.origin)
+    }
+  }
+
+  public func tombstoneCategory(_ categoryID: String) throws {
+    _ = try mutate { snapshot in
+      guard let category = snapshot.categories.first(where: { $0.id == categoryID }) else {
+        throw Error.incompatibleCanonicalStore
+      }
+      let replacement = try LedgerCategory(
+        id: category.id, name: category.name, kind: category.kind, origin: category.origin,
+        lifecycle: .tombstoned, parentID: category.parentID,
+        displayOrder: category.displayOrder, hidden: category.hidden)
+      try Self.ensureCategoryMutation(replacement, in: snapshot)
+      try Self.run(
+        "UPDATE main.ledger_category SET lifecycle=? WHERE category_id=?",
+        values: [.text(LedgerLifecycleState.tombstoned.rawValue), .text(category.id)],
+        on: database)
       return try Self.placeholderResult(origin: category.origin)
     }
   }
@@ -666,6 +789,99 @@ public final class LedgerStore {
       return first
     }
     return results
+  }
+
+  private static func ensureAccountGroup(
+    _ groupID: String?, in snapshot: LedgerReadSnapshot
+  ) throws {
+    guard let groupID else { return }
+    guard snapshot.accountGroups.contains(where: { $0.id == groupID && $0.lifecycle == .active })
+    else { throw Error.incompatibleCanonicalStore }
+  }
+
+  private static func writeAccountPreferences(_ account: LedgerAccount, on database: OpaquePointer)
+    throws
+  {
+    let isDefault = account.groupID == nil && account.displayOrder == 0 && !account.hidden
+      && account.includeInTotals && account.variant == .standard
+    if isDefault {
+      try run(
+        "DELETE FROM main.ledger_account_preferences WHERE account_id=?",
+        values: [.text(account.id)], on: database)
+      return
+    }
+    try run(
+      """
+      INSERT INTO main.ledger_account_preferences(
+        account_id, group_id, display_order, hidden, include_in_totals, variant
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_id) DO UPDATE SET
+        group_id=excluded.group_id, display_order=excluded.display_order,
+        hidden=excluded.hidden, include_in_totals=excluded.include_in_totals,
+        variant=excluded.variant
+      """,
+      values: [
+        .text(account.id), .optionalText(account.groupID), .int(account.displayOrder),
+        .int(account.hidden ? 1 : 0), .int(account.includeInTotals ? 1 : 0),
+        .text(account.variant.rawValue),
+      ], on: database)
+  }
+
+  private static func ensureCategoryParent(
+    _ category: LedgerCategory, in snapshot: LedgerReadSnapshot
+  ) throws {
+    guard let parentID = category.parentID else { return }
+    if parentID == category.id { throw Error.categoryCycleDetected }
+    guard snapshot.categories.contains(where: {
+      $0.id == parentID && $0.lifecycle == .active && !$0.hidden
+    })
+    else { throw Error.incompatibleCanonicalStore }
+    var categories = Dictionary(uniqueKeysWithValues: snapshot.categories.map { ($0.id, $0) })
+    categories[category.id] = category
+    var visited: Set<String> = []
+    var cursor: String? = category.id
+    while let id = cursor {
+      guard visited.insert(id).inserted else { throw Error.categoryCycleDetected }
+      cursor = categories[id]?.parentID
+    }
+  }
+
+  private static func ensureCategoryMutation(
+    _ category: LedgerCategory, in snapshot: LedgerReadSnapshot
+  ) throws {
+    guard category.lifecycle == .tombstoned || category.hidden else { return }
+    let children = Dictionary(grouping: snapshot.categories.compactMap { value in
+      value.parentID.map { ($0, value) }
+    }, by: \.0).mapValues { $0.map(\.1) }
+    var pending = children[category.id] ?? []
+    while let descendant = pending.popLast() {
+      if descendant.lifecycle == .active { throw Error.categoryHasActiveChildren }
+      pending.append(contentsOf: children[descendant.id] ?? [])
+    }
+  }
+
+  private static func writeCategoryTree(_ category: LedgerCategory, on database: OpaquePointer)
+    throws
+  {
+    let isDefault = category.parentID == nil && category.displayOrder == 0 && !category.hidden
+    if isDefault {
+      try run(
+        "DELETE FROM main.ledger_category_tree WHERE category_id=?",
+        values: [.text(category.id)], on: database)
+      return
+    }
+    try run(
+      """
+      INSERT INTO main.ledger_category_tree(category_id, parent_category_id, display_order, hidden)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(category_id) DO UPDATE SET
+        parent_category_id=excluded.parent_category_id,
+        display_order=excluded.display_order, hidden=excluded.hidden
+      """,
+      values: [
+        .text(category.id), .optionalText(category.parentID), .int(category.displayOrder),
+        .int(category.hidden ? 1 : 0),
+      ], on: database)
   }
 
   private static func writeBudget(_ budget: LedgerBudget, on database: OpaquePointer) throws {
@@ -758,8 +974,11 @@ public final class LedgerStore {
   }
 
   public func applyExport(_ package: LedgerCanonicalPackage) throws {
-    guard package.formatVersion == LedgerPortablePackageFormat.version,
-      package.formatFingerprint == LedgerPortablePackageFormat.fingerprint
+    guard
+      (package.formatVersion == LedgerPortablePackageFormat.version
+        && package.formatFingerprint == LedgerPortablePackageFormat.fingerprint)
+        || (package.formatVersion == LedgerPortablePackageFormat.legacyV1Version
+          && package.formatFingerprint == LedgerPortablePackageFormat.legacyV1Fingerprint)
     else { throw Error.incompatibleCanonicalStore }
     let origins =
       package.accounts.map(\.origin) + package.categories.map(\.origin)
@@ -768,6 +987,7 @@ public final class LedgerStore {
     let importedOriginID = String(repeating: "e", count: 64)
     guard package.preservedSource.isEmpty,
       Set(package.accounts.map(\.id)).count == package.accounts.count,
+      Set(package.accountGroups.map(\.id)).count == package.accountGroups.count,
       Set(package.categories.map(\.id)).count == package.categories.count,
       Set(package.revisions.map(\.id)).count == package.revisions.count,
       Set(package.revisions.map { "\($0.transactionID):\($0.revision)" }).count
@@ -786,6 +1006,33 @@ public final class LedgerStore {
         }
       })
     else { throw Error.incompatibleCanonicalStore }
+    let groupsByID = Dictionary(uniqueKeysWithValues: package.accountGroups.map { ($0.id, $0) })
+    guard package.accounts.allSatisfy({ account in
+      guard let groupID = account.groupID else { return true }
+      guard let group = groupsByID[groupID] else { return false }
+      return group.lifecycle == .active || account.lifecycle == .tombstoned
+    }) else { throw Error.incompatibleCanonicalStore }
+    let categoriesByID = Dictionary(uniqueKeysWithValues: package.categories.map { ($0.id, $0) })
+    guard package.categories.allSatisfy({ category in
+      guard let parentID = category.parentID else { return true }
+      guard let parent = categoriesByID[parentID] else { return false }
+      return (parent.lifecycle == .active && !parent.hidden) || category.lifecycle == .tombstoned
+    }) else { throw Error.incompatibleCanonicalStore }
+    var categoryVisitState: [String: Int] = [:]
+    func visit(_ category: LedgerCategory) -> Bool {
+      switch categoryVisitState[category.id] {
+      case 1: return false
+      case 2: return true
+      default: break
+      }
+      categoryVisitState[category.id] = 1
+      if let parentID = category.parentID, let parent = categoriesByID[parentID], !visit(parent) {
+        return false
+      }
+      categoryVisitState[category.id] = 2
+      return true
+    }
+    guard package.categories.allSatisfy(visit) else { throw Error.incompatibleCanonicalStore }
     _ = try mutate { snapshot in
       let tables = CanonicalLedgerSchema.expectedObjects
         .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
@@ -793,6 +1040,14 @@ public final class LedgerStore {
         try !Self.hasRows(in: tables, on: database)
       else {
         throw Error.incompatibleCanonicalStore
+      }
+      for group in package.accountGroups {
+        try Self.run(
+          "INSERT INTO main.ledger_account_group(group_id, name, display_order, lifecycle) VALUES (?, ?, ?, ?)",
+          values: [
+            .text(group.id), .text(group.name), .int(group.displayOrder),
+            .text(group.lifecycle.rawValue),
+          ], on: database)
       }
       for account in package.accounts { try Self.ensureOrigin(account.origin, on: database) }
       for account in package.accounts {
@@ -802,15 +1057,27 @@ public final class LedgerStore {
             .text(account.id), .text(account.name), .text(account.currencyUnit),
             .text(account.origin.id), .text(account.lifecycle.rawValue),
           ], on: database)
+        try Self.writeAccountPreferences(account, on: database)
       }
-      for category in package.categories {
-        try Self.ensureOrigin(category.origin, on: database)
-        try Self.run(
-          "INSERT INTO main.ledger_category(category_id, name, kind, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
-          values: [
-            .text(category.id), .text(category.name), .text(category.kind.rawValue),
-            .text(category.origin.id), .text(category.lifecycle.rawValue),
-          ], on: database)
+      var pendingCategories = package.categories
+      var insertedCategoryIDs: Set<String> = []
+      while !pendingCategories.isEmpty {
+        let ready = pendingCategories.filter {
+          $0.parentID == nil || insertedCategoryIDs.contains($0.parentID!)
+        }
+        guard !ready.isEmpty else { throw Error.incompatibleCanonicalStore }
+        for category in ready {
+          try Self.ensureOrigin(category.origin, on: database)
+          try Self.run(
+            "INSERT INTO main.ledger_category(category_id, name, kind, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+            values: [
+              .text(category.id), .text(category.name), .text(category.kind.rawValue),
+              .text(category.origin.id), .text(category.lifecycle.rawValue),
+            ], on: database)
+          try Self.writeCategoryTree(category, on: database)
+          insertedCategoryIDs.insert(category.id)
+        }
+        pendingCategories.removeAll { insertedCategoryIDs.contains($0.id) }
       }
       let grouped = Dictionary(grouping: package.revisions, by: \.transactionID)
       for (transactionID, revisions) in grouped {
@@ -1182,11 +1449,6 @@ public final class LedgerStore {
   private static func portablePackageExportIsRepresentable(on database: OpaquePointer) throws
     -> Bool
   {
-    // Ponytail: Task 4/5 package encoding removes this temporary refusal once these rows
-    // have a lossless portable representation.
-    let hasFoundationRows = try hasRows(
-      in: ["ledger_category_tree", "ledger_account_group", "ledger_account_preferences"],
-      on: database)
     guard
       let standaloneOriginCount = scalarInt(
         """
@@ -1201,7 +1463,7 @@ public final class LedgerStore {
         )
         """, on: database)
     else { throw Error.incompatibleCanonicalStore }
-    return !hasFoundationRows && standaloneOriginCount != 1
+    return standaloneOriginCount != 1
   }
 
   package func isEmptyForPortablePackageImport() throws -> Bool {
@@ -1751,6 +2013,7 @@ public final class LedgerStore {
       return result
     } catch {
       _ = try? Self.execute("ROLLBACK", on: database)
+      if let error = error as? Error, error.preservesMutationError { throw error }
       throw Error.incompatibleCanonicalStore
     }
   }

@@ -25,28 +25,109 @@ package enum CanonicalLedgerHealth {
           id: row.text(0), label: row.text(1), provenanceID: row.optionalText(2))
         return (value.id, value)
       })
+    let v11Tables = Set(
+      try rows(
+        database,
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('ledger_account_group', 'ledger_account_preferences', 'ledger_category_tree')"
+      ) { $0.text(0) })
+    let accountGroups: [String: LedgerAccountGroup]
+    if v11Tables.contains("ledger_account_group") {
+      accountGroups = try Dictionary(
+        uniqueKeysWithValues: rows(
+          database,
+          "SELECT group_id, name, display_order, lifecycle FROM main.ledger_account_group"
+        ) { row in
+          let group = try LedgerAccountGroup(
+            id: row.text(0), name: row.text(1), displayOrder: row.int(2),
+            lifecycle: try enumValue(LedgerLifecycleState.self, row.text(3)))
+          return (group.id, group)
+        })
+    } else {
+      accountGroups = [:]
+    }
+    let accountPreferences: [String: AccountPreference]
+    if v11Tables.contains("ledger_account_preferences") {
+      accountPreferences = try Dictionary(
+        uniqueKeysWithValues: rows(
+          database,
+          "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM main.ledger_account_preferences"
+        ) { row in
+          guard row.int(3) == 0 || row.int(3) == 1,
+            row.int(4) == 0 || row.int(4) == 1,
+            let variant = LedgerAccountVariant(rawValue: row.text(5))
+          else { throw HealthError.invalid }
+          return (
+            row.text(0),
+            AccountPreference(
+              groupID: row.optionalText(1), displayOrder: row.int(2), hidden: row.int(3) == 1,
+              includeInTotals: row.int(4) == 1, variant: variant))
+        })
+    } else {
+      accountPreferences = [:]
+    }
     let accounts = try Dictionary(
       uniqueKeysWithValues: rows(
-        database,
-        "SELECT account_id, name, currency_unit, origin_id, lifecycle FROM main.ledger_account"
+      database,
+      "SELECT account_id, name, currency_unit, origin_id, lifecycle FROM main.ledger_account"
       ) { row in
+        let preference = accountPreferences[row.text(0)] ?? .defaults
+        let lifecycle = try enumValue(LedgerLifecycleState.self, row.text(4))
+        if let groupID = preference.groupID {
+          guard let group = accountGroups[groupID] else { throw HealthError.invalid }
+          if lifecycle == .active { guard group.lifecycle == .active else { throw HealthError.invalid } }
+        }
         let value = try LedgerAccount(
           id: row.text(0), name: row.text(1), currencyUnit: row.text(2),
           origin: try require(origins[row.text(3)]),
-          lifecycle: try enumValue(LedgerLifecycleState.self, row.text(4)))
+          lifecycle: lifecycle,
+          groupID: preference.groupID, displayOrder: preference.displayOrder,
+          hidden: preference.hidden, includeInTotals: preference.includeInTotals,
+          variant: preference.variant)
         return (value.id, value)
       })
+    let categoryTrees: [String: CategoryTree]
+    if v11Tables.contains("ledger_category_tree") {
+      categoryTrees = try Dictionary(
+        uniqueKeysWithValues: rows(
+          database,
+          "SELECT category_id, parent_category_id, display_order, hidden FROM main.ledger_category_tree"
+        ) { row in
+          guard row.int(3) == 0 || row.int(3) == 1 else { throw HealthError.invalid }
+          return (
+            row.text(0),
+            CategoryTree(
+              parentID: row.optionalText(1), displayOrder: row.int(2), hidden: row.int(3) == 1))
+        })
+    } else {
+      categoryTrees = [:]
+    }
     let categories = try Dictionary(
       uniqueKeysWithValues: rows(
         database, "SELECT category_id, name, kind, origin_id, lifecycle FROM main.ledger_category"
       ) { row in
+        let tree = categoryTrees[row.text(0)] ?? .defaults
         let value = try LedgerCategory(
           id: row.text(0), name: row.text(1),
           kind: try enumValue(LedgerCategoryKind.self, row.text(2)),
           origin: try require(origins[row.text(3)]),
-          lifecycle: try enumValue(LedgerLifecycleState.self, row.text(4)))
+          lifecycle: try enumValue(LedgerLifecycleState.self, row.text(4)),
+          parentID: tree.parentID, displayOrder: tree.displayOrder, hidden: tree.hidden)
         return (value.id, value)
       })
+    for category in categories.values {
+      if let parentID = category.parentID {
+        guard let parent = categories[parentID] else { throw HealthError.invalid }
+        if category.lifecycle == .active {
+          guard parent.lifecycle == .active, !parent.hidden else { throw HealthError.invalid }
+        }
+      }
+      var seen: Set<String> = []
+      var cursor: String? = category.id
+      while let current = cursor {
+        guard seen.insert(current).inserted else { throw HealthError.invalid }
+        cursor = categories[current]?.parentID
+      }
+    }
     let effects = try grouped(
       database,
       "SELECT revision_id, account_id, direction, amount_literal, currency_unit FROM main.ledger_transaction_effect ORDER BY revision_id, account_id"
@@ -151,6 +232,9 @@ package enum CanonicalLedgerHealth {
     }
     return .init(
       accounts: accounts.values.sorted { $0.id < $1.id },
+      accountGroups: accountGroups.values.sorted {
+        ($0.displayOrder, $0.id) < ($1.displayOrder, $1.id)
+      },
       transactions: snapshots.sorted {
         let lhs = $0.currentRevision.draft.occurredAt.instant
         let rhs = $1.currentRevision.draft.occurredAt.instant
@@ -159,7 +243,29 @@ package enum CanonicalLedgerHealth {
       revisionHistory: revisions.values.sorted {
         ($0.transactionID, $0.revision) < ($1.transactionID, $1.revision)
       },
-      undisplayedImportedEventCount: 0)
+      undisplayedImportedEventCount: 0,
+      categories: categories.values.sorted {
+        ($0.displayOrder, $0.id) < ($1.displayOrder, $1.id)
+      })
+  }
+
+  private struct AccountPreference {
+    let groupID: String?
+    let displayOrder: Int
+    let hidden: Bool
+    let includeInTotals: Bool
+    let variant: LedgerAccountVariant
+
+    static let defaults = AccountPreference(
+      groupID: nil, displayOrder: 0, hidden: false, includeInTotals: true, variant: .standard)
+  }
+
+  private struct CategoryTree {
+    let parentID: String?
+    let displayOrder: Int
+    let hidden: Bool
+
+    static let defaults = CategoryTree(parentID: nil, displayOrder: 0, hidden: false)
   }
 
   private static func validateImportGraph(_ database: OpaquePointer, trustKey: Data?) throws {

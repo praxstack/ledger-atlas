@@ -63,6 +63,318 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(try run(first) == run(second))
 }
 
+@Test func accountGroupsAndPreferencesRoundTripWithStableIdentity() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let group = try LedgerAccountGroup(
+    id: String(repeating: "2", count: 64), name: "Borrowed", displayOrder: 3)
+  try app.createAccountGroup(group)
+  try app.createAccountGroup(group)
+
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Credit", currencyUnit: "USD", origin: origin, groupID: group.id, displayOrder: 4,
+    hidden: true, includeInTotals: false, variant: .loan)
+  try app.createAccount(account)
+  try app.createAccount(account)
+
+  var snapshot = try app.snapshot()
+  #expect(snapshot.accountGroups == [group])
+  #expect(snapshot.accounts == [account])
+
+  let renamed = try LedgerAccount(
+    id: account.id, name: "Credit card", currencyUnit: account.currencyUnit, origin: origin,
+    lifecycle: .tombstoned, groupID: group.id, displayOrder: 1, hidden: false,
+    includeInTotals: true, variant: .overdraft)
+  try app.updateAccount(renamed)
+  snapshot = try app.snapshot()
+  #expect(snapshot.accounts.first == renamed)
+
+  let restored = try LedgerAccount(
+    id: renamed.id, name: renamed.name, currencyUnit: renamed.currencyUnit, origin: origin,
+    lifecycle: .active, groupID: group.id, displayOrder: renamed.displayOrder,
+    hidden: renamed.hidden, includeInTotals: renamed.includeInTotals, variant: renamed.variant)
+  try app.updateAccount(restored)
+  #expect(try app.snapshot().accounts.first?.lifecycle == .active)
+
+  let occurredAt = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 8, day: 1)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  _ = try app.createTransaction(
+    idempotencyKey: String(repeating: "b", count: 64),
+    draft: LedgerTransactionDraft(
+      effects: [
+        try LedgerTransactionEffect(
+          accountID: restored.id, direction: .decrease,
+          amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("5.00")))
+      ], categoryID: nil, kind: .expense, occurredAt: occurredAt, origin: origin),
+    createdAt: UTCInstant(epochMilliseconds: 4))
+  let report = try app.report(unitCode: "USD")
+  #expect(report.rows.contains { $0.id == LedgerTransactionKind.expense.rawValue })
+
+  let renamedGroup = try LedgerAccountGroup(
+    id: group.id, name: "Liabilities", displayOrder: 1, lifecycle: .active)
+  try app.updateAccountGroup(renamedGroup)
+  #expect(try app.snapshot().accountGroups.first == renamedGroup)
+
+  let exported = try app.exportPackage()
+  let restoredApp = LedgerApplication(store: try makeApplicationStore())
+  try restoredApp.importPackage(manifest: exported.manifest, payload: exported.payload)
+  #expect(try restoredApp.snapshot().accounts == app.snapshot().accounts)
+  #expect(try restoredApp.snapshot().accountGroups == app.snapshot().accountGroups)
+  #expect(try restoredApp.checksum() == app.checksum())
+  #expect(try restoredApp.exportPackage().manifest.payloadSHA256 == exported.manifest.payloadSHA256)
+
+  try app.tombstoneAccount(account.id)
+  try app.updateAccountGroup(
+    LedgerAccountGroup(id: group.id, name: renamedGroup.name, displayOrder: 1, lifecycle: .tombstoned))
+  let tombstonedExport = try app.exportPackage()
+  let tombstonedRestore = LedgerApplication(store: try makeApplicationStore())
+  try tombstonedRestore.importPackage(
+    manifest: tombstonedExport.manifest, payload: tombstonedExport.payload)
+  #expect(try tombstonedRestore.snapshot().accounts == app.snapshot().accounts)
+  #expect(try tombstonedRestore.snapshot().accountGroups == app.snapshot().accountGroups)
+  #expect(try tombstonedRestore.checksum() == app.checksum())
+}
+
+@Test func categoryTreeSupportsArbitraryDepthAndRejectsCyclesAtomically() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "3", count: 64), label: "local")
+  let parent = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Living", kind: .expense, origin: origin, displayOrder: 2)
+  let child = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Home", kind: .expense, origin: origin, parentID: parent.id, displayOrder: 1)
+  let grandchild = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Supplies", kind: .expense, origin: origin, parentID: child.id, displayOrder: 0)
+  try app.createCategory(parent)
+  try app.createCategory(child)
+  try app.createCategory(grandchild)
+  try app.createCategory(grandchild)
+
+  let snapshot = try app.snapshot()
+  #expect(snapshot.categories.count == 3)
+  #expect(snapshot.categories.first(where: { $0.id == grandchild.id })?.parentID == child.id)
+
+  let before = try app.checksum()
+  let cycle = try LedgerCategory(
+    id: parent.id, name: parent.name, kind: parent.kind, origin: origin,
+    parentID: grandchild.id, displayOrder: parent.displayOrder)
+  #expect(throws: LedgerStore.Error.categoryCycleDetected) {
+    try app.updateCategory(cycle)
+  }
+  #expect(try app.checksum() == before)
+
+  let tombstoned = try LedgerCategory(
+    id: grandchild.id, name: grandchild.name, kind: grandchild.kind, origin: origin,
+    lifecycle: .tombstoned, parentID: child.id, displayOrder: grandchild.displayOrder)
+  try app.updateCategory(tombstoned)
+  #expect(try app.snapshot().categories.first(where: { $0.id == grandchild.id })?.lifecycle == .tombstoned)
+  let restored = try LedgerCategory(
+    id: grandchild.id, name: grandchild.name, kind: grandchild.kind, origin: origin,
+    lifecycle: .active, parentID: child.id, displayOrder: grandchild.displayOrder)
+  try app.updateCategory(restored)
+  #expect(try app.snapshot().categories.first(where: { $0.id == grandchild.id }) == restored)
+
+  let exported = try app.exportPackage()
+  let restoredApp = LedgerApplication(store: try makeApplicationStore())
+  try restoredApp.importPackage(manifest: exported.manifest, payload: exported.payload)
+  #expect(try restoredApp.snapshot().categories == app.snapshot().categories)
+  #expect(try restoredApp.checksum() == app.checksum())
+
+  try app.tombstoneCategory(grandchild.id)
+  try app.tombstoneCategory(child.id)
+  try app.tombstoneCategory(parent.id)
+  let tombstonedExport = try app.exportPackage()
+  let tombstonedRestore = LedgerApplication(store: try makeApplicationStore())
+  try tombstonedRestore.importPackage(
+    manifest: tombstonedExport.manifest, payload: tombstonedExport.payload)
+  #expect(try tombstonedRestore.snapshot().categories == app.snapshot().categories)
+  #expect(try tombstonedRestore.checksum() == app.checksum())
+}
+
+@Test func accountStateSearchFiltersAndHierarchyMutationsAreExplicit() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "4", count: 64), label: "local")
+  let visible = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Visible", currencyUnit: "USD", origin: origin)
+  let hidden = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Hidden", currencyUnit: "USD", origin: origin, hidden: true)
+  let excluded = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Excluded", currencyUnit: "USD", origin: origin, includeInTotals: false)
+  try app.createAccount(visible)
+  try app.createAccount(hidden)
+  try app.createAccount(excluded)
+  for (index, account) in [visible, hidden, excluded].enumerated() {
+    _ = try app.createTransaction(
+      idempotencyKey: String(repeating: String(index), count: 64),
+      draft: try expenseDraft(
+        accountID: account.id, categoryID: nil, origin: origin, amount: "1.00",
+        year: 2026, month: 9, day: index + 1),
+      createdAt: UTCInstant(epochMilliseconds: Int64(index + 1)))
+  }
+  #expect(try app.search(LedgerSearchQuery(accountHidden: true)).count == 1)
+  #expect(try app.search(LedgerSearchQuery(accountHidden: false)).count == 2)
+  #expect(try app.search(LedgerSearchQuery(accountIncludedInTotals: false)).count == 1)
+  #expect(
+    try app.search(
+      LedgerSearchQuery(
+        accountID: hidden.id, accountHidden: false, includeTombstones: true)).isEmpty)
+
+  let group = try LedgerAccountGroup(
+    id: String(repeating: "d", count: 64), name: "Grouped")
+  try app.createAccountGroup(group)
+  let grouped = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "d", count: 64)),
+    name: "Grouped account", currencyUnit: "USD", origin: origin, groupID: group.id)
+  try app.createAccount(grouped)
+  let groupBefore = try app.checksum()
+  let tombstonedGroup = try LedgerAccountGroup(
+    id: group.id, name: group.name, lifecycle: .tombstoned)
+  #expect(throws: LedgerStore.Error.accountGroupHasActiveAccounts) {
+    try app.updateAccountGroup(tombstonedGroup)
+  }
+  #expect(try app.checksum() == groupBefore)
+
+  let parent = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "e", count: 64)),
+    name: "Parent", kind: .expense, origin: origin)
+  let child = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "f", count: 64)),
+    name: "Child", kind: .expense, origin: origin, parentID: parent.id)
+  try app.createCategory(parent)
+  try app.createCategory(child)
+  let categoryBefore = try app.checksum()
+  let hiddenParent = try LedgerCategory(
+    id: parent.id, name: parent.name, kind: parent.kind, origin: origin, hidden: true)
+  #expect(throws: LedgerStore.Error.categoryHasActiveChildren) {
+    try app.updateCategory(hiddenParent)
+  }
+  #expect(try app.checksum() == categoryBefore)
+  let tombstonedParent = try LedgerCategory(
+    id: parent.id, name: parent.name, kind: parent.kind, origin: origin,
+    lifecycle: .tombstoned)
+  #expect(throws: LedgerStore.Error.categoryHasActiveChildren) {
+    try app.updateCategory(tombstonedParent)
+  }
+  #expect(try app.checksum() == categoryBefore)
+
+  let hiddenInternalParent = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "0", count: 64)),
+    name: "Hidden parent", kind: .expense, origin: origin, parentID: parent.id, hidden: true)
+  try app.createCategory(hiddenInternalParent)
+  let hiddenInternalChild = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "1", count: 64)),
+    name: "Hidden child", kind: .expense, origin: origin, parentID: hiddenInternalParent.id)
+  let beforeHiddenChild = try app.checksum()
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try app.createCategory(hiddenInternalChild)
+  }
+  #expect(try app.checksum() == beforeHiddenChild)
+
+  let invalidPackage = LedgerCanonicalPackage(
+    formatVersion: LedgerPortablePackageFormat.version,
+    formatFingerprint: LedgerPortablePackageFormat.fingerprint,
+    accounts: [], categories: [parent, hiddenInternalParent, hiddenInternalChild], revisions: [], links: [],
+    recurrenceRules: [], budgets: [], installmentPlans: [])
+  let importStore = try makeApplicationStore()
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try importStore.applyExport(invalidPackage)
+  }
+  #expect(try LedgerApplication(store: importStore).snapshot().categories.isEmpty)
+}
+
+@Test func healthRejectsActiveAccountAssignedToTombstonedGroup() throws {
+  let origin = String(repeating: "6", count: 64)
+  let account = String(repeating: "7", count: 64)
+  let group = String(repeating: "8", count: 64)
+  let sql = """
+  INSERT INTO ledger_origin VALUES ('\(origin)', 'Synthetic', NULL);
+  INSERT INTO ledger_account_group VALUES ('\(group)', 'Tombstoned', 0, 'tombstoned');
+  INSERT INTO ledger_account VALUES ('\(account)', 'Cash', 'USD', '\(origin)', 'active');
+  INSERT INTO ledger_account_preferences VALUES ('\(account)', '\(group)', 0, 0, 1, 'standard');
+  """
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    _ = try makeApplicationStore(seedSQL: sql)
+  }
+}
+
+@Test func reportRollsCategoryAmountsToVisibleAncestorsOnce() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "5", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Cash", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let parent = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Living", kind: .expense, origin: origin)
+  let child = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Home", kind: .expense, origin: origin, parentID: parent.id)
+  let grandchild = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "d", count: 64)),
+    name: "Supplies", kind: .expense, origin: origin, parentID: child.id)
+  try app.createCategory(parent)
+  try app.createCategory(child)
+  try app.createCategory(grandchild)
+  for (category, amount, day) in [(parent, "2.00", 1), (child, "3.00", 2), (grandchild, "4.00", 3)] {
+    _ = try app.createTransaction(
+      idempotencyKey: String(repeating: String(day), count: 64),
+      draft: try expenseDraft(
+        accountID: account.id, categoryID: category.id, origin: origin, amount: amount,
+        year: 2026, month: 10, day: day),
+      createdAt: UTCInstant(epochMilliseconds: Int64(day)))
+  }
+  let report = try app.report(unitCode: "USD")
+  let living = try #require(report.categoryRows.first { $0.id == parent.id })
+  let home = try #require(report.categoryRows.first { $0.id == child.id })
+  let supplies = try #require(report.categoryRows.first { $0.id == grandchild.id })
+  #expect(try ExactDecimal(living.amountLiteral) == ExactDecimal("9.00"))
+  #expect(living.count == 3)
+  #expect(try ExactDecimal(home.amountLiteral) == ExactDecimal("7.00"))
+  #expect(home.count == 2)
+  #expect(try ExactDecimal(supplies.amountLiteral) == ExactDecimal("4.00"))
+  #expect(supplies.count == 1)
+  #expect(report.accessibleTable.contains("Category Living"))
+
+  let hiddenLeaf = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "e", count: 64)),
+    name: "Private", kind: .expense, origin: origin, parentID: parent.id, hidden: true)
+  try app.createCategory(hiddenLeaf)
+  _ = try app.createTransaction(
+    idempotencyKey: String(repeating: "e", count: 64),
+    draft: try expenseDraft(
+      accountID: account.id, categoryID: hiddenLeaf.id, origin: origin, amount: "10.00",
+      year: 2026, month: 10, day: 4),
+    createdAt: UTCInstant(epochMilliseconds: 4))
+  let hiddenReport = try app.report(unitCode: "USD")
+  let hiddenParent = try #require(hiddenReport.categoryRows.first { $0.id == parent.id })
+  #expect(try ExactDecimal(hiddenParent.amountLiteral) == ExactDecimal("9.00"))
+  #expect(hiddenReport.categoryRows.contains { $0.id == hiddenLeaf.id } == false)
+
+  let tombstonedLeaf = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "f", count: 64)),
+    name: "Retired", kind: .expense, origin: origin, parentID: parent.id)
+  try app.createCategory(tombstonedLeaf)
+  _ = try app.createTransaction(
+    idempotencyKey: String(repeating: "0", count: 64),
+    draft: try expenseDraft(
+      accountID: account.id, categoryID: tombstonedLeaf.id, origin: origin, amount: "11.00",
+      year: 2026, month: 10, day: 5),
+    createdAt: UTCInstant(epochMilliseconds: 5))
+  let beforeTombstone = try app.report(unitCode: "USD")
+  #expect(try #require(beforeTombstone.categoryRows.first { $0.id == parent.id }).amountLiteral == "20")
+  try app.tombstoneCategory(tombstonedLeaf.id)
+  let afterTombstone = try app.report(unitCode: "USD")
+  #expect(try #require(afterTombstone.categoryRows.first { $0.id == parent.id }).amountLiteral == "9")
+}
+
 @Test func applicationCreatesInspectsCorrectsAndTombstonesExactMoney() throws {
   let store = try makeApplicationStore()
   let app = LedgerApplication(store: store)
@@ -462,6 +774,41 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   let destination = LedgerApplication(store: try makeApplicationStore())
   try destination.importPackage(manifest: legacyManifest, payload: legacyPayload)
   #expect(try destination.snapshot().accounts.map(\.id) == [String(repeating: "a", count: 64)])
+
+  var legacyV1Object = currentObject
+  legacyV1Object.removeValue(forKey: "accountGroups")
+  if var rows = legacyV1Object["accounts"] as? [[String: Any]] {
+    rows = rows.map { row in
+      var row = row
+      for key in ["groupID", "displayOrder", "hidden", "includeInTotals", "variant"] {
+        row.removeValue(forKey: key)
+      }
+      return row
+    }
+    legacyV1Object["accounts"] = rows
+  }
+  if var rows = legacyV1Object["categories"] as? [[String: Any]] {
+    rows = rows.map { row in
+      var row = row
+      for key in ["parentID", "displayOrder", "hidden"] { row.removeValue(forKey: key) }
+      return row
+    }
+    legacyV1Object["categories"] = rows
+  }
+  legacyV1Object["formatVersion"] = LedgerPortablePackageFormat.legacyV1Version
+  legacyV1Object["formatFingerprint"] = LedgerPortablePackageFormat.legacyV1Fingerprint
+  let legacyV1Payload = try JSONSerialization.data(
+    withJSONObject: legacyV1Object, options: [.sortedKeys])
+  let legacyV1Digest = SHA256.hash(data: legacyV1Payload).map {
+    String(format: "%02x", $0)
+  }.joined()
+  let legacyV1Manifest = LedgerExportManifest(
+    formatVersion: LedgerPortablePackageFormat.legacyV1Version,
+    formatFingerprint: LedgerPortablePackageFormat.legacyV1Fingerprint,
+    payloadSHA256: legacyV1Digest, createdAtMilliseconds: 0)
+  let legacyV1Destination = LedgerApplication(store: try makeApplicationStore())
+  try legacyV1Destination.importPackage(manifest: legacyV1Manifest, payload: legacyV1Payload)
+  #expect(try legacyV1Destination.snapshot().accounts.map(\.id) == source.snapshot().accounts.map(\.id))
 }
 
 @Test func applyExportRejectsUnknownPortableIdentityBeforeMutation() throws {
@@ -480,7 +827,7 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(try store.readSnapshot().accounts.isEmpty)
 }
 
-@Test func exportRejectsEveryUnrepresentedV11FoundationTableAndStandaloneOrigin() throws {
+@Test func exportIncludesV11OrganizationStateAndRejectsStandaloneOrigin() throws {
   let origin = String(repeating: "1", count: 64)
   let account = String(repeating: "2", count: 64)
   let category = String(repeating: "3", count: 64)
@@ -499,11 +846,27 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
     """,
     "INSERT INTO ledger_origin VALUES ('\(origin)', 'standalone', NULL)",
   ]
-  for sql in cases {
-    let application = LedgerApplication(store: try makeApplicationStore(seedSQL: sql))
-    #expect(throws: LedgerApplication.Error.invalidCommand) {
-      try application.exportPackage()
-    }
+  let groupExport = try LedgerApplication(store: try makeApplicationStore(seedSQL: cases[0]))
+    .exportPackage()
+  let groupObject = try #require(
+    JSONSerialization.jsonObject(with: groupExport.payload) as? [String: Any])
+  #expect((groupObject["accountGroups"] as? [[String: Any]])?.count == 1)
+
+  let categoryExport = try LedgerApplication(store: try makeApplicationStore(seedSQL: cases[1]))
+    .exportPackage()
+  let categoryObject = try #require(
+    JSONSerialization.jsonObject(with: categoryExport.payload) as? [String: Any])
+  #expect((categoryObject["categories"] as? [[String: Any]])?.first?["hidden"] as? Bool == false)
+
+  let accountExport = try LedgerApplication(store: try makeApplicationStore(seedSQL: cases[2]))
+    .exportPackage()
+  let accountObject = try #require(
+    JSONSerialization.jsonObject(with: accountExport.payload) as? [String: Any])
+  #expect((accountObject["accounts"] as? [[String: Any]])?.first?["includeInTotals"] as? Bool == true)
+
+  let standalone = LedgerApplication(store: try makeApplicationStore(seedSQL: cases[3]))
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try standalone.exportPackage()
   }
 }
 
@@ -1179,6 +1542,14 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   var unknownTopLevel = base
   unknownTopLevel["attachments"] = [["name": "synthetic", "data": "AA=="]]
   try expectRejected(unknownTopLevel)
+
+  var duplicateGroups = base
+  let duplicateGroup: [String: Any] = [
+    "id": String(repeating: "g", count: 64), "name": "Synthetic", "displayOrder": 0,
+    "lifecycle": "active",
+  ]
+  duplicateGroups["accountGroups"] = [duplicateGroup, duplicateGroup]
+  try expectRejected(duplicateGroups)
 
   var unknownNested = base
   var unknownAccounts = try #require(unknownNested["accounts"] as? [[String: Any]])
@@ -1907,17 +2278,19 @@ private func expectedInventory(from snapshot: LedgerStore.LedgerReadSnapshot) ->
 }
 
 private func expenseDraft(
-  accountID: String, categoryID: String, origin: LedgerOrigin, amount: String, note: String,
-  tag: String, year: Int, month: Int, day: Int
+  accountID: String, categoryID: String?, origin: LedgerOrigin, amount: String,
+  note: String? = nil, tag: String? = nil, year: Int, month: Int, day: Int
 ) throws -> LedgerTransactionDraft {
   let when = try SourceTemporal(
     resolving: SourceLocalDateTime(date: SourceLocalDate(year: year, month: month, day: day)),
     in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  let literals = try tag.map { [try LedgerSourceLiteral(field: "tag", literal: $0)] } ?? []
   return try LedgerTransactionDraft(
     effects: [
       try LedgerTransactionEffect(
         accountID: accountID, direction: .decrease,
         amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(amount)))
     ], categoryID: categoryID, kind: .expense, occurredAt: when, note: note,
-    sourceLiterals: [try LedgerSourceLiteral(field: "tag", literal: tag)], origin: origin)
+    sourceLiterals: literals,
+    origin: origin)
 }

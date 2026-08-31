@@ -34,8 +34,32 @@ public struct LedgerApplication: LedgerClient {
     try store.createAccount(account)
   }
 
+  public func createAccountGroup(_ group: LedgerAccountGroup) throws {
+    try store.createAccountGroup(group)
+  }
+
+  public func updateAccount(_ account: LedgerAccount) throws {
+    try store.updateAccount(account)
+  }
+
+  public func updateAccountGroup(_ group: LedgerAccountGroup) throws {
+    try store.updateAccountGroup(group)
+  }
+
+  public func tombstoneAccount(_ accountID: String) throws {
+    try store.tombstoneAccount(accountID)
+  }
+
   public func createCategory(_ category: LedgerCategory) throws {
     try store.createCategory(category)
+  }
+
+  public func updateCategory(_ category: LedgerCategory) throws {
+    try store.updateCategory(category)
+  }
+
+  public func tombstoneCategory(_ categoryID: String) throws {
+    try store.tombstoneCategory(categoryID)
   }
 
   public func createTransaction(
@@ -255,18 +279,30 @@ public struct LedgerApplication: LedgerClient {
   public static func search(
     _ query: LedgerSearchQuery, in snapshot: LedgerStore.LedgerReadSnapshot
   ) -> [LedgerTransactionSnapshot] {
-    snapshot.transactions.filter { matches($0, query: query) }
+    let accounts = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
+    return snapshot.transactions.filter { matches($0, accounts: accounts, query: query) }
   }
 
-  static func matches(_ snapshot: LedgerTransactionSnapshot, query: LedgerSearchQuery) -> Bool {
+  static func matches(
+    _ snapshot: LedgerTransactionSnapshot, accounts: [String: LedgerAccount],
+    query: LedgerSearchQuery
+  ) -> Bool {
     let revision = snapshot.currentRevision
     let draft = revision.draft
     if !query.includeTombstones, revision.lifecycle == .tombstoned { return false }
     if let lifecycle = query.lifecycle, revision.lifecycle != lifecycle { return false }
-    if let accountID = query.accountID,
-      !draft.effects.contains(where: { $0.accountID == accountID })
+    if query.accountID != nil || query.accountHidden != nil
+      || query.accountIncludedInTotals != nil
     {
-      return false
+      guard draft.effects.contains(where: { effect in
+        guard let account = accounts[effect.accountID] else { return false }
+        if let accountID = query.accountID, effect.accountID != accountID { return false }
+        if let hidden = query.accountHidden, account.hidden != hidden { return false }
+        if let included = query.accountIncludedInTotals,
+          account.includeInTotals != included
+        { return false }
+        return true
+      }) else { return false }
     }
     if let categoryID = query.categoryID, draft.categoryID != categoryID { return false }
     if let kind = query.kind, draft.kind != kind { return false }
@@ -321,11 +357,17 @@ public struct LedgerApplication: LedgerClient {
   public static func report(
     from snapshot: LedgerStore.LedgerReadSnapshot, unitCode: String
   ) throws -> LedgerReport {
+    let accounts = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
     var totals: [LedgerTransactionKind: (ExactDecimal, Int)] = [:]
     for transaction in snapshot.transactions where transaction.currentRevision.lifecycle == .active
     {
       let draft = transaction.currentRevision.draft
-      let matching = draft.effects.filter { $0.amount.unitCode == unitCode }
+      let matching = draft.effects.filter {
+        $0.amount.unitCode == unitCode
+          && accounts[$0.accountID].map {
+            $0.lifecycle == .active && !$0.hidden && $0.includeInTotals
+          } == true
+      }
       guard !matching.isEmpty else { continue }
       var entry = totals[draft.kind]
       if entry == nil { entry = (try ExactDecimal("0"), 0) }
@@ -345,7 +387,46 @@ public struct LedgerApplication: LedgerClient {
     for row in rows { total = try total.adding(ExactDecimal(row.amountLiteral)) }
     return LedgerReport(
       title: "Activity by kind", rows: rows, totalLiteral: total.rawLiteral, unitCode: unitCode,
-      inventory: inventory(from: snapshot))
+      inventory: inventory(from: snapshot), categoryRows: try categoryRows(
+        from: snapshot, accounts: accounts, unitCode: unitCode))
+  }
+
+  private static func categoryRows(
+    from snapshot: LedgerStore.LedgerReadSnapshot, accounts: [String: LedgerAccount],
+    unitCode: String
+  ) throws -> [LedgerReportRow] {
+    let categories = Dictionary(uniqueKeysWithValues: snapshot.categories.map { ($0.id, $0) })
+    var totals: [String: (ExactDecimal, Int)] = [:]
+    let zero = try ExactDecimal("0")
+    for transaction in snapshot.transactions where transaction.currentRevision.lifecycle == .active {
+      let draft = transaction.currentRevision.draft
+      guard let categoryID = draft.categoryID else { continue }
+      let matching = draft.effects.filter {
+        $0.amount.unitCode == unitCode
+          && accounts[$0.accountID].map {
+            $0.lifecycle == .active && !$0.hidden && $0.includeInTotals
+          } == true
+      }
+      guard !matching.isEmpty else { continue }
+      var ancestors: Set<String> = []
+      var cursor: String? = categoryID
+      while let id = cursor, ancestors.insert(id).inserted {
+        guard let category = categories[id], category.lifecycle == .active, !category.hidden else {
+          break
+        }
+        var entry = totals[id] ?? (zero, 0)
+        for effect in matching { entry.0 = try entry.0.adding(effect.amount.amount) }
+        entry.1 += 1
+        totals[id] = entry
+        cursor = category.parentID
+      }
+    }
+    return totals.compactMap { id, entry in
+      guard let category = categories[id] else { return nil }
+      return LedgerReportRow(
+        id: id, label: category.name, amountLiteral: entry.0.rawLiteral,
+        unitCode: unitCode, count: entry.1)
+    }.sorted { ($0.label, $0.id) < ($1.label, $1.id) }
   }
 
   public static func inventory(from snapshot: LedgerStore.LedgerReadSnapshot) -> [LedgerReportRow] {
@@ -360,7 +441,11 @@ public struct LedgerApplication: LedgerClient {
     let tombstoneCount = snapshot.transactions.filter {
       $0.currentRevision.lifecycle == .tombstoned
     }.count
-    let currencies = Set(snapshot.accounts.map(\.currencyUnit)).count
+    let currencies = Set(
+      snapshot.accounts.filter {
+        $0.lifecycle == .active && !$0.hidden && $0.includeInTotals
+      }.map(\.currencyUnit)
+    ).count
     return [
       LedgerReportRow(
         id: "transfers", label: "Transfers", amountLiteral: "0", unitCode: "", count: transferCount),
@@ -406,6 +491,7 @@ public struct LedgerApplication: LedgerClient {
     let package = LedgerCanonicalPackage(
       formatVersion: LedgerPortablePackageFormat.version,
       formatFingerprint: LedgerPortablePackageFormat.fingerprint, accounts: snapshot.accounts,
+      accountGroups: snapshot.accountGroups,
       categories: snapshot.categories, revisions: snapshot.revisionHistory,
       links: links.values.sorted { $0.id < $1.id }, recurrenceRules: snapshot.recurrenceRules,
       budgets: snapshot.budgets, installmentPlans: snapshot.installmentPlans)
@@ -440,7 +526,8 @@ public struct LedgerApplication: LedgerClient {
 }
 
 private func snapshotHasProductRows(_ snapshot: LedgerStore.LedgerReadSnapshot) -> Bool {
-  !snapshot.accounts.isEmpty || !snapshot.transactions.isEmpty || !snapshot.categories.isEmpty
+  !snapshot.accounts.isEmpty || !snapshot.accountGroups.isEmpty || !snapshot.transactions.isEmpty
+    || !snapshot.categories.isEmpty
     || !snapshot.recurrenceRules.isEmpty || !snapshot.budgets.isEmpty
     || !snapshot.installmentPlans.isEmpty
 }
@@ -448,6 +535,8 @@ private func snapshotHasProductRows(_ snapshot: LedgerStore.LedgerReadSnapshot) 
 private func supportedPackageManifest(_ manifest: LedgerExportManifest) -> Bool {
   (manifest.formatVersion == LedgerPortablePackageFormat.version
     && manifest.formatFingerprint == LedgerPortablePackageFormat.fingerprint)
+    || (manifest.formatVersion == LedgerPortablePackageFormat.legacyV1Version
+      && manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV1Fingerprint)
     || (manifest.formatVersion == LedgerPortablePackageFormat.legacyV10SchemaVersion
       && manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV10SchemaFingerprint)
 }
@@ -462,8 +551,26 @@ public struct IOSFacingLedgerClient: LedgerClient {
   public func createAccount(_ account: LedgerAccount) throws {
     try application.createAccount(account)
   }
+  public func createAccountGroup(_ group: LedgerAccountGroup) throws {
+    try application.createAccountGroup(group)
+  }
+  public func updateAccount(_ account: LedgerAccount) throws {
+    try application.updateAccount(account)
+  }
+  public func updateAccountGroup(_ group: LedgerAccountGroup) throws {
+    try application.updateAccountGroup(group)
+  }
+  public func tombstoneAccount(_ accountID: String) throws {
+    try application.tombstoneAccount(accountID)
+  }
   public func createCategory(_ category: LedgerCategory) throws {
     try application.createCategory(category)
+  }
+  public func updateCategory(_ category: LedgerCategory) throws {
+    try application.updateCategory(category)
+  }
+  public func tombstoneCategory(_ categoryID: String) throws {
+    try application.tombstoneCategory(categoryID)
   }
   public func createTransaction(
     idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant
@@ -580,17 +687,26 @@ private func addDays(_ date: SourceLocalDate, _ days: Int) throws -> SourceLocal
 }
 
 private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
+  let accountGroups = package.accountGroups.map {
+    [
+      "id": $0.id, "name": $0.name, "displayOrder": $0.displayOrder,
+      "lifecycle": $0.lifecycle.rawValue,
+    ] as [String: Any]
+  }
   let accounts = package.accounts.map {
     [
       "id": $0.id, "name": $0.name, "currencyUnit": $0.currencyUnit, "originID": $0.origin.id,
       "originLabel": $0.origin.label, "lifecycle": $0.lifecycle.rawValue,
-    ]
+      "groupID": $0.groupID as Any, "displayOrder": $0.displayOrder, "hidden": $0.hidden,
+      "includeInTotals": $0.includeInTotals, "variant": $0.variant.rawValue,
+    ] as [String: Any]
   }
   let categories = package.categories.map {
     [
       "id": $0.id, "name": $0.name, "kind": $0.kind.rawValue, "originID": $0.origin.id,
       "originLabel": $0.origin.label, "lifecycle": $0.lifecycle.rawValue,
-    ]
+      "parentID": $0.parentID as Any, "displayOrder": $0.displayOrder, "hidden": $0.hidden,
+    ] as [String: Any]
   }
   var revisions: [[String: Any]] = []
   for revision in package.revisions {
@@ -630,6 +746,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
   let object: [String: Any] = [
     "formatVersion": package.formatVersion,
     "formatFingerprint": package.formatFingerprint,
+    "accountGroups": accountGroups,
     "accounts": accounts,
     "categories": categories,
     "revisions": revisions,
@@ -695,6 +812,11 @@ private func decodePackage(_ data: Data, manifest: LedgerExportManifest) throws
   {
     return try decodeCurrentPackage(data, manifest: manifest)
   }
+  if manifest.formatVersion == LedgerPortablePackageFormat.legacyV1Version,
+    manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV1Fingerprint
+  {
+    return try decodeLegacyV1Package(data, manifest: manifest)
+  }
   if manifest.formatVersion == LedgerPortablePackageFormat.legacyV10SchemaVersion,
     manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV10SchemaFingerprint
   {
@@ -707,18 +829,29 @@ private func decodeCurrentPackage(_ data: Data, manifest: LedgerExportManifest) 
   -> LedgerCanonicalPackage
 {
   try decodePackageShape(
-    data, manifest: manifest, versionKey: "formatVersion", fingerprintKey: "formatFingerprint")
+    data, manifest: manifest, versionKey: "formatVersion", fingerprintKey: "formatFingerprint",
+    includeOrganization: true)
+}
+
+private func decodeLegacyV1Package(_ data: Data, manifest: LedgerExportManifest) throws
+  -> LedgerCanonicalPackage
+{
+  try decodePackageShape(
+    data, manifest: manifest, versionKey: "formatVersion", fingerprintKey: "formatFingerprint",
+    includeOrganization: false)
 }
 
 private func decodeLegacyV10Package(_ data: Data, manifest: LedgerExportManifest) throws
   -> LedgerCanonicalPackage
 {
   try decodePackageShape(
-    data, manifest: manifest, versionKey: "schemaVersion", fingerprintKey: "schemaFingerprint")
+    data, manifest: manifest, versionKey: "schemaVersion", fingerprintKey: "schemaFingerprint",
+    includeOrganization: false)
 }
 
 private func decodePackageShape(
-  _ data: Data, manifest: LedgerExportManifest, versionKey: String, fingerprintKey: String
+  _ data: Data, manifest: LedgerExportManifest, versionKey: String, fingerprintKey: String,
+  includeOrganization: Bool
 ) throws -> LedgerCanonicalPackage {
   guard hasOnlyUniqueJSONKeys(data),
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -767,16 +900,43 @@ private func decodePackageShape(
     guard let value = T(rawValue: raw) else { throw LedgerApplication.Error.invalidCommand }
     return value
   }
-  try exactKeys(
-    object,
-    [
-      versionKey, fingerprintKey, "accounts", "categories", "revisions", "links",
-      "recurrenceRules", "budgets", "installmentPlans", "preservedSource",
-    ])
+  var topLevelKeys: Set<String> = [
+    versionKey, fingerprintKey, "accounts", "categories", "revisions", "links",
+    "recurrenceRules", "budgets", "installmentPlans", "preservedSource",
+  ]
+  if includeOrganization { topLevelKeys.insert("accountGroups") }
+  try exactKeys(object, topLevelKeys)
   guard try jsonInt(object, versionKey) == manifest.formatVersion,
     try string(object, fingerprintKey) == manifest.formatFingerprint
   else { throw LedgerApplication.Error.invalidCommand }
+  let accountGroups: [LedgerAccountGroup]
+  if includeOrganization {
+    accountGroups = try maps("accountGroups").map { row in
+      try exactKeys(row, ["id", "name", "displayOrder", "lifecycle"])
+      return try LedgerAccountGroup(
+        id: string(row, "id"), name: string(row, "name"), displayOrder: jsonInt(row, "displayOrder"),
+        lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self))
+    }
+  } else {
+    accountGroups = []
+  }
   let accounts = try maps("accounts").map { row in
+    if includeOrganization {
+      try exactKeys(
+        row,
+        [
+          "id", "name", "currencyUnit", "originID", "originLabel", "lifecycle", "groupID",
+          "displayOrder", "hidden", "includeInTotals", "variant",
+        ])
+      return try LedgerAccount(
+        id: string(row, "id"), name: string(row, "name"),
+        currencyUnit: string(row, "currencyUnit"),
+        origin: LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel")),
+        lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self),
+        groupID: optionalString(row, "groupID"), displayOrder: jsonInt(row, "displayOrder"),
+        hidden: boolean(row, "hidden"), includeInTotals: boolean(row, "includeInTotals"),
+        variant: try requiredEnum(string(row, "variant"), as: LedgerAccountVariant.self))
+    }
     try exactKeys(
       row, ["id", "name", "currencyUnit", "originID", "originLabel", "lifecycle"])
     return try LedgerAccount(
@@ -786,6 +946,21 @@ private func decodePackageShape(
       lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self))
   }
   let categories = try maps("categories").map { row in
+    if includeOrganization {
+      try exactKeys(
+        row,
+        [
+          "id", "name", "kind", "originID", "originLabel", "lifecycle", "parentID",
+          "displayOrder", "hidden",
+        ])
+      return try LedgerCategory(
+        id: string(row, "id"), name: string(row, "name"),
+        kind: try requiredEnum(string(row, "kind"), as: LedgerCategoryKind.self),
+        origin: LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel")),
+        lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self),
+        parentID: optionalString(row, "parentID"), displayOrder: jsonInt(row, "displayOrder"),
+        hidden: boolean(row, "hidden"))
+    }
     try exactKeys(
       row, ["id", "name", "kind", "originID", "originLabel", "lifecycle"])
     return try LedgerCategory(
@@ -964,7 +1139,7 @@ private func decodePackageShape(
   return LedgerCanonicalPackage(
     formatVersion: LedgerPortablePackageFormat.version,
     formatFingerprint: LedgerPortablePackageFormat.fingerprint,
-    accounts: accounts, categories: categories, revisions: revisions, links: links,
+    accounts: accounts, accountGroups: accountGroups, categories: categories, revisions: revisions, links: links,
     recurrenceRules: recurrenceRules, budgets: budgets, installmentPlans: installmentPlans,
     preservedSource: preservedSource)
 }
