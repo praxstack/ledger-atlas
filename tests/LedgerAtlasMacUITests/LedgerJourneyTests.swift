@@ -679,6 +679,17 @@ import Testing
   #expect(journey.snapshot?.accountGroups.contains(group) == true)
   #expect(journey.snapshot?.categories.contains(childCategory) == true)
   #expect(try LedgerApplication.splitPurchases(from: try #require(journey.snapshot)).count == 1)
+  let secondAccount = try LedgerAccount(
+    id: String(repeating: "9", count: 64), name: "Savings", currencyUnit: account.currencyUnit,
+    origin: macOrigin)
+  try journey.createAccount(secondAccount)
+  let transfer = try journey.createNativeTransfer(
+    sourceAccountID: account.id, destinationAccountID: secondAccount.id,
+    sourceAmountLiteral: "3.25", destinationAmountLiteral: nil, rateLiteral: nil,
+    feeAmountLiteral: nil, feeAccountID: nil,
+    createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+  #expect(transfer.transfer.draft.kind == .transfer)
+  #expect(transfer.transfer.draft.effects.count == 2)
 }
 
 private func writeSyntheticV19(to url: URL) throws {

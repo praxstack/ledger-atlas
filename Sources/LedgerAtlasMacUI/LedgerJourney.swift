@@ -309,6 +309,68 @@ public final class LedgerJourney {
     return try createTransaction(idempotencyKey: key, draft: draft, createdAt: createdAt)
   }
 
+  public func createNativeTransfer(
+    sourceAccountID: String, destinationAccountID: String,
+    sourceAmountLiteral: String, destinationAmountLiteral: String?, rateLiteral: String?,
+    rateScale: Int = 6, feeAmountLiteral: String?, feeAccountID: String?, createdAt: UTCInstant
+  ) throws -> (transfer: LedgerTransactionRevision, fee: LedgerTransactionRevision?) {
+    guard application != nil, let snapshot,
+      sourceAccountID != destinationAccountID,
+      let source = snapshot.accounts.first(where: { $0.id == sourceAccountID }),
+      let destination = snapshot.accounts.first(where: { $0.id == destinationAccountID }),
+      source.lifecycle == .active, destination.lifecycle == .active
+    else { throw LedgerApplication.Error.invalidCommand }
+    let sourceAmount = try CurrencyAmount(
+      unitCode: source.currencyUnit, amount: ExactDecimal(sourceAmountLiteral))
+    let destinationAmount: CurrencyAmount
+    let conversion: LedgerConversion?
+    if source.currencyUnit == destination.currencyUnit {
+      let literal = destinationAmountLiteral?.trimmingCharacters(in: .whitespacesAndNewlines)
+      destinationAmount = try CurrencyAmount(
+        unitCode: destination.currencyUnit,
+        amount: ExactDecimal(literal?.isEmpty == false ? literal! : sourceAmountLiteral))
+      guard destinationAmount == sourceAmount else { throw LedgerApplication.Error.invalidCommand }
+      conversion = nil
+    } else {
+      guard let destinationLiteral = destinationAmountLiteral,
+        !destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        let rateLiteral, !rateLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else { throw LedgerApplication.Error.invalidCommand }
+      destinationAmount = try CurrencyAmount(
+        unitCode: destination.currencyUnit, amount: ExactDecimal(destinationLiteral))
+      conversion = try LedgerConversion(
+        sourceAmount: sourceAmount, convertedAmount: destinationAmount,
+        rate: ExactDecimal(rateLiteral), rateScale: rateScale, rounding: .halfEven)
+    }
+    let fee: CurrencyAmount?
+    if let feeLiteral = feeAmountLiteral,
+      !feeLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      guard let feeAccountID,
+        let feeAccount = snapshot.accounts.first(where: { $0.id == feeAccountID }),
+        feeAccount.lifecycle == .active
+      else { throw LedgerApplication.Error.invalidCommand }
+      fee = try CurrencyAmount(
+        unitCode: feeAccount.currencyUnit, amount: ExactDecimal(feeLiteral))
+    } else {
+      guard feeAccountID == nil || feeAccountID?.isEmpty == true else {
+        throw LedgerApplication.Error.invalidCommand
+      }
+      fee = nil
+    }
+    let key = SHA256.hash(
+      data: Data(
+        "mac-native-transfer:\(createdAt.epochMilliseconds):\(sourceAccountID):\(destinationAccountID):\(sourceAmountLiteral):\(destinationAmountLiteral ?? ""):\(rateLiteral ?? ""):\(feeAmountLiteral ?? ""):\(feeAccountID ?? "")".utf8)
+    ).map { String(format: "%02x", $0) }.joined()
+    return try createTransfer(
+      idempotencyKey: key, sourceAccountID: sourceAccountID,
+      destinationAccountID: destinationAccountID, sourceAmount: sourceAmount,
+      destinationAmount: destinationAmount, conversion: conversion, fee: fee,
+      feeAccountID: fee == nil ? nil : feeAccountID,
+      occurredAt: try Self.nativeTemporal(for: createdAt), origin: try LedgerOrigin.macNative(),
+      createdAt: createdAt)
+  }
+
   package static func localDate(for instant: UTCInstant, in timeZone: TimeZone) throws
     -> SourceLocalDate
   {
