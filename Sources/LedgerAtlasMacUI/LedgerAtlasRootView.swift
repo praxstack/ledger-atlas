@@ -787,7 +787,7 @@ public struct LedgerAtlasRootView: View {
         }
       )
       .id(selection)
-    } else if selection == .accounts {
+      } else if selection == .accounts {
       AccountsView(
         state: session.state, rows: journey.rows(for: .accounts),
         accounts: journey.snapshot?.accounts ?? [], groups: journey.snapshot?.accountGroups ?? [],
@@ -1705,6 +1705,7 @@ private struct AccountsView: View {
   let open: () -> Void
   @State private var showingAccountForm = false
   @State private var showingGroupForm = false
+  @State private var editingAccount: LedgerAccount?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -1713,7 +1714,9 @@ private struct AccountsView: View {
           ForEach(groups.sorted { $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder }, id: \.id) { group in
             Section {
               ForEach(Self.sortedAccounts(accounts.filter { $0.groupID == group.id }), id: \.id) { account in
-                AccountRow(account: account, save: saveAccount)
+                AccountRow(account: account, isEditing: isEditing, save: saveAccount) {
+                  editingAccount = $0
+                }
               }
               if !accounts.contains(where: { $0.groupID == group.id }) {
                 Text("No accounts in this group").foregroundStyle(.secondary)
@@ -1728,7 +1731,9 @@ private struct AccountsView: View {
               Text("No ungrouped accounts").foregroundStyle(.secondary)
             } else {
               ForEach(ungrouped, id: \.id) { account in
-                AccountRow(account: account, save: saveAccount)
+                AccountRow(account: account, isEditing: isEditing, save: saveAccount) {
+                  editingAccount = $0
+                }
               }
             }
           }
@@ -1779,6 +1784,15 @@ private struct AccountsView: View {
         showingGroupForm = false
       })
     }
+    .sheet(isPresented: Binding(
+      get: { editingAccount != nil }, set: { if !$0 { editingAccount = nil } })) {
+      if let editingAccount {
+        AccountEditForm(account: editingAccount, groups: groups) { revised in
+          saveAccount(revised)
+          self.editingAccount = nil
+        }
+      }
+    }
   }
 
   @ViewBuilder
@@ -1811,7 +1825,9 @@ private struct AccountsView: View {
 
 private struct AccountRow: View {
   let account: LedgerAccount
+  let isEditing: Bool
   let save: (LedgerAccount) -> Void
+  let edit: (LedgerAccount) -> Void
 
   var body: some View {
     HStack {
@@ -1826,6 +1842,7 @@ private struct AccountRow: View {
       if !account.includeInTotals { Label("Excluded from totals", systemImage: "minus.circle").font(.caption) }
       if account.lifecycle == .tombstoned { Label("Closed", systemImage: "archivebox").font(.caption) }
       Menu("Actions") {
+        Button("Edit account") { edit(account) }
         Button(account.hidden ? "Show account" : "Hide account") {
           update(hidden: !account.hidden)
         }
@@ -1836,6 +1853,7 @@ private struct AccountRow: View {
           update(lifecycle: account.lifecycle == .active ? .tombstoned : .active)
         }
       }
+      .disabled(!isEditing)
       .accessibilityLabel("Actions for \(account.name)")
     }
     .accessibilityElement(children: .combine)
@@ -1853,6 +1871,66 @@ private struct AccountRow: View {
       includeInTotals: includeInTotals ?? account.includeInTotals, variant: account.variant)
     else { return }
     save(revised)
+  }
+}
+
+private struct AccountEditForm: View {
+  let account: LedgerAccount
+  let groups: [LedgerAccountGroup]
+  let onSave: (LedgerAccount) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var name: String
+  @State private var groupID: String?
+  @State private var displayOrder: String
+  @State private var hidden: Bool
+  @State private var includeInTotals: Bool
+  @State private var variant: LedgerAccountVariant
+
+  init(account: LedgerAccount, groups: [LedgerAccountGroup], onSave: @escaping (LedgerAccount) -> Void) {
+    self.account = account
+    self.groups = groups
+    self.onSave = onSave
+    _name = State(initialValue: account.name)
+    _groupID = State(initialValue: account.groupID)
+    _displayOrder = State(initialValue: String(account.displayOrder))
+    _hidden = State(initialValue: account.hidden)
+    _includeInTotals = State(initialValue: account.includeInTotals)
+    _variant = State(initialValue: account.variant)
+  }
+
+  var body: some View {
+    Form {
+      TextField("Account name", text: $name)
+      Text("Currency: \(account.currencyUnit)").font(.caption).foregroundStyle(.secondary)
+      Picker("Group", selection: $groupID) {
+        Text("No group").tag(String?.none)
+        ForEach(groups.filter { $0.lifecycle == .active }, id: \.id) { Text($0.name).tag(Optional($0.id)) }
+      }
+      TextField("Display order", text: $displayOrder)
+      Picker("Account type", selection: $variant) {
+        ForEach(LedgerAccountVariant.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+      }
+      Toggle("Hidden", isOn: $hidden)
+      Toggle("Include in totals", isOn: $includeInTotals)
+      HStack {
+        Button("Cancel", role: .cancel) { dismiss() }
+        Spacer()
+        Button("Save") { save() }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Int(displayOrder) == nil)
+      }
+    }
+    .padding(20).frame(width: 420)
+  }
+
+  private func save() {
+    guard let order = Int(displayOrder), order >= 0,
+      let revised = try? LedgerAccount(
+        id: account.id, name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+        currencyUnit: account.currencyUnit, origin: account.origin, lifecycle: account.lifecycle,
+        groupID: groupID, displayOrder: order, hidden: hidden,
+        includeInTotals: includeInTotals, variant: variant)
+    else { return }
+    onSave(revised)
+    dismiss()
   }
 }
 
@@ -1983,13 +2061,16 @@ private struct CategoriesView: View {
   let createCategory: (LedgerCategory) -> Void
   let open: () -> Void
   @State private var showingCategoryForm = false
+  @State private var editingCategory: LedgerCategory?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       if !categories.isEmpty {
         List {
           ForEach(categories.filter { $0.parentID == nil }.sorted(by: Self.categoryOrder), id: \.id) { category in
-            CategoryTreeRow(category: category, allCategories: categories, isEditing: isEditing, save: saveCategory)
+            CategoryTreeRow(
+              category: category, allCategories: categories, isEditing: isEditing, save: saveCategory,
+              edit: { editingCategory = $0 })
           }
         }
       } else if !rows.isEmpty {
@@ -2035,6 +2116,15 @@ private struct CategoriesView: View {
         showingCategoryForm = false
       })
     }
+    .sheet(isPresented: Binding(
+      get: { editingCategory != nil }, set: { if !$0 { editingCategory = nil } })) {
+      if let editingCategory {
+        CategoryEditForm(category: editingCategory, categories: categories) { revised in
+          saveCategory(revised)
+          self.editingCategory = nil
+        }
+      }
+    }
   }
 
   private static func categoryOrder(_ lhs: LedgerCategory, _ rhs: LedgerCategory) -> Bool {
@@ -2047,6 +2137,7 @@ private struct CategoryTreeRow: View {
   let allCategories: [LedgerCategory]
   let isEditing: Bool
   let save: (LedgerCategory) -> Void
+  let edit: (LedgerCategory) -> Void
   @State private var expanded = true
 
   private var children: [LedgerCategory] {
@@ -2058,7 +2149,8 @@ private struct CategoryTreeRow: View {
   var body: some View {
     DisclosureGroup(isExpanded: $expanded) {
       ForEach(children, id: \.id) { child in
-        CategoryTreeRow(category: child, allCategories: allCategories, isEditing: isEditing, save: save)
+        CategoryTreeRow(
+          category: child, allCategories: allCategories, isEditing: isEditing, save: save, edit: edit)
       }
     } label: {
       HStack {
@@ -2071,6 +2163,7 @@ private struct CategoryTreeRow: View {
         Spacer()
         if category.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
         Menu("Actions") {
+          Button("Edit category") { edit(category) }
           Button(category.hidden ? "Show category" : "Hide category") { update(hidden: !category.hidden) }
           Button(category.lifecycle == .active ? "Close category" : "Restore category") {
             update(lifecycle: category.lifecycle == .active ? .tombstoned : .active)
@@ -2091,6 +2184,75 @@ private struct CategoryTreeRow: View {
       displayOrder: category.displayOrder, hidden: hidden ?? category.hidden)
     else { return }
     save(revised)
+  }
+}
+
+private struct CategoryEditForm: View {
+  let category: LedgerCategory
+  let categories: [LedgerCategory]
+  let onSave: (LedgerCategory) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var name: String
+  @State private var parentID: String?
+  @State private var displayOrder: String
+  @State private var hidden: Bool
+
+  init(category: LedgerCategory, categories: [LedgerCategory], onSave: @escaping (LedgerCategory) -> Void) {
+    self.category = category
+    self.categories = categories
+    self.onSave = onSave
+    _name = State(initialValue: category.name)
+    _parentID = State(initialValue: category.parentID)
+    _displayOrder = State(initialValue: String(category.displayOrder))
+    _hidden = State(initialValue: category.hidden)
+  }
+
+  var body: some View {
+    Form {
+      TextField("Category name", text: $name)
+      Picker("Parent", selection: $parentID) {
+        Text("Top level").tag(String?.none)
+        ForEach(availableParents, id: \.id) { Text($0.name).tag(Optional($0.id)) }
+      }
+      TextField("Display order", text: $displayOrder)
+      Toggle("Hidden", isOn: $hidden)
+      HStack {
+        Button("Cancel", role: .cancel) { dismiss() }
+        Spacer()
+        Button("Save") { save() }
+          .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Int(displayOrder) == nil)
+      }
+    }
+    .padding(20).frame(width: 420)
+  }
+
+  private var availableParents: [LedgerCategory] {
+    let excluded = descendantIDs(of: category.id).union([category.id])
+    return categories.filter {
+      $0.lifecycle == .active && !$0.hidden && !excluded.contains($0.id)
+    }.sorted { ($0.displayOrder, $0.name) < ($1.displayOrder, $1.name) }
+  }
+
+  private func descendantIDs(of id: String) -> Set<String> {
+    var result: Set<String> = []
+    var pending = [id]
+    while let current = pending.popLast() {
+      for child in categories where child.parentID == current && result.insert(child.id).inserted {
+        pending.append(child.id)
+      }
+    }
+    return result
+  }
+
+  private func save() {
+    guard let order = Int(displayOrder), order >= 0,
+      let revised = try? LedgerCategory(
+        id: category.id, name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: category.kind,
+        origin: category.origin, lifecycle: category.lifecycle, parentID: parentID,
+        displayOrder: order, hidden: hidden)
+    else { return }
+    onSave(revised)
+    dismiss()
   }
 }
 
