@@ -387,10 +387,12 @@ public struct LedgerApplication: LedgerClient {
   }
 
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {
-    let snapshot = try store.readSnapshot()
-    guard try store.portablePackageExportIsRepresentable(),
-      snapshot.undisplayedImportedEventCount == 0, try !store.containsImportHistory(),
-      try store.readPreservedSource().isEmpty, !hasUnsupportedPortableProvenance(snapshot)
+    let export = try store.portablePackageExportSnapshot()
+    let snapshot = export.ledger
+    guard export.isRepresentable,
+      snapshot.undisplayedImportedEventCount == 0, !export.hasImportHistory,
+      snapshot.preservedSource.isEmpty,
+      !hasUnsupportedPortableProvenance(snapshot)
     else {
       // The portable package cannot yet encode the canonical receipt/provenance graph.
       // Imported ledgers must use the exact canonical SQLite backup instead of losing it.

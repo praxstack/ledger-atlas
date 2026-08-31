@@ -42,8 +42,8 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV10Objects)
         == CanonicalLedgerSchema.legacyV10Fingerprint)
     #expect(CanonicalLedgerSchema.legacyV10Objects.count == 31)
-    #expect(CanonicalLedgerSchema.expectedObjects.count == 34)
-    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 34)
+    #expect(CanonicalLedgerSchema.expectedObjects.count == 35)
+    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 35)
     #expect(
       Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).isSuperset(of: [
         "receipt_preservation_anchor", "receipt_preservation_payload",
@@ -68,7 +68,7 @@ struct CanonicalPersistenceModelsTests {
     #expect(migration == CanonicalLedgerSchema.v8ToV9MigrationStatements)
     #expect(CanonicalLedgerSchema.v8ToV9MigrationStatements.count == 16)
     #expect(CanonicalLedgerSchema.v9ToV10MigrationStatements.count == 3)
-    #expect(CanonicalLedgerSchema.v10ToV11MigrationStatements.count == 3)
+    #expect(CanonicalLedgerSchema.v10ToV11MigrationStatements.count == 4)
     #expect(
       CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 9)
         == CanonicalLedgerSchema.v9ToV10MigrationStatements)
@@ -100,7 +100,8 @@ struct CanonicalPersistenceModelsTests {
     #expect(categoryTree.contains("parent_category_id TEXT REFERENCES ledger_category"))
     #expect(categoryTree.contains("display_order INTEGER NOT NULL CHECK(display_order >= 0)"))
     #expect(categoryTree.contains("hidden INTEGER NOT NULL CHECK(hidden IN (0, 1))"))
-    #expect(categoryTree.contains("parent_category_id IS NULL OR parent_category_id != category_id"))
+    #expect(
+      categoryTree.contains("parent_category_id IS NULL OR parent_category_id != category_id"))
 
     let groups = objects["ledger_account_group"] ?? ""
     #expect(groups.contains("group_id TEXT PRIMARY KEY"))
@@ -111,7 +112,8 @@ struct CanonicalPersistenceModelsTests {
     #expect(preferences.contains("account_id TEXT PRIMARY KEY REFERENCES ledger_account"))
     #expect(preferences.contains("group_id TEXT REFERENCES ledger_account_group"))
     #expect(preferences.contains("hidden INTEGER NOT NULL CHECK(hidden IN (0, 1))"))
-    #expect(preferences.contains("include_in_totals INTEGER NOT NULL CHECK(include_in_totals IN (0, 1))"))
+    #expect(
+      preferences.contains("include_in_totals INTEGER NOT NULL CHECK(include_in_totals IN (0, 1))"))
     #expect(preferences.contains("variant TEXT NOT NULL"))
   }
 

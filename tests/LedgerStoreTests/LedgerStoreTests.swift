@@ -436,6 +436,256 @@ import Testing
       == store.semanticChecksum())
 }
 
+@Test func backupDetectsAReplacementAtTheFinalPublicationSeam() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let parked = directory.appendingPathComponent("parked-backup.sqlite")
+  let sentinel = Data("backup publication sentinel".utf8)
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .beforeDestinationPublication else { return }
+      let temporary = try #require(
+        FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+          .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-backup-") })
+      #expect(Darwin.rename(temporary.path, parked.path) == 0)
+      try sentinel.write(to: temporary)
+      #expect(chmod(temporary.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+    }
+  }
+
+  #expect(!FileManager.default.fileExists(atPath: destination.path))
+  #expect(try Data(contentsOf: parked).isEmpty == false)
+  let replacement = try #require(
+    FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+      .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-backup-") })
+  #expect(try Data(contentsOf: replacement) == sentinel)
+}
+
+@Test func backupRejectsDestinationTruncationAfterCopy() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .afterDestinationCopyBeforeValidation else { return }
+      let descriptor = Darwin.open(destination.path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW)
+      guard descriptor >= 0 else { throw TestError.injected }
+      defer { Darwin.close(descriptor) }
+      #expect(ftruncate(descriptor, 1) == 0)
+      #expect(fsync(descriptor) == 0)
+    }
+  }
+
+  #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
+@Test func preservedSourceProjectionDeduplicatesTheSameOpaqueFieldCommitment() throws {
+  let database = try makeCanonicalDatabase()
+  let store = try LedgerStore(takingOwnershipOfValidatedCanonicalDatabase: database)
+  let id = String(repeating: "a", count: 64)
+  let receipt = String(repeating: "b", count: 64)
+  let anchor = String(repeating: "c", count: 64)
+  let event = String(repeating: "d", count: 64)
+  let payload = Data("synthetic note".utf8).map { String(format: "%02x", $0) }.joined()
+  try execute(
+    database,
+    """
+    INSERT INTO provenance_reference VALUES ('\(id)', '\(id)', 'synthetic-profile', 'synthetic-adapter', NULL, 'INOUTCOME', 'row-1', 7, 'NOTE');
+    INSERT INTO economic_event VALUES ('\(event)', 'account', 'expense', '1', 'USD', 0, 1970, 1, 1, 0, 0, 0, 0, 'fixed', '0', 'millisecond', 0, 'row-1', '\(id)');
+    INSERT INTO import_receipt VALUES ('\(receipt)', '\(id)', '\(id)', 'synthetic-profile', 'synthetic-adapter', '\(id)', '\(id)', 1, 8);
+    INSERT INTO receipt_preservation_anchor VALUES ('\(anchor)', '\(receipt)', 'row-subject', 'record', '\(id)', 'synthetic-profile', 'synthetic-adapter', NULL, 'INOUTCOME', 'row-1');
+    INSERT INTO receipt_preservation_payload VALUES ('payload', '\(receipt)', '\(anchor)', '\(id)', '\(id)', 1, 'TEXT', 'text', X'\(payload)');
+    INSERT INTO sidecar_reference VALUES ('\(id)', '\(event)', '\(id)', 1, 'TEXT', 'text', X'\(payload)');
+    """)
+
+  let projected = try store.readPreservedSource()
+
+  #expect(projected.count == 1)
+  #expect(projected.first?.table == "INOUTCOME")
+  #expect(projected.first?.recordKey == "row-1")
+  #expect(projected.first?.columnName == "NOTE")
+  #expect(projected.first?.payload == Data("synthetic note".utf8))
+}
+
+@Test func backupReportsWhenRenameCompletedBeforeFinalDurabilityChecks() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+  var reachedPublishedDestination = false
+
+  #expect(throws: LedgerStore.Error.backupPublicationCompleted) {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .afterDestinationPublished else { return }
+      reachedPublishedDestination = true
+      throw TestError.injected
+    }
+  }
+
+  #expect(reachedPublishedDestination)
+  #expect(FileManager.default.fileExists(atPath: destination.path))
+  #expect(
+    try LedgerStore.openReadOnly(at: destination).semanticChecksum()
+      == store.semanticChecksum())
+}
+
+@Test func backupRejectsARepurposedTemporaryBeforeWritingFinancialBytes() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let parked = directory.appendingPathComponent("parked.sqlite")
+  let sentinel = Data("unrelated-sentinel".utf8)
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+  var racedLeaf: URL?
+
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .afterTemporaryFileCreated else { return }
+      let temporary = try #require(
+        FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+          .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-backup-") })
+      try FileManager.default.moveItem(at: temporary, to: parked)
+      let parkedDescriptor = Darwin.open(parked.path, O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW)
+      guard parkedDescriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+      defer { Darwin.close(parkedDescriptor) }
+      let parkedWrite = sentinel.withUnsafeBytes {
+        Darwin.write(parkedDescriptor, $0.baseAddress, $0.count)
+      }
+      #expect(parkedWrite == sentinel.count)
+      #expect(fsync(parkedDescriptor) == 0)
+      try sentinel.write(to: temporary)
+      #expect(chmod(temporary.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+      racedLeaf = temporary
+    }
+  }
+
+  #expect(try Data(contentsOf: #require(racedLeaf)) == sentinel)
+  #expect(try Data(contentsOf: parked) == sentinel)
+  #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
+@Test func failedBackupNeverDeletesOrTruncatesARepurposedTemporaryInode() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let parked = directory.appendingPathComponent("parked.sqlite")
+  let sentinel = Data("unrelated-sentinel".utf8)
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+  var racedLeaf: URL?
+
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .afterTemporaryFileValidated else { return }
+      let temporary = try #require(
+        FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+          .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-backup-") })
+      try FileManager.default.moveItem(at: temporary, to: parked)
+      let parkedDescriptor = Darwin.open(parked.path, O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW)
+      guard parkedDescriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+      defer { Darwin.close(parkedDescriptor) }
+      let parkedWrite = sentinel.withUnsafeBytes {
+        Darwin.write(parkedDescriptor, $0.baseAddress, $0.count)
+      }
+      #expect(parkedWrite == sentinel.count)
+      #expect(fsync(parkedDescriptor) == 0)
+      try sentinel.write(to: temporary)
+      #expect(chmod(temporary.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+      racedLeaf = temporary
+    }
+  }
+
+  #expect(try Data(contentsOf: #require(racedLeaf)) == sentinel)
+  #expect(try Data(contentsOf: parked) == sentinel)
+  #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
+@Test func failedBackupPreservesARenamedValidatedTemporary() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let parked = directory.appendingPathComponent("parked.sqlite")
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+  var parkedBytes = Data()
+
+  do {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .afterTemporaryFileValidated else { return }
+      let temporary = try #require(
+        FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+          .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-backup-") })
+      try FileManager.default.moveItem(at: temporary, to: parked)
+      parkedBytes = try Data(contentsOf: parked)
+      throw TestError.injected
+    }
+    Issue.record("expected injected failure after renaming validated backup")
+  } catch TestError.injected {
+  } catch {
+    Issue.record("unexpected backup error: \(error)")
+  }
+
+  #expect(!parkedBytes.isEmpty)
+  #expect(try Data(contentsOf: parked) == parkedBytes)
+  #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
+@Test func failedBackupPreservesAMatchingPrefixInARenamedTemporaryInode() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let parked = directory.appendingPathComponent("parked.sqlite")
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+  var expectedPrefix = Data()
+
+  do {
+    try store.backupCanonicalDatabase(to: destination) { phase in
+      guard phase == .afterTemporaryFileValidated else { return }
+      let temporary = try #require(
+        FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+          .first { $0.lastPathComponent.hasPrefix(".ledger-atlas-backup-") })
+      try FileManager.default.moveItem(at: temporary, to: parked)
+      let serialized = try Data(contentsOf: parked)
+      expectedPrefix = Data(serialized.prefix(max(1, min(4_096, serialized.count))))
+      let parkedDescriptor = Darwin.open(
+        parked.path, O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW)
+      guard parkedDescriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+      defer { Darwin.close(parkedDescriptor) }
+      let written = expectedPrefix.withUnsafeBytes {
+        Darwin.write(parkedDescriptor, $0.baseAddress, $0.count)
+      }
+      #expect(written == expectedPrefix.count)
+      #expect(fsync(parkedDescriptor) == 0)
+      throw TestError.injected
+    }
+    Issue.record("expected injected failure after repurposing validated backup")
+  } catch TestError.injected {
+  } catch {
+    Issue.record("unexpected backup error: \(error)")
+  }
+
+  #expect(!expectedPrefix.isEmpty)
+  #expect(try Data(contentsOf: parked) == expectedPrefix)
+  #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
 @Test func descriptorBoundWriterDoesNotMutateAReplacementPath() throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -646,6 +896,40 @@ import Testing
   }
 }
 
+@Test func expectedMutationIdentityRejectsAPathSwapBeforePinnedSQLiteOpen() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let replacement = directory.appendingPathComponent("replacement.sqlite")
+  sqlite3_close(try makeCanonicalDatabase(at: replacement))
+  #expect(chmod(replacement.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+  let parked = directory.appendingPathComponent("parked.sqlite")
+  let originalBytes = try Data(contentsOf: fixture.url)
+  let replacementBytes = try Data(contentsOf: replacement)
+  var expectedIdentity = stat()
+  #expect(lstat(fixture.url.path, &expectedIdentity) == 0)
+  var reachedPinnedOpen = false
+
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try LedgerStore.openForMutation(
+      at: fixture.url, expectedIdentity: expectedIdentity,
+      testing: { phase in
+        if phase == .afterPinnedOpen { reachedPinnedOpen = true }
+        guard phase == .afterRecoveryJournalAuthenticated else { return }
+        #expect(Darwin.rename(fixture.url.path, parked.path) == 0)
+        #expect(Darwin.rename(replacement.path, fixture.url.path) == 0)
+      })
+  }
+
+  #expect(!reachedPinnedOpen)
+  #expect(try Data(contentsOf: parked) == originalBytes)
+  #expect(try Data(contentsOf: fixture.url) == replacementBytes)
+  for suffix in ["-wal", "-shm"] {
+    #expect(!FileManager.default.fileExists(atPath: fixture.url.path + suffix))
+  }
+}
+
 @Test func importedEventLoaderRejectsUnknownKindAndInvalidCivilDates() throws {
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
     try makeStoreWithImportedEvent(kind: "not-a-kind")
@@ -666,12 +950,22 @@ import Testing
 
 private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throws -> LedgerStore {
   let database = try makeCanonicalDatabase()
-  let provenanceID = String(repeating: "b", count: 64)
-  let eventID = String(repeating: "c", count: 64)
   let accountID = String(repeating: "d", count: 64)
   let artifact = String(repeating: "a", count: 64)
-  let receipt = String(repeating: "6", count: 64)
-  let bindingIDs = [provenanceID] + ["e", "f", "1", "2"].map { String(repeating: $0, count: 64) }
+  let receipt = CanonicalStagingID.stage(
+    artifactSHA256: artifact, profileID: "synthetic-profile",
+    adapterVersion: "synthetic-adapter-v1")
+  let sourceRecordID = CanonicalStagingID.record(
+    stagingID: receipt, table: "INOUTCOME", recordKey: "event")
+  let eventID = try StableCanonicalID.event(sourceRecordID: sourceRecordID, effectOrdinal: 0)
+  let bindingIDs = (0..<5).map { (index: Int) in
+    CanonicalStagingID.field(
+      stagingID: receipt,
+      locator: SourceLocator(
+        table: "INOUTCOME", recordKey: "event", columnOrdinal: index,
+        columnName: "c\(index)"))
+  }
+  let provenanceID = bindingIDs[0]
   let provenanceRows = bindingIDs.enumerated().map { index, id in
     "INSERT INTO provenance_reference VALUES ('\(id)', '\(artifact)', 'synthetic-profile', 'synthetic-adapter-v1', NULL, 'INOUTCOME', 'event', \(index), 'c\(index)')"
   }.joined(separator: ";")
@@ -679,6 +973,25 @@ private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throw
     .map { semantic, id in
       "INSERT INTO event_source_binding VALUES ('\(eventID)', '\(semantic)', '\(id)', 'TEXT', 'text'); INSERT INTO receipt_binding VALUES ('\(receipt)', '\(eventID)', '\(semantic)', '\(id)')"
     }.joined(separator: ";")
+  var eventComponents = [
+    CanonicalReceiptDigest.eventSetPrefix, eventID, accountID, kind, "1.00", "USD", "0",
+    "1970", String(localMonth), "1", "0", "0", "0", "0", "fixed", "0", "millisecond",
+    "0", sourceRecordID, provenanceID,
+  ]
+  for (semantic, id) in zip(
+    ["amount", "currency", "occurred_at", "account", "kind"], bindingIDs
+  ).sorted(by: { $0.0 < $1.0 }) {
+    eventComponents.append(contentsOf: [semantic, id, "optional:some", "TEXT", "text"])
+  }
+  let eventSetHash = CanonicalReceiptDigest.hash(eventComponents)
+  let preservationHash = CanonicalReceiptDigest.hash([
+    "ledger-atlas/receipt-owned-preservation-set/v4"
+  ])
+  let reconciliationHash = CanonicalReceiptDigest.hash([
+    "ledger-atlas/canonical-receipt-integrity/v6", receipt, artifact, artifact,
+    "synthetic-profile", "synthetic-adapter-v1", eventSetHash, "1", "8", eventSetHash,
+    preservationHash,
+  ])
   try execute(
     database,
     """
@@ -691,9 +1004,9 @@ private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throw
     ) VALUES (
       '\(eventID)', '\(accountID)', '\(kind)', '1.00', 'USD',
       0, 1970, \(localMonth), 1, 0, 0, 0, 0, 'fixed', '0', 'millisecond',
-      0, '\(eventID)', '\(provenanceID)'
+      0, '\(sourceRecordID)', '\(provenanceID)'
     );
-    INSERT INTO import_receipt VALUES ('\(receipt)', '\(artifact)', '\(artifact)', 'synthetic-profile', 'synthetic-adapter-v1', '\(artifact)', '\(artifact)', 1, 8);
+    INSERT INTO import_receipt VALUES ('\(receipt)', '\(artifact)', '\(artifact)', 'synthetic-profile', 'synthetic-adapter-v1', '\(reconciliationHash)', '\(eventSetHash)', 1, 8);
     INSERT INTO receipt_event VALUES ('\(receipt)', '\(eventID)');
     \(bindings);
     """)

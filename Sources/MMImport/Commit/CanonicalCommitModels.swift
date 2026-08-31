@@ -36,7 +36,8 @@ public struct CanonicalCommitRequest: Sendable {
     expectedStagingDigest: String,
     mappingDecisions: [ReconciliationDecision],
     events: [CanonicalEconomicEvent],
-    receiptOwnedSubjectIDs: Set<String>
+    receiptOwnedSubjectIDs: Set<String>,
+    sourceTimeZone: SourceTimeZone? = nil
   ) {
     self.canonicalDatabaseURL = canonicalDatabaseURL
     self.stagingDatabaseURL = stagingDatabaseURL
@@ -44,7 +45,8 @@ public struct CanonicalCommitRequest: Sendable {
     self.expectedStagingDigest = expectedStagingDigest
     self.mappingDecisions = mappingDecisions
     self.events = events
-    adapterAuthorization = .observedV19(receiptOwnedSubjectIDs: receiptOwnedSubjectIDs)
+    adapterAuthorization = .observedV19(
+      receiptOwnedSubjectIDs: receiptOwnedSubjectIDs, sourceTimeZone: sourceTimeZone)
   }
 
   var isObservedV19AdapterAuthorized: Bool {
@@ -53,15 +55,22 @@ public struct CanonicalCommitRequest: Sendable {
   }
 
   var observedV19ReceiptOwnedSubjectIDs: Set<String>? {
-    guard case .observedV19(let receiptOwnedSubjectIDs)? = adapterAuthorization else { return nil }
+    guard case .observedV19(let receiptOwnedSubjectIDs, _)? = adapterAuthorization else {
+      return nil
+    }
     return receiptOwnedSubjectIDs
+  }
+
+  var observedV19SourceTimeZone: SourceTimeZone? {
+    guard case .observedV19(_, let sourceTimeZone)? = adapterAuthorization else { return nil }
+    return sourceTimeZone
   }
 
   var hasAdapterAuthorization: Bool { adapterAuthorization != nil }
 }
 
 enum CanonicalCommitAdapterAuthorization: Sendable {
-  case observedV19(receiptOwnedSubjectIDs: Set<String>)
+  case observedV19(receiptOwnedSubjectIDs: Set<String>, sourceTimeZone: SourceTimeZone?)
 }
 
 public enum CanonicalCommitStatus: String, Codable, Equatable, Sendable {
@@ -142,14 +151,7 @@ enum CanonicalCommitDigest {
   static let maximumTotalSidecarBytes = 512 * 1_024 * 1_024
 
   static func hash(_ components: [String]) -> String {
-    var hasher = SHA256()
-    for component in components {
-      let data = Data(component.utf8)
-      var length = UInt64(data.count).bigEndian
-      withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
-      hasher.update(data: data)
-    }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    CanonicalReceiptDigest.hash(components)
   }
 
   static func eventSet(
@@ -165,11 +167,10 @@ enum CanonicalCommitDigest {
     return hash(components)
   }
 
-  static let eventSetPrefix = "ledger-atlas/canonical-event-set/v4"
+  static let eventSetPrefix = CanonicalReceiptDigest.eventSetPrefix
 
   static func optionalComponents(_ value: String?) -> [String] {
-    guard let value else { return ["optional:none"] }
-    return ["optional:some", value]
+    CanonicalReceiptDigest.optionalComponents(value)
   }
 
   static func eventSetComponents(
@@ -190,7 +191,8 @@ enum CanonicalCommitDigest {
       event.occurredAt.precision.rawValue, String(event.occurredAt.resolvedOffsetSeconds),
       event.sourceRecordID, event.amountProvenance.deterministicID,
     ]
-    for binding in event.sourceBindings.sorted(by: { $0.semantic.rawValue < $1.semantic.rawValue }) {
+    for binding in event.sourceBindings.sorted(by: { $0.semantic.rawValue < $1.semantic.rawValue })
+    {
       components.append(binding.semantic.rawValue)
       components.append(binding.provenance.deterministicID)
       components.append(contentsOf: optionalComponents(binding.declaredType))
@@ -264,25 +266,32 @@ enum CanonicalStagingPreflight {
       scalarInt64(database, "SELECT count(*) FROM staged_field") == Int64(expected.fieldCount),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND (typeof(type)<>'text' OR typeof(name)<>'text' OR typeof(tbl_name)<>'text' OR typeof(sql)<>'text' OR length(CAST(type AS BLOB))>16 OR length(CAST(name AS BLOB))>128 OR length(CAST(tbl_name AS BLOB))>128 OR length(CAST(sql AS BLOB))>65536)"),
+        "SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND (typeof(type)<>'text' OR typeof(name)<>'text' OR typeof(tbl_name)<>'text' OR typeof(sql)<>'text' OR length(CAST(type AS BLOB))>16 OR length(CAST(name AS BLOB))>128 OR length(CAST(tbl_name AS BLOB))>128 OR length(CAST(sql AS BLOB))>65536)"
+      ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM staging_meta WHERE typeof(key)<>'text' OR typeof(value)<>'text' OR length(CAST(key AS BLOB))<1 OR length(CAST(key AS BLOB))>128 OR length(CAST(value AS BLOB))>\(limits.maximumMetadataBytes)"),
+        "SELECT 1 FROM staging_meta WHERE typeof(key)<>'text' OR typeof(value)<>'text' OR length(CAST(key AS BLOB))<1 OR length(CAST(key AS BLOB))>128 OR length(CAST(value AS BLOB))>\(limits.maximumMetadataBytes)"
+      ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM staged_artifact WHERE typeof(artifact_id)<>'text' OR length(CAST(artifact_id AS BLOB))<>64 OR typeof(artifact_sha256)<>'text' OR length(CAST(artifact_sha256 AS BLOB))<>64 OR typeof(profile_id)<>'text' OR length(CAST(profile_id AS BLOB))<1 OR length(CAST(profile_id AS BLOB))>256 OR typeof(adapter_version)<>'text' OR length(CAST(adapter_version AS BLOB))<1 OR length(CAST(adapter_version AS BLOB))>256 OR typeof(source_size_bytes)<>'integer' OR source_size_bytes<0"),
+        "SELECT 1 FROM staged_artifact WHERE typeof(artifact_id)<>'text' OR length(CAST(artifact_id AS BLOB))<>64 OR typeof(artifact_sha256)<>'text' OR length(CAST(artifact_sha256 AS BLOB))<>64 OR typeof(profile_id)<>'text' OR length(CAST(profile_id AS BLOB))<1 OR length(CAST(profile_id AS BLOB))>256 OR typeof(adapter_version)<>'text' OR length(CAST(adapter_version AS BLOB))<1 OR length(CAST(adapter_version AS BLOB))>256 OR typeof(source_size_bytes)<>'integer' OR source_size_bytes<0"
+      ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM staged_table WHERE typeof(table_id)<>'text' OR length(CAST(table_id AS BLOB))<>64 OR typeof(artifact_id)<>'text' OR length(CAST(artifact_id AS BLOB))<>64 OR typeof(ordinal)<>'integer' OR ordinal<0 OR ordinal>=\(limits.maximumTables) OR typeof(table_name)<>'text' OR length(CAST(table_name AS BLOB))<1 OR length(CAST(table_name AS BLOB))>1024 OR typeof(record_count)<>'integer' OR record_count<0 OR record_count>\(limits.maximumRecords)"),
+        "SELECT 1 FROM staged_table WHERE typeof(table_id)<>'text' OR length(CAST(table_id AS BLOB))<>64 OR typeof(artifact_id)<>'text' OR length(CAST(artifact_id AS BLOB))<>64 OR typeof(ordinal)<>'integer' OR ordinal<0 OR ordinal>=\(limits.maximumTables) OR typeof(table_name)<>'text' OR length(CAST(table_name AS BLOB))<1 OR length(CAST(table_name AS BLOB))>1024 OR typeof(record_count)<>'integer' OR record_count<0 OR record_count>\(limits.maximumRecords)"
+      ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM staged_record WHERE typeof(record_id)<>'text' OR length(CAST(record_id AS BLOB))<>64 OR typeof(table_id)<>'text' OR length(CAST(table_id AS BLOB))<>64 OR typeof(record_key)<>'text' OR length(CAST(record_key AS BLOB))<1 OR length(CAST(record_key AS BLOB))>4096 OR typeof(field_count)<>'integer' OR field_count<0 OR field_count>\(limits.maximumFieldsPerRecord) OR typeof(opaque_byte_count)<>'integer' OR opaque_byte_count<0 OR opaque_byte_count>\(limits.maximumRecordBytes)"),
+        "SELECT 1 FROM staged_record WHERE typeof(record_id)<>'text' OR length(CAST(record_id AS BLOB))<>64 OR typeof(table_id)<>'text' OR length(CAST(table_id AS BLOB))<>64 OR typeof(record_key)<>'text' OR length(CAST(record_key AS BLOB))<1 OR length(CAST(record_key AS BLOB))>4096 OR typeof(field_count)<>'integer' OR field_count<0 OR field_count>\(limits.maximumFieldsPerRecord) OR typeof(opaque_byte_count)<>'integer' OR opaque_byte_count<0 OR opaque_byte_count>\(limits.maximumRecordBytes)"
+      ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM staged_field WHERE typeof(field_id)<>'text' OR length(CAST(field_id AS BLOB))<>64 OR typeof(record_id)<>'text' OR length(CAST(record_id AS BLOB))<>64 OR typeof(ordinal)<>'integer' OR ordinal<0 OR ordinal>=\(limits.maximumFieldsPerRecord) OR typeof(column_name)<>'text' OR length(CAST(column_name AS BLOB))<1 OR length(CAST(column_name AS BLOB))>1024 OR (declared_type IS NOT NULL AND (typeof(declared_type)<>'text' OR length(CAST(declared_type AS BLOB))>1024)) OR typeof(storage_class)<>'text' OR storage_class NOT IN ('null','integer','real','blob','text') OR typeof(payload)<>'blob' OR length(payload)>\(limits.maximumValueBytes) OR (storage_class='null' AND length(payload)<>0) OR (storage_class IN ('integer','real') AND length(payload)<>8) OR typeof(sidecar_version)<>'integer' OR sidecar_version<>1 OR (container_member IS NOT NULL AND (typeof(container_member)<>'text' OR length(CAST(container_member AS BLOB))>4096))"),
+        "SELECT 1 FROM staged_field WHERE typeof(field_id)<>'text' OR length(CAST(field_id AS BLOB))<>64 OR typeof(record_id)<>'text' OR length(CAST(record_id AS BLOB))<>64 OR typeof(ordinal)<>'integer' OR ordinal<0 OR ordinal>=\(limits.maximumFieldsPerRecord) OR typeof(column_name)<>'text' OR length(CAST(column_name AS BLOB))<1 OR length(CAST(column_name AS BLOB))>1024 OR (declared_type IS NOT NULL AND (typeof(declared_type)<>'text' OR length(CAST(declared_type AS BLOB))>1024)) OR typeof(storage_class)<>'text' OR storage_class NOT IN ('null','integer','real','blob','text') OR typeof(payload)<>'blob' OR length(payload)>\(limits.maximumValueBytes) OR (storage_class='null' AND length(payload)<>0) OR (storage_class IN ('integer','real') AND length(payload)<>8) OR typeof(sidecar_version)<>'integer' OR sidecar_version<>1 OR (container_member IS NOT NULL AND (typeof(container_member)<>'text' OR length(CAST(container_member AS BLOB))>4096))"
+      ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM staging_manifest WHERE typeof(format_version)<>'integer' OR format_version<>1 OR typeof(staging_id)<>'text' OR length(CAST(staging_id AS BLOB))<>64 OR typeof(artifact_sha256)<>'text' OR length(CAST(artifact_sha256 AS BLOB))<>64 OR typeof(profile_id)<>'text' OR length(CAST(profile_id AS BLOB))<1 OR length(CAST(profile_id AS BLOB))>256 OR typeof(adapter_version)<>'text' OR length(CAST(adapter_version AS BLOB))<1 OR length(CAST(adapter_version AS BLOB))>256 OR typeof(table_count)<>'integer' OR table_count<0 OR table_count>\(limits.maximumTables) OR typeof(record_count)<>'integer' OR record_count<0 OR record_count>\(limits.maximumRecords) OR typeof(field_count)<>'integer' OR field_count<0 OR field_count>\(limits.maximumFields) OR typeof(opaque_byte_count)<>'integer' OR opaque_byte_count<0 OR opaque_byte_count>\(limits.maximumTotalBytes)"),
+        "SELECT 1 FROM staging_manifest WHERE typeof(format_version)<>'integer' OR format_version<>1 OR typeof(staging_id)<>'text' OR length(CAST(staging_id AS BLOB))<>64 OR typeof(artifact_sha256)<>'text' OR length(CAST(artifact_sha256 AS BLOB))<>64 OR typeof(profile_id)<>'text' OR length(CAST(profile_id AS BLOB))<1 OR length(CAST(profile_id AS BLOB))>256 OR typeof(adapter_version)<>'text' OR length(CAST(adapter_version AS BLOB))<1 OR length(CAST(adapter_version AS BLOB))>256 OR typeof(table_count)<>'integer' OR table_count<0 OR table_count>\(limits.maximumTables) OR typeof(record_count)<>'integer' OR record_count<0 OR record_count>\(limits.maximumRecords) OR typeof(field_count)<>'integer' OR field_count<0 OR field_count>\(limits.maximumFields) OR typeof(opaque_byte_count)<>'integer' OR opaque_byte_count<0 OR opaque_byte_count>\(limits.maximumTotalBytes)"
+      ),
       queryHasNoRows(
         database,
         """
@@ -310,7 +319,8 @@ enum CanonicalStagingPreflight {
         """),
       queryHasNoRows(
         database,
-        "SELECT 1 WHERE (SELECT total(length(payload)) FROM staged_field)>\(limits.maximumTotalBytes).0"),
+        "SELECT 1 WHERE (SELECT total(length(payload)) FROM staged_field)>\(limits.maximumTotalBytes).0"
+      ),
       scalarDouble(database, "SELECT total(length(payload)) FROM staged_field")
         == Double(expected.opaqueByteCount)
     else { return false }

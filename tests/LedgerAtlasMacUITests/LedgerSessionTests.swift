@@ -53,14 +53,20 @@ import Testing
   let url = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
   let counts = ScopeCounts()
   let loaded = LedgerSession.Presentation(
-    snapshot: .init(accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0))
+    snapshot: .init(
+      accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0))
   let session = LedgerSession(
     testingLoader: { _ in loaded },
-    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStarter: { _ in
+      counts.start()
+      return true
+    },
     testingScopeStopper: { _ in counts.stop() })
 
   #expect(session.open(url, requiresSecurityScope: true))
-  for _ in 0..<100 where session.screen == LedgerSession.Screen.loading { try? await Task.sleep(for: .milliseconds(1)) }
+  for _ in 0..<100 where session.screen == LedgerSession.Screen.loading {
+    try? await Task.sleep(for: .milliseconds(1))
+  }
   #expect(session.screen == LedgerSession.Screen.loaded)
   #expect(counts.started == 1)
   #expect(counts.stopped == 0)
@@ -76,7 +82,10 @@ import Testing
   let snapshot = LedgerStore.LedgerReadSnapshot(
     accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0)
   let session = LedgerSession(
-    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStarter: { _ in
+      counts.start()
+      return true
+    },
     testingScopeStopper: { _ in counts.stop() })
 
   #expect(session.openValidated(url, snapshot: snapshot, requiresSecurityScope: true))
@@ -94,7 +103,8 @@ import Testing
     testingLoader: { _ in fatalError("denied URL must not load") },
     testingScopeStarter: { _ in false })
 
-  #expect(!session.open(URL(fileURLWithPath: "/synthetic/denied.sqlite"), requiresSecurityScope: true))
+  #expect(
+    !session.open(URL(fileURLWithPath: "/synthetic/denied.sqlite"), requiresSecurityScope: true))
   #expect(session.screen == .unavailable)
 }
 
@@ -104,8 +114,14 @@ import Testing
   let gate = LoaderGate()
   let counts = ScopeCounts()
   let session = LedgerSession(
-    testingLoader: { _ in gate.blockUntilReleased(); return nil },
-    testingScopeStarter: { _ in counts.start(); return true },
+    testingLoader: { _ in
+      gate.blockUntilReleased()
+      return nil
+    },
+    testingScopeStarter: { _ in
+      counts.start()
+      return true
+    },
     testingScopeStopper: { _ in counts.stop() })
 
   #expect(session.open(url, requiresSecurityScope: true))
@@ -129,7 +145,10 @@ import Testing
       if url == blocked { gate.blockUntilReleased() }
       return nil
     },
-    testingScopeStarter: { _ in counts.start(); return true },
+    testingScopeStarter: { _ in
+      counts.start()
+      return true
+    },
     testingScopeStopper: { _ in counts.stop() })
 
   #expect(session.open(blocked, requiresSecurityScope: true))
@@ -150,10 +169,16 @@ import Testing
   let gate = LoaderGate()
   let counts = ScopeCounts()
   var session: LedgerSession? = LedgerSession(
-    testingLoader: { _ in gate.blockUntilReleased(); return nil },
-    testingScopeStarter: { _ in counts.start(); return true },
+    testingLoader: { _ in
+      gate.blockUntilReleased()
+      return nil
+    },
+    testingScopeStarter: { _ in
+      counts.start()
+      return true
+    },
     testingScopeStopper: { _ in counts.stop() })
-  weak var releasedSession = session
+  weak let releasedSession = session
 
   #expect(session?.open(url, requiresSecurityScope: true) == true)
   for _ in 0..<100 where !gate.hasStarted { try? await Task.sleep(for: .milliseconds(1)) }

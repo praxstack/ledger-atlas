@@ -125,15 +125,9 @@ public final class LedgerJourney {
   package func openValidatedLedger(_ store: LedgerStore, at url: URL) throws
     -> LedgerStore.LedgerReadSnapshot
   {
-    disconnectLedger()
-    lastFailure = nil
     do {
       let snapshot = try store.readSnapshot()
-      self.snapshot = snapshot
-      openedStore = store
-      ledgerURL = url
-      canonicalURL = url
-      phase = .imported
+      adoptValidatedLedger(store, snapshot: snapshot, at: url)
       return snapshot
     } catch {
       disconnectLedger()
@@ -141,6 +135,18 @@ public final class LedgerJourney {
       phase = .failed
       throw error
     }
+  }
+
+  package func adoptValidatedLedger(
+    _ store: LedgerStore, snapshot: LedgerStore.LedgerReadSnapshot, at url: URL
+  ) {
+    disconnectLedger()
+    lastFailure = nil
+    self.snapshot = snapshot
+    openedStore = store
+    ledgerURL = url
+    canonicalURL = url
+    phase = .imported
   }
 
   public func beginEditing(_ url: URL) throws {
@@ -307,14 +313,19 @@ public final class LedgerJourney {
   }
 
   public func backupCanonicalLedger(to destination: URL) throws {
-    guard let source = ledgerURL ?? canonicalURL, let store = mutableStore ?? openedStore else {
+    guard let source = ledgerURL ?? canonicalURL else {
       throw LedgerApplication.Error.invalidCommand
     }
     guard source.standardizedFileURL != destination.standardizedFileURL else {
       throw LedgerApplication.Error.invalidCommand
     }
     do {
+      guard let store = mutableStore ?? openedStore else {
+        throw LedgerApplication.Error.invalidCommand
+      }
       try store.backupCanonicalDatabase(to: destination)
+    } catch LedgerStore.Error.backupPublicationCompleted {
+      throw LedgerStore.Error.backupPublicationCompleted
     } catch {
       throw LedgerApplication.Error.invalidCommand
     }

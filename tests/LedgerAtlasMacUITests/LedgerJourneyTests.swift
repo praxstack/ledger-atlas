@@ -6,6 +6,8 @@ import LedgerCore
 import LedgerStore
 import Testing
 
+@testable import LedgerAtlasMacUI
+
 @MainActor
 @Test func recordedFailuresReplaceThePreviousFailure() {
   let journey = LedgerJourney()
@@ -15,8 +17,6 @@ import Testing
 
   #expect(journey.lastFailure == "Ledger access was not granted.")
 }
-
-@testable import LedgerAtlasMacUI
 
 @MainActor
 @Test func widgetPublicationFailureKeepsTheWidgetAndFlowFailuresTogetherOnce() {
@@ -46,7 +46,8 @@ import Testing
   try journey.performBeginEditing()
   let stops = TestScopeCounts()
   let presentation = LedgerSession.Presentation(
-    snapshot: .init(accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0))
+    snapshot: .init(
+      accounts: [], transactions: [], revisionHistory: [], undisplayedImportedEventCount: 0))
   let session = LedgerSession(
     testingLoader: { _ in presentation }, testingScopeStarter: { _ in true },
     testingScopeStopper: { _ in stops.increment() })
@@ -56,14 +57,55 @@ import Testing
   let publisher = RedactedWidgetProjectionPublisher(write: { _ in
     throw CocoaError(.fileWriteNoPermission)
   })
-  #expect(!LedgerAtlasRootView.publishWidget(
-    .ready, publisher: publisher, journey: journey, session: session))
+  #expect(
+    !LedgerAtlasRootView.publishWidget(
+      .ready, publisher: publisher, journey: journey, session: session))
 
   #expect(session.screen == .noLedger)
   #expect(stops.value == 1)
   #expect(journey.ledgerURL == nil)
   #expect(journey.snapshot == nil)
   #expect(!journey.isEditing)
+}
+
+@MainActor
+@Test func readyWidgetFailurePreservesApprovedImportSessionAndBookmark() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  let session = LedgerSession()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try LedgerShell.approve(journey, into: session)
+  for _ in 0..<200 where session.screen == .loading {
+    try? await Task.sleep(for: .milliseconds(1))
+  }
+  let ledgerURL = try #require(journey.ledgerURL)
+  let suite = "LedgerAtlasMacUITests.import-bookmark.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let bookmarks = SecurityScopedBookmarkStore(
+    defaults: defaults, makeBookmark: { Data($0.path.utf8) },
+    resolveBookmark: { URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)) })
+  try bookmarks.save(ledgerURL, for: .canonicalLedger)
+
+  #expect(
+    !LedgerAtlasRootView.publishWidget(
+      .ready,
+      publisher: .init(write: { _ in throw CocoaError(.fileWriteNoPermission) }),
+      journey: journey, session: session, closeLedgerOnFailure: false))
+
+  #expect(bookmarks.reopen(.canonicalLedger) == .resolved(ledgerURL))
+  #expect(session.screen == .loaded)
+  #expect(journey.phase == .imported)
+  #expect(journey.ledgerURL == ledgerURL)
+  #expect(journey.snapshot != nil)
+  #expect(journey.lastFailure == "Widget status could not be published.")
 }
 
 @MainActor

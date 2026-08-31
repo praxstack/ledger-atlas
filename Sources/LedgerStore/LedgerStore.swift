@@ -35,6 +35,12 @@ public final class LedgerStore {
       self.preservedSource = preservedSource
     }
   }
+
+  package struct PortablePackageExportSnapshot: Sendable {
+    package let ledger: LedgerReadSnapshot
+    package let isRepresentable: Bool
+    package let hasImportHistory: Bool
+  }
   public struct SchemaIdentity: Equatable, Sendable {
     public let version: Int
     public let fingerprint: String
@@ -46,6 +52,7 @@ public final class LedgerStore {
   }
 
   public enum Error: Swift.Error, Equatable, Sendable {
+    case backupPublicationCompleted
     case incompatibleCanonicalStore
     case sqliteFailure(code: Int32)
   }
@@ -57,12 +64,18 @@ public final class LedgerStore {
     case afterMutationWrite
     case afterInsertingTransaction
     case afterApplyingExportCore
+    case afterReadSnapshotCoreRead
+    case afterPortableExportSnapshotRead
   }
 
   package typealias MutationTestHook = (MutationTestPhase) throws -> Void
 
   package enum BackupTestPhase: Equatable, Sendable {
+    case afterTemporaryFileCreated
     case afterTemporaryFileValidated
+    case beforeDestinationPublication
+    case afterDestinationCopyBeforeValidation
+    case afterDestinationPublished
   }
 
   package typealias BackupTestHook = (BackupTestPhase) throws -> Void
@@ -203,7 +216,8 @@ public final class LedgerStore {
       // HAS_MOVED is not meaningful for a standard VFS opened through a file descriptor.
       // The descriptor was authenticated before opening and the path is revalidated below.
       try validateCanonicalSchema(on: database)
-      try CanonicalLedgerHealth.validate(database)
+      try CanonicalLedgerHealth.validate(
+        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
       try validatePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(database: database, identity: identity, url: url)
@@ -214,12 +228,14 @@ public final class LedgerStore {
   }
 
   public static func openForMutation(at url: URL) throws -> LedgerStore {
-    try openForMutation(at: url, testing: nil)
+    try openForMutation(at: url, expectedIdentity: nil, testing: nil)
   }
 
   package static func openForMutation(
-    at url: URL, testing mutationTestHook: MutationTestHook?
+    at url: URL, expectedIdentity: stat? = nil,
+    testing mutationTestHook: MutationTestHook?
   ) throws -> LedgerStore {
+    if let expectedIdentity { try validatePath(url, matches: expectedIdentity) }
     let recoveryJournalDescriptor = try openRecoveryJournal(at: url)
     defer {
       if let recoveryJournalDescriptor { Darwin.close(recoveryJournalDescriptor) }
@@ -230,7 +246,8 @@ public final class LedgerStore {
     var identity = stat()
     var atPath = stat()
     guard fstat(descriptor, &identity) == 0, lstat(url.path, &atPath) == 0,
-      sameFile(identity, atPath), isSafeCanonicalFile(identity)
+      sameFile(identity, atPath), isSafeCanonicalFile(identity),
+      expectedIdentity.map({ sameFile($0, identity) }) ?? true
     else {
       Darwin.close(descriptor)
       throw Error.incompatibleCanonicalStore
@@ -240,7 +257,8 @@ public final class LedgerStore {
         let authenticated = try openReadOnlyDatabase(descriptor)
         defer { sqlite3_close(authenticated) }
         try validateCanonicalSchema(on: authenticated)
-        try CanonicalLedgerHealth.validate(authenticated)
+        try CanonicalLedgerHealth.validate(
+          authenticated, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
         try validatePath(url, matches: identity)
         try validateNoSQLiteCompanions(at: url)
       } catch {
@@ -261,6 +279,17 @@ public final class LedgerStore {
     guard !leaf.isEmpty,
       fstatat(parentDescriptor, leaf, &atParent, AT_SYMLINK_NOFOLLOW) == 0,
       sameFile(identity, atParent)
+    else {
+      Darwin.close(descriptor)
+      throw Error.incompatibleCanonicalStore
+    }
+    var retainedIdentity = stat()
+    var retainedAtParent = stat()
+    guard fstat(descriptor, &retainedIdentity) == 0,
+      fstatat(parentDescriptor, leaf, &retainedAtParent, AT_SYMLINK_NOFOLLOW) == 0,
+      sameFile(identity, retainedIdentity), sameFile(retainedIdentity, retainedAtParent),
+      isSafeCanonicalFile(retainedIdentity),
+      expectedIdentity.map({ sameFile($0, retainedIdentity) }) ?? true
     else {
       Darwin.close(descriptor)
       throw Error.incompatibleCanonicalStore
@@ -288,7 +317,8 @@ public final class LedgerStore {
       }
       try validateCanonicalJournalMode(on: database)
       try validateCanonicalSchema(on: database)
-      try CanonicalLedgerHealth.validate(database)
+      try CanonicalLedgerHealth.validate(
+        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(
@@ -303,10 +333,34 @@ public final class LedgerStore {
   public func readSnapshot() throws -> LedgerReadSnapshot {
     do {
       try Self.execute("BEGIN", on: database)
-      let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
-      let importedCount =
-        Self.scalarInt("SELECT count(*) FROM main.economic_event", on: database) ?? -1
-      guard importedCount >= 0 else { throw Error.incompatibleCanonicalStore }
+      let snapshot = try readSnapshotContents()
+      try Self.execute("COMMIT", on: database)
+      if let descriptor = pinnedIdentity, let url {
+        if isMutable {
+          try Self.validateMutablePath(url, matches: descriptor)
+        } else {
+          try Self.validatePath(url, matches: descriptor)
+        }
+        try Self.validateNoSQLiteCompanions(at: url)
+      }
+      return snapshot
+    } catch {
+      _ = try? Self.execute("ROLLBACK", on: database)
+      throw Error.incompatibleCanonicalStore
+    }
+  }
+
+  /// The package encoder consumes this one coherent SQLite read view; no export decision may
+  /// inspect a later database state.
+  package func portablePackageExportSnapshot() throws -> PortablePackageExportSnapshot {
+    do {
+      try Self.execute("BEGIN", on: database)
+      let snapshot = try readSnapshotContents(forPortableExport: true)
+      guard
+        let importReceiptCount = Self.scalarInt(
+          "SELECT count(*) FROM main.import_receipt", on: database)
+      else { throw Error.incompatibleCanonicalStore }
+      let representable = try Self.portablePackageExportIsRepresentable(on: database)
       try Self.execute("COMMIT", on: database)
       if let descriptor = pinnedIdentity, let url {
         if isMutable {
@@ -317,18 +371,30 @@ public final class LedgerStore {
         try Self.validateNoSQLiteCompanions(at: url)
       }
       return .init(
-        accounts: snapshot.accounts, transactions: snapshot.transactions,
-        revisionHistory: snapshot.revisionHistory,
-        undisplayedImportedEventCount: importedCount,
-        categories: try Self.loadCategories(on: database),
-        recurrenceRules: try Self.loadRecurrenceRules(on: database),
-        budgets: try Self.loadBudgets(on: database),
-        installmentPlans: try Self.loadInstallmentPlans(on: database),
-        preservedSource: try Self.loadPreservedSource(on: database))
+        ledger: snapshot, isRepresentable: representable,
+        hasImportHistory: importReceiptCount > 0)
     } catch {
       _ = try? Self.execute("ROLLBACK", on: database)
       throw Error.incompatibleCanonicalStore
     }
+  }
+
+  private func readSnapshotContents(forPortableExport: Bool = false) throws -> LedgerReadSnapshot {
+    let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
+    try mutationTestHook?(
+      forPortableExport ? .afterPortableExportSnapshotRead : .afterReadSnapshotCoreRead)
+    let importedCount =
+      Self.scalarInt("SELECT count(*) FROM main.economic_event", on: database) ?? -1
+    guard importedCount >= 0 else { throw Error.incompatibleCanonicalStore }
+    return .init(
+      accounts: snapshot.accounts, transactions: snapshot.transactions,
+      revisionHistory: snapshot.revisionHistory,
+      undisplayedImportedEventCount: importedCount,
+      categories: try Self.loadCategories(on: database),
+      recurrenceRules: try Self.loadRecurrenceRules(on: database),
+      budgets: try Self.loadBudgets(on: database),
+      installmentPlans: try Self.loadInstallmentPlans(on: database),
+      preservedSource: try Self.loadPreservedSource(on: database))
   }
 
   public func createTransaction(_ request: CreateTransactionRequest) throws -> MutationResult {
@@ -1104,12 +1170,25 @@ public final class LedgerStore {
   package func portablePackageExportIsRepresentable() throws -> Bool {
     try Self.execute("BEGIN", on: database)
     do {
-      // Ponytail: Task 4/5 package encoding removes this temporary refusal once these rows
-      // have a lossless portable representation.
-      let hasFoundationRows = try Self.hasRows(
-        in: ["ledger_category_tree", "ledger_account_group", "ledger_account_preferences"],
-        on: database)
-      guard let standaloneOriginCount = Self.scalarInt(
+      let result = try Self.portablePackageExportIsRepresentable(on: database)
+      try Self.execute("COMMIT", on: database)
+      return result
+    } catch {
+      _ = try? Self.execute("ROLLBACK", on: database)
+      throw Error.incompatibleCanonicalStore
+    }
+  }
+
+  private static func portablePackageExportIsRepresentable(on database: OpaquePointer) throws
+    -> Bool
+  {
+    // Ponytail: Task 4/5 package encoding removes this temporary refusal once these rows
+    // have a lossless portable representation.
+    let hasFoundationRows = try hasRows(
+      in: ["ledger_category_tree", "ledger_account_group", "ledger_account_preferences"],
+      on: database)
+    guard
+      let standaloneOriginCount = scalarInt(
         """
         SELECT EXISTS(
           SELECT 1 FROM main.ledger_origin o
@@ -1121,14 +1200,8 @@ public final class LedgerStore {
             AND NOT EXISTS (SELECT 1 FROM main.ledger_installment_plan p WHERE p.origin_id=o.origin_id)
         )
         """, on: database)
-      else { throw Error.incompatibleCanonicalStore }
-      let hasStandaloneOrigin = standaloneOriginCount == 1
-      try Self.execute("COMMIT", on: database)
-      return !hasFoundationRows && !hasStandaloneOrigin
-    } catch {
-      _ = try? Self.execute("ROLLBACK", on: database)
-      throw Error.incompatibleCanonicalStore
-    }
+    else { throw Error.incompatibleCanonicalStore }
+    return !hasFoundationRows && standaloneOriginCount != 1
   }
 
   package func isEmptyForPortablePackageImport() throws -> Bool {
@@ -1185,7 +1258,7 @@ public final class LedgerStore {
         x.storage_class, x.payload
       FROM main.receipt_preservation_payload x
       JOIN main.provenance_reference p ON p.provenance_id = x.provenance_id
-      UNION ALL
+      UNION
       SELECT p.source_table, coalesce(p.source_record_key,''),
         coalesce(p.source_column_name,''), s.storage_class, s.payload
       FROM main.sidecar_reference s
@@ -1291,23 +1364,41 @@ public final class LedgerStore {
     var createdIdentity = stat()
     guard fstat(descriptor, &createdIdentity) == 0, Self.isSafeCanonicalFile(createdIdentity) else {
       Darwin.close(descriptor)
-      _ = unlinkat(parentDescriptor, temporaryLeaf, 0)
       throw Error.incompatibleCanonicalStore
     }
-    var cleanupLeaf = temporaryLeaf
-    var completed = false
+    var published = false
     defer {
-      Darwin.close(descriptor)
-      if !completed {
-        var atParent = stat()
-        if fstatat(parentDescriptor, cleanupLeaf, &atParent, AT_SYMLINK_NOFOLLOW) == 0,
-          Self.sameInode(createdIdentity, atParent)
+      if !published,
+        Self.backupTemporaryIsBound(
+          descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          temporaryLeaf: temporaryLeaf),
+        Self.matchesSerializedPrefix(
+          descriptor, serialized: serialized, serializedCount: Int(byteCount)),
+        Self.backupTemporaryIsBound(
+          descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          temporaryLeaf: temporaryLeaf)
+      {
+        _ = ftruncate(descriptor, 0)
+        _ = fsync(descriptor)
+        if Self.backupTemporaryIsBound(
+          descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          temporaryLeaf: temporaryLeaf)
         {
-          _ = unlinkat(parentDescriptor, cleanupLeaf, 0)
-          _ = fsync(parentDescriptor)
+          _ = unlinkat(parentDescriptor, temporaryLeaf, 0)
         }
+        _ = fsync(parentDescriptor)
       }
+      Darwin.close(descriptor)
     }
+    try backupTestHook?(.afterTemporaryFileCreated)
+    var retainedEmptyIdentity = stat()
+    var emptyAtPath = stat()
+    guard fstat(descriptor, &retainedEmptyIdentity) == 0,
+      Self.sameFile(createdIdentity, retainedEmptyIdentity),
+      fstatat(parentDescriptor, temporaryLeaf, &emptyAtPath, AT_SYMLINK_NOFOLLOW) == 0,
+      Self.sameFile(retainedEmptyIdentity, emptyAtPath),
+      Self.isSafeCanonicalFile(retainedEmptyIdentity)
+    else { throw Error.incompatibleCanonicalStore }
 
     var offset = 0
     let count = Int(byteCount)
@@ -1324,7 +1415,11 @@ public final class LedgerStore {
     let validationDatabase = try Self.openReadOnlyDatabase(descriptor)
     do {
       try Self.validateCanonicalSchema(on: validationDatabase)
-      try CanonicalLedgerHealth.validate(validationDatabase)
+      try CanonicalLedgerHealth.validate(
+        validationDatabase,
+        trustKey: try self.url.flatMap {
+          try LedgerReceiptTrust.key(for: $0, create: false)
+        })
       guard try Self.canonicalChecksum(validationDatabase) == expectedChecksum else {
         throw Error.incompatibleCanonicalStore
       }
@@ -1334,17 +1429,172 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     try backupTestHook?(.afterTemporaryFileValidated)
+    var retainedValidatedIdentity = stat()
+    var validatedAtPath = stat()
+    guard fstat(descriptor, &retainedValidatedIdentity) == 0,
+      Self.sameFile(createdIdentity, retainedValidatedIdentity),
+      retainedValidatedIdentity.st_size == byteCount,
+      fstatat(parentDescriptor, temporaryLeaf, &validatedAtPath, AT_SYMLINK_NOFOLLOW) == 0,
+      Self.sameFile(retainedValidatedIdentity, validatedAtPath),
+      Self.matchesSerializedPrefix(
+        descriptor, serialized: serialized, serializedCount: Int(byteCount))
+    else { throw Error.incompatibleCanonicalStore }
+    try backupTestHook?(.beforeDestinationPublication)
+    let publishedIdentity = try Self.publishBackupCopy(
+      descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+      temporaryLeaf: temporaryLeaf, destinationLeaf: leaf,
+      serialized: serialized, serializedCount: Int(byteCount), testing: backupTestHook)
     guard
-      Darwin.renameatx_np(
-        parentDescriptor, temporaryLeaf, parentDescriptor, leaf, UInt32(RENAME_EXCL)) == 0
+      Self.backupTemporaryIsBound(
+        descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+        temporaryLeaf: temporaryLeaf)
+    else { throw Error.backupPublicationCompleted }
+    guard unlinkat(parentDescriptor, temporaryLeaf, 0) == 0, fsync(parentDescriptor) == 0 else {
+      throw Error.backupPublicationCompleted
+    }
+    published = true
+    do {
+      try backupTestHook?(.afterDestinationPublished)
+      guard
+        Self.backupDestinationIsBound(
+          parentDescriptor, leaf: leaf, expectedIdentity: publishedIdentity),
+        fsync(parentDescriptor) == 0
+      else { throw Error.backupPublicationCompleted }
+      try Self.validatePath(destination, matches: publishedIdentity)
+      try validateBoundPath()
+    } catch {
+      throw Error.backupPublicationCompleted
+    }
+  }
+
+  private static func backupTemporaryIsBound(
+    _ descriptor: Int32, createdIdentity: stat, parentDescriptor: Int32, temporaryLeaf: String
+  ) -> Bool {
+    var retained = stat()
+    var atPath = stat()
+    return fstat(descriptor, &retained) == 0
+      && sameInode(retained, createdIdentity)
+      && isSafeCanonicalFile(retained)
+      && fstatat(parentDescriptor, temporaryLeaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0
+      && sameFile(retained, atPath)
+      && isSafeCanonicalFile(atPath)
+  }
+
+  private static func backupDestinationIsBound(
+    _ parentDescriptor: Int32, leaf: String, expectedIdentity: stat
+  ) -> Bool {
+    var atPath = stat()
+    return fstatat(parentDescriptor, leaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0
+      && isSafeCanonicalFile(atPath) && sameFile(atPath, expectedIdentity)
+  }
+
+  /// Publish a backup by copying bytes from the authenticated temporary descriptor. The final
+  /// destination never consumes a replacement that appeared at the temporary pathname.
+  private static func publishBackupCopy(
+    _ source: Int32, createdIdentity: stat, parentDescriptor: Int32,
+    temporaryLeaf: String, destinationLeaf: String, serialized: UnsafePointer<UInt8>,
+    serializedCount: Int, testing backupTestHook: BackupTestHook?
+  ) throws -> stat {
+    guard
+      backupTemporaryIsBound(
+        source, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+        temporaryLeaf: temporaryLeaf)
     else { throw Error.incompatibleCanonicalStore }
-    cleanupLeaf = leaf
-    guard fstat(descriptor, &createdIdentity) == 0, Self.isSafeCanonicalFile(createdIdentity),
-      fsync(parentDescriptor) == 0
-    else { throw Error.incompatibleCanonicalStore }
-    try Self.validatePath(destination, matches: createdIdentity)
-    try validateBoundPath()
-    completed = true
+    let destination = Darwin.openat(
+      parentDescriptor, destinationLeaf,
+      O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+      mode_t(S_IRUSR | S_IWUSR))
+    guard destination >= 0 else { throw Error.incompatibleCanonicalStore }
+    var destinationIdentity = stat()
+    guard fstat(destination, &destinationIdentity) == 0,
+      isSafeCanonicalFile(destinationIdentity)
+    else {
+      Darwin.close(destination)
+      _ = unlinkat(parentDescriptor, destinationLeaf, 0)
+      _ = fsync(parentDescriptor)
+      throw Error.incompatibleCanonicalStore
+    }
+    do {
+      var sourceIdentity = stat()
+      guard fstat(source, &sourceIdentity) == 0, isSafeCanonicalFile(sourceIdentity),
+        sourceIdentity.st_size == off_t(serializedCount)
+      else { throw Error.incompatibleCanonicalStore }
+      var offset: off_t = 0
+      var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+      while offset < sourceIdentity.st_size {
+        let amount = min(buffer.count, Int(sourceIdentity.st_size - offset))
+        let readCount = pread(source, &buffer, amount, offset)
+        guard readCount == amount else { throw Error.incompatibleCanonicalStore }
+        var written = 0
+        while written < amount {
+          let count = buffer.withUnsafeBytes {
+            Darwin.write(destination, $0.baseAddress!.advanced(by: written), amount - written)
+          }
+          guard count > 0 else { throw Error.incompatibleCanonicalStore }
+          written += count
+        }
+        offset += off_t(amount)
+      }
+      guard fsync(destination) == 0,
+        backupTemporaryIsBound(
+          source, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          temporaryLeaf: temporaryLeaf)
+      else { throw Error.incompatibleCanonicalStore }
+      try backupTestHook?(.afterDestinationCopyBeforeValidation)
+      guard
+        matchesSerializedPrefix(
+          destination, serialized: serialized, serializedCount: serializedCount)
+      else { throw Error.incompatibleCanonicalStore }
+      destinationIdentity = try destinationIdentityOf(destination)
+      guard isSafeCanonicalFile(destinationIdentity),
+        backupDestinationIsBound(
+          parentDescriptor, leaf: destinationLeaf, expectedIdentity: destinationIdentity),
+        fsync(parentDescriptor) == 0
+      else { throw Error.incompatibleCanonicalStore }
+      Darwin.close(destination)
+      return destinationIdentity
+    } catch {
+      var atPath = stat()
+      if fstatat(parentDescriptor, destinationLeaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0,
+        sameInode(atPath, destinationIdentity)
+      {
+        _ = unlinkat(parentDescriptor, destinationLeaf, 0)
+        _ = fsync(parentDescriptor)
+      }
+      Darwin.close(destination)
+      throw error
+    }
+  }
+
+  private static func destinationIdentityOf(_ descriptor: Int32) throws -> stat {
+    var value = stat()
+    guard fstat(descriptor, &value) == 0 else { throw Error.incompatibleCanonicalStore }
+    return value
+  }
+
+  private static func matchesSerializedPrefix(
+    _ descriptor: Int32, serialized: UnsafePointer<UInt8>, serializedCount: Int
+  ) -> Bool {
+    var before = stat()
+    guard fstat(descriptor, &before) == 0, isSafeCanonicalFile(before), before.st_size >= 0,
+      before.st_size == off_t(serializedCount)
+    else { return false }
+    var offset = 0
+    var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+    while offset < Int(before.st_size) {
+      let amount = min(buffer.count, Int(before.st_size) - offset)
+      let readCount = buffer.withUnsafeMutableBytes {
+        pread(descriptor, $0.baseAddress, amount, off_t(offset))
+      }
+      guard readCount == amount,
+        buffer.withUnsafeBytes({
+          memcmp($0.baseAddress, serialized.advanced(by: offset), amount) == 0
+        })
+      else { return false }
+      offset += amount
+    }
+    var after = stat()
+    return fstat(descriptor, &after) == 0 && sameFile(before, after)
   }
 
   private func validateBoundPath() throws {
@@ -1488,7 +1738,11 @@ public final class LedgerStore {
       let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
       let result = try body(snapshot)
       try mutationTestHook?(.afterMutationWrite)
-      try CanonicalLedgerHealth.validate(database)
+      try CanonicalLedgerHealth.validate(
+        database,
+        trustKey: try self.url.flatMap {
+          try LedgerReceiptTrust.key(for: $0, create: false)
+        })
       guard Self.hasNoRows("PRAGMA foreign_key_check", on: database) else {
         throw Error.incompatibleCanonicalStore
       }

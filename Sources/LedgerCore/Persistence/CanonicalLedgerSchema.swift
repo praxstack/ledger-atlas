@@ -396,6 +396,17 @@ public enum CanonicalLedgerSchema {
 
   private static let v11Objects: [CanonicalSchemaObject] = [
     table(
+      "ledger_receipt_trust_anchor",
+      """
+      CREATE TABLE ledger_receipt_trust_anchor(
+        idempotency_key TEXT PRIMARY KEY REFERENCES import_receipt(idempotency_key),
+        algorithm TEXT NOT NULL CHECK(algorithm = 'hmac-sha256'),
+        signature TEXT NOT NULL CHECK(
+          length(signature) = 64 AND signature NOT GLOB '*[^0-9a-f]*'
+        )
+      ) STRICT
+      """),
+    table(
       "ledger_category_tree",
       """
       CREATE TABLE ledger_category_tree(
@@ -526,11 +537,13 @@ public enum CanonicalLedgerSchema {
     "SELECT plan_id, origin_id, account_id, category_id, principal_literal, currency_unit, occurrence_count, completed_count, lifecycle FROM ledger_installment_plan ORDER BY plan_id",
   ]
 
-  public static let checksumQueries = legacyV10ChecksumQueries + [
-    "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
-    "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
-    "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
-  ]
+  public static let checksumQueries =
+    legacyV10ChecksumQueries + [
+      "SELECT idempotency_key, algorithm, signature FROM ledger_receipt_trust_anchor ORDER BY idempotency_key",
+      "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
+      "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
+      "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
+    ]
 
   public static func normalizedDDL(_ ddl: String) -> String {
     ddl.split(whereSeparator: \.isWhitespace).joined(separator: " ")

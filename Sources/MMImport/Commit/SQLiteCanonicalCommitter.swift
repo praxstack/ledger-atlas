@@ -169,6 +169,11 @@ public struct SQLiteCanonicalCommitter: Sendable {
     let opened = try openWritable(
       at: request.canonicalDatabaseURL, expectedExistingIdentity: existingIdentity)
     let database = opened.database
+    let requestedV19 = MoneyManagerV19Adapter.admittedProfileIDs.contains(
+      request.expectedManifest.profileID)
+    let trustKey = try LedgerReceiptTrust.key(
+      for: request.canonicalDatabaseURL, create: requestedV19,
+      stableIdentity: requestedV19 ? request.expectedManifest.stagingID : nil)
     var transactionOpen = true
     defer {
       if transactionOpen { _ = execute(database, "ROLLBACK") }
@@ -218,7 +223,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
         }
         throw CanonicalCommitError.incompatibleCanonicalStore
       }
-      guard try existingCanonicalStateIsHealthy(database) else {
+      guard try existingCanonicalStateIsHealthy(database, trustKey: trustKey) else {
         throw CanonicalCommitError.idempotencyConflict
       }
       if let receipt = try readReceipt(database, idempotencyKey: request.expectedManifest.stagingID)
@@ -314,6 +319,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
       } catch {
         throw CanonicalCommitError.canonicalWriteFailed
       }
+      try insertObservedV19Commitments(request: request, plan: plan, into: database)
       guard
         try canonicalEventSetHash(
           database, receipt: request.expectedManifest.stagingID) == eventSetHash
@@ -324,6 +330,21 @@ public struct SQLiteCanonicalCommitter: Sendable {
         database,
         sql: "UPDATE import_receipt SET reconciliation_hash=? WHERE idempotency_key=?",
         values: [.text(integrityHash), .text(request.expectedManifest.stagingID)])
+      if requestedV19 {
+        guard let trustKey else { throw CanonicalCommitError.canonicalWriteFailed }
+        let signature = LedgerReceiptTrust.signature(
+          key: trustKey, receiptID: request.expectedManifest.stagingID,
+          integrityHash: integrityHash)
+        guard signature.count == 64 else { throw CanonicalCommitError.canonicalWriteFailed }
+        try run(
+          database,
+          sql:
+            "INSERT INTO ledger_receipt_trust_anchor(idempotency_key, algorithm, signature) VALUES(?, ?, ?)",
+          values: [
+            .text(request.expectedManifest.stagingID), .text(LedgerReceiptTrust.algorithm),
+            .text(signature),
+          ])
+      }
       testingBeforeCommit?()
       // The staging descriptor is held for the whole commit. Revalidate after all writes and
       // immediately before COMMIT so a same-inode source mutation cannot be certified.
@@ -424,6 +445,10 @@ public struct SQLiteCanonicalCommitter: Sendable {
       manifest.formatVersion == 1,
       CanonicalIdentifier.isValid(manifest.stagingID),
       CanonicalIdentifier.isValid(manifest.artifactSHA256),
+      manifest.stagingID
+        == StableStagingID.stage(
+          artifactSHA256: manifest.artifactSHA256, profileID: manifest.profileID,
+          adapterVersion: manifest.adapterVersion),
       CanonicalIdentifier.isValid(request.expectedStagingDigest),
       !request.events.isEmpty
         || (request.isObservedV19AdapterAuthorized
@@ -608,6 +633,68 @@ public struct SQLiteCanonicalCommitter: Sendable {
         Set(receiptOwnedAnchorsBySubject.keys).union(receiptOwnedPayloadsBySubject.keys)
           == authorizedSubjects
       else { throw CanonicalCommitError.unsafeMapping }
+
+      // Preserve opaque transaction fields twice: the sidecar is the event representation and
+      // this receipt-owned copy is the source-completeness commitment. It lets health reject a
+      // rehashed sidecar deletion without changing the frozen v10 schema.
+      for (sourceRecordID, effects) in Dictionary(grouping: request.events, by: \.sourceRecordID) {
+        guard let record = graph.records[sourceRecordID],
+          let table = graph.tables[record.tableID]
+        else { throw CanonicalCommitError.unsafeMapping }
+        let anchor: CanonicalReceiptOwnedAnchor
+        if let existing = receiptOwnedAnchorsBySubject[sourceRecordID] {
+          anchor = existing
+        } else {
+          anchor = try CanonicalReceiptOwnedAnchor(
+            anchorID: StableCanonicalID.preservationAnchor(
+              stagingID: request.expectedManifest.stagingID, sourceSubjectID: sourceRecordID,
+              kind: .record),
+            receiptID: request.expectedManifest.stagingID, sourceSubjectID: sourceRecordID,
+            subjectKind: .record, artifactSHA256: request.expectedManifest.artifactSHA256,
+            profileID: request.expectedManifest.profileID,
+            adapterVersion: request.expectedManifest.adapterVersion,
+            containerMember: nil, sourceTable: table.name, sourceRecordKey: record.recordKey)
+          receiptOwnedAnchors.append(anchor)
+          receiptOwnedAnchorsBySubject[sourceRecordID] = anchor
+        }
+        let boundIDs = Set(effects.flatMap { $0.sourceBindings.map(\.provenance.deterministicID) })
+        var opaqueSidecars: [String: CanonicalPersistedSidecar] = [:]
+        for sidecar in effects.flatMap({ persistedSidecarsByEvent[$0.eventID, default: []] })
+        where !boundIDs.contains(sidecar.provenance.deterministicID) {
+          if let existing = opaqueSidecars[sidecar.provenance.deterministicID] {
+            guard existing.formatVersion == sidecar.formatVersion,
+              existing.declaredType == sidecar.declaredType,
+              existing.storageClass == sidecar.storageClass,
+              existing.payload == sidecar.payload,
+              existing.provenance == sidecar.provenance
+            else { throw CanonicalCommitError.unsafeMapping }
+            continue
+          }
+          opaqueSidecars[sidecar.provenance.deterministicID] = sidecar
+        }
+        for sidecar in opaqueSidecars.values.sorted(by: { $0.sidecarID < $1.sidecarID }) {
+          let payload = try CanonicalReceiptOwnedPayload(
+            payloadID: StableCanonicalID.preservationPayload(
+              receiptID: request.expectedManifest.stagingID, anchorID: anchor.anchorID,
+              sourceSubjectID: sidecar.provenance.deterministicID,
+              formatVersion: sidecar.formatVersion, declaredType: sidecar.declaredType,
+              storageClass: sidecar.storageClass, payload: sidecar.payload),
+            receiptID: request.expectedManifest.stagingID, anchorID: anchor.anchorID,
+            sourceSubjectID: sidecar.provenance.deterministicID,
+            formatVersion: sidecar.formatVersion, declaredType: sidecar.declaredType,
+            storageClass: sidecar.storageClass, payload: sidecar.payload,
+            provenance: sidecar.provenance,
+            maximumBytes: CanonicalCommitDigest.maximumSidecarBytes)
+          let (newTotal, overflow) = totalSidecarBytes.addingReportingOverflow(
+            payload.payload.count)
+          guard !overflow, newTotal <= CanonicalCommitDigest.maximumTotalSidecarBytes else {
+            throw CanonicalCommitError.unsafeMapping
+          }
+          totalSidecarBytes = newTotal
+          receiptOwnedPayloads.append(payload)
+          receiptOwnedPayloadsBySubject[sidecar.provenance.deterministicID] = payload
+        }
+      }
     }
 
     let decisions = try request.mappingDecisions.map { decision in
@@ -750,6 +837,31 @@ public struct SQLiteCanonicalCommitter: Sendable {
         sidecarVersion: Int(sqlite3_column_int64(statement, 7)),
         containerMember: columnOptionalText(statement, 8))
     }
+    guard
+      graph.tables.allSatisfy({ tableID, table in
+        tableID
+          == StableStagingID.table(
+            stagingID: request.expectedManifest.stagingID, table: table.name)
+      }),
+      graph.records.allSatisfy({ recordID, record in
+        guard let table = graph.tables[record.tableID] else { return false }
+        return recordID
+          == StableStagingID.record(
+            stagingID: request.expectedManifest.stagingID, table: table.name,
+            recordKey: record.recordKey)
+      }),
+      graph.fields.allSatisfy({ fieldID, field in
+        guard let record = graph.records[field.recordID], let table = graph.tables[record.tableID]
+        else { return false }
+        return fieldID
+          == StableStagingID.field(
+            stagingID: request.expectedManifest.stagingID,
+            locator: SourceLocator(
+              containerMember: field.containerMember, table: table.name,
+              recordKey: record.recordKey, columnOrdinal: field.ordinal,
+              columnName: field.columnName))
+      })
+    else { throw CanonicalCommitError.unauthenticatedStaging }
     return graph
   }
 
@@ -1417,6 +1529,64 @@ public struct SQLiteCanonicalCommitter: Sendable {
     }
   }
 
+  private func insertObservedV19Commitments(
+    request: CanonicalCommitRequest, plan: TrustedCommitPlan, into database: OpaquePointer
+  ) throws {
+    guard request.isObservedV19AdapterAuthorized else { return }
+    for event in request.events {
+      try run(
+        database,
+        sql:
+          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 1, ?, ?, NULL)",
+        values: [
+          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
+          .text(MoneyManagerV19Vocabulary.temporalCommitmentField),
+          .text(MoneyManagerV19Vocabulary.temporalCommitment(event.occurredAt)),
+        ])
+      try run(
+        database,
+        sql:
+          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 2, ?, ?, NULL)",
+        values: [
+          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
+          .text(MoneyManagerV19Vocabulary.receiptGenerationField),
+          .text(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral),
+        ])
+      try run(
+        database,
+        sql:
+          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 3, ?, ?, NULL)",
+        values: [
+          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
+          .text(MoneyManagerV19Vocabulary.temporalAnchorField),
+          .text(MoneyManagerV19Vocabulary.temporalCommitment(event.occurredAt)),
+        ])
+      let fieldIDs = plan.sidecarsByEvent[event.eventID, default: []].map(\.sidecarID)
+      try run(
+        database,
+        sql:
+          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 4, ?, ?, NULL)",
+        values: [
+          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
+          .text(MoneyManagerV19Vocabulary.sourceSubjectSetField),
+          .text(
+            MoneyManagerV19Vocabulary.sourceSubjectSetCommitment(
+              sourceRecordID: event.sourceRecordID, fieldIDs: fieldIDs)),
+        ])
+      try run(
+        database,
+        sql:
+          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 5, ?, ?, NULL)",
+        values: [
+          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
+          .text(MoneyManagerV19Vocabulary.sourceTimeZoneField),
+          .text(
+            MoneyManagerV19Vocabulary.sourceTimeZoneLiteral(
+              request.observedV19SourceTimeZone ?? event.occurredAt.timeZone)),
+        ])
+    }
+  }
+
   private func checksum(_ database: OpaquePointer) throws -> String {
     do {
       return try LedgerStore.canonicalChecksum(database)
@@ -1449,7 +1619,9 @@ public struct SQLiteCanonicalCommitter: Sendable {
       eventSetHash: eventSetHash, eventCount: Int(sqlite3_column_int64(statement, 6)))
   }
 
-  private func existingCanonicalStateIsHealthy(_ database: OpaquePointer) throws -> Bool {
+  private func existingCanonicalStateIsHealthy(_ database: OpaquePointer, trustKey: Data? = nil)
+    throws -> Bool
+  {
     guard
       queryHasNoRows(
         database,
@@ -1547,9 +1719,11 @@ public struct SQLiteCanonicalCommitter: Sendable {
         database,
         "SELECT 1 FROM provenance_reference p WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM sidecar_reference s WHERE s.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM receipt_preservation_payload x WHERE x.provenance_id=p.provenance_id)"
       ),
+      // CanonicalLedgerHealth owns persisted digest recomputation. Retain this importer-only
+      // semantic replay until those typed receipt models are shared without a dependency cycle.
       try allReceiptsAreHealthy(database),
       try canonicalEventsAreHealthy(database),
-      CanonicalLedgerHealth.isHealthy(database)
+      CanonicalLedgerHealth.isHealthy(database, trustKey: trustKey)
     else { return false }
     return true
   }
@@ -1622,11 +1796,36 @@ public struct SQLiteCanonicalCommitter: Sendable {
     let schemaVersion = String(sqlite3_column_int64(statement, 7))
     let canonicalEvents = try canonicalEventSetHash(database, receipt: receipt)
     let canonicalPreservation = try canonicalPreservationSetHash(database, receipt: receipt)
-    return CanonicalCommitDigest.hash([
-      "ledger-atlas/canonical-receipt-integrity/v6", idempotencyKey, stagingDigest,
-      artifactSHA256, profileID, adapterVersion, eventSetHash, eventCount, schemaVersion,
-      canonicalEvents, canonicalPreservation,
-    ])
+    let envelope = [
+      idempotencyKey, stagingDigest, artifactSHA256, profileID, adapterVersion, eventSetHash,
+      eventCount, schemaVersion,
+    ]
+    guard MoneyManagerV19Vocabulary.admittedProfileIDs.contains(profileID) else {
+      return MoneyManagerV19Vocabulary.receiptIntegrityHash(
+        envelope: envelope, eventSetHash: canonicalEvents, preservationHash: canonicalPreservation,
+        generation: .legacy)
+    }
+    let generation = try persistedV19ReceiptGeneration(database, receipt: receipt)
+    return MoneyManagerV19Vocabulary.receiptIntegrityHash(
+      envelope: envelope, eventSetHash: canonicalEvents, preservationHash: canonicalPreservation,
+      generation: generation)
+  }
+
+  private func persistedV19ReceiptGeneration(
+    _ database: OpaquePointer, receipt: String
+  ) throws -> MoneyManagerV19Vocabulary.ReceiptGeneration {
+    let current =
+      scalarText(
+        database,
+        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON r.event_id=v.transaction_id WHERE r.idempotency_key='\(receipt)' AND l.field='\(MoneyManagerV19Vocabulary.receiptGenerationField)' AND l.literal='\(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral)' LIMIT 1"
+      ) != nil
+    let legacy =
+      scalarText(
+        database,
+        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON r.event_id=v.transaction_id WHERE r.idempotency_key='\(receipt)' AND l.field='\(MoneyManagerV19Vocabulary.receiptGenerationField)' AND l.literal='\(MoneyManagerV19Vocabulary.legacyReceiptGenerationLiteral)' LIMIT 1"
+      ) != nil
+    guard !(current && legacy) else { throw CanonicalCommitError.canonicalReadFailed }
+    return current || !legacy ? .current : .legacy
   }
 
   private func canonicalPreservationSetHash(

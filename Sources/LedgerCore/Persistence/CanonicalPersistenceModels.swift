@@ -1,6 +1,31 @@
 import CryptoKit
 import Foundation
 
+/// Stable, length-delimited primitives for digests persisted in canonical SQLite rows.
+/// Keep component ordering with the caller: these routines deliberately only encode primitives.
+package enum CanonicalReceiptDigest {
+  package static let eventSetPrefix = "ledger-atlas/canonical-event-set/v4"
+
+  package static func hash(_ components: [String]) -> String {
+    var hasher = SHA256()
+    for component in components {
+      let data = Data(component.utf8)
+      var length = UInt64(data.count).bigEndian
+      withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
+      hasher.update(data: data)
+    }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+  }
+
+  package static func optionalComponents(_ value: String?) -> [String] {
+    value.map { ["optional:some", $0] } ?? ["optional:none"]
+  }
+
+  package static func sha256(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
 public enum CanonicalPersistenceError: String, Error, Equatable, Sendable {
   case invalidIdentifier = "invalid_identifier"
   case invalidEvent = "invalid_event"
@@ -362,6 +387,35 @@ public enum StableCanonicalID {
       hasher.update(data: data)
     }
     return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+/// Stable source identities shared by staging and persisted-ledger validation.
+package enum CanonicalStagingID {
+  package static func stage(
+    artifactSHA256: String, profileID: String, adapterVersion: String
+  ) -> String {
+    digest(["ledger-atlas/staging/v1", artifactSHA256, profileID, adapterVersion])
+  }
+
+  package static func table(stagingID: String, table: String) -> String {
+    digest(["ledger-atlas/staging/table/v1", stagingID, table])
+  }
+
+  package static func record(stagingID: String, table: String, recordKey: String) -> String {
+    digest(["ledger-atlas/staging/record/v1", stagingID, table, recordKey])
+  }
+
+  package static func field(stagingID: String, locator: SourceLocator) -> String {
+    digest([
+      "ledger-atlas/staging/field/v1", stagingID, locator.containerMember ?? "",
+      locator.table, locator.recordKey, locator.columnOrdinal.map(String.init) ?? "",
+      locator.columnName ?? "",
+    ])
+  }
+
+  private static func digest(_ components: [String]) -> String {
+    CanonicalReceiptDigest.hash(components)
   }
 }
 

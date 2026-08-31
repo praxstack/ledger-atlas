@@ -44,7 +44,7 @@ private final class SecurityScopeLeaseRegistry: @unchecked Sendable {
       defer { leases.removeAll() }
       return Array(leases.values)
     }
-    released.forEach { $0.release() }
+    for lease in released { lease.release() }
   }
 }
 
@@ -149,8 +149,8 @@ package final class LedgerSession {
     let lease = scopedLeases.lease(for: generation)
     loadingGenerations.insert(generation)
     loads[generation] = Task.detached { [weak self, lease] in
-      defer { lease?.release() }
       let presentation = load(url)
+      lease?.release()
       await MainActor.run {
         self?.finishLoad(generation: generation, presentation: presentation)
       }
@@ -179,7 +179,7 @@ package final class LedgerSession {
 
   package func close() {
     openGeneration &+= 1
-    loads.values.forEach { $0.cancel() }
+    for load in loads.values { load.cancel() }
     releaseAllScopes()
     state = .noLedger
   }

@@ -1,6 +1,7 @@
 import CSQLite
 import CryptoKit
 import Darwin
+import Dispatch
 import Foundation
 import LedgerCore
 import Testing
@@ -445,9 +446,11 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(currentObject["schemaFingerprint"] == nil)
 
   let legacyPayload = Data(
-    (#"{"accounts":[{"currencyUnit":"USD","id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lifecycle":"active","name":"Cash","originID":"1111111111111111111111111111111111111111111111111111111111111111","originLabel":"synthetic"}],"budgets":[],"categories":[],"installmentPlans":[],"links":[],"preservedSource":[],"recurrenceRules":[],"revisions":[],"schemaFingerprint":"aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926","schemaVersion":10}"#).utf8)
+    (#"{"accounts":[{"currencyUnit":"USD","id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lifecycle":"active","name":"Cash","originID":"1111111111111111111111111111111111111111111111111111111111111111","originLabel":"synthetic"}],"budgets":[],"categories":[],"installmentPlans":[],"links":[],"preservedSource":[],"recurrenceRules":[],"revisions":[],"schemaFingerprint":"aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926","schemaVersion":10}"#)
+      .utf8)
   let legacyManifestBytes = Data(
-    (#"{"createdAtMilliseconds":0,"payloadSHA256":"3689355a3fdc2624bf56bf94cae56e8c06ca827b2a8f6057870ed078deebcdff","schemaFingerprint":"aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926","schemaVersion":10}"#).utf8)
+    (#"{"createdAtMilliseconds":0,"payloadSHA256":"3689355a3fdc2624bf56bf94cae56e8c06ca827b2a8f6057870ed078deebcdff","schemaFingerprint":"aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926","schemaVersion":10}"#)
+      .utf8)
   let legacyManifestObject = try #require(
     JSONSerialization.jsonObject(with: legacyManifestBytes) as? [String: Any])
   let legacyManifest = LedgerExportManifest(
@@ -1303,12 +1306,22 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
     throw LedgerStore.Error.incompatibleCanonicalStore
   }
-  let provenanceID = String(repeating: "b", count: 64)
-  let eventID = String(repeating: "c", count: 64)
   let accountID = String(repeating: "d", count: 64)
   let artifactID = String(repeating: "a", count: 64)
-  let receiptID = String(repeating: "6", count: 64)
-  let bindingIDs = [provenanceID] + ["e", "f", "1", "2"].map { String(repeating: $0, count: 64) }
+  let receiptID = CanonicalStagingID.stage(
+    artifactSHA256: artifactID, profileID: "synthetic-profile",
+    adapterVersion: "synthetic-adapter-v1")
+  let sourceRecordID = CanonicalStagingID.record(
+    stagingID: receiptID, table: "INOUTCOME", recordKey: "event")
+  let eventID = try StableCanonicalID.event(sourceRecordID: sourceRecordID, effectOrdinal: 0)
+  let bindingIDs = (0..<5).map { (index: Int) in
+    CanonicalStagingID.field(
+      stagingID: receiptID,
+      locator: SourceLocator(
+        table: "INOUTCOME", recordKey: "event", columnOrdinal: index,
+        columnName: "c\(index)"))
+  }
+  let provenanceID = bindingIDs[0]
   let provenanceRows = bindingIDs.enumerated().map { index, id in
     "INSERT INTO provenance_reference VALUES ('\(id)', '\(artifactID)', 'synthetic-profile', 'synthetic-adapter-v1', NULL, 'INOUTCOME', 'event', \(index), 'c\(index)')"
   }.joined(separator: ";")
@@ -1316,6 +1329,25 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
     .map { semantic, id in
       "INSERT INTO event_source_binding VALUES ('\(eventID)', '\(semantic)', '\(id)', 'TEXT', 'text'); INSERT INTO receipt_binding VALUES ('\(receiptID)', '\(eventID)', '\(semantic)', '\(id)')"
     }.joined(separator: ";")
+  var eventComponents = [
+    CanonicalReceiptDigest.eventSetPrefix, eventID, accountID, "adjustment", "1.00", "USD",
+    "0", "1970", "1", "1", "0", "0", "0", "0", "fixed", "0", "millisecond", "0",
+    sourceRecordID, provenanceID,
+  ]
+  for (semantic, id) in zip(
+    ["amount", "currency", "occurred_at", "account", "kind"], bindingIDs
+  ).sorted(by: { $0.0 < $1.0 }) {
+    eventComponents.append(contentsOf: [semantic, id, "optional:some", "TEXT", "text"])
+  }
+  let eventSetHash = CanonicalReceiptDigest.hash(eventComponents)
+  let preservationHash = CanonicalReceiptDigest.hash([
+    "ledger-atlas/receipt-owned-preservation-set/v4"
+  ])
+  let reconciliationHash = CanonicalReceiptDigest.hash([
+    "ledger-atlas/canonical-receipt-integrity/v6", receiptID, artifactID, artifactID,
+    "synthetic-profile", "synthetic-adapter-v1", eventSetHash, "1", "8", eventSetHash,
+    preservationHash,
+  ])
   let insert = """
     \(provenanceRows);
     INSERT INTO economic_event(
@@ -1326,9 +1358,9 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
     ) VALUES (
       '\(eventID)', '\(accountID)', 'adjustment', '1.00', 'USD',
       0, 1970, 1, 1, 0, 0, 0, 0, 'fixed', '0', 'millisecond',
-      0, '\(eventID)', '\(provenanceID)'
+      0, '\(sourceRecordID)', '\(provenanceID)'
     );
-    INSERT INTO import_receipt VALUES ('\(receiptID)', '\(artifactID)', '\(artifactID)', 'synthetic-profile', 'synthetic-adapter-v1', '\(artifactID)', '\(artifactID)', 1, 8);
+    INSERT INTO import_receipt VALUES ('\(receiptID)', '\(artifactID)', '\(artifactID)', 'synthetic-profile', 'synthetic-adapter-v1', '\(reconciliationHash)', '\(eventSetHash)', 1, 8);
     INSERT INTO receipt_event VALUES ('\(receiptID)', '\(eventID)');
     \(bindings);
     """
@@ -1360,6 +1392,102 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
     try LedgerStore.openForMutation(at: url)
   }
+}
+
+@Test func portableExportUsesOneReadTransactionWhenAnotherConnectionWrites() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("ledger.sqlite")
+  try writeEmptyCanonicalFile(to: url)
+  let writer = ConcurrentSQLiteCommit()
+  defer { if let database = writer.database { sqlite3_close(database) } }
+  let store = try LedgerStore.openForMutation(at: url) { phase in
+    guard phase == .afterPortableExportSnapshotRead, writer.database == nil else { return }
+    guard sqlite3_open(url.path, &writer.database) == SQLITE_OK, let database = writer.database,
+      sqlite3_busy_timeout(database, 100) == SQLITE_OK,
+      sqlite3_exec(
+        database, "BEGIN IMMEDIATE; UPDATE ledger_category SET name='Later'", nil, nil, nil)
+        == SQLITE_OK
+    else { throw LedgerStore.Error.incompatibleCanonicalStore }
+    Thread {
+      writer.result = sqlite3_exec(writer.database, "COMMIT", nil, nil, nil)
+      writer.finished.signal()
+    }.start()
+    #expect(writer.finished.wait(timeout: .now() + .milliseconds(500)) == .success)
+    #expect(writer.result == SQLITE_BUSY)
+    #expect(sqlite3_exec(writer.database, "ROLLBACK", nil, nil, nil) == SQLITE_OK)
+  }
+  let app = LedgerApplication(store: store)
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Before", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let category = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Category Before", kind: .expense, origin: origin)
+  try app.createCategory(category)
+
+  let exported = try app.exportPackage()
+  #expect(String(data: exported.payload, encoding: .utf8)?.contains("Category Before") == true)
+  #expect(
+    sqlite3_exec(
+      writer.database, "BEGIN IMMEDIATE; UPDATE ledger_category SET name='Later'; COMMIT", nil,
+      nil, nil) == SQLITE_OK)
+  let current = try app.snapshot().categories
+  #expect(current.count == 1)
+  #expect(current.first?.name == "Later")
+}
+
+@Test func ordinarySnapshotUsesOneReadTransactionWhenAnotherConnectionWrites() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("ledger.sqlite")
+  try writeEmptyCanonicalFile(to: url)
+  let writer = ConcurrentSQLiteCommit()
+  defer { if let database = writer.database { sqlite3_close(database) } }
+  let store = try LedgerStore.openForMutation(at: url) { phase in
+    guard phase == .afterReadSnapshotCoreRead, writer.database == nil else { return }
+    guard sqlite3_open(url.path, &writer.database) == SQLITE_OK, let database = writer.database,
+      sqlite3_busy_timeout(database, 100) == SQLITE_OK,
+      sqlite3_exec(
+        database, "BEGIN IMMEDIATE; UPDATE ledger_category SET name='Later'", nil, nil, nil)
+        == SQLITE_OK
+    else { throw LedgerStore.Error.incompatibleCanonicalStore }
+    Thread {
+      writer.result = sqlite3_exec(writer.database, "COMMIT", nil, nil, nil)
+      writer.finished.signal()
+    }.start()
+    #expect(writer.finished.wait(timeout: .now() + .milliseconds(500)) == .success)
+    #expect(writer.result == SQLITE_BUSY)
+    #expect(sqlite3_exec(writer.database, "ROLLBACK", nil, nil, nil) == SQLITE_OK)
+  }
+  let app = LedgerApplication(store: store)
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  try app.createAccount(
+    LedgerAccount(
+      id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+      name: "Before", currencyUnit: "USD", origin: origin))
+  try app.createCategory(
+    LedgerCategory(
+      id: StableLedgerID.category(origin: origin, localKey: String(repeating: "b", count: 64)),
+      name: "Category Before", kind: .expense, origin: origin))
+
+  let snapshot = try app.snapshot()
+  #expect(snapshot.categories.first?.name == "Category Before")
+  #expect(
+    sqlite3_exec(
+      writer.database, "BEGIN IMMEDIATE; UPDATE ledger_category SET name='Later'; COMMIT", nil,
+      nil, nil) == SQLITE_OK)
+  #expect(try app.snapshot().categories.first?.name == "Later")
+}
+
+private final class ConcurrentSQLiteCommit: @unchecked Sendable {
+  var database: OpaquePointer?
+  var result = SQLITE_OK
+  let finished = DispatchSemaphore(value: 0)
 }
 
 @Test func malformedPreservedSourceLeavesEmptyDestinationUnchanged() throws {

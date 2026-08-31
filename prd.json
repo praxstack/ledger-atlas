@@ -8,7 +8,7 @@
     "portal_contract": "read-only loopback; no browser ledger editing",
     "tickets": [
       {"id":"MACV2-01","deps":[],"github":37,"linear":"PRA-69","status":"done"},
-      {"id":"MACV2-02","deps":["MACV2-01"],"github":38,"linear":"PRA-72","status":"todo"},
+      {"id":"MACV2-02","deps":["MACV2-01"],"github":38,"linear":"PRA-72","status":"done"},
       {"id":"MACV2-03","deps":["MACV2-02"],"github":39,"linear":"PRA-68","status":"todo"},
       {"id":"MACV2-04","deps":["MACV2-03"],"github":40,"linear":"PRA-70","status":"todo"},
       {"id":"MACV2-05","deps":["MACV2-03"],"github":41,"linear":"PRA-71","status":"todo"},

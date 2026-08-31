@@ -46,6 +46,7 @@ struct AtomicCanonicalCommitTests {
         }
         for table in [
           "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
+          "ledger_receipt_trust_anchor",
           "ledger_transaction_link", "ledger_transaction_source_literal",
           "ledger_transaction_effect", "ledger_transaction_revision", "ledger_transaction",
           "ledger_category", "ledger_account", "ledger_origin", "ledger_budget",
@@ -80,7 +81,10 @@ struct AtomicCanonicalCommitTests {
       let committer = SQLiteCanonicalCommitter()
       _ = try committer.commit(fixture.request)
       try withDatabase(fixture.request.canonicalDatabaseURL) { database in
-        for table in ["ledger_account_preferences", "ledger_account_group", "ledger_category_tree"] {
+        for table in [
+          "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
+          "ledger_receipt_trust_anchor",
+        ] {
           try executeTestSQL(database, "DROP TABLE \(table)")
         }
         try executeTestSQL(
@@ -98,7 +102,8 @@ struct AtomicCanonicalCommitTests {
           database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
         let foundationCount = try scalarTestText(
           database,
-          "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_category_tree','ledger_account_group','ledger_account_preferences')")
+          "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_category_tree','ledger_account_group','ledger_account_preferences')"
+        )
         #expect(version == "11")
         #expect(fingerprint == CanonicalLedgerSchema.fingerprint)
         #expect(foundationCount == "3")
@@ -214,6 +219,38 @@ struct AtomicCanonicalCommitTests {
         try SQLiteCanonicalCommitter().commit(empty)
       }
       #expect(!FileManager.default.fileExists(atPath: empty.canonicalDatabaseURL.path))
+    }
+  }
+
+  @Test("a noncanonical staging receipt identifier is rejected before destination creation")
+  func noncanonicalStagingReceiptIDIsRejected() throws {
+    try withCommitDirectory { directory in
+      let fixture = try makeFixture(directory: directory, variant: .noncanonicalReceipt)
+      try expectPreDestinationRejection(fixture, error: .invalidRequest)
+    }
+  }
+
+  @Test("a noncanonical staging table identifier is rejected before destination creation")
+  func noncanonicalStagingTableIDIsRejected() throws {
+    try withCommitDirectory { directory in
+      let fixture = try makeFixture(directory: directory, variant: .noncanonicalTable)
+      try expectPreDestinationRejection(fixture, error: .unauthenticatedStaging)
+    }
+  }
+
+  @Test("a noncanonical staging record identifier is rejected before destination creation")
+  func noncanonicalStagingRecordIDIsRejected() throws {
+    try withCommitDirectory { directory in
+      let fixture = try makeFixture(directory: directory, variant: .noncanonicalRecord)
+      try expectPreDestinationRejection(fixture, error: .unauthenticatedStaging)
+    }
+  }
+
+  @Test("a noncanonical staging field identifier is rejected before destination creation")
+  func noncanonicalStagingFieldIDIsRejected() throws {
+    try withCommitDirectory { directory in
+      let fixture = try makeFixture(directory: directory, variant: .noncanonicalField)
+      try expectPreDestinationRejection(fixture, error: .unauthenticatedStaging)
     }
   }
 
@@ -960,7 +997,9 @@ struct AtomicCanonicalCommitTests {
   }
 }
 
-private enum FixtureVariant { case first, second }
+private enum FixtureVariant {
+  case first, second, noncanonicalReceipt, noncanonicalTable, noncanonicalRecord, noncanonicalField
+}
 
 private struct CommitFixture {
   let request: CanonicalCommitRequest
@@ -981,6 +1020,26 @@ private func makeFixture(
   case .second:
     ids = fixtureIDs(base: "1")
     suffix = "two"
+  case .noncanonicalReceipt:
+    ids = fixtureIDs(
+      stagingID: String(repeating: "b", count: 64),
+      artifactSHA256: fixtureIDs(base: "a")[9])
+    suffix = "noncanonical-receipt"
+  case .noncanonicalTable:
+    var forged = fixtureIDs(base: "a")
+    forged[1] = String(repeating: "b", count: 64)
+    ids = forged
+    suffix = "noncanonical-table"
+  case .noncanonicalRecord:
+    var forged = fixtureIDs(base: "a")
+    forged[2] = String(repeating: "b", count: 64)
+    ids = forged
+    suffix = "noncanonical-record"
+  case .noncanonicalField:
+    var forged = fixtureIDs(base: "a")
+    forged[3] = String(repeating: "b", count: 64)
+    ids = forged
+    suffix = "noncanonical-field"
   }
   let stageURL = directory.appendingPathComponent("stage-\(suffix).sqlite")
   let ledgerURL = canonicalURL ?? directory.appendingPathComponent("canonical.sqlite")
@@ -1029,16 +1088,18 @@ private func makeFixture(
     ])
   return CommitFixture(
     request: try request(
-      canonicalURL: ledgerURL, stagingURL: stageURL, manifest: manifest, event: event),
+      canonicalURL: ledgerURL, stagingURL: stageURL, manifest: manifest, event: event,
+      subjectIDs: stageSubjectIDs(ids: ids)),
     privateSentinel: sentinel)
 }
 
 private func request(
   canonicalURL: URL, stagingURL: URL, manifest: StagingManifest,
-  event: CanonicalEconomicEvent
+  event: CanonicalEconomicEvent,
+  subjectIDs: (table: String, record: String, mappedFields: [String], sidecarField: String)? = nil
 ) throws -> CanonicalCommitRequest {
   let digest = try SQLiteStagingStore().contentDigest(at: stagingURL)
-  let ids = stageSubjectIDs(manifest: manifest)
+  let ids = subjectIDs ?? stageSubjectIDs(manifest: manifest)
   let specifications:
     [(String, ReconciliationSubjectKind, ReconciliationDisposition, ReconciliationReasonCode)] =
       [
@@ -1082,8 +1143,12 @@ private func evidence(
 private func stageSubjectIDs(manifest: StagingManifest) -> (
   table: String, record: String, mappedFields: [String], sidecarField: String
 ) {
-  let first = manifest.stagingID.first == "a"
-  let ids = fixtureIDs(base: first ? "a" : "1")
+  stageSubjectIDs(ids: fixtureIDs(artifactSHA256: manifest.artifactSHA256))
+}
+
+private func stageSubjectIDs(ids: [String]) -> (
+  table: String, record: String, mappedFields: [String], sidecarField: String
+) {
   return (ids[1], ids[2], Array(ids[3...7]), ids[8])
 }
 
@@ -1199,9 +1264,53 @@ private func withCommitDirectory(_ body: (URL) throws -> Void) throws {
 }
 
 private func fixtureIDs(base: Character) -> [String] {
-  (0..<10).map { index in
-    String(repeating: String(base), count: 62) + String(format: "%02x", index)
+  guard base == "a" || base == "1" else {
+    return (0..<10).map { index in
+      String(repeating: String(base), count: 62) + String(format: "%02x", index)
+    }
   }
+  let artifactSHA256 = String(repeating: String(base), count: 62) + "09"
+  return fixtureIDs(artifactSHA256: artifactSHA256)
+}
+
+private func fixtureIDs(artifactSHA256: String) -> [String] {
+  let stagingID = StableStagingID.stage(
+    artifactSHA256: artifactSHA256, profileID: "synthetic-profile",
+    adapterVersion: "synthetic-adapter")
+  return fixtureIDs(stagingID: stagingID, artifactSHA256: artifactSHA256)
+}
+
+private func fixtureIDs(stagingID: String, artifactSHA256: String) -> [String] {
+  let tableID = StableStagingID.table(stagingID: stagingID, table: "synthetic_entries")
+  let recordID = StableStagingID.record(
+    stagingID: stagingID, table: "synthetic_entries", recordKey: "synthetic-record")
+  let fields = ["amount", "currency", "occurred_at", "account", "kind", "opaque"]
+    .enumerated().map { index, name in
+      StableStagingID.field(
+        stagingID: stagingID,
+        locator: SourceLocator(
+          table: "synthetic_entries", recordKey: "synthetic-record", columnOrdinal: index,
+          columnName: name))
+    }
+  return [stagingID, tableID, recordID] + fields + [artifactSHA256]
+}
+
+private final class CommitBoundaryProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var reached = false
+
+  func markReached() { lock.withLock { reached = true } }
+  var wasReached: Bool { lock.withLock { reached } }
+}
+
+private func expectPreDestinationRejection(
+  _ fixture: CommitFixture, error: CanonicalCommitError
+) throws {
+  let probe = CommitBoundaryProbe()
+  let committer = SQLiteCanonicalCommitter(testingBeforeCanonicalOpen: probe.markReached)
+  #expect(throws: error) { try committer.commit(fixture.request) }
+  #expect(!probe.wasReached)
+  #expect(!FileManager.default.fileExists(atPath: fixture.request.canonicalDatabaseURL.path))
 }
 
 private func temporalBindingLiteral(_ value: SourceTemporal) -> String {

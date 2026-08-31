@@ -20,14 +20,22 @@ let package = Package(
       linkerSettings: [.linkedLibrary("sqlite3"), .linkedLibrary("z")]
     ),
     .target(name: "LedgerCore"),
-    .target(name: "LedgerStore", dependencies: ["CSQLite", "LedgerCore"]),
-    .target(name: "MMImport", dependencies: ["CSQLite", "LedgerCore", "LedgerStore"]),
+    .target(name: "LedgerAdapterSemantics", dependencies: ["LedgerCore"]),
+    .target(
+      name: "LedgerStore",
+      dependencies: ["CSQLite", "LedgerCore", "LedgerAdapterSemantics"],
+      linkerSettings: [.linkedFramework("Security")]),
+    .target(
+      name: "MMImport",
+      dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "LedgerAdapterSemantics"]),
     .target(name: "MMFixtures", dependencies: ["LedgerCore"]),
     .target(name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore"]),
     .executableTarget(name: "mmctl", dependencies: ["LedgerCore", "MMImport"]),
     .executableTarget(name: "LedgerAtlasMac", dependencies: ["LedgerAtlasMacUI"]),
     .testTarget(name: "LedgerCoreTests", dependencies: ["LedgerCore", "MMImport", "MMFixtures"]),
-    .testTarget(name: "LedgerStoreTests", dependencies: ["CSQLite", "LedgerCore", "LedgerStore"]),
+    .testTarget(
+      name: "LedgerStoreTests",
+      dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "LedgerAdapterSemantics"]),
     .testTarget(name: "MMImportTests", dependencies: ["CSQLite", "MMImport"]),
     .testTarget(name: "MMFixturesTests", dependencies: ["MMFixtures"]),
     .testTarget(

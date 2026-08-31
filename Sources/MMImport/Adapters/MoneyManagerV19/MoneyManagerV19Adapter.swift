@@ -1,6 +1,7 @@
 import CSQLite
 import Darwin
 import Foundation
+import LedgerAdapterSemantics
 import LedgerCore
 
 /// Strict, evidence-labelled projection of the one observed Android SQLite v19 profile.
@@ -22,16 +23,11 @@ public enum MoneyManagerV19ObservedSchema {
 }
 
 public enum MoneyManagerV19Adapter {
-  public static let version = "money-manager-android-v19-adapter-v1"
+  public static let version = MoneyManagerV19Semantics.adapterVersion
   public static let sourceProfileID = SourceProfile.observedAndroidV19.identifier
   public static let observedProfileID = "realbyte-android-v19-synthetic-text-subset-v1"
 
-  public static let admittedProfileIDs: Set<String> = [
-    observedProfileID, sourceProfileID,
-    SourceProfile.moneyManagerAndroidV19Family.identifier,
-    SourceProfile.moneyManagerIOSV19Family.identifier,
-    SourceProfile.moneyManagerMacV19Family.identifier,
-  ]
+  public static let admittedProfileIDs = MoneyManagerV19Semantics.admittedProfileIDs
 
   public static func admits(_ profile: SourceProfile) -> Bool {
     admittedProfileIDs.contains(profile.identifier)
@@ -125,7 +121,8 @@ public enum MoneyManagerV19Adapter {
       let amount = mapped.amount
       let zdate = mapped.timestamp.zdate
       let account = mapped.account
-      let type = sourceField(record, aliases: MoneyManagerV19Vocabulary.doTypeAliases) ?? mapped.amount
+      let type =
+        sourceField(record, aliases: MoneyManagerV19Vocabulary.doTypeAliases) ?? mapped.amount
       let temporal = try canonicalTemporal(mapped.timestamp, sourceTimeZone: sourceTimeZone)
       let bindings = try [
         binding(.amount, amount), binding(.currency, mapped.currency),
@@ -169,7 +166,8 @@ public enum MoneyManagerV19Adapter {
       observedV19CanonicalDatabaseURL: canonicalDatabaseURL,
       stagingDatabaseURL: stagingDatabaseURL, expectedManifest: input.manifest,
       expectedStagingDigest: input.stagingDigest, mappingDecisions: decisions,
-      events: events, receiptOwnedSubjectIDs: receiptOwnedSubjectIDs)
+      events: events, receiptOwnedSubjectIDs: receiptOwnedSubjectIDs,
+      sourceTimeZone: sourceTimeZone)
   }
 
   private static func binding(

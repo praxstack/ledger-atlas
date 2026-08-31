@@ -8,13 +8,12 @@ public enum StableStagingID {
     profileID: String,
     adapterVersion: String
   ) -> String {
-    digest([
-      "ledger-atlas/staging/v1", artifactSHA256, profileID, adapterVersion,
-    ])
+    CanonicalStagingID.stage(
+      artifactSHA256: artifactSHA256, profileID: profileID, adapterVersion: adapterVersion)
   }
 
   public static func table(stagingID: String, table: String) -> String {
-    digest(["ledger-atlas/staging/table/v1", stagingID, table])
+    CanonicalStagingID.table(stagingID: stagingID, table: table)
   }
 
   public static func record(
@@ -22,19 +21,11 @@ public enum StableStagingID {
     table: String,
     recordKey: String
   ) -> String {
-    digest(["ledger-atlas/staging/record/v1", stagingID, table, recordKey])
+    CanonicalStagingID.record(stagingID: stagingID, table: table, recordKey: recordKey)
   }
 
   public static func field(stagingID: String, locator: SourceLocator) -> String {
-    digest([
-      "ledger-atlas/staging/field/v1",
-      stagingID,
-      locator.containerMember ?? "",
-      locator.table,
-      locator.recordKey,
-      locator.columnOrdinal.map(String.init) ?? "",
-      locator.columnName ?? "",
-    ])
+    CanonicalStagingID.field(stagingID: stagingID, locator: locator)
   }
 
   static func rowKey(canonicalRecord: Data, duplicateOrdinal: Int) -> String {
@@ -50,6 +41,7 @@ public enum StableStagingID {
   }
 
   static func digest(_ components: [Data]) -> String {
+    // Row keys include raw canonical bytes and therefore do not use the string-only shared API.
     var hasher = SHA256()
     for component in components {
       var length = UInt64(component.count).bigEndian

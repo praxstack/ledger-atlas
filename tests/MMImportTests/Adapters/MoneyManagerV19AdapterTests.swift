@@ -3,6 +3,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import LedgerCore
+import LedgerStore
 import Testing
 
 @testable import MMImport
@@ -76,7 +77,7 @@ struct MoneyManagerV19AdapterTests {
     }
   }
 
-  @Test("authenticated text-safe stage keeps event and receipt-owned preservation separate")
+  @Test("authenticated text-safe stage retains opaque event fields in the receipt commitment")
   func commitsAuthenticatedSyntheticStageIdempotently() throws {
     let staged = try makeAuthenticatedStage()
     let canonical = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -121,21 +122,75 @@ struct MoneyManagerV19AdapterTests {
     #expect(sidecars.allSatisfy { $0.provenance.locator.table == "INOUTCOME" })
     let preservation = try committer.receiptOwnedPreservation(
       at: canonical, receiptID: staged.manifest.stagingID)
-    #expect(preservation.anchors.count == 6)
-    #expect(preservation.payloads.count == 4)
+    #expect(preservation.anchors.count == 7)
+    #expect(preservation.payloads.count == 9)
     #expect(
-      Set(preservation.anchors.map(\.sourceTable)) == ["ASSETS", "ZCATEGORY", "CURRENCY"])
+      Set(preservation.anchors.map(\.sourceTable)) == [
+        "ASSETS", "ZCATEGORY", "CURRENCY", "INOUTCOME",
+      ])
     #expect(
       Set(preservation.payloads.map { $0.provenance.locator.table })
-        == ["ASSETS", "ZCATEGORY", "CURRENCY"])
+        == ["ASSETS", "ZCATEGORY", "CURRENCY", "INOUTCOME"])
+    // Opaque transaction fields are retained in a second source-backed receipt copy. This is
+    // the completeness commitment used to reject a rehashed sidecar deletion.
     #expect(
-      preservation.payloads.allSatisfy {
-        $0.anchorID != event.eventID && $0.provenance.locator.recordKey != "transaction-record"
-      })
+      Set(
+        preservation.payloads.filter { $0.provenance.locator.recordKey == "transaction-record" }
+          .compactMap { $0.provenance.locator.columnName })
+        == ["uid", "currencyUid", "ctgUid", "WDATE", "NOTE"])
     #expect(
       Set(
         preservation.payloads.filter { $0.provenance.locator.table == "CURRENCY" }
           .compactMap { $0.provenance.locator.columnName }) == ["uid", "ISO"])
+  }
+
+  @Test("authorized v19 commit rejects multiple effects for one source row")
+  func rejectsMultipleEffectsForOneSourceRow() throws {
+    let staged = try makeAuthenticatedStage()
+    let canonical = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "v19-one-to-many-\(UUID().uuidString).sqlite")
+    defer {
+      try? FileManager.default.removeItem(at: staged.url)
+      try? FileManager.default.removeItem(at: canonical)
+    }
+    let base = try MoneyManagerV19Adapter.canonicalCommitRequest(
+      canonicalDatabaseURL: canonical, stagingDatabaseURL: staged.url,
+      expectedManifest: staged.manifest, expectedContentDigest: staged.digest,
+      sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: 19_800))
+    let first = try #require(base.events.first)
+    let second = try eventCopy(first, effectOrdinal: 1)
+    let request = CanonicalCommitRequest(
+      observedV19CanonicalDatabaseURL: canonical, stagingDatabaseURL: staged.url,
+      expectedManifest: staged.manifest, expectedStagingDigest: staged.digest,
+      mappingDecisions: base.mappingDecisions, events: [first, second],
+      receiptOwnedSubjectIDs: try #require(base.observedV19ReceiptOwnedSubjectIDs))
+    #expect(throws: CanonicalCommitError.unsafeMapping) {
+      _ = try SQLiteCanonicalCommitter().prepare(request)
+    }
+    #expect(!FileManager.default.fileExists(atPath: canonical.path))
+  }
+
+  @Test("authorized v19 commit identity rejects a gap or forged effect ordinal")
+  func rejectsGappedOrForgedEffectIDs() throws {
+    let staged = try makeAuthenticatedStage()
+    defer { try? FileManager.default.removeItem(at: staged.url) }
+    let canonical = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "v19-one-to-many-forged-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: canonical) }
+    let base = try MoneyManagerV19Adapter.canonicalCommitRequest(
+      canonicalDatabaseURL: canonical, stagingDatabaseURL: staged.url,
+      expectedManifest: staged.manifest, expectedContentDigest: staged.digest,
+      sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: 19_800))
+    let first = try #require(base.events.first)
+    let gap = try eventCopy(first, effectOrdinal: 2)
+    let request = CanonicalCommitRequest(
+      observedV19CanonicalDatabaseURL: canonical, stagingDatabaseURL: staged.url,
+      expectedManifest: staged.manifest, expectedStagingDigest: staged.digest,
+      mappingDecisions: base.mappingDecisions, events: [first, gap],
+      receiptOwnedSubjectIDs: try #require(base.observedV19ReceiptOwnedSubjectIDs))
+    #expect(throws: CanonicalCommitError.unsafeMapping) {
+      _ = try SQLiteCanonicalCommitter().prepare(request)
+    }
   }
 
   @Test("authenticated preservation-only stage commits empty-table anchors without events")
@@ -359,12 +414,14 @@ struct MoneyManagerV19AdapterTests {
       let firstPayloadID = try #require(
         adapterTestTextRows(
           database,
-          sql: "SELECT payload_id FROM receipt_preservation_payload WHERE idempotency_key='\(firstStage.manifest.stagingID)'"
+          sql:
+            "SELECT payload_id FROM receipt_preservation_payload WHERE idempotency_key='\(firstStage.manifest.stagingID)'"
         ).first?.first ?? nil)
       let secondPayloadID = try #require(
         adapterTestTextRows(
           database,
-          sql: "SELECT payload_id FROM receipt_preservation_payload WHERE idempotency_key='\(secondStage.manifest.stagingID)'"
+          sql:
+            "SELECT payload_id FROM receipt_preservation_payload WHERE idempotency_key='\(secondStage.manifest.stagingID)'"
         ).first?.first ?? nil)
       try executeAdapterTestSQL(
         database,
@@ -411,7 +468,8 @@ struct MoneyManagerV19AdapterTests {
     try withAdapterDatabase(canonical) { database in
       try executeAdapterTestSQL(
         database,
-        "PRAGMA ignore_check_constraints=ON; UPDATE receipt_preservation_payload SET declared_type=char(0) WHERE idempotency_key='\(staged.manifest.stagingID)'")
+        "PRAGMA ignore_check_constraints=ON; UPDATE receipt_preservation_payload SET declared_type=char(0) WHERE idempotency_key='\(staged.manifest.stagingID)'"
+      )
       try rehashSyntheticReceipt(database, receiptID: staged.manifest.stagingID)
     }
     let checksumBefore = try adapterTestCanonicalChecksum(canonical)
@@ -546,7 +604,8 @@ struct MoneyManagerV19AdapterTests {
         try withAdapterDatabase(staged.url) { database in
           try executeAdapterTestSQL(
             database,
-            "UPDATE staged_field SET payload=zeroblob(\(CanonicalCommitDigest.maximumSidecarBytes + 1)) WHERE column_name='NOTE'")
+            "UPDATE staged_field SET payload=zeroblob(\(CanonicalCommitDigest.maximumSidecarBytes + 1)) WHERE column_name='NOTE'"
+          )
         }
       }
       if requestPath {
@@ -779,7 +838,8 @@ private func makeAuthenticatedStage(
       ("ctgUid", transactionCategoryUID), ("ZMONEY", "12.30"), ("WDATE", "2025-02-03"),
       ("ZDATE", "1738547200000"), ("NOTE", "synthetic"),
     ])
-  let duplicateTransaction = includeDuplicateTransactionUID
+  let duplicateTransaction =
+    includeDuplicateTransactionUID
     ? try record(
       "INOUTCOME", "transaction-duplicate",
       [
@@ -827,7 +887,7 @@ private func makeAuthenticatedStage(
       ? []
       : [asset, category, currency] + (duplicateCurrency.map { [$0] } ?? []) + [transaction]
         + (duplicateTransaction.map { [$0] } ?? []))
-      + (unknown.map { [$0] } ?? [])
+    + (unknown.map { [$0] } ?? [])
   let manifest = StagingManifest(
     stagingID: stageID, artifactSHA256: artifact,
     profileID: MoneyManagerV19Adapter.observedProfileID,
@@ -863,6 +923,18 @@ private func transaction(_ identifier: Int, type: String, amount: String) throws
       "NOTE": "synthetic opaque note", "WDATE": "2025-02-03", "ZDATE": "1738547200000",
       "ZMONEY": amount,
     ])
+}
+
+private func eventCopy(_ event: CanonicalEconomicEvent, effectOrdinal: Int) throws
+  -> CanonicalEconomicEvent
+{
+  try CanonicalEconomicEvent(
+    eventID: StableCanonicalID.event(
+      sourceRecordID: event.sourceRecordID, effectOrdinal: effectOrdinal),
+    accountID: event.accountID, kind: event.kind, amount: event.amount,
+    occurredAt: event.occurredAt, sourceRecordID: event.sourceRecordID,
+    amountProvenance: event.amountProvenance, sourceBindings: event.sourceBindings,
+    sidecarReferences: event.sidecarReferences)
 }
 
 private func record(_ table: String, _ identifier: Int, _ values: [String: String]) throws
@@ -930,8 +1002,9 @@ private func canonicalTableCounts(_ url: URL) throws -> [String: Int] {
   try withAdapterDatabase(url) { database in
     for table in tables {
       var statement: OpaquePointer?
-      guard sqlite3_prepare_v2(database, "SELECT count(*) FROM \(table)", -1, &statement, nil)
-        == SQLITE_OK, let statement
+      guard
+        sqlite3_prepare_v2(database, "SELECT count(*) FROM \(table)", -1, &statement, nil)
+          == SQLITE_OK, let statement
       else { throw AdapterTestFailure.sqlite }
       defer { sqlite3_finalize(statement) }
       guard sqlite3_step(statement) == SQLITE_ROW else { throw AdapterTestFailure.sqlite }
@@ -1004,13 +1077,17 @@ private func rehashSyntheticReceipt(
       try #require(adapterTestColumnString(payloadStatement, index))
     }
     preservationComponents.append(contentsOf: try (0...4).map { try required(Int32($0)) })
-    appendAdapterTestOptional(adapterTestColumnString(payloadStatement, 5), to: &preservationComponents)
+    appendAdapterTestOptional(
+      adapterTestColumnString(payloadStatement, 5), to: &preservationComponents)
     preservationComponents.append(contentsOf: [try required(6), payloadHash])
     preservationComponents.append(contentsOf: try (8...10).map { try required(Int32($0)) })
-    appendAdapterTestOptional(adapterTestColumnString(payloadStatement, 11), to: &preservationComponents)
+    appendAdapterTestOptional(
+      adapterTestColumnString(payloadStatement, 11), to: &preservationComponents)
     preservationComponents.append(contentsOf: [try required(12), try required(13)])
-    appendAdapterTestOptional(adapterTestColumnString(payloadStatement, 14), to: &preservationComponents)
-    appendAdapterTestOptional(adapterTestColumnString(payloadStatement, 15), to: &preservationComponents)
+    appendAdapterTestOptional(
+      adapterTestColumnString(payloadStatement, 14), to: &preservationComponents)
+    appendAdapterTestOptional(
+      adapterTestColumnString(payloadStatement, 15), to: &preservationComponents)
     preservationComponents.append(try required(16))
   }
   let preservationHash = CanonicalCommitDigest.hash(preservationComponents)
@@ -1023,9 +1100,9 @@ private func rehashSyntheticReceipt(
       """)
   let receipt = try #require(receiptRows.first)
   let eventHash = CanonicalCommitDigest.hash([CanonicalCommitDigest.eventSetPrefix])
-  let integrity = CanonicalCommitDigest.hash(
-    ["ledger-atlas/canonical-receipt-integrity/v6"] + receipt.compactMap { $0 }
-      + [eventHash, preservationHash])
+  let integrity = MoneyManagerV19Vocabulary.receiptIntegrityHash(
+    envelope: receipt.compactMap { $0 }, eventSetHash: eventHash,
+    preservationHash: preservationHash, generation: .current)
   try executeAdapterTestSQL(
     database,
     "UPDATE import_receipt SET reconciliation_hash='\(integrity)' WHERE idempotency_key='\(receiptID)'"
