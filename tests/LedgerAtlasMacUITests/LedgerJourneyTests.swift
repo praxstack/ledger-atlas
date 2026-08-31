@@ -690,6 +690,19 @@ import Testing
     createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
   #expect(transfer.transfer.draft.kind == .transfer)
   #expect(transfer.transfer.draft.effects.count == 2)
+
+  let beforeCopyCount = try #require(journey.snapshot).transactions.count
+  let copiedRevision = try journey.copyTransaction(
+    transactionID: transfer.transfer.transactionID,
+    createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds() + 1))
+  let copied = try #require(
+    journey.snapshot?.transactions.first(where: { $0.id == copiedRevision.transactionID }))
+  #expect(journey.snapshot?.transactions.count == beforeCopyCount + 1)
+  #expect(copied.currentRevision.draft.origin.label == LedgerOrigin.macNativeLabel)
+  try journey.tombstoneTransaction(
+    transactionID: copied.id,
+    createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds() + 2))
+  #expect(journey.snapshot?.transactions.first(where: { $0.id == copied.id })?.currentRevision.lifecycle == .tombstoned)
 }
 
 private func writeSyntheticV19(to url: URL) throws {

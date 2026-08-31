@@ -251,6 +251,35 @@ public final class LedgerJourney {
       createdAt: createdAt)
   }
 
+  public func tombstoneTransaction(transactionID: String, createdAt: UTCInstant) throws {
+    guard let application,
+      let current = snapshot?.transactions.first(where: { $0.id == transactionID })?.currentRevision
+    else { throw LedgerApplication.Error.invalidCommand }
+    _ = try application.tombstoneTransaction(
+      transactionID: transactionID, expectedCurrentRevisionID: current.id, createdAt: createdAt)
+    snapshot = try application.snapshot()
+  }
+
+  public func copyTransaction(transactionID: String, createdAt: UTCInstant) throws
+    -> LedgerTransactionRevision
+  {
+    guard let application,
+      let current = snapshot?.transactions.first(where: { $0.id == transactionID })?.currentRevision
+    else { throw LedgerApplication.Error.invalidCommand }
+    let draft = try LedgerTransactionDraft(
+      effects: current.draft.effects, categoryID: current.draft.categoryID,
+      kind: current.draft.kind, occurredAt: current.draft.occurredAt,
+      note: current.draft.note, roundingPolicy: current.draft.roundingPolicy,
+      origin: try LedgerOrigin.macNative())
+    let key = SHA256.hash(
+      data: Data("mac-native-copy:\(transactionID):\(createdAt.epochMilliseconds)".utf8)
+    ).map { String(format: "%02x", $0) }.joined()
+    let revision = try application.createTransaction(
+      idempotencyKey: key, draft: draft, createdAt: createdAt)
+    snapshot = try application.snapshot()
+    return revision
+  }
+
   public func setSearch(_ query: LedgerSearchQuery) {
     searchQuery = query
   }

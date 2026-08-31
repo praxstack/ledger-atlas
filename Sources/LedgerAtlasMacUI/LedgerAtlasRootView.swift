@@ -710,6 +710,20 @@ public struct LedgerAtlasRootView: View {
             transactionID: transactionID, amountLiteral: amountLiteral,
             createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
         },
+        tombstone: { transactionID in
+          do {
+            try journey.tombstoneTransaction(
+              transactionID: transactionID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch { journey.recordFailure("Transaction could not be closed.") }
+        },
+        copy: { transactionID in
+          do {
+            _ = try journey.copyTransaction(
+              transactionID: transactionID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch { journey.recordFailure("Transaction could not be copied.") }
+        },
         addMacTransaction: { amountLiteral in
           journey.performCreateMacTransaction(
             amountLiteral: amountLiteral,
@@ -1156,6 +1170,8 @@ private struct LedgerView: View {
   let lastFailure: String?
   let beginEditing: () -> Void
   let saveAmount: (String, String) -> Void
+  let tombstone: (String) -> Void
+  let copy: (String) -> Void
   let addMacTransaction: (String) -> Void
   let createTransaction: (String, LedgerTransactionKind, String, String?, String?) -> Void
   let createSplit: (LedgerSplitDraft) -> Void
@@ -1175,6 +1191,10 @@ private struct LedgerView: View {
               Text(row.detail).font(.caption).foregroundStyle(.secondary)
             }
             .tag(row.id)
+            .contextMenu {
+              Button("Copy transaction") { copy(row.id) }
+              Button("Close transaction", role: .destructive) { tombstone(row.id) }
+            }
           }
           ForEach(splitPurchases, id: \.id) { purchase in
             DisclosureGroup {
@@ -1230,6 +1250,19 @@ private struct LedgerView: View {
               saveAmount(selectedID, amountLiteral)
             }
             .accessibilityLabel("Save amount")
+          }
+          .padding(.horizontal, 16)
+          HStack {
+            Button("Copy selected") {
+              guard let selectedID else { return }
+              copy(selectedID)
+            }
+            .disabled(selectedID == nil)
+            Button("Close selected", role: .destructive) {
+              guard let selectedID else { return }
+              tombstone(selectedID)
+            }
+            .disabled(selectedID == nil)
           }
           .padding(.horizontal, 16)
           HStack {
