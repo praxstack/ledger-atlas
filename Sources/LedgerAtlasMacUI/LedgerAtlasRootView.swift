@@ -1803,7 +1803,7 @@ private struct NativeTransactionForm: View {
         Picker("Category", selection: $categoryID) {
           Text("No category").tag(String?.none)
           ForEach(availableCategories, id: \.id) { category in
-            Text(category.name).tag(Optional(category.id))
+            Text(CategoryPresentation.label(category, in: categories)).tag(Optional(category.id))
           }
         }
         TextField("Note (optional)", text: $note)
@@ -1883,7 +1883,7 @@ private struct SplitPurchaseForm: View {
               Picker("Category", selection: $line.categoryID) {
                 Text("Choose category…").tag("")
                 ForEach(availableCategories, id: \.id) { category in
-                  Text(category.name).tag(category.id)
+                  Text(CategoryPresentation.label(category, in: categories)).tag(category.id)
                 }
               }
               TextField("Description (optional)", text: $line.description)
@@ -2415,7 +2415,7 @@ private struct CategoryTreeRow: View {
     } label: {
       HStack {
         VStack(alignment: .leading, spacing: 3) {
-          Text(category.name)
+          Text(CategoryPresentation.label(category, in: allCategories))
           Text("\(category.kind.rawValue) · \(category.lifecycle.rawValue)")
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -2472,7 +2472,9 @@ private struct CategoryEditForm: View {
       TextField("Category name", text: $name)
       Picker("Parent", selection: $parentID) {
         Text("Top level").tag(String?.none)
-        ForEach(availableParents, id: \.id) { Text($0.name).tag(Optional($0.id)) }
+        ForEach(availableParents, id: \.id) {
+          Text(CategoryPresentation.label($0, in: categories)).tag(Optional($0.id))
+        }
       }
       TextField("Display order", text: $displayOrder)
       Toggle("Hidden", isOn: $hidden)
@@ -2533,7 +2535,7 @@ private struct CategoryForm: View {
       Picker("Parent", selection: $parentID) {
         Text("Top level").tag(String?.none)
         ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }.sorted { $0.name < $1.name }, id: \.id) { category in
-          Text(category.name).tag(Optional(category.id))
+          Text(CategoryPresentation.label(category, in: categories)).tag(Optional(category.id))
         }
       }
       HStack {

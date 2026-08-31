@@ -161,7 +161,7 @@ private struct RecurrenceForm: View {
       Picker("Category", selection: $categoryID) {
         Text("No category").tag(String?.none)
         ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }, id: \.id) {
-          Text($0.name).tag(Optional($0.id))
+          Text(CategoryPresentation.label($0, in: categories)).tag(Optional($0.id))
         }
       }
       Picker("Kind", selection: $kind) {
@@ -248,7 +248,8 @@ struct InstallmentsView: View {
               Text("\(plan.completedCount)/\(plan.occurrenceCount) occurrences · \(accounts.first(where: { $0.id == plan.accountID })?.name ?? "Unknown account")")
                 .font(.caption).foregroundStyle(.secondary)
               if let category = categories.first(where: { $0.id == plan.categoryID }) {
-                Text(category.name).font(.caption).foregroundStyle(.secondary)
+                Text(CategoryPresentation.label(category, in: categories))
+                  .font(.caption).foregroundStyle(.secondary)
               }
             }
             Spacer()
@@ -304,7 +305,7 @@ private struct InstallmentForm: View {
       Picker("Category", selection: $categoryID) {
         Text("No category").tag(String?.none)
         ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }, id: \.id) {
-          Text($0.name).tag(Optional($0.id))
+          Text(CategoryPresentation.label($0, in: categories)).tag(Optional($0.id))
         }
       }
       TextField("Principal amount", text: $principal)
@@ -420,7 +421,9 @@ private struct BudgetForm: View {
       }
       Picker("Category", selection: $categoryID) {
         Text("Choose category…").tag("")
-        ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }, id: \.id) { Text($0.name).tag($0.id) }
+        ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }, id: \.id) { category in
+          Text(CategoryPresentation.label(category, in: categories)).tag(category.id)
+        }
       }
       TextField("Amount", text: $amount)
       Picker("Period", selection: $period) {
