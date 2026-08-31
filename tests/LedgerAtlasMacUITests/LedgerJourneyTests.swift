@@ -620,6 +620,67 @@ import Testing
   #expect(!FileManager.default.fileExists(atPath: destination.path))
 }
 
+@MainActor
+@Test func nativeEntryAndOrganizationCommandsRoundTrip() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try journey.approveAndOpen(canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
+  try journey.performBeginEditing()
+  let imported = try #require(journey.snapshot)
+  let account = try #require(imported.accounts.first)
+  let sourceCategory = try #require(imported.categories.first)
+  let importedTransaction = try #require(imported.transactions.first)
+  #expect(importedTransaction.currentRevision.draft.categoryID == sourceCategory.id)
+  let macOrigin = try LedgerOrigin.macNative()
+  let group = try LedgerAccountGroup(id: String(repeating: "b", count: 64), name: "Daily")
+  try journey.createAccountGroup(group)
+  try journey.updateAccount(
+    LedgerAccount(
+      id: account.id, name: account.name, currencyUnit: account.currencyUnit,
+      origin: account.origin, groupID: group.id))
+  let childCategory = try LedgerCategory(
+    id: String(repeating: "c", count: 64), name: "Health", kind: .expense, origin: macOrigin,
+    parentID: sourceCategory.id)
+  try journey.createCategory(childCategory)
+  _ = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id,
+    categoryID: childCategory.id, note: "Pharmacy",
+    createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+  let when = try LedgerJourney.nativeTemporal(
+    for: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+  let purchaseID = try StableLedgerID.transaction(
+    origin: macOrigin, localKey: String(repeating: "d", count: 64))
+  let lines = try [
+    LedgerSplitLine(
+      id: try StableLedgerID.splitLine(origin: macOrigin, localKey: String(repeating: "e", count: 64)),
+      amount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("2.50")),
+      categoryID: sourceCategory.id, description: "Groceries", displayOrder: 0),
+    LedgerSplitLine(
+      id: try StableLedgerID.splitLine(origin: macOrigin, localKey: String(repeating: "f", count: 64)),
+      amount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("2.50")),
+      categoryID: childCategory.id, description: "Medicine", displayOrder: 1),
+  ]
+  let purchase = try journey.createSplit(
+    LedgerSplitDraft(
+      id: purchaseID, accountID: account.id,
+      parentAmount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("5.00")),
+      lines: lines, occurredAt: when, note: "Mixed purchase", origin: macOrigin),
+    createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+  #expect(purchase.lines.map(\.description) == ["Groceries", "Medicine"])
+  #expect(purchase.total.amount.rawLiteral == "5")
+  #expect(journey.snapshot?.accountGroups.contains(group) == true)
+  #expect(journey.snapshot?.categories.contains(childCategory) == true)
+  #expect(try LedgerApplication.splitPurchases(from: try #require(journey.snapshot)).count == 1)
+}
+
 private func writeSyntheticV19(to url: URL) throws {
   var database: OpaquePointer?
   guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {

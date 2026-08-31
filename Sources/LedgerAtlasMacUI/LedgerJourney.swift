@@ -279,22 +279,33 @@ public final class LedgerJourney {
     guard application != nil, let snapshot, let account = snapshot.accounts.first else {
       throw LedgerApplication.Error.invalidCommand
     }
+    return try createNativeTransaction(
+      amountLiteral: amountLiteral, kind: .expense, accountID: account.id,
+      categoryID: nil, note: nil, createdAt: createdAt)
+  }
+
+  public func createNativeTransaction(
+    amountLiteral: String, kind: LedgerTransactionKind, accountID: String,
+    categoryID: String?, note: String?, createdAt: UTCInstant
+  ) throws -> LedgerTransactionRevision {
+    guard application != nil, let snapshot,
+      let account = snapshot.accounts.first(where: { $0.id == accountID }),
+      kind == .income || kind == .expense
+    else { throw LedgerApplication.Error.invalidCommand }
     let origin = try LedgerOrigin.macNative()
     let amount = try CurrencyAmount(
       unitCode: account.currencyUnit, amount: ExactDecimal(amountLiteral))
-    let foundationTimeZone = TimeZone.current
-    let localDate = try Self.localDate(for: createdAt, in: foundationTimeZone)
-    let nativeTimeZone = try SourceTimeZone(ianaIdentifier: foundationTimeZone.identifier)
-    let when = try SourceTemporal(
-      resolving: SourceLocalDateTime(date: localDate),
-      in: nativeTimeZone, precision: .day)
+    let when = try Self.nativeTemporal(for: createdAt)
     let key = SHA256.hash(
-      data: Data("mac-native:\(createdAt.epochMilliseconds):\(amountLiteral)".utf8)
+      data: Data(
+        "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")".utf8)
     ).map { String(format: "%02x", $0) }.joined()
     let draft = try LedgerTransactionDraft(
       effects: [
-        try LedgerTransactionEffect(accountID: account.id, direction: .decrease, amount: amount)
-      ], categoryID: nil, kind: .expense, occurredAt: when, origin: origin)
+        try LedgerTransactionEffect(
+          accountID: account.id,
+          direction: kind == .income ? .increase : .decrease, amount: amount)
+      ], categoryID: categoryID, kind: kind, occurredAt: when, note: note, origin: origin)
     return try createTransaction(idempotencyKey: key, draft: draft, createdAt: createdAt)
   }
 
@@ -310,6 +321,14 @@ public final class LedgerJourney {
       throw LedgerApplication.Error.invalidCommand
     }
     return try SourceLocalDate(year: year, month: month, day: day)
+  }
+
+  package static func nativeTemporal(for instant: UTCInstant) throws -> SourceTemporal {
+    let foundationTimeZone = TimeZone.current
+    let localDate = try localDate(for: instant, in: foundationTimeZone)
+    let nativeTimeZone = try SourceTimeZone(ianaIdentifier: foundationTimeZone.identifier)
+    return try SourceTemporal(
+      resolving: SourceLocalDateTime(date: localDate), in: nativeTimeZone, precision: .day)
   }
 
   public func backupCanonicalLedger(to destination: URL) throws {
@@ -347,9 +366,45 @@ public final class LedgerJourney {
     snapshot = try application.snapshot()
   }
 
+  public func createAccountGroup(_ group: LedgerAccountGroup) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.createAccountGroup(group)
+    snapshot = try application.snapshot()
+  }
+
+  public func updateAccount(_ account: LedgerAccount) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateAccount(account)
+    snapshot = try application.snapshot()
+  }
+
+  public func updateAccountGroup(_ group: LedgerAccountGroup) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateAccountGroup(group)
+    snapshot = try application.snapshot()
+  }
+
+  public func tombstoneAccount(_ accountID: String) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.tombstoneAccount(accountID)
+    snapshot = try application.snapshot()
+  }
+
   public func createCategory(_ category: LedgerCategory) throws {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
     try application.createCategory(category)
+    snapshot = try application.snapshot()
+  }
+
+  public func updateCategory(_ category: LedgerCategory) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateCategory(category)
+    snapshot = try application.snapshot()
+  }
+
+  public func tombstoneCategory(_ categoryID: String) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.tombstoneCategory(categoryID)
     snapshot = try application.snapshot()
   }
 
@@ -386,6 +441,20 @@ public final class LedgerJourney {
         components: components, occurredAt: occurredAt, origin: origin, createdAt: createdAt)
       snapshot = try application.snapshot()
       return result
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
+  public func createSplit(
+    _ draft: LedgerSplitDraft, createdAt: UTCInstant
+  ) throws -> LedgerSplitPurchase {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    do {
+      let purchase = try application.createSplit(draft, createdAt: createdAt)
+      snapshot = try application.snapshot()
+      return purchase
     } catch {
       snapshot = try? application.snapshot()
       throw error

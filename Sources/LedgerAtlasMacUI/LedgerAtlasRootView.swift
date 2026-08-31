@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import LedgerCore
 import LedgerStore
 import SwiftUI
@@ -666,6 +667,7 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .ledger {
       LedgerView(
         state: session.state, rows: journey.rows(for: .ledger), isEditing: journey.isEditing,
+        accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
         splitPurchases: splitPurchases,
         splitTransactionIDs: splitTransactionIDs,
         open: openLedger,
@@ -681,6 +683,24 @@ public struct LedgerAtlasRootView: View {
           journey.performCreateMacTransaction(
             amountLiteral: amountLiteral,
             createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+        },
+        createTransaction: { amount, kind, accountID, categoryID, note in
+          do {
+            _ = try journey.createNativeTransaction(
+              amountLiteral: amount, kind: kind, accountID: accountID,
+              categoryID: categoryID, note: note,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch {
+            journey.recordFailure("Transaction could not be saved.")
+          }
+        },
+        createSplit: { draft in
+          do {
+            _ = try journey.createSplit(
+              draft, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch {
+            journey.recordFailure("Split purchase could not be saved.")
+          }
         }
       )
       .id(selection)
@@ -706,10 +726,42 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .accounts {
       AccountsView(
         state: session.state, rows: journey.rows(for: .accounts),
-        lastFailure: lifecycleMessage ?? journey.lastFailure
-      ) {
-        openLedger()
-      }
+        accounts: journey.snapshot?.accounts ?? [], groups: journey.snapshot?.accountGroups ?? [],
+        isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
+        beginEditing: { try? journey.performBeginEditing() },
+        saveAccount: { account in
+          do { try journey.updateAccount(account) }
+          catch { journey.recordFailure("Account could not be saved.") }
+        },
+        saveGroup: { group in
+          do { try journey.updateAccountGroup(group) }
+          catch { journey.recordFailure("Account group could not be saved.") }
+        },
+        createAccount: { account in
+          do { try journey.createAccount(account) }
+          catch { journey.recordFailure("Account could not be created.") }
+        },
+        createGroup: { group in
+          do { try journey.createAccountGroup(group) }
+          catch { journey.recordFailure("Account group could not be created.") }
+        },
+        open: openLedger)
+      .id(selection)
+    } else if selection == .categories {
+      CategoriesView(
+        state: session.state, rows: journey.rows(for: .categories),
+        categories: journey.snapshot?.categories ?? [], isEditing: journey.isEditing,
+        lastFailure: lifecycleMessage ?? journey.lastFailure,
+        beginEditing: { try? journey.performBeginEditing() },
+        saveCategory: { category in
+          do { try journey.updateCategory(category) }
+          catch { journey.recordFailure("Category could not be saved.") }
+        },
+        createCategory: { category in
+          do { try journey.createCategory(category) }
+          catch { journey.recordFailure("Category could not be created.") }
+        },
+        open: openLedger)
       .id(selection)
     } else if selection == .search {
       SearchSurface(
@@ -965,6 +1017,8 @@ private struct LedgerView: View {
   let state: LedgerSession.State
   let rows: [LedgerJourney.SurfaceRow]
   let isEditing: Bool
+  let accounts: [LedgerAccount]
+  let categories: [LedgerCategory]
   let splitPurchases: [LedgerSplitPurchase]
   let splitTransactionIDs: Set<String>
   let open: () -> Void
@@ -973,9 +1027,13 @@ private struct LedgerView: View {
   let beginEditing: () -> Void
   let saveAmount: (String, String) -> Void
   let addMacTransaction: (String) -> Void
+  let createTransaction: (String, LedgerTransactionKind, String, String?, String?) -> Void
+  let createSplit: (LedgerSplitDraft) -> Void
   @State private var selectedID: String?
   @State private var amountLiteral = ""
   @State private var macAmountLiteral = ""
+  @State private var showingTransactionForm = false
+  @State private var showingSplitForm = false
 
   var body: some View {
     if !rows.isEmpty {
@@ -1029,6 +1087,13 @@ private struct LedgerView: View {
         }
         if isEditing {
           HStack {
+            Button("New transaction") { showingTransactionForm = true }
+              .accessibilityLabel("New income or expense")
+            Button("New split purchase") { showingSplitForm = true }
+              .accessibilityLabel("New split purchase")
+          }
+          .padding(.horizontal, 16)
+          HStack {
             TextField("Amount", text: $amountLiteral)
             Button("Save") {
               guard let selectedID, !amountLiteral.isEmpty else { return }
@@ -1055,6 +1120,12 @@ private struct LedgerView: View {
         }
       }
       .navigationTitle("Ledger")
+      .sheet(isPresented: $showingTransactionForm) {
+        NativeTransactionForm(accounts: accounts, categories: categories, onSave: createTransaction)
+      }
+      .sheet(isPresented: $showingSplitForm) {
+        SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
+      }
     } else {
       switch state {
       case .noLedger:
@@ -1117,67 +1188,654 @@ private struct LedgerView: View {
   }
 }
 
+private struct NativeTransactionForm: View {
+  let accounts: [LedgerAccount]
+  let categories: [LedgerCategory]
+  let onSave: (String, LedgerTransactionKind, String, String?, String?) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var amount = ""
+  @State private var kind: LedgerTransactionKind = .expense
+  @State private var accountID = ""
+  @State private var categoryID: String?
+  @State private var note = ""
+
+  private var availableCategories: [LedgerCategory] {
+    categories.filter {
+      $0.lifecycle == .active && !$0.hidden && $0.kind.accepts(kind)
+    }.sorted { $0.name < $1.name }
+  }
+
+  var body: some View {
+    Form {
+      if accounts.isEmpty {
+        ContentUnavailableView(
+          "No accounts", systemImage: "rectangle.stack",
+          description: Text("Create an account before entering a transaction."))
+      } else {
+        TextField("Amount", text: $amount)
+        Picker("Type", selection: $kind) {
+          Text("Expense").tag(LedgerTransactionKind.expense)
+          Text("Income").tag(LedgerTransactionKind.income)
+        }
+        Picker("Account", selection: $accountID) {
+          ForEach(accounts.filter { $0.lifecycle == .active }, id: \.id) { account in
+            Text("\(account.name) (\(account.currencyUnit))").tag(account.id)
+          }
+        }
+        Picker("Category", selection: $categoryID) {
+          Text("No category").tag(String?.none)
+          ForEach(availableCategories, id: \.id) { category in
+            Text(category.name).tag(Optional(category.id))
+          }
+        }
+        TextField("Note (optional)", text: $note)
+        HStack {
+          Button("Cancel", role: .cancel) { dismiss() }
+          Spacer()
+          Button("Save") { save() }
+            .disabled(amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || accountID.isEmpty)
+        }
+      }
+    }
+    .padding(20)
+    .frame(width: 460)
+    .onAppear {
+      if accountID.isEmpty { accountID = accounts.first(where: { $0.lifecycle == .active })?.id ?? "" }
+    }
+    .onChange(of: kind) { _, _ in
+      if let categoryID, !availableCategories.contains(where: { $0.id == categoryID }) {
+        self.categoryID = nil
+      }
+    }
+    .accessibilityElement(children: .contain)
+  }
+
+  private func save() {
+    let cleanAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+    onSave(cleanAmount, kind, accountID, categoryID, cleanNote.isEmpty ? nil : cleanNote)
+    dismiss()
+  }
+}
+
+private struct SplitLineInput: Identifiable {
+  let id: Int
+  var amount = ""
+  var categoryID = ""
+  var description = ""
+}
+
+private struct SplitPurchaseForm: View {
+  let accounts: [LedgerAccount]
+  let categories: [LedgerCategory]
+  let onSave: (LedgerSplitDraft) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var parentAmount = ""
+  @State private var accountID = ""
+  @State private var note = ""
+  @State private var lines = [SplitLineInput(id: 0), SplitLineInput(id: 1), SplitLineInput(id: 2)]
+
+  private var availableCategories: [LedgerCategory] {
+    categories.filter { $0.lifecycle == .active && !$0.hidden && $0.kind == .expense }
+      .sorted { $0.name < $1.name }
+  }
+
+  var body: some View {
+    Form {
+      if accounts.isEmpty || availableCategories.count < 2 {
+        ContentUnavailableView(
+          "Split purchase needs setup", systemImage: "square.split.2x1",
+          description: Text("Create an account and at least two active expense categories first."))
+      } else {
+        TextField("Purchase total", text: $parentAmount)
+        Picker("Account", selection: $accountID) {
+          ForEach(accounts.filter { $0.lifecycle == .active }, id: \.id) { account in
+            Text("\(account.name) (\(account.currencyUnit))").tag(account.id)
+          }
+        }
+        Section("Categories") {
+          ForEach($lines) { $line in
+            VStack(alignment: .leading, spacing: 6) {
+              HStack {
+                Text("Line \(line.id + 1)").font(.headline)
+                Spacer()
+                TextField("Amount", text: $line.amount)
+                  .frame(width: 110)
+              }
+              Picker("Category", selection: $line.categoryID) {
+                Text("Choose category…").tag("")
+                ForEach(availableCategories, id: \.id) { category in
+                  Text(category.name).tag(category.id)
+                }
+              }
+              TextField("Description (optional)", text: $line.description)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Split line \(line.id + 1)")
+          }
+        }
+        TextField("Purchase note (optional)", text: $note)
+        HStack {
+          Button("Cancel", role: .cancel) { dismiss() }
+          Spacer()
+          Button("Save split purchase") { save() }
+            .disabled(parentAmount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || accountID.isEmpty)
+        }
+      }
+    }
+    .padding(20)
+    .frame(width: 560)
+    .onAppear {
+      if accountID.isEmpty { accountID = accounts.first(where: { $0.lifecycle == .active })?.id ?? "" }
+    }
+    .accessibilityElement(children: .contain)
+  }
+
+  private func save() {
+    let cleanParent = parentAmount.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let origin = try? LedgerOrigin.macNative(),
+      let localKey = Self.digest("split:\(UUID().uuidString)"),
+      let purchaseID = try? StableLedgerID.transaction(origin: origin, localKey: localKey),
+      let account = accounts.first(where: { $0.id == accountID }),
+      let total = try? CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal(cleanParent)),
+      let occurredAt = try? LedgerJourney.nativeTemporal(
+        for: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+    else { return }
+    var builtLines: [LedgerSplitLine] = []
+    for input in lines where !input.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      let cleanAmount = input.amount.trimmingCharacters(in: .whitespacesAndNewlines)
+      let cleanDescription = input.description.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !input.categoryID.isEmpty,
+        let amount = try? CurrencyAmount(
+          unitCode: account.currencyUnit, amount: ExactDecimal(cleanAmount)),
+        let lineID = try? StableLedgerID.splitLine(
+          origin: origin, localKey: Self.digest("\(purchaseID):\(input.id)") ?? localKey),
+        let line = try? LedgerSplitLine(
+          id: lineID, amount: amount, categoryID: input.categoryID,
+          description: cleanDescription.isEmpty ? nil : cleanDescription, displayOrder: input.id)
+      else { return }
+      builtLines.append(line)
+    }
+    guard builtLines.count >= 2,
+      let draft = try? LedgerSplitDraft(
+        id: purchaseID, accountID: accountID, parentAmount: total, lines: builtLines,
+        occurredAt: occurredAt, note: cleanNote.isEmpty ? nil : cleanNote, origin: origin)
+    else { return }
+    onSave(draft)
+    dismiss()
+  }
+
+  private static func digest(_ value: String) -> String? {
+    let result = SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    return CanonicalIdentifier.isValid(result) ? result : nil
+  }
+}
+
 private struct AccountsView: View {
   let state: LedgerSession.State
   let rows: [LedgerJourney.SurfaceRow]
+  let accounts: [LedgerAccount]
+  let groups: [LedgerAccountGroup]
+  let isEditing: Bool
   let lastFailure: String?
+  let beginEditing: () -> Void
+  let saveAccount: (LedgerAccount) -> Void
+  let saveGroup: (LedgerAccountGroup) -> Void
+  let createAccount: (LedgerAccount) -> Void
+  let createGroup: (LedgerAccountGroup) -> Void
   let open: () -> Void
+  @State private var showingAccountForm = false
+  @State private var showingGroupForm = false
 
   var body: some View {
-    if !rows.isEmpty {
-      List(rows) { row in
-        VStack(alignment: .leading, spacing: 4) {
-          Text(row.title)
-          Text(row.detail).font(.caption).foregroundStyle(.secondary)
-        }
-      }
-      .navigationTitle("Accounts")
-    } else {
-      switch state {
-      case .loaded(let snapshot) where !snapshot.accounts.isEmpty:
+    VStack(alignment: .leading, spacing: 12) {
+      if !accounts.isEmpty {
         List {
-          ForEach(snapshot.accounts) { account in
-            VStack(alignment: .leading, spacing: 4) {
-              Text(account.name)
-              Text(account.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+          ForEach(groups.sorted { $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder }, id: \.id) { group in
+            Section {
+              ForEach(Self.sortedAccounts(accounts.filter { $0.groupID == group.id }), id: \.id) { account in
+                AccountRow(account: account, save: saveAccount)
+              }
+              if !accounts.contains(where: { $0.groupID == group.id }) {
+                Text("No accounts in this group").foregroundStyle(.secondary)
+              }
+            } header: {
+              AccountGroupHeader(group: group, isEditing: isEditing, save: saveGroup)
+            }
+          }
+          Section("Ungrouped") {
+            let ungrouped = Self.sortedAccounts(accounts.filter { $0.groupID == nil })
+            if ungrouped.isEmpty {
+              Text("No ungrouped accounts").foregroundStyle(.secondary)
+            } else {
+              ForEach(ungrouped, id: \.id) { account in
+                AccountRow(account: account, save: saveAccount)
+              }
             }
           }
         }
-        .navigationTitle("Accounts")
-      case .loaded:
-        ContentUnavailableView(
-          "No accounts", systemImage: "rectangle.stack",
-          description: Text("This native ledger has no accounts yet."))
-      case .unavailable:
-        openPrompt(
-          title: "Ledger unavailable", icon: "exclamationmark.triangle",
-          description: "Choose a compatible ledger to view its accounts.",
-          buttonTitle: "Open Ledger…", guidance: .unavailable, failure: lastFailure)
-      case .noLedger:
-        openPrompt(
-          title: "Open a ledger", icon: "folder",
-          description: "Choose a Ledger Atlas ledger to view its accounts.",
-          buttonTitle: "Open Ledger…", guidance: .noLedger, failure: lastFailure)
-      case .loading:
-        ProgressView("Opening ledger…")
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if !rows.isEmpty {
+        List(rows) { row in
+          VStack(alignment: .leading, spacing: 4) {
+            Text(row.title)
+            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+          }
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel("\(row.title), \(row.detail)")
+        }
+      } else {
+        emptyContent
       }
+      if let lastFailure {
+        Text(lastFailure)
+          .foregroundStyle(.red)
+          .accessibilityLabel(lastFailure)
+      }
+      HStack {
+        if isEditing {
+          Button("New account") { showingAccountForm = true }
+            .accessibilityLabel("New account")
+          Button("New group") { showingGroupForm = true }
+            .accessibilityLabel("New account group")
+        } else if !accounts.isEmpty || !rows.isEmpty {
+          Button("Begin editing", action: beginEditing)
+            .accessibilityLabel("Begin editing accounts")
+        } else {
+          Button("Open Ledger…", action: open)
+        }
+      }
+      .padding(.horizontal, 16)
+      .padding(.bottom, 12)
+    }
+    .navigationTitle("Accounts")
+    .sheet(isPresented: $showingAccountForm) {
+      AccountForm(groups: groups, onSave: { account in
+        createAccount(account)
+        showingAccountForm = false
+      })
+    }
+    .sheet(isPresented: $showingGroupForm) {
+      AccountGroupForm(onSave: { group in
+        createGroup(group)
+        showingGroupForm = false
+      })
     }
   }
 
-  private func openPrompt(
-    title: String, icon: String, description: String, buttonTitle: String,
-    guidance: LedgerLifecycleGuidance? = nil, failure: String? = nil
-  )
-    -> some View
-  {
+  @ViewBuilder
+  private var emptyContent: some View {
+    switch state {
+    case .loaded:
+      ContentUnavailableView(
+        "No accounts", systemImage: "rectangle.stack",
+        description: Text(isEditing ? "Create an account or group to start organizing balances." : "Begin editing to manage accounts."))
+    case .unavailable:
+      EmptyLedgerPrompt(title: "Ledger unavailable", description: "Choose a compatible ledger to view its accounts.", guidance: .unavailable, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
+    case .noLedger:
+      EmptyLedgerPrompt(title: "Open a ledger", description: "Choose a Ledger Atlas ledger to view its accounts.", guidance: .noLedger, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
+    case .loading:
+      ProgressView("Opening ledger…")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  private static func revise(_ group: LedgerAccountGroup, lifecycle: LedgerLifecycleState) -> LedgerAccountGroup? {
+    try? LedgerAccountGroup(id: group.id, name: group.name, displayOrder: group.displayOrder, lifecycle: lifecycle)
+  }
+
+  private static func sortedAccounts(_ accounts: [LedgerAccount]) -> [LedgerAccount] {
+    accounts.sorted {
+      $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder
+    }
+  }
+}
+
+private struct AccountRow: View {
+  let account: LedgerAccount
+  let save: (LedgerAccount) -> Void
+
+  var body: some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 3) {
+        Text(account.name)
+        Text("\(account.currencyUnit) · \(account.variant.rawValue) · \(account.lifecycle.rawValue)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Spacer()
+      if account.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
+      if !account.includeInTotals { Label("Excluded from totals", systemImage: "minus.circle").font(.caption) }
+      if account.lifecycle == .tombstoned { Label("Closed", systemImage: "archivebox").font(.caption) }
+      Menu("Actions") {
+        Button(account.hidden ? "Show account" : "Hide account") {
+          update(hidden: !account.hidden)
+        }
+        Button(account.includeInTotals ? "Exclude from totals" : "Include in totals") {
+          update(includeInTotals: !account.includeInTotals)
+        }
+        Button(account.lifecycle == .active ? "Close account" : "Restore account") {
+          update(lifecycle: account.lifecycle == .active ? .tombstoned : .active)
+        }
+      }
+      .accessibilityLabel("Actions for \(account.name)")
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(account.name), \(account.currencyUnit), \(account.lifecycle.rawValue)")
+  }
+
+  private func update(
+    name: String? = nil, lifecycle: LedgerLifecycleState? = nil, hidden: Bool? = nil,
+    includeInTotals: Bool? = nil
+  ) {
+    guard let revised = try? LedgerAccount(
+      id: account.id, name: name ?? account.name, currencyUnit: account.currencyUnit,
+      origin: account.origin, lifecycle: lifecycle ?? account.lifecycle, groupID: account.groupID,
+      displayOrder: account.displayOrder, hidden: hidden ?? account.hidden,
+      includeInTotals: includeInTotals ?? account.includeInTotals, variant: account.variant)
+    else { return }
+    save(revised)
+  }
+}
+
+private struct AccountGroupHeader: View {
+  let group: LedgerAccountGroup
+  let isEditing: Bool
+  let save: (LedgerAccountGroup) -> Void
+
+  var body: some View {
+    HStack {
+      Text(group.name)
+      if group.lifecycle == .tombstoned {
+        Text("Closed").font(.caption).foregroundStyle(.secondary)
+      }
+      Spacer()
+      if isEditing {
+        Button(group.lifecycle == .active ? "Close group" : "Restore group") {
+          guard let revised = try? LedgerAccountGroup(
+            id: group.id, name: group.name, displayOrder: group.displayOrder,
+            lifecycle: group.lifecycle == .active ? .tombstoned : .active)
+          else { return }
+          save(revised)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("\(group.lifecycle == .active ? "Close" : "Restore") account group \(group.name)")
+      }
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Account group \(group.name), \(group.lifecycle.rawValue)")
+  }
+}
+
+private struct AccountForm: View {
+  let groups: [LedgerAccountGroup]
+  let onSave: (LedgerAccount) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var name = ""
+  @State private var currency = "USD"
+  @State private var groupID: String?
+  @State private var variant: LedgerAccountVariant = .standard
+  @State private var includeInTotals = true
+
+  var body: some View {
+    Form {
+      TextField("Account name", text: $name)
+      TextField("Currency code", text: $currency)
+        .textCase(.uppercase)
+      Picker("Group", selection: $groupID) {
+        Text("No group").tag(String?.none)
+        ForEach(groups.filter { $0.lifecycle == .active }, id: \.id) { group in
+          Text(group.name).tag(Optional(group.id))
+        }
+      }
+      Picker("Account type", selection: $variant) {
+        ForEach(LedgerAccountVariant.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+      }
+      Toggle("Include in totals", isOn: $includeInTotals)
+      HStack {
+        Button("Cancel", role: .cancel) { dismiss() }
+        Spacer()
+        Button("Create") { create() }
+          .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || currency.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+    }
+    .padding(20)
+    .frame(width: 420)
+    .accessibilityElement(children: .contain)
+  }
+
+  private func create() {
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let unit = currency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    guard let origin = try? LedgerOrigin.macNative(),
+      let id = try? StableLedgerID.account(origin: origin, localKey: Self.generatedID()),
+      let account = try? LedgerAccount(
+      id: id, name: trimmedName, currencyUnit: unit, origin: origin,
+        groupID: groupID, includeInTotals: includeInTotals, variant: variant)
+    else { return }
+    onSave(account)
+    dismiss()
+  }
+
+  private static func generatedID() -> String {
+    SHA256.hash(data: Data("ledger-atlas/account/\(UUID().uuidString)".utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+private struct AccountGroupForm: View {
+  let onSave: (LedgerAccountGroup) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var name = ""
+
+  var body: some View {
+    Form {
+      TextField("Group name", text: $name)
+      HStack {
+        Button("Cancel", role: .cancel) { dismiss() }
+        Spacer()
+        Button("Create") { create() }
+          .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+    }
+    .padding(20)
+    .frame(width: 360)
+  }
+
+  private func create() {
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let id = Self.generatedID(), let group = try? LedgerAccountGroup(id: id, name: trimmedName) else { return }
+    onSave(group)
+    dismiss()
+  }
+
+  private static func generatedID() -> String? {
+    let value = SHA256.hash(data: Data("ledger-atlas/account-group/\(UUID().uuidString)".utf8)).map { String(format: "%02x", $0) }.joined()
+    return CanonicalIdentifier.isValid(value) ? value : nil
+  }
+}
+
+private struct CategoriesView: View {
+  let state: LedgerSession.State
+  let rows: [LedgerJourney.SurfaceRow]
+  let categories: [LedgerCategory]
+  let isEditing: Bool
+  let lastFailure: String?
+  let beginEditing: () -> Void
+  let saveCategory: (LedgerCategory) -> Void
+  let createCategory: (LedgerCategory) -> Void
+  let open: () -> Void
+  @State private var showingCategoryForm = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      if !categories.isEmpty {
+        List {
+          ForEach(categories.filter { $0.parentID == nil }.sorted(by: Self.categoryOrder), id: \.id) { category in
+            CategoryTreeRow(category: category, allCategories: categories, isEditing: isEditing, save: saveCategory)
+          }
+        }
+      } else if !rows.isEmpty {
+        List(rows) { row in
+          VStack(alignment: .leading, spacing: 4) {
+            Text(row.title)
+            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+          }
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel("\(row.title), \(row.detail)")
+        }
+      } else {
+        switch state {
+        case .loaded:
+          ContentUnavailableView("No categories", systemImage: "tag", description: Text(isEditing ? "Create a category to classify transactions." : "Begin editing to manage categories."))
+        case .unavailable:
+          EmptyLedgerPrompt(title: "Ledger unavailable", description: "Choose a compatible ledger to view its categories.", guidance: .unavailable, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
+        case .noLedger:
+          EmptyLedgerPrompt(title: "Open a ledger", description: "Choose a Ledger Atlas ledger to view its categories.", guidance: .noLedger, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
+        case .loading:
+          ProgressView("Opening ledger…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+      }
+      if let lastFailure {
+        Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
+      }
+      HStack {
+        if isEditing {
+          Button("New category") { showingCategoryForm = true }.accessibilityLabel("New category")
+        } else if !categories.isEmpty || !rows.isEmpty {
+          Button("Begin editing", action: beginEditing).accessibilityLabel("Begin editing categories")
+        } else {
+          Button("Open Ledger…", action: open)
+        }
+      }
+      .padding(.horizontal, 16)
+      .padding(.bottom, 12)
+    }
+    .navigationTitle("Categories")
+    .sheet(isPresented: $showingCategoryForm) {
+      CategoryForm(categories: categories, onSave: { category in
+        createCategory(category)
+        showingCategoryForm = false
+      })
+    }
+  }
+
+  private static func categoryOrder(_ lhs: LedgerCategory, _ rhs: LedgerCategory) -> Bool {
+    lhs.displayOrder == rhs.displayOrder ? lhs.name < rhs.name : lhs.displayOrder < rhs.displayOrder
+  }
+}
+
+private struct CategoryTreeRow: View {
+  let category: LedgerCategory
+  let allCategories: [LedgerCategory]
+  let isEditing: Bool
+  let save: (LedgerCategory) -> Void
+  @State private var expanded = true
+
+  private var children: [LedgerCategory] {
+    allCategories.filter { $0.parentID == category.id }.sorted {
+      $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder
+    }
+  }
+
+  var body: some View {
+    DisclosureGroup(isExpanded: $expanded) {
+      ForEach(children, id: \.id) { child in
+        CategoryTreeRow(category: child, allCategories: allCategories, isEditing: isEditing, save: save)
+      }
+    } label: {
+      HStack {
+        VStack(alignment: .leading, spacing: 3) {
+          Text(category.name)
+          Text("\(category.kind.rawValue) · \(category.lifecycle.rawValue)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        if category.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
+        Menu("Actions") {
+          Button(category.hidden ? "Show category" : "Hide category") { update(hidden: !category.hidden) }
+          Button(category.lifecycle == .active ? "Close category" : "Restore category") {
+            update(lifecycle: category.lifecycle == .active ? .tombstoned : .active)
+          }
+        }
+        .disabled(!isEditing)
+        .accessibilityLabel("Actions for \(category.name)")
+      }
+      .accessibilityElement(children: .combine)
+      .accessibilityLabel("\(category.name), \(category.kind.rawValue), \(category.lifecycle.rawValue)")
+    }
+  }
+
+  private func update(lifecycle: LedgerLifecycleState? = nil, hidden: Bool? = nil) {
+    guard let revised = try? LedgerCategory(
+      id: category.id, name: category.name, kind: category.kind, origin: category.origin,
+      lifecycle: lifecycle ?? category.lifecycle, parentID: category.parentID,
+      displayOrder: category.displayOrder, hidden: hidden ?? category.hidden)
+    else { return }
+    save(revised)
+  }
+}
+
+private struct CategoryForm: View {
+  let categories: [LedgerCategory]
+  let onSave: (LedgerCategory) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var name = ""
+  @State private var kind: LedgerCategoryKind = .expense
+  @State private var parentID: String?
+
+  var body: some View {
+    Form {
+      TextField("Category name", text: $name)
+      Picker("Kind", selection: $kind) {
+        ForEach(LedgerCategoryKind.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+      }
+      Picker("Parent", selection: $parentID) {
+        Text("Top level").tag(String?.none)
+        ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }.sorted { $0.name < $1.name }, id: \.id) { category in
+          Text(category.name).tag(Optional(category.id))
+        }
+      }
+      HStack {
+        Button("Cancel", role: .cancel) { dismiss() }
+        Spacer()
+        Button("Create") { create() }
+          .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+    }
+    .padding(20)
+    .frame(width: 420)
+  }
+
+  private func create() {
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let origin = try? LedgerOrigin.macNative(),
+      let id = try? StableLedgerID.category(origin: origin, localKey: Self.generatedID()),
+      let category = try? LedgerCategory(id: id, name: trimmedName, kind: kind, origin: origin, parentID: parentID)
+    else { return }
+    onSave(category)
+    dismiss()
+  }
+
+  private static func generatedID() -> String {
+    SHA256.hash(data: Data("ledger-atlas/category/\(UUID().uuidString)".utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+private struct EmptyLedgerPrompt: View {
+  let title: String
+  let description: String
+  let guidance: LedgerLifecycleGuidance
+  let failure: String?
+  let buttonTitle: String
+  let open: () -> Void
+
+  var body: some View {
     VStack(spacing: 12) {
-      Image(systemName: icon).font(.largeTitle).foregroundStyle(.secondary)
+      Image(systemName: "folder").font(.largeTitle).foregroundStyle(.secondary)
       Text(title).font(.title2.bold())
       Text(description).foregroundStyle(.secondary)
-      if let guidance { LedgerLifecycleGuidanceView(guidance: guidance, failure: failure) }
+      LedgerLifecycleGuidanceView(guidance: guidance, failure: failure)
       Button(buttonTitle, action: open)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
