@@ -133,7 +133,7 @@ import Testing
 @Test func destinationsCoverDeclaredDailyFinanceSurfaces() {
   let titles = Set(AppDestination.allCases.map(\.title))
   for required in [
-    "Onboarding", "Import Review", "Accounts", "Ledger", "Receipts", "Categories", "Transfers",
+    "Onboarding", "Import Review", "Accounts", "Ledger", "Receipts", "Local Access", "Categories", "Transfers",
     "Recurrence", "Installments", "Budgets", "Insights", "Search", "Backup", "Settings",
   ] {
     #expect(titles.contains(required))

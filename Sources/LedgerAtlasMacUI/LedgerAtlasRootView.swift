@@ -802,6 +802,11 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .receipts {
       ReceiptSurface()
         .id(selection)
+    } else if selection == .localAccess {
+      LocalAccessSurface(
+        accountCount: journey.snapshot?.accounts.count ?? 0,
+        transactionCount: journey.snapshot?.transactions.count ?? 0)
+        .id(selection)
     } else if selection == .backupRestore {
       BackupSurface(
         rows: journey.rows(for: .backupRestore),
@@ -944,7 +949,8 @@ public struct LedgerAtlasRootView: View {
       SettingsSurface(
         lock: appLock, settings: $productSettings,
         lockNow: lockApp,
-        reducedMotion: reduceMotion)
+        reducedMotion: reduceMotion,
+        exportDiagnostics: exportDiagnostics)
       .id(selection)
     } else if selection == .search {
       SearchSurface(
@@ -995,6 +1001,23 @@ public struct LedgerAtlasRootView: View {
     session.close()
     journey.closeLedger()
     _ = publishWidget(.reopenRequired)
+  }
+
+  private func exportDiagnostics() {
+    guard let snapshot = journey.snapshot else {
+      journey.recordFailure("Open a ledger before exporting diagnostics.")
+      return
+    }
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [.json]
+    panel.nameFieldStringValue = "ledger-atlas-diagnostics.json"
+    guard panel.runModal() == .OK, let destination = panel.url else { return }
+    do {
+      try LedgerDiagnosticsWriter.write(.init(snapshot: snapshot), to: destination)
+      lifecycleMessage = "Diagnostics exported without financial values or paths."
+    } catch {
+      journey.recordFailure("Diagnostics could not be exported.")
+    }
   }
 }
 

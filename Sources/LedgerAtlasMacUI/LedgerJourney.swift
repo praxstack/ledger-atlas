@@ -707,6 +707,8 @@ public final class LedgerJourney {
       }
     case .receipts:
       return []
+    case .localAccess:
+      return []
     case .categories:
       let categories = snapshot.categories.map {
         SurfaceRow(id: $0.id, title: $0.name, detail: $0.kind.rawValue)

@@ -4,6 +4,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
   case accounts
   case ledger
   case receipts
+  case localAccess
   case categories
   case transfers
   case recurrence
@@ -30,6 +31,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Ledger"
     case .receipts:
       "Receipts"
+    case .localAccess:
+      "Local Access"
     case .categories:
       "Categories"
     case .transfers:
@@ -65,6 +68,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Show the canonical ledger."
     case .receipts:
       "Import receipt images and review local OCR suggestions without changing financial truth."
+    case .localAccess:
+      "Start a temporary read-only loopback status view for this Mac."
     case .categories:
       "Show canonical categories."
     case .transfers:
@@ -98,6 +103,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "list.bullet.rectangle"
     case .receipts:
       "doc.text.image"
+    case .localAccess:
+      "network"
     case .categories:
       "tag"
     case .transfers:
@@ -131,6 +138,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Canonical transactions appear after a successful import or ledger open."
     case .receipts:
       "Receipt images stay private. OCR suggestions require explicit review and never write automatically."
+    case .localAccess:
+      "The portal is loopback-only, token-protected, and contains no mutation endpoint."
     case .categories:
       "Canonical categories are listed from the opened ledger."
     case .transfers:

@@ -33,6 +33,7 @@ let package = Package(
       name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore"],
       linkerSettings: [
         .linkedFramework("ImageIO"), .linkedFramework("LocalAuthentication"),
+        .linkedFramework("Network"),
         .linkedFramework("UserNotifications"),
         .linkedFramework("Vision"),
       ]),

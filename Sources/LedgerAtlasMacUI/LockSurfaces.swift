@@ -51,6 +51,7 @@ struct SettingsSurface: View {
   @Binding var settings: LedgerProductSettings
   let lockNow: () -> Void
   let reducedMotion: Bool
+  let exportDiagnostics: () -> Void
   @State private var showingPasscodeForm = false
   @State private var message: String?
 
@@ -119,6 +120,11 @@ struct SettingsSurface: View {
             }
           }
         Text("Reminders are scheduled only after macOS authorization.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      Section("Support") {
+        Button("Export content-free diagnostics", action: exportDiagnostics)
+        Text("The file contains schema versions and counts only. It excludes financial values, names, notes, and paths.")
           .font(.caption).foregroundStyle(.secondary)
       }
       if let message { Text(message).foregroundStyle(.secondary) }
