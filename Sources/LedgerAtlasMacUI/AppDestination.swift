@@ -3,6 +3,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
   case importReview
   case accounts
   case ledger
+  case receipts
   case categories
   case transfers
   case recurrence
@@ -27,6 +28,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Accounts"
     case .ledger:
       "Ledger"
+    case .receipts:
+      "Receipts"
     case .categories:
       "Categories"
     case .transfers:
@@ -60,6 +63,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Show canonical accounts."
     case .ledger:
       "Show the canonical ledger."
+    case .receipts:
+      "Import receipt images and review local OCR suggestions without changing financial truth."
     case .categories:
       "Show canonical categories."
     case .transfers:
@@ -91,6 +96,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "rectangle.stack"
     case .ledger:
       "list.bullet.rectangle"
+    case .receipts:
+      "doc.text.image"
     case .categories:
       "tag"
     case .transfers:
@@ -122,6 +129,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Canonical accounts appear after a successful import or ledger open."
     case .ledger:
       "Canonical transactions appear after a successful import or ledger open."
+    case .receipts:
+      "Receipt images stay private. OCR suggestions require explicit review and never write automatically."
     case .categories:
       "Canonical categories are listed from the opened ledger."
     case .transfers:

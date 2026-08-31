@@ -48,6 +48,7 @@ struct LockedSurface: View {
 
 struct SettingsSurface: View {
   let lock: LedgerAppLock
+  @Binding var settings: LedgerProductSettings
   let lockNow: () -> Void
   let reducedMotion: Bool
   @State private var showingPasscodeForm = false
@@ -78,10 +79,53 @@ struct SettingsSurface: View {
         Text("Keyboard navigation and explicit VoiceOver labels are used throughout the app.")
           .font(.caption).foregroundStyle(.secondary)
       }
+      Section("Presentation") {
+        Picker("Appearance", selection: $settings.appearance) {
+          Text("System").tag(LedgerProductSettings.Appearance.system)
+          Text("Light").tag(LedgerProductSettings.Appearance.light)
+          Text("Dark").tag(LedgerProductSettings.Appearance.dark)
+        }
+        Picker("Locale", selection: $settings.localeIdentifier) {
+          Text("English (United States)").tag("en_US")
+          Text("English (United Kingdom)").tag("en_GB")
+          Text("German").tag("de_DE")
+          Text("Japanese").tag("ja_JP")
+        }
+        Text("Locale changes affect presentation only. Canonical amounts and dates remain typed values.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      Section("Report periods") {
+        Picker("First weekday", selection: $settings.firstWeekday) {
+          Text("Sunday").tag(1)
+          Text("Monday").tag(2)
+        }
+        Stepper("Period start day: \(settings.periodStartDay)", value: $settings.periodStartDay, in: 1...28)
+          .accessibilityValue(String(settings.periodStartDay))
+        Text("Period starts are limited to days 1 through 28 so every month has a valid boundary.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      Section("Notifications") {
+        Toggle("Daily reminders", isOn: $settings.remindersEnabled)
+          .onChange(of: settings.remindersEnabled) { _, enabled in
+            settings.save()
+            Task { @MainActor in
+              let granted = await LedgerNotificationScheduler.setDailyReminder(enabled: enabled)
+              if !granted {
+                settings.remindersEnabled = false
+                message = "Notifications were not authorized."
+              } else {
+                message = enabled ? "Daily reminder scheduled for 9:00." : "Daily reminder disabled."
+              }
+            }
+          }
+        Text("Reminders are scheduled only after macOS authorization.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       if let message { Text(message).foregroundStyle(.secondary) }
     }
     .formStyle(.grouped)
     .navigationTitle("Settings")
+    .onChange(of: settings) { _, value in value.save() }
     .sheet(isPresented: $showingPasscodeForm) {
       PasscodeForm { passcode in
         do {
@@ -132,4 +176,3 @@ private struct PasscodeForm: View {
     .accessibilityElement(children: .contain)
   }
 }
-

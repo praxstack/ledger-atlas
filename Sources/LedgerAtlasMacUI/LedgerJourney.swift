@@ -705,6 +705,8 @@ public final class LedgerJourney {
           id: $0.id, title: draft.kind.rawValue,
           detail: "\(amount) · \($0.currentRevision.lifecycle.rawValue)")
       }
+    case .receipts:
+      return []
     case .categories:
       let categories = snapshot.categories.map {
         SurfaceRow(id: $0.id, title: $0.name, detail: $0.kind.rawValue)

@@ -98,6 +98,7 @@ public struct LedgerAtlasRootView: View {
   @State private var session = LedgerSession()
   @State private var appLock = LedgerAppLock()
   @State private var journey = LedgerJourney()
+  @State private var productSettings = LedgerProductSettings.load()
   @State private var isChoosingImportSource = false
   @State private var lifecycleMessage: String?
   @State private var lifecycleRetryOperation: LedgerLifecycleOperation?
@@ -144,6 +145,7 @@ public struct LedgerAtlasRootView: View {
           )
       }
     }
+    .preferredColorScheme(productSettings.colorScheme)
     .toolbar {
       ToolbarItemGroup {
         Button("Create Ledger…", action: createLedger)
@@ -797,6 +799,9 @@ public struct LedgerAtlasRootView: View {
         }
       )
       .id(selection)
+    } else if selection == .receipts {
+      ReceiptSurface()
+        .id(selection)
     } else if selection == .backupRestore {
       BackupSurface(
         rows: journey.rows(for: .backupRestore),
@@ -937,7 +942,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .settings {
       SettingsSurface(
-        lock: appLock,
+        lock: appLock, settings: $productSettings,
         lockNow: lockApp,
         reducedMotion: reduceMotion)
       .id(selection)
