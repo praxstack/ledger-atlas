@@ -275,6 +275,29 @@ public struct LedgerAtlasRootView: View {
     }
   }
 
+  private func exportPDFStatement() {
+    guard let snapshot = journey.snapshot else {
+      journey.recordFailure("Open a ledger before exporting a statement.")
+      return
+    }
+    let unit = snapshot.accounts.first?.currencyUnit
+      ?? snapshot.transactions.first?.currentRevision.draft.effects.first?.amount.unitCode
+      ?? "USD"
+    guard let report = try? LedgerApplication.report(from: snapshot, unitCode: unit) else {
+      journey.recordFailure("The report could not be generated.")
+      return
+    }
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [UTType.pdf]
+    panel.nameFieldStringValue = "ledger-atlas-statement.pdf"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try LedgerPDFStatementExporter.export(report, to: url)
+    } catch {
+      journey.recordFailure("The PDF statement could not be saved.")
+    }
+  }
+
   private func recordSupersededPublication(_ outcome: LedgerLifecycleOutcome) {
     guard let message = Self.supersededPublicationMessage(for: outcome) else { return }
     lifecycleMessage = message
@@ -799,7 +822,9 @@ public struct LedgerAtlasRootView: View {
         rows: journey.rows(for: .insights),
         table: journey.insightTable,
         emptyMessage: selection.emptyStateMessage
-      ) { openLedger() }
+      ) { openLedger() } exportPDF: {
+        exportPDFStatement()
+      }
       .id(selection)
     } else {
       DataBackedSurface(
@@ -880,6 +905,7 @@ private struct InsightsSurface: View {
   let table: String
   let emptyMessage: String
   let open: () -> Void
+  let exportPDF: () -> Void
 
   var body: some View {
     if rows.isEmpty {
@@ -911,6 +937,10 @@ private struct InsightsSurface: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(row.title), \(row.detail)")
           }
+        }
+        Section("Export") {
+          Button("Export PDF statement", action: exportPDF)
+            .accessibilityLabel("Export PDF statement")
         }
       }
       .navigationTitle("Insights")
