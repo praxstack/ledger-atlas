@@ -839,7 +839,8 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .transfers {
       TransferSurface(
         rows: journey.rows(for: .transfers),
-        accounts: journey.snapshot?.accounts ?? [], isEditing: journey.isEditing,
+        accounts: journey.snapshot?.accounts ?? [], intentRequest: pendingIntent,
+        consumeIntent: { pendingIntent = nil }, isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         createTransfer: { sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID in
@@ -1292,8 +1293,9 @@ private struct LedgerView: View {
   @State private var showingSplitForm = false
 
   var body: some View {
-    if !rows.isEmpty {
-      VStack(alignment: .leading, spacing: 12) {
+    Group {
+      if !rows.isEmpty {
+        VStack(alignment: .leading, spacing: 12) {
         List(selection: $selectedID) {
           ForEach(rows.filter { !splitTransactionIDs.contains($0.id) }) { row in
             VStack(alignment: .leading, spacing: 4) {
@@ -1391,63 +1393,78 @@ private struct LedgerView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
-      }
-      .navigationTitle("Ledger")
-      .sheet(isPresented: $showingTransactionForm) {
-        NativeTransactionForm(
-          accounts: accounts, categories: categories, intent: intentRequest,
-          onSave: { amount, kind, accountID, categoryID, note in
-            createTransaction(amount, kind, accountID, categoryID, note)
-            if intentRequest != nil { consumeIntent() }
-          })
-      }
-      .sheet(isPresented: $showingSplitForm) {
-        SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
-      }
-      .onAppear { presentIntentIfNeeded() }
-      .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
-    } else {
-      switch state {
-      case .noLedger:
-        openPrompt(
-          title: "Open a ledger", icon: "folder",
-          description: "Choose a Ledger Atlas ledger to view its native transactions.",
-          buttonTitle: "Open Ledger…", guidance: .noLedger,
-          failure: lifecycleMessage ?? lastFailure)
-      case .loading:
-        ProgressView("Opening ledger…")
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      case .unavailable:
-        openPrompt(
-          title: "Ledger unavailable", icon: "exclamationmark.triangle",
-          description: "This ledger could not be opened safely.",
-          buttonTitle: "Choose another ledger…", guidance: .unavailable,
-          failure: lifecycleMessage ?? lastFailure)
-      case .loaded(let snapshot)
-      where snapshot.transactions.isEmpty && snapshot.undisplayedImportedEventCount > 0:
-        ContentUnavailableView(
-          "Imported data is preserved", systemImage: "archivebox",
-          description: Text(
-            "This ledger has imported records that are not yet displayable in the native ledger."))
-      case .loaded(let snapshot) where snapshot.transactions.isEmpty:
-        openPrompt(
-          title: "No transactions", icon: "list.bullet",
-          description: lifecycleMessage ?? "This native ledger has no transactions yet.",
-          buttonTitle: "Open another ledger…")
-      case .loaded(let snapshot):
-        List {
-          ForEach(snapshot.transactions) { transaction in
-            VStack(alignment: .leading, spacing: 4) {
-              Text(transaction.title)
-              Text(transaction.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
         }
         .navigationTitle("Ledger")
+      } else {
+        switch state {
+        case .noLedger:
+          openPrompt(
+            title: "Open a ledger", icon: "folder",
+            description: "Choose a Ledger Atlas ledger to view its native transactions.",
+            buttonTitle: "Open Ledger…", guidance: .noLedger,
+            failure: lifecycleMessage ?? lastFailure)
+        case .loading:
+          ProgressView("Opening ledger…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .unavailable:
+          openPrompt(
+            title: "Ledger unavailable", icon: "exclamationmark.triangle",
+            description: "This ledger could not be opened safely.",
+            buttonTitle: "Choose another ledger…", guidance: .unavailable,
+            failure: lifecycleMessage ?? lastFailure)
+        case .loaded(let snapshot)
+        where snapshot.transactions.isEmpty && snapshot.undisplayedImportedEventCount > 0:
+          ContentUnavailableView(
+            "Imported data is preserved", systemImage: "archivebox",
+            description: Text(
+              "This ledger has imported records that are not yet displayable in the native ledger."))
+        case .loaded(let snapshot) where snapshot.transactions.isEmpty:
+          VStack(spacing: 12) {
+            ContentUnavailableView(
+              "No transactions", systemImage: "list.bullet",
+              description: Text(
+                lifecycleMessage ?? "This native ledger has no transactions yet."))
+            if isEditing {
+              HStack {
+                Button("New transaction") { showingTransactionForm = true }
+                  .accessibilityLabel("New income or expense")
+                Button("New split purchase") { showingSplitForm = true }
+                  .accessibilityLabel("New split purchase")
+              }
+            } else {
+              Button("Begin editing", action: beginEditing)
+                .accessibilityLabel("Begin editing")
+            }
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loaded(let snapshot):
+          List {
+            ForEach(snapshot.transactions) { transaction in
+              VStack(alignment: .leading, spacing: 4) {
+                Text(transaction.title)
+                Text(transaction.detail)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+          .navigationTitle("Ledger")
+        }
       }
     }
+    .sheet(isPresented: $showingTransactionForm) {
+      NativeTransactionForm(
+        accounts: accounts, categories: categories, intent: intentRequest,
+        onSave: { amount, kind, accountID, categoryID, note in
+          createTransaction(amount, kind, accountID, categoryID, note)
+          if intentRequest != nil { consumeIntent() }
+        })
+    }
+    .sheet(isPresented: $showingSplitForm) {
+      SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
+    }
+    .onAppear { presentIntentIfNeeded() }
+    .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
   }
 
   private func presentIntentIfNeeded() {
@@ -1477,6 +1494,8 @@ private struct LedgerView: View {
 private struct TransferSurface: View {
   let rows: [LedgerJourney.SurfaceRow]
   let accounts: [LedgerAccount]
+  let intentRequest: LedgerIntentRequest?
+  let consumeIntent: () -> Void
   let isEditing: Bool
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -1519,13 +1538,27 @@ private struct TransferSurface: View {
     .padding(16)
     .navigationTitle("Transfers")
     .sheet(isPresented: $showingForm) {
-      NativeTransferForm(accounts: accounts, onSave: createTransfer)
+      NativeTransferForm(
+        accounts: accounts, intent: intentRequest,
+        onSave: { sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID in
+          createTransfer(
+            sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID)
+          if intentRequest?.kind == .addTransfer { consumeIntent() }
+        })
     }
+    .onAppear { presentIntentIfNeeded() }
+    .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
+  }
+
+  private func presentIntentIfNeeded() {
+    guard intentRequest?.kind == .addTransfer, !showingForm else { return }
+    showingForm = true
   }
 }
 
 private struct NativeTransferForm: View {
   let accounts: [LedgerAccount]
+  let intent: LedgerIntentRequest?
   let onSave: (String, String, String, String?, String?, String?, String?) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var sourceAccountID = ""
@@ -1535,6 +1568,16 @@ private struct NativeTransferForm: View {
   @State private var rate = ""
   @State private var feeAmount = ""
   @State private var feeAccountID: String?
+
+  init(
+    accounts: [LedgerAccount], intent: LedgerIntentRequest? = nil,
+    onSave: @escaping (String, String, String, String?, String?, String?, String?) -> Void
+  ) {
+    self.accounts = accounts
+    self.intent = intent
+    self.onSave = onSave
+    _sourceAmount = State(initialValue: intent?.kind == .addTransfer ? intent?.amountLiteral ?? "" : "")
+  }
 
   private var activeAccounts: [LedgerAccount] {
     accounts.filter { $0.lifecycle == .active }.sorted { $0.name < $1.name }
