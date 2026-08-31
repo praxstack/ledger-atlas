@@ -29,7 +29,9 @@ let package = Package(
       name: "MMImport",
       dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "LedgerAdapterSemantics"]),
     .target(name: "MMFixtures", dependencies: ["LedgerCore"]),
-    .target(name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore"]),
+    .target(
+      name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore"],
+      linkerSettings: [.linkedFramework("LocalAuthentication")]),
     .executableTarget(name: "mmctl", dependencies: ["LedgerCore", "MMImport"]),
     .executableTarget(name: "LedgerAtlasMac", dependencies: ["LedgerAtlasMacUI"]),
     .testTarget(name: "LedgerCoreTests", dependencies: ["LedgerCore", "MMImport", "MMFixtures"]),

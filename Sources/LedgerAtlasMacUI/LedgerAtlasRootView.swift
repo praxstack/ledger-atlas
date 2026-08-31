@@ -96,6 +96,7 @@ public struct LedgerAtlasRootView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
   @State private var session = LedgerSession()
+  @State private var appLock = LedgerAppLock()
   @State private var journey = LedgerJourney()
   @State private var isChoosingImportSource = false
   @State private var lifecycleMessage: String?
@@ -130,11 +131,18 @@ public struct LedgerAtlasRootView: View {
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     } detail: {
-      destinationPreview
-        .animation(
-          MotionPolicy.navigationAnimation(reduceMotion: reduceMotion),
-          value: selection
-        )
+      if appLock.isLocked && selection != .settings {
+        LockedSurface(
+          lock: appLock,
+          unlock: { appLock.unlock(with: $0) },
+          biometricUnlock: { await appLock.unlockWithBiometrics() })
+      } else {
+        destinationPreview
+          .animation(
+            MotionPolicy.navigationAnimation(reduceMotion: reduceMotion),
+            value: selection
+          )
+      }
     }
     .toolbar {
       ToolbarItemGroup {
@@ -864,6 +872,12 @@ public struct LedgerAtlasRootView: View {
         },
         open: openLedger)
       .id(selection)
+    } else if selection == .settings {
+      SettingsSurface(
+        lock: appLock,
+        lockNow: lockApp,
+        reducedMotion: reduceMotion)
+      .id(selection)
     } else if selection == .search {
       SearchSurface(
         rows: journey.rows(for: .search),
@@ -905,6 +919,14 @@ public struct LedgerAtlasRootView: View {
       snapshot.transactions.filter { transaction in
         transaction.links.contains { $0.kind == .split }
       }.map(\.id))
+  }
+
+  private func lockApp() {
+    guard appLock.hasPasscode else { return }
+    appLock.lock()
+    session.close()
+    journey.closeLedger()
+    _ = publishWidget(.reopenRequired)
   }
 }
 
