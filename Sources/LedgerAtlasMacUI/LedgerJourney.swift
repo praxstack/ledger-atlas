@@ -441,6 +441,18 @@ public final class LedgerJourney {
     }
   }
 
+  public func restoreCanonicalBackup(from source: URL, to destination: URL) throws {
+    guard source.standardizedFileURL != destination.standardizedFileURL else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    guard !FileManager.default.fileExists(atPath: destination.path) else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let sourceStore = try LedgerStore.openReadOnly(at: source)
+    try sourceStore.backupCanonicalDatabase(to: destination)
+    openLedger(destination)
+  }
+
   public func createTransaction(
     idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant
   ) throws -> LedgerTransactionRevision {

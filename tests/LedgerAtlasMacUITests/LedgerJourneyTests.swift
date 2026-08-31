@@ -302,6 +302,15 @@ import Testing
   #expect(!firstRows.isEmpty)
   #expect(firstRows.contains { $0.detail.contains("12.30") || $0.detail.contains("12.3 ") })
 
+  let restoredCopyURL = directory.appendingPathComponent("restored-copy.sqlite")
+  try restored.restoreCanonicalBackup(from: restoredURL, to: restoredCopyURL)
+  let copied = LedgerJourney()
+  copied.openLedger(restoredCopyURL)
+  #expect(copied.rows(for: .ledger).map(\.id) == firstRows.map(\.id))
+  let restoredCopyChecksum = try copied.checksum()
+  let restoredChecksum = try restored.checksum()
+  #expect(restoredCopyChecksum == restoredChecksum)
+
   let secondURL = directory.appendingPathComponent("restored-again.sqlite")
   try restored.backupCanonicalLedger(to: secondURL)
   let reopened = LedgerJourney()

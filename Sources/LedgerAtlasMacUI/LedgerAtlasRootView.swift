@@ -306,6 +306,54 @@ public struct LedgerAtlasRootView: View {
     }
   }
 
+  private func restoreBackup() {
+    let openPanel = NSOpenPanel()
+    openPanel.title = "Choose a Ledger Atlas backup"
+    openPanel.allowedContentTypes = [.database, .data]
+    openPanel.allowsMultipleSelection = false
+    openPanel.canChooseDirectories = false
+    guard openPanel.runModal() == .OK, let source = openPanel.url else { return }
+    guard source.startAccessingSecurityScopedResource() else {
+      journey.recordFailure("Backup access was not granted.")
+      return
+    }
+    defer { source.stopAccessingSecurityScopedResource() }
+    guard let preview = try? LedgerStore.openReadOnly(at: source).readSnapshot() else {
+      journey.recordFailure("The selected backup could not be validated.")
+      return
+    }
+    let alert = NSAlert()
+    alert.messageText = "Restore this backup as a new ledger?"
+    alert.informativeText =
+      "The backup contains \(preview.accounts.count) accounts, \(preview.transactions.count) transactions, and \(preview.categories.count) categories. The original backup stays unchanged."
+    alert.addButton(withTitle: "Choose destination")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    let savePanel = NSSavePanel()
+    savePanel.title = "Restore backup as a new ledger"
+    savePanel.prompt = "Restore"
+    savePanel.allowedContentTypes = Self.ledgerTypes
+    savePanel.nameFieldStringValue = "ledger-atlas-restored.sqlite"
+    savePanel.canCreateDirectories = true
+    guard savePanel.runModal() == .OK, let destination = savePanel.url else { return }
+    guard destination.standardizedFileURL != source.standardizedFileURL else {
+      journey.recordFailure("Choose a new destination for the restored ledger.")
+      return
+    }
+    guard destination.startAccessingSecurityScopedResource() else {
+      journey.recordFailure("Restore destination access was not granted.")
+      return
+    }
+    defer { destination.stopAccessingSecurityScopedResource() }
+    do {
+      try journey.restoreCanonicalBackup(from: source, to: destination)
+      lifecycleMessage = "Backup restored as a new ledger."
+      selection = .ledger
+    } catch {
+      journey.recordFailure("The backup could not be restored without replacing existing data.")
+    }
+  }
+
   private func recordSupersededPublication(_ outcome: LedgerLifecycleOutcome) {
     guard let message = Self.supersededPublicationMessage(for: outcome) else { return }
     lifecycleMessage = message
@@ -765,7 +813,8 @@ public struct LedgerAtlasRootView: View {
           } catch {
             journey.recordFailure(Self.backupFailureMessage(for: error))
           }
-        }
+        },
+        restoreBackup: restoreBackup
       )
       .id(selection)
     } else if selection == .transfers {
@@ -1078,6 +1127,7 @@ private struct BackupSurface: View {
   let lastFailure: String?
   let open: () -> Void
   let saveBackup: () -> Void
+  let restoreBackup: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -1101,6 +1151,8 @@ private struct BackupSurface: View {
         Button("Open ledger…", action: open)
         Button("Save 1:1 backup…", action: saveBackup)
           .accessibilityLabel("Save 1:1 backup")
+        Button("Restore backup…", action: restoreBackup)
+          .accessibilityLabel("Restore backup as a new ledger")
       }
     }
     .padding(16)
