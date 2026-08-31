@@ -805,6 +805,65 @@ public struct LedgerAtlasRootView: View {
         },
         open: openLedger)
       .id(selection)
+    } else if selection == .recurrence {
+      RecurrenceView(
+        state: session.state, rules: journey.snapshot?.recurrenceRules ?? [],
+        accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
+        isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
+        beginEditing: { try? journey.performBeginEditing() },
+        onCreate: { rule in
+          do { try journey.createRecurrence(rule) }
+          catch { journey.recordFailure("Recurrence rule could not be saved.") }
+        },
+        onUpdate: { rule, scope in
+          do { try journey.updateRecurrence(rule, scope: scope) }
+          catch { journey.recordFailure("Recurrence rule could not be updated.") }
+        },
+        onGenerate: { rule, end in
+          do {
+            try journey.generateOccurrences(
+              rule, through: end,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch { journey.recordFailure("Recurrence occurrences could not be generated.") }
+        },
+        open: openLedger)
+      .id(selection)
+    } else if selection == .installments {
+      InstallmentsView(
+        state: session.state,
+        plans: journey.snapshot?.installmentPlans ?? [], accounts: journey.snapshot?.accounts ?? [],
+        categories: journey.snapshot?.categories ?? [], isEditing: journey.isEditing,
+        lastFailure: lifecycleMessage ?? journey.lastFailure,
+        beginEditing: { try? journey.performBeginEditing() },
+        onCreate: { plan, occurredAt in
+          do {
+            _ = try journey.createInstallmentPlan(
+              plan, occurredAt: occurredAt,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch { journey.recordFailure("Installment plan could not be saved.") }
+        },
+        onUpdate: { plan in
+          do { try journey.updateInstallmentPlan(plan) }
+          catch { journey.recordFailure("Installment plan could not be updated.") }
+        },
+        open: openLedger)
+      .id(selection)
+    } else if selection == .budgets {
+      BudgetsView(
+        state: session.state, budgets: journey.snapshot?.budgets ?? [],
+        categories: journey.snapshot?.categories ?? [], accounts: journey.snapshot?.accounts ?? [],
+        isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
+        beginEditing: { try? journey.performBeginEditing() },
+        onCreate: { budget in
+          do { try journey.createBudget(budget) }
+          catch { journey.recordFailure("Budget could not be saved.") }
+        },
+        onUpdate: { budget in
+          do { try journey.updateBudget(budget) }
+          catch { journey.recordFailure("Budget could not be updated.") }
+        },
+        open: openLedger)
+      .id(selection)
     } else if selection == .search {
       SearchSurface(
         rows: journey.rows(for: .search),

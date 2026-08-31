@@ -545,6 +545,32 @@ public final class LedgerJourney {
     snapshot = try application.snapshot()
   }
 
+  public func updateBudget(_ budget: LedgerBudget) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateBudget(budget)
+    snapshot = try application.snapshot()
+  }
+
+  public func updateInstallmentPlan(_ plan: LedgerInstallmentPlan) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateInstallmentPlan(plan)
+    snapshot = try application.snapshot()
+  }
+
+  public func updateRecurrence(_ rule: LedgerRecurrenceRule, scope: LedgerEditScope) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateRecurrence(rule, scope: scope)
+    snapshot = try application.snapshot()
+  }
+
+  public func generateOccurrences(
+    _ rule: LedgerRecurrenceRule, through end: SourceLocalDate, createdAt: UTCInstant
+  ) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    _ = try application.generateOccurrences(rule, through: end, createdAt: createdAt)
+    snapshot = try application.snapshot()
+  }
+
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {
     if let application { return try application.exportPackage() }
     guard let ledgerURL else { throw LedgerApplication.Error.invalidCommand }

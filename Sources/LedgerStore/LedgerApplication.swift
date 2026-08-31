@@ -412,6 +412,20 @@ public struct LedgerApplication: LedgerClient {
     try store.persistBudget(budget)
   }
 
+  public func updateBudget(_ budget: LedgerBudget) throws {
+    guard try snapshot().budgets.contains(where: { $0.id == budget.id }) else {
+      throw Error.invalidCommand
+    }
+    try store.persistBudget(budget)
+  }
+
+  public func updateInstallmentPlan(_ plan: LedgerInstallmentPlan) throws {
+    guard try snapshot().installmentPlans.contains(where: { $0.id == plan.id }) else {
+      throw Error.invalidCommand
+    }
+    try store.persistInstallment(plan)
+  }
+
   public func search(_ query: LedgerSearchQuery) throws -> [LedgerTransactionSnapshot] {
     Self.search(query, in: try store.readSnapshot())
   }
@@ -778,6 +792,10 @@ public struct IOSFacingLedgerClient: LedgerClient {
     try application.generateOccurrences(rule, through: end, createdAt: createdAt)
   }
   public func createBudget(_ budget: LedgerBudget) throws { try application.createBudget(budget) }
+  public func updateBudget(_ budget: LedgerBudget) throws { try application.updateBudget(budget) }
+  public func updateInstallmentPlan(_ plan: LedgerInstallmentPlan) throws {
+    try application.updateInstallmentPlan(plan)
+  }
   public func search(_ query: LedgerSearchQuery) throws -> [LedgerTransactionSnapshot] {
     try application.search(query)
   }

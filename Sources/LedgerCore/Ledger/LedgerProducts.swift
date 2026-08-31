@@ -535,6 +535,8 @@ public protocol LedgerClient {
     _ rule: LedgerRecurrenceRule, through end: SourceLocalDate, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision]
   func createBudget(_ budget: LedgerBudget) throws
+  func updateBudget(_ budget: LedgerBudget) throws
+  func updateInstallmentPlan(_ plan: LedgerInstallmentPlan) throws
   func search(_ query: LedgerSearchQuery) throws -> [LedgerTransactionSnapshot]
   func report(unitCode: String) throws -> LedgerReport
   func makeProjection(unitCode: String) throws -> LedgerProjection
