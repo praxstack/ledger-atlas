@@ -1,0 +1,1 @@
+ARC-001 is the frozen dependency; fresh focused tests, full verification, reviewer, and red-team evidence close every MIG-001 finding; MIG-001 and ADM-002 are recorded done with exact commit evidence; and no product source or executable control changes.

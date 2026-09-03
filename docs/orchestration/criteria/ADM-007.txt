@@ -1,0 +1,1 @@
+IMP-004 is the frozen dependency; fresh focused tests, full verification, reviewer, red-team, and recorded runtime keyboard plus Accessibility Inspector or VoiceOver evidence close every MAC-001 finding; MAC-001 and ADM-006 are recorded done with exact commit evidence; and no product source or executable control changes.

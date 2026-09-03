@@ -1,0 +1,1 @@
+GATE-002 is the frozen dependency; independent planning reviews have no unresolved P0 or P1 findings; ARC-001 and GATE-002 are recorded done with exact commit and verification evidence; ARC-001.txt is admitted as its frozen receipt; and no product source or executable orchestration control changes.

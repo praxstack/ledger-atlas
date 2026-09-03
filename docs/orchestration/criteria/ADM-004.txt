@@ -1,0 +1,1 @@
+MIG-001 is the frozen dependency; fresh focused tests, full verification, reviewer, and red-team evidence close every PKG-001 finding; PKG-001 and ADM-003 are recorded done with exact commit evidence; and no product source or executable control changes.

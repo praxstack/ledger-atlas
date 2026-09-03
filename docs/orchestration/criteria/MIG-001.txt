@@ -1,0 +1,1 @@
+LedgerStore owns literal v8, v9, and v10 releases and one descriptor-bound migration executor that requires the caller's write transaction, preserves populated semantic rows and exact metadata transitions, publishes and verifies a durable pre-upgrade recovery image before DDL, and is reused by native and import writers retained through close with unchanged-on-failure tests.

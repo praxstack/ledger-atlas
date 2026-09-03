@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "ledger-atlas-milestone-one",
-  "acceptance": "unaccepted working tree; atom status done means an implemented candidate with evidence, not a gated product commit or shipped release",
+  "acceptance": "architecture stabilization candidate pending ARC admission; done means evidence-backed accepted repository state, not merge, release, shipment, or compatibility certification",
   "atoms": [
     {
       "id": "ORC-001",
@@ -104,7 +104,7 @@
       "id": "GATE-002",
       "title": "Admit bounded baseline atoms",
       "criterion": "Gate v2 permits unrelated untracked paths outside a bounded atom, rejects untracked paths owned by the atom, materializes and fully verifies the exact staged tree, preserves the 400000-byte provider review limit, and preserves mandatory reviewer plus red-team lenses for every P0 atom.",
-      "status": "todo",
+      "status": "done",
       "deps": ["ADM-001"],
       "p0": true,
       "paths": [
@@ -135,6 +135,252 @@
         "docs/orchestration/RUNBOOK.md",
         "docs/orchestration/criteria/GATE-002.txt",
         "uv.lock"
+      ],
+      "evidence": [
+        "git commit 8623651",
+        "qualified ./scripts/verify.sh --fast (2026-08-23)",
+        "qualified ./scripts/verify.sh --full: 53 governance tests, 283 Swift tests, mmctl smoke, and production build (2026-08-23)",
+        "docs/specifications/architecture-stabilization-v1-review-record.md#gate-002-acceptance-evidence"
+      ]
+    },
+    {
+      "id": "ARC-001",
+      "title": "Freeze architecture stabilization authority",
+      "criterion": "Accepted architecture specification, review record, implementation ticket pack, future atom criteria, current-worktree-relative manual runbook, and GATE-002 evidence are mutually consistent and frozen without changing product source, executable gate controls, compatibility claims, or release status.",
+      "status": "todo",
+      "deps": ["GATE-002"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/orchestration/RUNBOOK.md",
+        "docs/specifications/architecture-stabilization-v1.md",
+        "docs/specifications/architecture-stabilization-v1-review-record.md",
+        "docs/specifications/architecture-stabilization-v1-tickets.md",
+        "docs/orchestration/criteria/ADM-002.txt",
+        "docs/orchestration/criteria/MIG-001.txt",
+        "docs/orchestration/criteria/ADM-003.txt",
+        "docs/orchestration/criteria/PKG-001.txt",
+        "docs/orchestration/criteria/ADM-004.txt",
+        "docs/orchestration/criteria/LED-003.txt",
+        "docs/orchestration/criteria/ADM-005.txt",
+        "docs/orchestration/criteria/IMP-004.txt",
+        "docs/orchestration/criteria/ADM-006.txt",
+        "docs/orchestration/criteria/MAC-001.txt",
+        "docs/orchestration/criteria/ADM-007.txt",
+        "docs/orchestration/criteria/TRUTH-001.txt",
+        "docs/orchestration/criteria/ADM-008.txt"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-002",
+      "title": "Admit architecture stabilization authority",
+      "criterion": "GATE-002 is the frozen dependency; independent planning reviews have no unresolved P0 or P1 findings; ARC-001 and GATE-002 are recorded done with exact commit and verification evidence; ARC-001.txt is admitted as its frozen receipt; and no product source or executable orchestration control changes.",
+      "status": "todo",
+      "deps": ["GATE-002"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/specifications/architecture-stabilization-v1-review-record.md",
+        "docs/orchestration/criteria/ARC-001.txt"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "MIG-001",
+      "title": "Own canonical releases and migrations",
+      "criterion": "LedgerStore owns literal v8, v9, and v10 releases and one descriptor-bound migration executor that requires the caller's write transaction, preserves populated semantic rows and exact metadata transitions, publishes and verifies a durable pre-upgrade recovery image before DDL, and is reused by native and import writers retained through close with unchanged-on-failure tests.",
+      "status": "todo",
+      "deps": ["ARC-001"],
+      "p0": true,
+      "paths": [
+        "Sources/LedgerCore/Persistence/CanonicalLedgerSchema.swift",
+        "Sources/LedgerStore/LedgerStore.swift",
+        "Sources/MMImport/Commit/SQLiteCanonicalCommitter.swift",
+        "tests/LedgerCoreTests/Persistence/CanonicalPersistenceModelsTests.swift",
+        "tests/LedgerStoreTests/LedgerStoreTests.swift",
+        "tests/MMImportTests/Commit/AtomicCanonicalCommitTests.swift"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-003",
+      "title": "Admit canonical migration foundation",
+      "criterion": "ARC-001 is the frozen dependency; fresh focused tests, full verification, reviewer, and red-team evidence close every MIG-001 finding; MIG-001 and ADM-002 are recorded done with exact commit evidence; and no product source or executable control changes.",
+      "status": "todo",
+      "deps": ["ARC-001"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/specifications/architecture-stabilization-v1-review-record.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "PKG-001",
+      "title": "Freeze portable package and typed failures",
+      "criterion": "Portable package v0 is frozen by a complete synthetic vector, new exports write manifest version 1 through the shared frozen v0/v1 decoder, complete destination projection rejects hidden conflicts, current typed command/store/package failures propagate unchanged, and every rejection leaves the destination unchanged.",
+      "status": "todo",
+      "deps": ["MIG-001"],
+      "p0": true,
+      "paths": [
+        "Sources/LedgerCore/Ledger/LedgerProducts.swift",
+        "Sources/LedgerStore/CanonicalLedgerHealth.swift",
+        "Sources/LedgerStore/LedgerStore.swift",
+        "Sources/LedgerStore/LedgerApplication.swift",
+        "tests/LedgerStoreTests/LedgerStoreTests.swift",
+        "tests/LedgerStoreTests/LedgerApplicationTests.swift",
+        "fixtures/synthetic/portable-package-v0/"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-004",
+      "title": "Admit portable package contract",
+      "criterion": "MIG-001 is the frozen dependency; fresh focused tests, full verification, reviewer, and red-team evidence close every PKG-001 finding; PKG-001 and ADM-003 are recorded done with exact commit evidence; and no product source or executable control changes.",
+      "status": "todo",
+      "deps": ["MIG-001"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/specifications/architecture-stabilization-v1-review-record.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "LED-003",
+      "title": "Close atomic ledger defects",
+      "criterion": "Vendor identifiers are SQL-bound, recurrence this-occurrence update is one transaction, occurrence generation prevalidates at most 366 candidates and commits one atomic batch, and named concurrency, boundary, injection, and rollback regressions prove issue 34 items 1 through 3.",
+      "status": "todo",
+      "deps": ["PKG-001"],
+      "p0": true,
+      "paths": [
+        "Sources/MMImport/Commit/SQLiteCanonicalCommitter.swift",
+        "Sources/LedgerStore/LedgerStore.swift",
+        "Sources/LedgerStore/LedgerApplication.swift",
+        "tests/MMImportTests/Commit/AtomicCanonicalCommitTests.swift",
+        "tests/LedgerStoreTests/LedgerStoreTests.swift",
+        "tests/LedgerStoreTests/LedgerApplicationTests.swift"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-005",
+      "title": "Admit atomic ledger fixes",
+      "criterion": "PKG-001 is the frozen dependency; fresh focused tests, full verification, reviewer, and red-team evidence close every LED-003 finding; LED-003 and ADM-004 are recorded done with exact commit evidence; and no product source or executable control changes.",
+      "status": "todo",
+      "deps": ["PKG-001"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/specifications/architecture-stabilization-v1-review-record.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "IMP-004",
+      "title": "Create safe two-stage import preparation",
+      "criterion": "The exact observed Android profile remains classification-only; structural review precedes fresh timezone and durable destination selection; a one-shot authenticated staging lease transfers from reviewed to prepared state and is safely disposed or recovered on every terminal or crash path; tested family and synthetic cells retain their named behavior.",
+      "status": "todo",
+      "deps": ["LED-003"],
+      "p0": true,
+      "paths": [
+        "Sources/MMImport/Classification/Models.swift",
+        "Sources/MMImport/Adapters/MoneyManagerV19/MoneyManagerV19Adapter.swift",
+        "Sources/MMImport/Workspace/ImportWorkspace.swift",
+        "Sources/MMImport/Staging/SQLiteStagingStore.swift",
+        "tests/MMImportTests/Staging/ImmutableSourceStagingTests.swift",
+        "tests/MMImportTests/Adapters/MoneyManagerV19AdapterTests.swift",
+        "tests/MMImportTests/Workspace/ImportWorkspaceTests.swift",
+        "tests/MMImportTests/Workspace/MoneyManagerFamilyImportTests.swift"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-006",
+      "title": "Admit import boundary",
+      "criterion": "LED-003 is the frozen dependency; fresh focused tests, full verification, reviewer, and red-team evidence close every IMP-004 finding; IMP-004 and ADM-005 are recorded done with exact commit evidence; and no product source or executable control changes.",
+      "status": "todo",
+      "deps": ["LED-003"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/specifications/architecture-stabilization-v1-review-record.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "MAC-001",
+      "title": "Unify the native Journey and truthful UI states",
+      "criterion": "LedgerJourney is the sole open and async state owner; onboarding, create, open, explicit upgrade, import, and backup states use balanced security scope and latest-generation presentation; typed domain surfaces, explicit exact backup actions and copy, 900 by 620 minimum size, focus and VoiceOver order, and one motion policy have focused and runtime evidence.",
+      "status": "todo",
+      "deps": ["IMP-004"],
+      "p0": true,
+      "paths": [
+        "Sources/LedgerAtlasMacUI/AppDestination.swift",
+        "Sources/LedgerAtlasMacUI/ImportReview.swift",
+        "Sources/LedgerAtlasMacUI/LedgerAtlasRootView.swift",
+        "Sources/LedgerAtlasMacUI/LedgerJourney.swift",
+        "Sources/LedgerAtlasMacUI/LedgerSession.swift",
+        "Sources/LedgerAtlasMacUI/LedgerShell.swift",
+        "tests/LedgerAtlasMacUITests/AppDestinationTests.swift",
+        "tests/LedgerAtlasMacUITests/ImportReviewTests.swift",
+        "tests/LedgerAtlasMacUITests/LedgerJourneyTests.swift",
+        "tests/LedgerAtlasMacUITests/LedgerSessionTests.swift",
+        "tests/LedgerAtlasMacUITests/MoneyManagerPhase00JourneyTests.swift",
+        "tests/LedgerAtlasMacUITests/MotionPolicyTests.swift",
+        "tests/LedgerAtlasMacUITests/LedgerAtlasRootViewAccessibilityTests.swift"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-007",
+      "title": "Admit native Journey",
+      "criterion": "IMP-004 is the frozen dependency; fresh focused tests, full verification, reviewer, red-team, and recorded runtime keyboard plus Accessibility Inspector or VoiceOver evidence close every MAC-001 finding; MAC-001 and ADM-006 are recorded done with exact commit evidence; and no product source or executable control changes.",
+      "status": "todo",
+      "deps": ["IMP-004"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/specifications/architecture-stabilization-v1-review-record.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "TRUTH-001",
+      "title": "Reconcile product truth",
+      "criterion": "Status sources record exact accepted commits, verification, review, compatibility, and release state without rewriting historical narrative or broadening claims; clean fast and full verification and fresh code review are green.",
+      "status": "todo",
+      "deps": ["MAC-001"],
+      "p0": true,
+      "paths": [
+        "CONTEXT.md",
+        "SPEC.md",
+        "README.md",
+        "JOURNAL.md",
+        "progress.txt",
+        "docs/product-status.json",
+        "status.html",
+        "docs/specifications/architecture-stabilization-v1.md",
+        "docs/specifications/architecture-stabilization-v1-review-record.md",
+        "docs/specifications/architecture-stabilization-v1-tickets.md"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "ADM-008",
+      "title": "Admit delivery-ready local implementation",
+      "criterion": "MAC-001 is the frozen dependency; all subject and prior admission atoms are recorded done with exact gated commits, focused and full verification, reviewer, red-team, runtime accessibility, and code-review evidence; the accepted spec and product status identify delivery-ready local implementation without claiming merge, release, certification, or shipment; and ADM-008 remains the only doing atom under the documented gate limitation.",
+      "status": "todo",
+      "deps": ["MAC-001"],
+      "p0": true,
+      "paths": [
+        "prd.json",
+        "docs/product-status.json",
+        "status.html",
+        "docs/specifications/architecture-stabilization-v1.md",
+        "docs/specifications/architecture-stabilization-v1-review-record.md",
+        "docs/specifications/architecture-stabilization-v1-tickets.md"
       ],
       "evidence": []
     }

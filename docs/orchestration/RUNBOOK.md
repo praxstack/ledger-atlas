@@ -7,14 +7,16 @@ This is the tested operating guide for the project-owned harness. It supersedes 
 | Repository | Authority |
 |---|---|
 | `/Users/prax/Developer/money-manager-reverse-engineering` | Read-only source evidence and research after harness transfer. Never run a writable product agent here. |
-| `/Users/prax/Developer/ledger-atlas` | Product code, synthetic fixtures, generated projections, tests, and autonomous atoms. |
+| Current Ledger Atlas Git worktree | Product code, synthetic fixtures, generated projections, tests, and autonomous atoms. Derive it with `git rev-parse --show-toplevel`; do not hard-code the primary checkout. |
 
 Do not copy real backups, personal screenshots, SMS, account names, notes, or photos into the product repository. Product processes may read explicitly referenced originals under a read-only sandbox for certification; routine tests use synthetic fixtures.
 
 ## Bootstrap
 
 ```sh
-cd /Users/prax/Developer/ledger-atlas
+# Run from the chosen Ledger Atlas worktree.
+ledger_root=$(git rev-parse --show-toplevel)
+cd "$ledger_root"
 ./scripts/bootstrap.sh
 codex --version
 codex doctor
@@ -59,6 +61,12 @@ Inside Codex, implement and stage exact paths. The only commit command is:
 
 Gate v2 never stages files. It permits unrelated untracked files only outside the armed atom's declared paths. Any owned untracked path is rejected as an incomplete atom. Verification runs from a temporary materialization of the exact staged tree, so unrelated working-tree files cannot make the candidate pass. The gate still refuses protected evidence, tracked unstaged changes, stale receipts, secret-like/binary/provider payloads over 400,000 bytes, non-passing structured reviews, changed staged trees, expired authority, and staged paths outside the armed PRD atom. `--criterion` must be a repository file whose text equals the frozen PRD atom criterion. P0 is the PRD flag plus a conservative path classification: every Swift file and every path under `Sources/`, `Tests/`, `tests/`, `src/`, `scripts/`, hooks, and `Package.swift`. Every P0 atom receives both reviewer and red-team lenses.
 
+Architecture stabilization v1 uses separate manual runs in this exact pattern: subject
+atom, admission atom, next subject. Its shared files intentionally transfer ownership, so
+do not use unattended or batch mode for ARC/MIG/PKG/LED/IMP/MAC/TRUTH atoms. The admission
+atom records the preceding subject done; it changes no product source or executable
+control. See the accepted ticket pack for exact dependencies and paths.
+
 The exact-tree verifier ignores the worktree `.venv`, caller `PATH`, Python injection variables, and compiler/toolchain overrides. It provisions a fresh offline environment from the staged `uv.lock` and requires the qualified Git, Swift, uv, Python, and Codex executable hashes embedded in the reviewed gate. Both provider lenses run from the materialized staged tree, not the ambient worktree. The pre-commit hook accepts only the short-lived capability created and consumed by that gate process. Tool upgrades fail closed until a separate Gate control review updates those hashes. Git replacement refs and caller-selected reviewer executables are rejected.
 
 ## Unattended sequential run
@@ -81,7 +89,8 @@ The two authorization flags are intentionally required on each run. State is wri
 Stop from another terminal:
 
 ```sh
-touch /Users/prax/Developer/ledger-atlas/.orchestrion/off
+ledger_root=$(git rev-parse --show-toplevel)
+touch "$ledger_root/.orchestrion/off"
 ```
 
 Remove the switch only after inspecting the run summary and logs.

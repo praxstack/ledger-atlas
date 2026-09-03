@@ -1,0 +1,1 @@
+Status sources record exact accepted commits, verification, review, compatibility, and release state without rewriting historical narrative or broadening claims; clean fast and full verification and fresh code review are green.
