@@ -16,10 +16,10 @@ export async function POST(request: Request) {
       amount?: number;
     };
 
-    const transaction = await addTransaction(
-      body.description ?? "",
-      Number(body.amount),
-    );
+    if (!body || typeof body.description !== "string" || typeof body.amount !== "number") {
+      throw new Error("Description and numeric amount are required");
+    }
+    const transaction = await addTransaction(body.description, body.amount);
 
     const ledger = await readLedger();
     return NextResponse.json(
