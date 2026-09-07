@@ -1,1 +1,1 @@
-/workspace/vendor/skills-repos/gstack/.cursor/skills/gstack-upgrade/SKILL.md
+../../../../../../.agents/plugins/gstack/.cursor/skills/gstack-upgrade/SKILL.md
