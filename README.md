@@ -1,6 +1,10 @@
 # Ledger Atlas
 
-A lightweight ledger for tracking credits and debits. Built with Next.js and TypeScript.
+Ledger Atlas contains the lightweight Next.js ledger surface and the macOS-first,
+local-first personal-finance product track. The native track includes a Money
+Manager compatibility boundary, a versioned canonical-ledger backend, and an
+early SwiftUI shell. Both tracks are kept in this repository; neither implies a
+universal compatibility or release claim.
 
 ## Development
 
@@ -10,6 +14,18 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+For the native track:
+
+```sh
+./scripts/bootstrap.sh
+./scripts/verify.sh --full
+swift run mmctl
+```
+
+The native `mmctl` surface is redacted `inspect`, `coverage`, `stage`, and
+`reconcile`. The positive import cell is a named synthetic text-only v19 subset;
+real Android v19 SQLite and `.mmbak` inputs remain classification-only.
 
 ## Scripts
 
@@ -34,3 +50,7 @@ This repo ships 818+ project-local agent skills under `.agents/skills/` plus Spe
 ## Cloud Agent environment
 
 Repository-managed environment configuration lives in `.cursor/environment.json`. The install script at `.cursor/scripts/install.sh` runs `npm ci` after checkout.
+
+Native development also follows `AGENTS.md`, `CONTEXT.md`, `SPEC.md`, and
+`docs/orchestration/RUNBOOK.md`. Real financial evidence stays in the separate
+read-only research repository described by `EVIDENCE.md`.

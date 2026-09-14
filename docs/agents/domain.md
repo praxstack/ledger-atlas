@@ -1,51 +1,31 @@
-# Domain Docs
+# Ledger Atlas agent domains
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+Keep one task context focused on one domain. Cross-domain work must be split into linked tickets with explicit interface acceptance criteria.
 
-## Before exploring, read these
+Layout: single-context. Root `CONTEXT.md` is the shared vocabulary; architecture decisions are recorded as ADRs under `docs/decisions/` (numbered markdown files), not `docs/adr/`.
 
-- **`CONTEXT.md`** at the repo root, or
-- **`CONTEXT-MAP.md`** at the repo root if it exists: it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+## Engineering quality
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+Acceptance criteria, architecture boundaries, root-cause fixes, focused and full
+verification, risk-based review, and tracker synchronization. Quality checks improve
+the product; they do not create a separate commit-permission system.
 
-## File structure
+## Compatibility laboratory
 
-Single-context repo (most repos):
+Read-only classification, named profile registry, synthetic fixtures, schema fingerprints, immutable staging, and certification evidence. Vendor schemas and codes stop at this boundary.
 
-```
-/
-├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
-```
+## Canonical ledger
 
-Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
+Exact money and temporal primitives, accounts, transactions, provenance, loss reconciliation, atomic persistence, idempotency, migrations, backup, export, and restore.
 
-```
-/
-├── CONTEXT-MAP.md
-├── docs/adr/                          ← system-wide decisions
-└── src/
-    ├── ordering/
-    │   ├── CONTEXT.md
-    │   └── docs/adr/                  ← context-specific decisions
-    └── billing/
-        ├── CONTEXT.md
-        └── docs/adr/
-```
+## Money Manager v19 adapter
 
-## Use the glossary's vocabulary
+Observed source structure and evidence-backed semantics for accounts, categories, currencies, transactions, transfers, recurrence, installments, attachments, tombstones, and unknown preservation. Never infer universal compatibility.
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
+## Native Mac product
 
-If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
+Ledger browsing, import review, editing, settings, search, reports, budgets, accessibility, reduced motion, menus, window behavior, and recovery UX.
 
-## Flag ADR conflicts
+## Shared clients
 
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+Stable independently owned contracts for future sync and iOS. Client parity is measured against canonical behaviors, not copied vendor UI.

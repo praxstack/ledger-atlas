@@ -1,0 +1,1 @@
+Account update/tombstone commands; include-in-totals and hidden flags stored as columns and honored deterministically: totals exclude hidden accounts, reports and search expose both flags as filters; loan/overdraft/investment variants land as a new variant column with named migration statements, never CHECK widening.

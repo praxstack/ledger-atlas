@@ -1,0 +1,61 @@
+name: LedgerAtlas
+options:
+  minimumXcodeGenVersion: 2.46.0
+  # Keep the local package reference while omitting XcodeGen's checkout-name folder.
+  # That folder is navigation-only and makes otherwise identical projects path-dependent.
+  postGenCommand: >-
+    perl -0pi -e 'if (/(\t\t([0-9A-F]{24}) \/\* [^*]+ \*\/ = \{isa = PBXFileReference; lastKnownFileType = folder; name = "[^"]+"; path = \.; sourceTree = SOURCE_ROOT; \};\n)/) { my $entry=$1; my $id=$2; s/\Q$entry\E//; s/\n\t\t\t\t\Q$id\E \/\* [^*]+ \*\/,//; }' LedgerAtlas.xcodeproj/project.pbxproj
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    ARCHS: arm64
+    SUPPORTED_PLATFORMS: macosx
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+packages:
+  LedgerAtlas:
+    path: .
+    group: ""
+targets:
+  LedgerAtlas:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/LedgerAtlasMac
+    dependencies:
+      - package: LedgerAtlas
+        product: LedgerAtlasMacUI
+      - target: LedgerAtlasWidget
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.praxstack.ledgeratlas
+        CODE_SIGN_ENTITLEMENTS: LedgerAtlas.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 57GGJTRSFG
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-framework"
+          - AppIntents
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: 1.0
+        CURRENT_PROJECT_VERSION: 1
+  LedgerAtlasWidget:
+    type: app-extension
+    platform: macOS
+    info:
+      path: Sources/LedgerAtlasWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Ledger Atlas
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    sources:
+      - Sources/LedgerAtlasWidget
+      - path: Sources/LedgerAtlasMacUI/RedactedWidgetProjection.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.praxstack.ledgeratlas.widget
+        CODE_SIGN_ENTITLEMENTS: LedgerAtlasWidget.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 57GGJTRSFG
+        SKIP_INSTALL: YES

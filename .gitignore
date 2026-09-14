@@ -40,3 +40,21 @@ next-env.d.ts
 
 # cloned skill source repos (installed copies live in .agents/skills)
 /vendor/
+
+# Swift/Python build output and local evidence
+/.build/
+/.swiftpm/
+/.venv/
+/.pytest_cache/
+/.ruff_cache/
+__pycache__/
+*.pyc
+/work/
+/.agent/
+/.worktrees/
+/.playwright-mcp/
+
+# Only synthetic fixtures belong in this repository.
+/fixtures/*
+!/fixtures/synthetic/
+!/fixtures/synthetic/**

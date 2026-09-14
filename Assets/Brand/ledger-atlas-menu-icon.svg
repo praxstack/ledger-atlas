@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="ledger-atlas-menu-title ledger-atlas-menu-desc" shape-rendering="geometricPrecision">
+  <title id="ledger-atlas-menu-title">Ledger Atlas</title>
+  <desc id="ledger-atlas-menu-desc">Ledger Atlas menu icon. A navy rounded square with a paper right half and a gold fold, readable at 16 to 22 pixels.</desc>
+  <defs>
+    <clipPath id="ledger-atlas-menu-squircle">
+      <rect x="0" y="0" width="32" height="32" rx="7" ry="7"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#ledger-atlas-menu-squircle)">
+    <rect x="0" y="0" width="32" height="32" fill="#0B1F3A"/>
+    <rect x="0" y="0" width="16" height="32" fill="#132A4A"/>
+    <rect x="16" y="0" width="16" height="32" fill="#F3EBE0"/>
+    <rect x="15" y="0" width="2" height="32" fill="#C4A35A"/>
+  </g>
+</svg>

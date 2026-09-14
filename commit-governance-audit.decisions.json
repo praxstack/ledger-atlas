@@ -1,0 +1,93 @@
+{
+  "kind": "decisions",
+  "schemaVersion": "0.2.0",
+  "canvasId": "01M0Z3CQVNHC5X3T3F8PB990XC",
+  "exportId": "01M0Z4QX9VTBCTQ1JTHWTF62Q5",
+  "exportedAt": "2026-08-26T13:39:20.507Z",
+  "baseline": "39d5972b161740fc61ae08119a7660fccb38ce38bbe8a0940a702a28bbb987a7",
+  "baselines": {
+    "01M0Z3CQVNHC5X3T3F8PB990XC": "39d5972b161740fc61ae08119a7660fccb38ce38bbe8a0940a702a28bbb987a7"
+  },
+  "answers": [
+    {
+      "questionId": "01M0Z3CQVNHC5X3T3F8PB990XQ",
+      "confirmation": "explicit",
+      "key": "commit_rules",
+      "resolution": "answered",
+      "value": {
+        "01M0Z3CQVNHC5X3T3F8PB990XR": "remove",
+        "01M0Z3CQVNHC5X3T3F8PB990XS": "remove",
+        "01M0Z3CQVNHC5X3T3F8PB990XT": "simplify",
+        "01M0Z3CQVNHC5X3T3F8PB990XV": "remove",
+        "01M0Z3CQVNHC5X3T3F8PB990XW": "remove",
+        "01M0Z3CQVNHC5X3T3F8PB990XX": "remove",
+        "01M0Z3CQVNHC5X3T3F8PB990XY": "simplify",
+        "01M0Z3CQVNHC5X3T3F8PB990XZ": "keep",
+        "01M0Z3CQVNHC5X3T3F8PB990Y0": "remove"
+      }
+    },
+    {
+      "questionId": "01M0Z3CQVNHC5X3T3F8PB990Y6",
+      "confirmation": "explicit",
+      "key": "evidence_rules",
+      "resolution": "answered",
+      "value": {
+        "01M0Z3CQVNHC5X3T3F8PB990Y7": "keep",
+        "01M0Z3CQVNHC5X3T3F8PB990Y8": "keep",
+        "01M0Z3CQVNHC5X3T3F8PB990Y9": "keep",
+        "01M0Z3CQVNHC5X3T3F8PB990YA": "keep",
+        "01M0Z3CQVNHC5X3T3F8PB990YB": "simplify"
+      }
+    },
+    {
+      "questionId": "01M0Z3CQVNHC5X3T3F8PB990YD",
+      "confirmation": "explicit",
+      "key": "removal_scope",
+      "resolution": "answered",
+      "value": "total_repository_removal"
+    },
+    {
+      "questionId": "01M0Z3CQVNHC5X3T3F8PB990YE",
+      "confirmation": "explicit",
+      "key": "audit_corrections",
+      "resolution": "answered",
+      "value": "You were suppose to raise \n- tech bar \n- architecture ba\n- you fucked up "
+    },
+    {
+      "questionId": "01M0Z3CQVNHC5X3T3F8PB990YF",
+      "confirmation": "explicit",
+      "key": "apply_cleanup",
+      "resolution": "answered",
+      "value": "go"
+    }
+  ],
+  "gate": {
+    "raw": "go",
+    "effective": "go",
+    "wordsWinTriggered": false
+  },
+  "sourceRevisions": {
+    "01M0Z3CQVNHC5X3T3F8PB990XC": {
+      "revisionId": "01M0Z40SP3VQJKR6WYK7XS3MXW",
+      "revisionFingerprint": "df361875989e3c0bf8798a3c9cccb3958876ae48060cb2b02b2201dcad1b95d8"
+    }
+  },
+  "threadId": "01M0Z3CQVNHC5X3T3F8PB990XD",
+  "revisionId": "01M0Z40SP3VQJKR6WYK7XS3MXW",
+  "revisionFingerprint": "df361875989e3c0bf8798a3c9cccb3958876ae48060cb2b02b2201dcad1b95d8",
+  "theme": {
+    "id": "private-review",
+    "version": "1.0.0",
+    "overridden": false
+  },
+  "reviewProfile": {
+    "id": "artifact-review",
+    "version": "1.0.0",
+    "overridden": false
+  },
+  "writingPolicy": {
+    "id": "unslop-humanizer",
+    "version": "1.0.0",
+    "mode": "warn"
+  }
+}

@@ -1,15 +1,14 @@
-# Triage Labels
+# Ledger Atlas triage labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+Use this closed vocabulary in GitHub and Linear.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+| Label | Meaning |
+|---|---|
+| `needs-triage` | Scope, priority, dependency, or acceptance criteria are not yet settled. |
+| `needs-info` | Progress requires a specific owner decision or missing evidence. |
+| `ready-for-agent` | Blockers are closed, scope is bounded, and acceptance criteria can be executed safely by an agent. |
+| `ready-for-human` | The next action needs human-supervised authority, judgment, credentials, or an irreversible/external gate. |
+| `wontfix` | Deliberately declined; the close reason must explain why. |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
-
-Edit the right-hand column to match whatever vocabulary you actually use.
+Exactly one readiness label should be active. Dependency order alone does not prove
+readiness; the named blocker, acceptance criteria, and required evidence must be clear.

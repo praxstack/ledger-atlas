@@ -1,0 +1,483 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0818B7A5F0BE84CB90F6C8B4 /* LedgerAtlasMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */; };
+		1330C9AB18BC3C02B98CB027 /* LedgerAtlasWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */; };
+		3139F6937C4243F36056EF8A /* LedgerAtlasWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		49921E2A145BF6413F4ACE49 /* LedgerAtlasMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = F54C1341B767FDABE89BB321 /* LedgerAtlasMacUI */; };
+		793118580FC787BF9CCCE2F6 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070F3A60D31441FDBFE96E80 /* AppIntents.swift */; };
+		8275EE13370A16F2216FF01D /* RedactedWidgetProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D82EF2940C8AA319907256F3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 48965B4F19EBADC1184542D2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FCE25D60E44E8B12CEEDD545;
+			remoteInfo = LedgerAtlasWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8E8DFF3F1FCA47915BF9EF8B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				3139F6937C4243F36056EF8A /* LedgerAtlasWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		070F3A60D31441FDBFE96E80 /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
+		0B2E6D4C5DAD29CF53544AE9 /* LedgerAtlas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LedgerAtlas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerAtlasWidget.swift; sourceTree = "<group>"; };
+		262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedactedWidgetProjection.swift; sourceTree = "<group>"; };
+		978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LedgerAtlasWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerAtlasMacApp.swift; sourceTree = "<group>"; };
+		C9A18D20504B0D55CCEFDF6F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1AD3E0DD79584511CF93503D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				49921E2A145BF6413F4ACE49 /* LedgerAtlasMacUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		00673D2F5794FE7E7A36609C /* LedgerAtlasMacUI */ = {
+			isa = PBXGroup;
+			children = (
+				262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */,
+			);
+			name = LedgerAtlasMacUI;
+			path = Sources/LedgerAtlasMacUI;
+			sourceTree = "<group>";
+		};
+		33E736A5A067853E4816F0BD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0B2E6D4C5DAD29CF53544AE9 /* LedgerAtlas.app */,
+				978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7EE26042D6EC5647053770E6 /* LedgerAtlasMac */ = {
+			isa = PBXGroup;
+			children = (
+				070F3A60D31441FDBFE96E80 /* AppIntents.swift */,
+				B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */,
+			);
+			name = LedgerAtlasMac;
+			path = Sources/LedgerAtlasMac;
+			sourceTree = "<group>";
+		};
+		A9DC40FAA3B22FE61DD558CC = {
+			isa = PBXGroup;
+			children = (
+				7EE26042D6EC5647053770E6 /* LedgerAtlasMac */,
+				00673D2F5794FE7E7A36609C /* LedgerAtlasMacUI */,
+				C7CB8E0B0880BF0B2D247723 /* LedgerAtlasWidget */,
+				33E736A5A067853E4816F0BD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C7CB8E0B0880BF0B2D247723 /* LedgerAtlasWidget */ = {
+			isa = PBXGroup;
+			children = (
+				C9A18D20504B0D55CCEFDF6F /* Info.plist */,
+				1A283AEBEFE602CC34B00CE3 /* LedgerAtlasWidget.swift */,
+			);
+			name = LedgerAtlasWidget;
+			path = Sources/LedgerAtlasWidget;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B3BBB8C69F534E4840FC6212 /* LedgerAtlas */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7D8A5D02261D97CE38E553E1 /* Build configuration list for PBXNativeTarget "LedgerAtlas" */;
+			buildPhases = (
+				DB461EA88E3E8F9230E2FF62 /* Sources */,
+				1AD3E0DD79584511CF93503D /* Frameworks */,
+				8E8DFF3F1FCA47915BF9EF8B /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				98F37B674C3E4C41CBB52D37 /* PBXTargetDependency */,
+			);
+			name = LedgerAtlas;
+			packageProductDependencies = (
+				F54C1341B767FDABE89BB321 /* LedgerAtlasMacUI */,
+			);
+			productName = LedgerAtlas;
+			productReference = 0B2E6D4C5DAD29CF53544AE9 /* LedgerAtlas.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FCE25D60E44E8B12CEEDD545 /* LedgerAtlasWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BF97DA5C32EFA39A74754A00 /* Build configuration list for PBXNativeTarget "LedgerAtlasWidget" */;
+			buildPhases = (
+				1991EDF8BD48CB4794CD2E9C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LedgerAtlasWidget;
+			packageProductDependencies = (
+			);
+			productName = LedgerAtlasWidget;
+			productReference = 978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		48965B4F19EBADC1184542D2 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					B3BBB8C69F534E4840FC6212 = {
+						DevelopmentTeam = 57GGJTRSFG;
+						ProvisioningStyle = Automatic;
+					};
+					FCE25D60E44E8B12CEEDD545 = {
+						DevelopmentTeam = 57GGJTRSFG;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 501A649437C0062C85A06183 /* Build configuration list for PBXProject "LedgerAtlas" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A9DC40FAA3B22FE61DD558CC;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5BB4FE47ED72ECA99FB700C1 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 33E736A5A067853E4816F0BD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B3BBB8C69F534E4840FC6212 /* LedgerAtlas */,
+				FCE25D60E44E8B12CEEDD545 /* LedgerAtlasWidget */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1991EDF8BD48CB4794CD2E9C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1330C9AB18BC3C02B98CB027 /* LedgerAtlasWidget.swift in Sources */,
+				8275EE13370A16F2216FF01D /* RedactedWidgetProjection.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DB461EA88E3E8F9230E2FF62 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				793118580FC787BF9CCCE2F6 /* AppIntents.swift in Sources */,
+				0818B7A5F0BE84CB90F6C8B4 /* LedgerAtlasMacApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		98F37B674C3E4C41CBB52D37 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FCE25D60E44E8B12CEEDD545 /* LedgerAtlasWidget */;
+			targetProxy = D82EF2940C8AA319907256F3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1D53A8D5476740A4061EC4F1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LedgerAtlas.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 57GGJTRSFG;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.praxstack.ledgeratlas;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		2DD7842A038EECAE51C97FED /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LedgerAtlasWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 57GGJTRSFG;
+				INFOPLIST_FILE = Sources/LedgerAtlasWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.praxstack.ledgeratlas.widget;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		30EDE5309EB559E8B3A81EAA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		3421F7EBB07A147F37534498 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LedgerAtlas.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 57GGJTRSFG;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.praxstack.ledgeratlas;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		5E9232C8999A75CD3B82CF38 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LedgerAtlasWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 57GGJTRSFG;
+				INFOPLIST_FILE = Sources/LedgerAtlasWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.praxstack.ledgeratlas.widget;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		88F6F11DA8E5FEEF1C7EE296 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		501A649437C0062C85A06183 /* Build configuration list for PBXProject "LedgerAtlas" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				88F6F11DA8E5FEEF1C7EE296 /* Debug */,
+				30EDE5309EB559E8B3A81EAA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7D8A5D02261D97CE38E553E1 /* Build configuration list for PBXNativeTarget "LedgerAtlas" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1D53A8D5476740A4061EC4F1 /* Debug */,
+				3421F7EBB07A147F37534498 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BF97DA5C32EFA39A74754A00 /* Build configuration list for PBXNativeTarget "LedgerAtlasWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2DD7842A038EECAE51C97FED /* Debug */,
+				5E9232C8999A75CD3B82CF38 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5BB4FE47ED72ECA99FB700C1 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F54C1341B767FDABE89BB321 /* LedgerAtlasMacUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LedgerAtlasMacUI;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 48965B4F19EBADC1184542D2 /* Project object */;
+}

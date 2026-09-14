@@ -1,0 +1,1 @@
+Locale-aware money and date rendering over canonical ExactDecimal and SourceTemporal values; formatted strings are never re-parsed into canonical truth; transaction entry parses amounts with a fixed invariant formatter at the trust boundary so locale decimal separators cannot corrupt literals.

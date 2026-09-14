@@ -1,0 +1,32 @@
+{
+  "description": "Ledger Atlas evidence and destructive-operation safety hooks.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/quality.py\" session_start",
+            "timeout": 5,
+            "statusMessage": "Loading Ledger Atlas context",
+            "additionalContextLimit": 6000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/quality.py\" pre_tool_use",
+            "timeout": 5,
+            "statusMessage": "Protecting Ledger Atlas evidence"
+          }
+        ]
+      }
+    ]
+  }
+}

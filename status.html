@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger Atlas — Can you use this yet?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #e8efe6;
+      --ink: #1a2420;
+      --rule: #b7c9b4;
+      --muted: #4a5c54;
+      --stamp: #9b1c1c;
+      --ok: #176c3a;
+      --card: #f4f7f2;
+      --focus: #1a2420;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, transparent 47px, #c45c5c55 47px, #c45c5c55 49px, transparent 49px),
+        repeating-linear-gradient(var(--paper), var(--paper) 31px, var(--rule) 32px);
+      font-family: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+      font-size: 1.2rem;
+      line-height: 1.55;
+    }
+    .sheet {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 2.5rem 1.4rem 4rem 3.6rem;
+    }
+    header {
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: 1rem;
+      margin-bottom: 1.6rem;
+    }
+    .eyebrow {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 0.4rem;
+    }
+    h1 {
+      font-size: 2.1rem;
+      font-weight: 700;
+      line-height: 1.15;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    .lede { margin: 0; font-size: 1.15rem; }
+    .stamp {
+      display: inline-block;
+      margin: 1.4rem 0 0.4rem;
+      padding: 0.35rem 0.7rem;
+      border: 3px solid var(--stamp);
+      color: var(--stamp);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.95rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      transform: rotate(-2deg);
+    }
+    .answer {
+      font-size: 1.45rem;
+      font-weight: 600;
+      margin: 0.6rem 0 1.2rem;
+    }
+    h2 {
+      font-size: 1.15rem;
+      margin: 2rem 0 0.6rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid var(--ink);
+    }
+    p { margin: 0 0 0.9rem; }
+    .house {
+      background: var(--card);
+      border: 1px solid var(--ink);
+      padding: 0.9rem 1rem;
+      margin: 1rem 0 1.4rem;
+    }
+    .fact {
+      background: var(--card);
+      border-left: 4px solid var(--ink);
+      padding: 0.85rem 1rem;
+      margin: 0 0 0.9rem;
+    }
+    .fact strong { display: block; margin-bottom: 0.25rem; }
+    .ok { color: var(--ok); }
+    .no { color: var(--stamp); }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 1rem;
+      margin: 0.8rem 0 0;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.78rem;
+    }
+    a { color: var(--ink); }
+    a:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .choices {
+      display: grid;
+      gap: 0.8rem;
+      margin: 1rem 0 2rem;
+    }
+    .choice {
+      display: block;
+      background: var(--card);
+      border: 2px solid var(--ink);
+      padding: 0.9rem 1rem;
+      text-decoration: none;
+    }
+    .choice span {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    footer {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 2rem;
+    }
+    @media (max-width: 560px) {
+      body {
+        background: var(--paper);
+      }
+      .sheet { padding: 1.6rem 1.1rem 3rem; }
+      h1 { font-size: 1.7rem; }
+      .answer { font-size: 1.25rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header>
+      <p class="eyebrow">Ledger Atlas · status slip · 2026-08-19</p>
+      <h1>Can you use this as your money app yet?</h1>
+      <p class="lede">This page is the short answer. It uses the same words as the product: Entry, Account, Transfer, sidecar, LossReport, source profile, and the canonical ledger.</p>
+      <nav>
+        <a href="#verdict">Verdict</a>
+        <a href="#works">What works</a>
+        <a href="#two">Two facts</a>
+        <a href="#pick">Your pick</a>
+        <a href="spec.html">Short spec</a>
+        <a href="specProgress.html">Progress list</a>
+      </nav>
+    </header>
+
+    <p class="stamp" id="verdict">Not a finished product</p>
+    <p class="answer">Count the full plan as about one fifth done. Count a shipped app as zero.</p>
+    <p>Ledger Atlas is a money app we build from zero. The goal is to keep your money records in our database — the <strong>canonical ledger</strong> — not in Money Manager.</p>
+    <p>You asked if the project is complete. An earlier answer mixed five different questions. That is why the percentages fought each other. This page answers only the question you asked.</p>
+
+    <div class="house">
+      Think of a house. The kitchen machines are in the garage and they run. There is no street address, no front door key, and no inspector sign-off. You cannot move in.
+    </div>
+
+    <p>The engine works on fake test data. Tests pass. The Mac window can open a test ledger. That is real. It is not the same as: install this, import my backup, and trust every amount.</p>
+
+    <h2 id="works">What already works</h2>
+    <p>We can look at a Money Manager file without changing it. We can name the <strong>source profile</strong> (the exact backup type). We can keep unknown pieces in a <strong>sidecar</strong> (the original bytes, stored as-is). A <strong>LossReport</strong> must list every source item as mapped, kept, excluded with a reason, or blocking.</p>
+    <p>On fake test data we can create an <strong>Entry</strong>, an <strong>Account</strong>, and a <strong>Transfer</strong>. We can split a purchase, run an installment plan, search, report, export, and restore. The Mac journey can review a test source and open the imported ledger.</p>
+    <p class="no">We do not have a lossless import certificate for a real Android v19 backup. Certified cells: 0. Universal compatibility: false. Product source exists in local Git, but it is still an implementation candidate, not a shipped app.</p>
+
+    <h2 id="two">Two facts that still block delivery</h2>
+    <div class="fact">
+      <strong>1. The supplied real backup has not completed a verified import.</strong>
+      Candidate importer code and synthetic tests exist. There is no private reconciliation result proving that every supplied source item populated Ledger Atlas without silent loss.
+    </div>
+    <div class="fact">
+      <strong>2. A real Money Manager backup cannot get a lossless import certificate yet.</strong>
+      Some vendor codes are still unknown. If I guess, I can invert a sign or drop a photo. You must either give a proven meaning, or accept a Ledger Atlas rule that we write down. Until then, the LossReport must stop rather than hide a gap.
+    </div>
+    <p>I can keep building the Mac app on the canonical ledger we already have. I cannot pretend your real backup is imported. I cannot put this on the App Store.</p>
+
+    <h2 id="pick">Commit-governance decision</h2>
+    <p>On 26 August 2026, the stakeholder explicitly removed the custom commit-permission system. Normal local commits are allowed after relevant tests and review. Private evidence protections and project quality hooks remain.</p>
+    <div class="choices">
+      <div class="choice">
+        <span>Cleanup · selected</span>
+        Remove temporary permissions, admission paperwork, special commit scripts, and fixed provider-review ceremony.
+      </div>
+    </div>
+
+    <footer>
+      Live check: verify.sh --fast and --full passed after the 26 August cleanup. The run executed 283 Swift tests, 3 Python quality/traceability tests, lint, formatting, debug and release builds, and the CLI smoke test. The explicit private 25-screenshot inventory profile also passed.
+      This slip is a reading aid. It is not a compatibility certificate.
+    </footer>
+  </main>
+</body>
+</html>

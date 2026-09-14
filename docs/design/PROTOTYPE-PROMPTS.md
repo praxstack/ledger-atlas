@@ -22,6 +22,8 @@ The interface must feel like a quiet financial instrument: precise, calm, durabl
 Read and obey the attached DESIGN.md as a strict visual and interaction contract. Where this prompt conflicts with DESIGN.md, DESIGN.md wins.
 
 Use synthetic content only. Include non-round synthetic values, long and short labels, positive and negative amounts, multiple currencies, unresolved import rows, validation errors, empty states, and a partially displayable import. Never use real personal information.
+
+Do not copy Money Manager branding, proprietary assets, or pixel layout. Recreate required behavior with an original Ledger Atlas identity and native Mac conventions.
 ```
 
 ## 2. Google Stitch master prompt
@@ -74,7 +76,7 @@ Visual direction: Quiet Financial Instrument. Warm neutral canvas, nearly black 
 
 Use synthetic, clearly fictional, non-round amounts and neutral account labels such as Daily Account, Reserve Account, and Travel Card. Include light and dark appearance with consistent composition.
 
-Hard bans: no copied screenshots, purple or blue neon, gradients, glass cards, crypto aesthetics, floating action button, mobile tab bar, equal three-card dashboard, fake percentage claims, decorative 3D chart, overlapping text, emojis, or stock photography.
+Hard bans: no Money Manager branding, copied screenshots, purple or blue neon, gradients, glass cards, crypto aesthetics, floating action button, mobile tab bar, equal three-card dashboard, fake percentage claims, decorative 3D chart, overlapping text, emojis, or stock photography.
 
 The result must look plausible as a shipping Mac app, not a Dribbble fantasy. Every control needs a clear purpose and enough space for localization. Render legible interface text; if text cannot be rendered accurately, leave a clean placeholder region rather than inventing nonsense.
 ```

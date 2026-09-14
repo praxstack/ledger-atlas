@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "updated": "2026-08-26",
+  "acceptance": "implementation candidate in local Git; release, shipment, and real-v19 compatibility certification remain open",
+  "verification": {
+    "syntheticSwift": "257 tests passed locally",
+    "engineeringPython": "3 tests passed locally on 2026-08-26; explicit private 25-screenshot inventory profile also passed",
+    "fastRepositoryCheck": "passed 2026-08-26; 283 Swift tests plus lint, format, build, Python, and CLI smoke",
+    "fullRepositoryCheck": "passed 2026-08-26; 283 Swift tests plus release build"
+  },
+  "product": {
+    "kernel": "implemented candidate: exact money/time, immutable classification, staging, reconciliation, atomic/idempotent canonical persistence, schema v10 application ledger, LedgerApplication commands",
+    "cli": "implemented candidate: redacted inspect, coverage, stage, and reconcile --observed-v19-request on the synthetic v19 text-subset; mmctl cannot write a canonical ledger; ImportWorkspace approval is the only write path",
+    "macOS": "LedgerShell approves into LedgerSession; 13 destinations are data-backed after import or native commands (accounts, ledger, categories, transfers, recurrence, installments, budgets, insights, search, backup, settings); not a shipped product",
+    "graphify": "not a Ledger Atlas product module or shipped feature"
+  },
+  "compatibility": {
+    "certifiedCells": 0,
+    "observedAndroidV19": "classification-only L0; 19-table inventory plus review(databaseURL:) structure review; no L3+ and no real import certification",
+    "syntheticAdapter": "text-safe test subset only; not evidence for the real 19-table/non-text format",
+    "universalClaim": false
+  },
+  "blockers": [
+    "real-v19 semantic mapping and behavioral oracles are incomplete",
+    "no supplied backup has completed private import and reconciliation",
+    "sync, cloud identity, a shipped iOS app, Android, push, merge, and release remain separate milestones"
+  ]
+}

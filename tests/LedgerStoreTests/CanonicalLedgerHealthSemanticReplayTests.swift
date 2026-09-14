@@ -1,0 +1,1212 @@
+import CSQLite
+import Foundation
+import LedgerAdapterSemantics
+import LedgerCore
+import LedgerStore
+import Security
+import Testing
+
+@Test("an admitted Money Manager v19 v10 graph requires authenticated re-import")
+func admittedMoneyManagerV19V10GraphRequiresAuthenticatedReimport() throws {
+  try withPersistedV19Ledger(version: 10) { url, fixture in
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .upgradeRequired)
+    let before = try Data(contentsOf: url)
+    #expect(throws: LedgerStoreLifecycle.Error.unsupportedStore) {
+      try LedgerStoreLifecycle.open(at: url)
+    }
+    #expect(try Data(contentsOf: url) == before)
+    #expect(try readReceiptEventCount(at: url, receipt: fixture.receiptID) == 1)
+  }
+}
+
+@Test("legacy v19 receipts without a temporal commitment remain migration candidates")
+func legacyV19ReceiptWithoutCommitmentRemainsReadable() throws {
+  try withPersistedV19Ledger(version: 10, includeCommitment: false) { url, _ in
+    let inspection = try LedgerStoreLifecycle.inspect(at: url)
+    #expect(inspection == .upgradeRequired)
+  }
+}
+
+@Test("an authenticated v19 backup reopens on the same Mac with its external trust key")
+func authenticatedV19BackupReopensOnSameDevice() throws {
+  try withPersistedV19Ledger(version: 11) { url, _ in
+    let source = try LedgerStore.openReadOnly(at: url)
+    let destination = url.deletingLastPathComponent().appendingPathComponent("backup.sqlite")
+    try source.backupCanonicalDatabase(to: destination)
+    let restored = try LedgerStore.openReadOnly(at: destination)
+    #expect(try restored.semanticChecksum() == source.semanticChecksum())
+  }
+}
+
+@Test("current v11 receipt verification rejects a missing external trust key")
+func currentV11RejectsMissingExternalTrustKey() throws {
+  try withPersistedV19Ledger(version: 11) { url, _ in
+    try withSQLite(url) { database in
+      #expect(!CanonicalLedgerHealth.isHealthy(database, trustKey: nil))
+    }
+  }
+}
+
+@Test("current v11 receipt verification rejects a replacement signer key")
+func currentV11RejectsReplacementSignerKey() throws {
+  try withPersistedV19Ledger(version: 11) { url, fixture in
+    guard
+      let originalKey = try LedgerReceiptTrust.key(
+        for: url, create: false, stableIdentity: fixture.receiptID)
+    else { throw ReplayError.sqlite }
+    let replacementKey = Data(repeating: 0xA5, count: 32)
+    let replacementSignature = LedgerReceiptTrust.signature(
+      key: replacementKey, receiptID: fixture.receiptID,
+      integrityHash: try fixture.reconciliationHash())
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        "UPDATE ledger_receipt_trust_anchor SET signature=\(quote(replacementSignature)) WHERE idempotency_key=\(quote(fixture.receiptID));"
+      )
+      #expect(!CanonicalLedgerHealth.isHealthy(database, trustKey: originalKey))
+    }
+  }
+}
+
+@Test("new receipt trust keys remain readable through a synchronizable Keychain query")
+func synchronizableReceiptTrustKeyRoundTrips() throws {
+  let identity = String(repeating: "a", count: 63) + "b"
+  let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  let account = CanonicalReceiptDigest.sha256(
+    Data("ledger-atlas/receipt-key/v3\n\(identity)".utf8))
+  let cleanup: [String: Any] = [
+    kSecClass as String: kSecClassGenericPassword,
+    kSecAttrService as String: "com.praxstack.ledger-atlas.receipt-integrity.v1",
+    kSecAttrAccount as String: account,
+    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+  ]
+  defer { SecItemDelete(cleanup as CFDictionary) }
+  let created = try LedgerReceiptTrust.key(for: url, create: true, stableIdentity: identity)
+  let reopened = try LedgerReceiptTrust.key(for: url, create: false, stableIdentity: identity)
+  #expect(created == reopened)
+  var item: CFTypeRef?
+  let status = SecItemCopyMatching(
+    [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "com.praxstack.ledger-atlas.receipt-integrity.v1",
+      kSecAttrAccount as String: account,
+      kSecAttrSynchronizable as String: true,
+      kSecReturnData as String: true,
+    ] as CFDictionary,
+    &item)
+  // Unsigned SwiftPM tests cannot request the iCloud Keychain entitlement. The signed app target
+  // exercises this branch; the package fallback still proves that local reopen remains usable.
+  if status == errSecMissingEntitlement || status == errSecItemNotFound { return }
+  #expect(status == errSecSuccess)
+  #expect(item as? Data == created)
+}
+
+@Test("legacy receipt trust keys are copied into the current namespace before use")
+func legacyReceiptTrustKeyMigratesToCurrentNamespace() throws {
+  let identity = String(repeating: "c", count: 63) + "d"
+  let legacyAccount = CanonicalReceiptDigest.sha256(
+    Data("ledger-atlas/receipt-key/v2\n\(identity)".utf8))
+  let currentAccount = CanonicalReceiptDigest.sha256(
+    Data("ledger-atlas/receipt-key/v3\n\(identity)".utf8))
+  let service = "com.praxstack.ledger-atlas.receipt-integrity.v1"
+  let legacyQuery: [String: Any] = [
+    kSecClass as String: kSecClassGenericPassword,
+    kSecAttrService as String: service,
+    kSecAttrAccount as String: legacyAccount,
+    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+  ]
+  let currentQuery: [String: Any] = [
+    kSecClass as String: kSecClassGenericPassword,
+    kSecAttrService as String: service,
+    kSecAttrAccount as String: currentAccount,
+    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+  ]
+  defer {
+    SecItemDelete(legacyQuery as CFDictionary)
+    SecItemDelete(currentQuery as CFDictionary)
+  }
+  let legacyValue = Data(repeating: 0x3C, count: 32)
+  let addStatus = SecItemAdd(
+    [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: legacyAccount,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+      kSecValueData as String: legacyValue,
+    ] as CFDictionary,
+    nil)
+  #expect(addStatus == errSecSuccess)
+  let recovered = try LedgerReceiptTrust.key(
+    for: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+    create: false, stableIdentity: identity)
+  #expect(recovered == legacyValue)
+  var item: CFTypeRef?
+  let readStatus = SecItemCopyMatching(
+    currentQuery.merging([
+      kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+      kSecReturnData as String: true,
+    ]) { _, current in current } as CFDictionary,
+    &item)
+  #expect(readStatus == errSecSuccess)
+  #expect(item as? Data == legacyValue)
+}
+
+@Test("a current v11 ledger cannot be downgraded to the legacy v19 receipt generation")
+func currentV11RejectsLegacyReceiptGenerationDowngrade() throws {
+  try withPersistedV19Ledger(version: 11) { url, fixture in
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DROP TRIGGER ledger_transaction_source_literal_immutable_update;
+        UPDATE ledger_transaction_source_literal
+          SET literal='\(MoneyManagerV19Semantics.legacyReceiptGenerationLiteral)'
+          WHERE field='\(MoneyManagerV19Semantics.receiptGenerationField)';
+        CREATE TRIGGER ledger_transaction_source_literal_immutable_update
+        BEFORE UPDATE ON ledger_transaction_source_literal
+        BEGIN
+          SELECT RAISE(ABORT, 'immutable ledger history');
+        END;
+        """, generation: .legacy)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject kind bindings repointed to memo without mutation",
+  arguments: [10, 11])
+func lifecycleRejectsKindBindingToMemoWithoutMutation(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let kind = fixture.field(.kind).id(in: fixture)
+    let memo = fixture.field(named: "NOTE").id(in: fixture)
+    var overrides = fixture.digestOverrides()
+    overrides.bindingProvenanceIDs[.kind] = memo
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        UPDATE event_source_binding SET provenance_id=\(quote(memo))
+          WHERE event_id=\(quote(fixture.eventID)) AND semantic='kind';
+        UPDATE receipt_binding SET provenance_id=\(quote(memo))
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+        """,
+      overrides: overrides)
+    // Keep the original kind provenance in the graph; only the binding is forged.
+    #expect(kind != memo)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject occurred_at bindings repointed to memo without mutation",
+  arguments: [10, 11])
+func lifecycleRejectsOccurredAtBindingToMemoWithoutMutation(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let occurredAt = fixture.field(.occurredAt).id(in: fixture)
+    let memo = fixture.field(named: "NOTE").id(in: fixture)
+    var overrides = fixture.digestOverrides()
+    overrides.bindingProvenanceIDs[.occurredAt] = memo
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        UPDATE event_source_binding SET provenance_id=\(quote(memo))
+          WHERE event_id=\(quote(fixture.eventID)) AND semantic='occurred_at';
+        UPDATE receipt_binding SET provenance_id=\(quote(memo))
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND event_id=\(quote(fixture.eventID)) AND semantic='occurred_at';
+        """,
+      overrides: overrides)
+    #expect(occurredAt != memo)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject amount storage and payload relabelled BLOB without mutation",
+  arguments: [10, 11])
+func lifecycleRejectsAmountBlobRelabelWithoutMutation(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let amount = fixture.field(.amount).id(in: fixture)
+    var overrides = fixture.digestOverrides()
+    overrides.bindingStorageClasses[.amount] = .blob
+    overrides.sidecarStorageClasses["ZMONEY"] = .blob
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        UPDATE event_source_binding SET storage_class='blob'
+          WHERE event_id=\(quote(fixture.eventID)) AND semantic='amount';
+        UPDATE sidecar_reference SET storage_class='blob'
+          WHERE event_id=\(quote(fixture.eventID)) AND sidecar_id=\(quote(amount));
+        """,
+      overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject a fully rekeyed known profile with a forged adapter version without mutation",
+  arguments: [10, 11])
+func lifecycleRejectsFullyRekeyedForgedAdapterWithoutMutation(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let forged = try V19Fixture(adapterVersion: "forged-money-manager-adapter-v1")
+    try rekeyPersistedGraph(at: url, from: fixture, to: forged)
+    #expect(forged.profileID == MoneyManagerProfile.profileID)
+    #expect(forged.adapterVersion != MoneyManagerProfile.adapterVersion)
+    #expect(
+      forged.receiptID
+        == CanonicalStagingID.stage(
+          artifactSHA256: forged.artifactSHA256, profileID: forged.profileID,
+          adapterVersion: forged.adapterVersion))
+    try mutateAndRehash(at: url, fixture: forged, sql: "SELECT 1;")
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject canonical amount normalization with recomputed public hashes without mutation",
+  arguments: [10, 11])
+func lifecycleRejectsCanonicalAmountNormalizationWithoutMutation(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    var overrides = fixture.digestOverrides()
+    overrides.amountLiteral = "12.3"
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql:
+        "UPDATE economic_event SET amount_literal='12.3' WHERE event_id=\(quote(fixture.eventID));",
+      overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject a wrong admitted adapter even when no events remain",
+  arguments: [10, 11])
+func lifecycleRejectsWrongAdmittedAdapterForZeroEventReceipt(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let forged = try V19Fixture(adapterVersion: "forged-money-manager-adapter-v1")
+    try rekeyPersistedGraph(at: url, from: fixture, to: forged)
+    try removeEventAndRehash(at: url, fixture: forged)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test("persisted v10 and current v11 reject fully rekeyed admitted event IDs", arguments: [10, 11])
+func lifecycleRejectsFullyRekeyedAdmittedEventID(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let forgedID = String(repeating: "f", count: 64)
+    try rekeyEventID(at: url, from: fixture.eventID, to: forgedID)
+    var overrides = fixture.digestOverrides()
+    overrides.eventID = forgedID
+    try mutateAndRehash(at: url, fixture: fixture, sql: "SELECT 1;", overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject a fully rehashed opaque NOTE sidecar deletion",
+  arguments: [10, 11])
+func lifecycleRejectsFullyRehashedOpaqueSidecarDeletion(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let note = fixture.field(named: "NOTE").id(in: fixture)
+    var overrides = fixture.digestOverrides()
+    overrides.omittedSidecarIDs.insert(note)
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_sidecar
+          WHERE idempotency_key=\(quote(fixture.receiptID)) AND sidecar_id=\(quote(note));
+        DELETE FROM sidecar_reference WHERE sidecar_id=\(quote(note));
+        """,
+      overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "persisted v10 and current v11 reject deleting the complete new v19 opaque commitment",
+  arguments: [10, 11])
+func lifecycleRejectsCompleteV19CommitmentDeletion(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let note = fixture.field(named: "NOTE").id(in: fixture)
+    var overrides = fixture.digestOverrides()
+    overrides.omittedSidecarIDs.insert(note)
+    overrides.omitTransactionPreservation = true
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DROP TRIGGER ledger_transaction_source_literal_immutable_delete;
+        DELETE FROM receipt_sidecar
+          WHERE idempotency_key=\(quote(fixture.receiptID)) AND sidecar_id=\(quote(note));
+        DELETE FROM sidecar_reference WHERE sidecar_id=\(quote(note));
+        DELETE FROM receipt_preservation_membership
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND anchor_subject_id=\(quote(fixture.transaction.id(in: fixture)));
+        DELETE FROM receipt_preservation_payload
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND anchor_id=\(quote(fixture.transactionAnchorID));
+        DELETE FROM receipt_preservation_anchor
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND anchor_id=\(quote(fixture.transactionAnchorID));
+        DELETE FROM provenance_reference WHERE provenance_id=\(quote(note));
+        DELETE FROM ledger_transaction_source_literal
+          WHERE field='\(MoneyManagerV19Semantics.temporalCommitmentField)';
+        DELETE FROM ledger_transaction_source_literal
+          WHERE field='\(MoneyManagerV19Semantics.receiptGenerationField)';
+        CREATE TRIGGER ledger_transaction_source_literal_immutable_delete
+        BEFORE DELETE ON ledger_transaction_source_literal
+        BEGIN
+          SELECT RAISE(ABORT, 'immutable ledger history');
+        END;
+        """,
+      overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "a current v11 ledger rejects an opaque field deleted from both retention paths",
+  arguments: [11])
+func lifecycleRejectsRehashedOpaqueFieldDeletionFromBothPaths(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    let note = fixture.field(named: "NOTE").id(in: fixture)
+    var overrides = fixture.digestOverrides()
+    overrides.omittedSidecarIDs.insert(note)
+    overrides.omittedPreservationIDs.insert(note)
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_sidecar
+          WHERE idempotency_key=\(quote(fixture.receiptID)) AND sidecar_id=\(quote(note));
+        DELETE FROM sidecar_reference WHERE sidecar_id=\(quote(note));
+        DELETE FROM receipt_preservation_membership
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND source_subject_id=\(quote(note));
+        DELETE FROM receipt_preservation_payload
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND provenance_id=\(quote(note));
+        DELETE FROM provenance_reference WHERE provenance_id=\(quote(note));
+        """,
+      overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test(
+  "a current v11 ledger rejects a consistently rewritten v19 timezone tuple",
+  arguments: [11])
+func lifecycleRejectsRehashedV19TimezoneTuple(_ version: Int) throws {
+  try withPersistedV19Ledger(version: version) { url, fixture in
+    var overrides = fixture.digestOverrides()
+    overrides.instantMilliseconds = 1_738_537_200_000
+    overrides.timeZoneValue = "3600"
+    overrides.resolvedOffsetSeconds = 3_600
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DROP TRIGGER ledger_transaction_revision_immutable_update;
+        DROP TRIGGER ledger_transaction_source_literal_immutable_update;
+        UPDATE economic_event SET instant_milliseconds=1738537200000,
+          timezone_kind='fixed', timezone_value='3600', resolved_offset_seconds=3600
+          WHERE event_id=\(quote(fixture.eventID));
+        UPDATE ledger_transaction_revision SET instant_milliseconds=1738537200000,
+          timezone_kind='fixed', timezone_value='3600', resolved_offset_seconds=3600
+          WHERE transaction_id=\(quote(fixture.eventID));
+        UPDATE ledger_transaction_source_literal
+          SET literal=\(quote(v19ChangedTemporalCommitment()))
+          WHERE field='\(MoneyManagerV19Semantics.temporalCommitmentField)';
+        UPDATE ledger_transaction_source_literal
+          SET literal=\(quote(v19ChangedTemporalCommitment()))
+          WHERE field='\(MoneyManagerV19Semantics.temporalAnchorField)';
+        CREATE TRIGGER ledger_transaction_revision_immutable_update
+        BEFORE UPDATE ON ledger_transaction_revision
+        BEGIN
+          SELECT RAISE(ABORT, 'immutable ledger history');
+        END;
+        CREATE TRIGGER ledger_transaction_source_literal_immutable_update
+        BEFORE UPDATE ON ledger_transaction_source_literal
+        BEGIN
+          SELECT RAISE(ABORT, 'immutable ledger history');
+        END;
+        """,
+      overrides: overrides)
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+private enum MoneyManagerProfile {
+  static let profileID = "realbyte-android-v19-synthetic-text-subset-v1"
+  static let adapterVersion = "money-manager-android-v19-adapter-v1"
+}
+
+private struct V19Field {
+  let table: String
+  let recordKey: String
+  let ordinal: Int
+  let name: String
+  let value: String
+
+  var locator: SourceLocator {
+    SourceLocator(table: table, recordKey: recordKey, columnOrdinal: ordinal, columnName: name)
+  }
+
+  func id(in fixture: V19Fixture) -> String {
+    CanonicalStagingID.field(stagingID: fixture.receiptID, locator: locator)
+  }
+
+  var payload: Data { Data(value.utf8) }
+}
+
+private struct V19Record {
+  let table: String
+  let recordKey: String
+  let fields: [V19Field]
+
+  func id(in fixture: V19Fixture) -> String {
+    CanonicalStagingID.record(
+      stagingID: fixture.receiptID, table: table, recordKey: recordKey)
+  }
+}
+
+private struct V19Anchor {
+  let anchorID: String
+  let sourceSubjectID: String
+  let subjectKind: CanonicalPreservationSubjectKind
+  let sourceTable: String
+  let sourceRecordKey: String?
+}
+
+private struct V19Payload {
+  let payloadID: String
+  let anchorID: String
+  let field: V19Field
+}
+
+private struct V19Membership {
+  let sourceSubjectID: String
+  let subjectKind: String
+  let anchorID: String
+  let anchorSubjectID: String
+  let anchorSubjectKind: String
+  let payloadID: String?
+}
+
+private struct V19DigestOverrides {
+  var amountLiteral = "12.30"
+  var eventID: String?
+  var instantMilliseconds: Int64 = 1_738_540_800_000
+  var timeZoneValue = "0"
+  var resolvedOffsetSeconds = 0
+  var bindingProvenanceIDs: [CanonicalEventSourceSemantic: String] = [:]
+  var bindingStorageClasses: [CanonicalEventSourceSemantic: CanonicalFieldStorageClass] = [:]
+  var sidecarStorageClasses: [String: CanonicalFieldStorageClass] = [:]
+  var omittedSidecarIDs: Set<String> = []
+  var omittedPreservationIDs: Set<String> = []
+  var omitTransactionPreservation = false
+}
+
+private struct V19Fixture {
+  let artifactSHA256 = String(repeating: "a", count: 64)
+  let profileID = MoneyManagerProfile.profileID
+  let adapterVersion: String
+  let stagingDigest: String
+  let receiptID: String
+  let transaction: V19Record
+  let receiptOwnedRecords: [V19Record]
+  let receiptOwnedTables = ["ASSETS", "ZCATEGORY", "CURRENCY"]
+  let eventID: String
+  let accountID: String
+
+  var transactionAnchorID: String {
+    try! StableCanonicalID.preservationAnchor(
+      stagingID: receiptID, sourceSubjectID: transaction.id(in: self), kind: .record)
+  }
+
+  init(adapterVersion: String = MoneyManagerProfile.adapterVersion) throws {
+    self.adapterVersion = adapterVersion
+    let receiptID = CanonicalStagingID.stage(
+      artifactSHA256: artifactSHA256, profileID: profileID, adapterVersion: adapterVersion)
+    self.receiptID = receiptID
+    stagingDigest = CanonicalReceiptDigest.hash([
+      "ledger-atlas/synthetic-staging/v1", artifactSHA256, profileID, adapterVersion,
+    ])
+    transaction = V19Record(
+      table: "INOUTCOME", recordKey: "transaction-record",
+      fields: [
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 0, name: "uid",
+          value: "synthetic-transaction"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 1, name: "assetUid",
+          value: "synthetic-account"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 2, name: "currencyUid",
+          value: "synthetic-currency"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 3, name: "DO_TYPE",
+          value: "1"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 4, name: "ctgUid",
+          value: "synthetic-category"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 5, name: "ZMONEY",
+          value: "12.30"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 6, name: "WDATE",
+          value: "2025-02-03"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 7, name: "ZDATE",
+          value: "1738540800000"),
+        .init(
+          table: "INOUTCOME", recordKey: "transaction-record", ordinal: 8, name: "NOTE",
+          value: "synthetic opaque note"),
+      ])
+    receiptOwnedRecords = [
+      V19Record(
+        table: "ASSETS", recordKey: "asset-record",
+        fields: [
+          .init(
+            table: "ASSETS", recordKey: "asset-record", ordinal: 0, name: "uid",
+            value: "synthetic-account")
+        ]),
+      V19Record(
+        table: "ZCATEGORY", recordKey: "category-record",
+        fields: [
+          .init(
+            table: "ZCATEGORY", recordKey: "category-record", ordinal: 0, name: "uid",
+            value: "synthetic-category")
+        ]),
+      V19Record(
+        table: "CURRENCY", recordKey: "currency-record",
+        fields: [
+          .init(
+            table: "CURRENCY", recordKey: "currency-record", ordinal: 0, name: "uid",
+            value: "synthetic-currency"),
+          .init(
+            table: "CURRENCY", recordKey: "currency-record", ordinal: 1, name: "ISO", value: "USD"),
+        ]),
+    ]
+    eventID = try StableCanonicalID.event(
+      sourceRecordID: CanonicalStagingID.record(
+        stagingID: receiptID, table: "INOUTCOME", recordKey: "transaction-record"),
+      effectOrdinal: 0)
+    accountID = try StableCanonicalID.account(
+      profileID: profileID, sourceAccountID: "synthetic-account")
+  }
+
+  func field(_ semantic: CanonicalEventSourceSemantic) -> V19Field {
+    switch semantic {
+    case .amount: return transaction.fields[5]
+    case .currency: return receiptOwnedRecords[2].fields[1]
+    case .occurredAt: return transaction.fields[7]
+    case .account: return transaction.fields[1]
+    case .kind: return transaction.fields[3]
+    }
+  }
+
+  func field(named name: String) -> V19Field {
+    (transaction.fields + receiptOwnedRecords.flatMap(\.fields)).first { $0.name == name }!
+  }
+
+  func allFields() -> [V19Field] {
+    transaction.fields + receiptOwnedRecords.flatMap(\.fields)
+  }
+
+  func isOpaqueTransactionField(_ field: V19Field) -> Bool {
+    ![self.field(.amount), self.field(.occurredAt), self.field(.account), self.field(.kind)]
+      .contains { $0.id(in: self) == field.id(in: self) }
+  }
+
+  func anchors() throws -> [V19Anchor] {
+    let tables = try receiptOwnedTables.map { table in
+      let subjectID = CanonicalStagingID.table(stagingID: receiptID, table: table)
+      return V19Anchor(
+        anchorID: try StableCanonicalID.preservationAnchor(
+          stagingID: receiptID, sourceSubjectID: subjectID, kind: .table),
+        sourceSubjectID: subjectID, subjectKind: .table, sourceTable: table, sourceRecordKey: nil)
+    }
+    let records = try (receiptOwnedRecords + [transaction]).map { record in
+      let subjectID = record.id(in: self)
+      return V19Anchor(
+        anchorID: try StableCanonicalID.preservationAnchor(
+          stagingID: receiptID, sourceSubjectID: subjectID, kind: .record),
+        sourceSubjectID: subjectID, subjectKind: .record,
+        sourceTable: record.table, sourceRecordKey: record.recordKey)
+    }
+    return tables + records
+  }
+
+  func payloads() throws -> [V19Payload] {
+    let recordAnchors = try Dictionary(
+      uniqueKeysWithValues: anchors().filter { $0.subjectKind == .record }.map {
+        ($0.sourceSubjectID, $0.anchorID)
+      })
+    var result: [V19Payload] = []
+    for record in receiptOwnedRecords + [transaction] {
+      for field in record.fields {
+        guard record.table != transaction.table || isOpaqueTransactionField(field) else { continue }
+        let sourceID = field.id(in: self)
+        result.append(
+          V19Payload(
+            payloadID: try StableCanonicalID.preservationPayload(
+              receiptID: receiptID, anchorID: recordAnchors[record.id(in: self)]!,
+              sourceSubjectID: sourceID, formatVersion: 1, declaredType: "TEXT",
+              storageClass: .text, payload: field.payload),
+            anchorID: recordAnchors[record.id(in: self)]!, field: field))
+      }
+    }
+    return result
+  }
+
+  func memberships() throws -> [V19Membership] {
+    let anchors = try anchors()
+    let payloads = try payloads()
+    let anchorRows = anchors.map {
+      V19Membership(
+        sourceSubjectID: $0.sourceSubjectID, subjectKind: $0.subjectKind.rawValue,
+        anchorID: $0.anchorID, anchorSubjectID: $0.sourceSubjectID,
+        anchorSubjectKind: $0.subjectKind.rawValue, payloadID: nil)
+    }
+    let recordByID = Dictionary(
+      uniqueKeysWithValues: anchors.filter { $0.subjectKind == .record }.map {
+        ($0.sourceSubjectID, $0)
+      })
+    let fieldRows = payloads.map { payload in
+      let record = (receiptOwnedRecords + [transaction]).first {
+        $0.fields.contains { $0.id(in: self) == payload.field.id(in: self) }
+      }!
+      let recordAnchor = recordByID[record.id(in: self)]!
+      return V19Membership(
+        sourceSubjectID: payload.field.id(in: self), subjectKind: "field",
+        anchorID: recordAnchor.anchorID, anchorSubjectID: recordAnchor.sourceSubjectID,
+        anchorSubjectKind: "record", payloadID: payload.payloadID)
+    }
+    return anchorRows + fieldRows
+  }
+
+  func digestOverrides() -> V19DigestOverrides { .init() }
+
+  func eventSetHash(_ overrides: V19DigestOverrides = .init()) -> String {
+    let amount = field(.amount)
+    let amountID = overrides.bindingProvenanceIDs[.amount] ?? amount.id(in: self)
+    var components = [
+      CanonicalReceiptDigest.eventSetPrefix, overrides.eventID ?? eventID, accountID, "expense",
+      overrides.amountLiteral, "USD", String(overrides.instantMilliseconds), "2025", "2", "3", "0",
+      "0", "0", "0", "fixed", overrides.timeZoneValue, "millisecond",
+      String(overrides.resolvedOffsetSeconds), transaction.id(in: self), amountID,
+    ]
+    for semantic in CanonicalEventSourceSemantic.allCases.sorted(by: { $0.rawValue < $1.rawValue })
+    {
+      let field = field(semantic)
+      components += [
+        semantic.rawValue, overrides.bindingProvenanceIDs[semantic] ?? field.id(in: self),
+      ]
+      components += CanonicalReceiptDigest.optionalComponents("TEXT")
+      components.append((overrides.bindingStorageClasses[semantic] ?? .text).rawValue)
+    }
+    for field in transaction.fields.sorted(by: { $0.id(in: self) < $1.id(in: self) }) {
+      guard !overrides.omittedSidecarIDs.contains(field.id(in: self)) else { continue }
+      let storage = overrides.sidecarStorageClasses[field.name] ?? .text
+      components += [field.id(in: self), field.id(in: self), "1"]
+      components += CanonicalReceiptDigest.optionalComponents("TEXT")
+      components += [
+        storage.rawValue, CanonicalReceiptDigest.sha256(field.payload), artifactSHA256, profileID,
+        adapterVersion,
+      ]
+      components += CanonicalReceiptDigest.optionalComponents(nil)
+      components += [field.table, field.recordKey]
+      components += CanonicalReceiptDigest.optionalComponents(String(field.ordinal))
+      components += CanonicalReceiptDigest.optionalComponents(field.name)
+    }
+    return CanonicalReceiptDigest.hash(components)
+  }
+
+  func preservationHash(_ overrides: V19DigestOverrides = .init()) throws -> String {
+    var components = ["ledger-atlas/receipt-owned-preservation-set/v4"]
+    let memberships = try memberships().filter {
+      (!overrides.omitTransactionPreservation || $0.anchorID != transactionAnchorID)
+        && !overrides.omittedPreservationIDs.contains($0.sourceSubjectID)
+    }
+    for membership in memberships.sorted(by: { $0.sourceSubjectID < $1.sourceSubjectID }) {
+      components += [
+        receiptID, membership.sourceSubjectID, membership.subjectKind, membership.anchorID,
+        membership.anchorSubjectID, membership.anchorSubjectKind,
+      ]
+      components += CanonicalReceiptDigest.optionalComponents(membership.payloadID)
+    }
+    for anchor in try anchors().filter({
+      ($0.subjectKind == .table || $0.subjectKind == .record)
+        && (!overrides.omitTransactionPreservation || $0.anchorID != transactionAnchorID)
+    })
+    .sorted(by: { $0.anchorID < $1.anchorID }) {
+      components += [
+        anchor.anchorID, receiptID, anchor.sourceSubjectID, anchor.subjectKind.rawValue,
+        artifactSHA256, profileID, adapterVersion,
+      ]
+      components += CanonicalReceiptDigest.optionalComponents(nil)
+      components.append(anchor.sourceTable)
+      components += CanonicalReceiptDigest.optionalComponents(anchor.sourceRecordKey)
+    }
+    for payload in try payloads().filter({
+      (!overrides.omitTransactionPreservation || $0.anchorID != transactionAnchorID)
+        && !overrides.omittedPreservationIDs.contains($0.field.id(in: self))
+    }).sorted(by: { $0.payloadID < $1.payloadID }) {
+      let field = payload.field
+      components += [payload.payloadID, receiptID, payload.anchorID, field.id(in: self), "1"]
+      components += CanonicalReceiptDigest.optionalComponents("TEXT")
+      components += [
+        "text", CanonicalReceiptDigest.sha256(field.payload), artifactSHA256, profileID,
+        adapterVersion,
+      ]
+      components += CanonicalReceiptDigest.optionalComponents(nil)
+      components += [field.table, field.recordKey]
+      components += CanonicalReceiptDigest.optionalComponents(String(field.ordinal))
+      components += CanonicalReceiptDigest.optionalComponents(field.name)
+      components.append(field.id(in: self))
+    }
+    return CanonicalReceiptDigest.hash(components)
+  }
+
+  func reconciliationHash(
+    eventSetHash: String? = nil, preservationHash: String? = nil, eventCount: Int = 1,
+    generation: MoneyManagerV19Semantics.ReceiptGeneration = .current
+  ) throws -> String {
+    let events = eventSetHash ?? self.eventSetHash()
+    let preservation = try preservationHash ?? self.preservationHash()
+    return MoneyManagerV19Semantics.receiptIntegrityHash(
+      envelope: [
+        receiptID, stagingDigest, artifactSHA256, profileID, adapterVersion, events,
+        String(eventCount), "8",
+      ], eventSetHash: events, preservationHash: preservation, generation: generation)
+  }
+}
+
+private func withPersistedV19Ledger(
+  version: Int, includeCommitment: Bool = true,
+  _ body: (URL, V19Fixture) throws -> Void
+) throws {
+  guard version == 10 || version == 11 else { throw ReplayError.sqlite }
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("ledger.sqlite")
+  let fixture = try V19Fixture()
+  try writeV19V10Ledger(to: url, fixture: fixture, includeCommitment: includeCommitment)
+  if version == 10 {
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .upgradeRequired)
+  } else {
+    guard includeCommitment else { throw ReplayError.sqlite }
+    try materializeCurrentV19Fixture(at: url, fixture: fixture)
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
+  }
+  try body(url, fixture)
+}
+
+private func materializeCurrentV19Fixture(at url: URL, fixture: V19Fixture) throws {
+  guard
+    let trustKey = try LedgerReceiptTrust.key(
+      for: url, create: true, stableIdentity: fixture.receiptID)
+  else {
+    throw ReplayError.sqlite
+  }
+  let fieldIDs = fixture.transaction.fields.map { $0.id(in: fixture) }.sorted()
+  let sourceRecordID = fixture.transaction.id(in: fixture)
+  let sourceSubjectSet = MoneyManagerV19Semantics.sourceSubjectSetCommitment(
+    sourceRecordID: sourceRecordID, fieldIDs: fieldIDs)
+  try withSQLite(url) { database in
+    try execute(database, "BEGIN IMMEDIATE;")
+    for statement in CanonicalLedgerSchema.v10ToV11MigrationStatements {
+      try execute(database, statement)
+    }
+    let revisionID = try StableLedgerID.revision(transactionID: fixture.eventID, revision: 1)
+    try execute(
+      database,
+      """
+      INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), 4,
+        '\(MoneyManagerV19Semantics.sourceSubjectSetField)', \(quote(sourceSubjectSet)), NULL);
+      INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), 5,
+        '\(MoneyManagerV19Semantics.sourceTimeZoneField)', 'fixed:0', NULL);
+      UPDATE ledger_meta SET value='11' WHERE key='schema_version';
+      UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.fingerprint)' WHERE key='schema_fingerprint';
+      """)
+    let integrity = try fixture.reconciliationHash()
+    let signature = LedgerReceiptTrust.signature(
+      key: trustKey, receiptID: fixture.receiptID, integrityHash: integrity)
+    try execute(
+      database,
+      "INSERT INTO ledger_receipt_trust_anchor(idempotency_key, algorithm, signature) VALUES(\(quote(fixture.receiptID)), '\(LedgerReceiptTrust.algorithm)', \(quote(signature)));"
+    )
+    try execute(database, "COMMIT;")
+  }
+}
+
+private func writeV19V10Ledger(
+  to url: URL, fixture: V19Fixture, includeCommitment: Bool
+) throws {
+  try withSQLite(url) { database in
+    try execute(
+      database,
+      "PRAGMA foreign_keys=ON; PRAGMA application_id=\(CanonicalLedgerSchema.applicationID);")
+    for object in CanonicalLedgerSchema.legacyV10Objects { try execute(database, object.ddl) }
+    try execute(
+      database,
+      """
+      INSERT INTO ledger_meta(key, value) VALUES
+        ('schema_version', '10'), ('ledger_identity', 'ledger-atlas-canonical'),
+        ('schema_fingerprint', '\(CanonicalLedgerSchema.legacyV10Fingerprint)');
+      """)
+    for field in fixture.allFields().sorted(by: { $0.id(in: fixture) < $1.id(in: fixture) }) {
+      try execute(
+        database,
+        """
+        INSERT INTO provenance_reference VALUES (\(quote(field.id(in: fixture))),
+          \(quote(fixture.artifactSHA256)), \(quote(fixture.profileID)),
+          \(quote(fixture.adapterVersion)), NULL, \(quote(field.table)),
+          \(quote(field.recordKey)), \(field.ordinal), \(quote(field.name)));
+        """)
+    }
+    try execute(
+      database,
+      """
+      INSERT INTO economic_event VALUES (\(quote(fixture.eventID)), \(quote(fixture.accountID)),
+        'expense', '12.30', 'USD',
+        1738540800000, 2025, 2, 3, 0, 0, 0, 0, 'fixed', '0', 'millisecond', 0,
+        \(quote(fixture.transaction.id(in: fixture))),
+        \(quote(fixture.field(.amount).id(in: fixture))));
+      INSERT INTO import_receipt VALUES (\(quote(fixture.receiptID)),
+        \(quote(fixture.stagingDigest)), \(quote(fixture.artifactSHA256)),
+        \(quote(fixture.profileID)), \(quote(fixture.adapterVersion)),
+        \(quote(try fixture.reconciliationHash(generation: includeCommitment ? .current : .legacy))),
+        \(quote(fixture.eventSetHash())), 1, 8);
+      INSERT INTO receipt_event VALUES (\(quote(fixture.receiptID)), \(quote(fixture.eventID)));
+      """)
+    for semantic in CanonicalEventSourceSemantic.allCases {
+      let field = fixture.field(semantic)
+      try execute(
+        database,
+        """
+        INSERT INTO event_source_binding VALUES (\(quote(fixture.eventID)),
+          \(quote(semantic.rawValue)), \(quote(field.id(in: fixture))), 'TEXT', 'text');
+        INSERT INTO receipt_binding VALUES (\(quote(fixture.receiptID)),
+          \(quote(fixture.eventID)), \(quote(semantic.rawValue)),
+          \(quote(field.id(in: fixture))));
+        """)
+    }
+    for field in fixture.transaction.fields {
+      let id = field.id(in: fixture)
+      try execute(
+        database,
+        """
+        INSERT INTO sidecar_reference VALUES (\(quote(id)), \(quote(fixture.eventID)),
+          \(quote(id)), 1, 'TEXT', 'text', X'\(hex(field.payload))');
+        INSERT INTO receipt_sidecar VALUES (\(quote(fixture.receiptID)), \(quote(id)),
+          \(quote(fixture.eventID)), \(quote(id)));
+        """)
+    }
+    for anchor in try fixture.anchors() {
+      try execute(
+        database,
+        """
+        INSERT INTO receipt_preservation_anchor VALUES (\(quote(anchor.anchorID)),
+          \(quote(fixture.receiptID)), \(quote(anchor.sourceSubjectID)),
+          \(quote(anchor.subjectKind.rawValue)), \(quote(fixture.artifactSHA256)),
+          \(quote(fixture.profileID)), \(quote(fixture.adapterVersion)), NULL,
+          \(quote(anchor.sourceTable)), \(anchor.sourceRecordKey.map(quote) ?? "NULL"));
+        """)
+    }
+    for payload in try fixture.payloads() {
+      let field = payload.field
+      let fieldID = field.id(in: fixture)
+      try execute(
+        database,
+        """
+        INSERT INTO receipt_preservation_payload VALUES (\(quote(payload.payloadID)),
+          \(quote(fixture.receiptID)), \(quote(payload.anchorID)), \(quote(fieldID)),
+          \(quote(fieldID)), 1, 'TEXT', 'text', X'\(hex(field.payload))');
+        """)
+    }
+    for membership in try fixture.memberships() {
+      try execute(
+        database,
+        """
+        INSERT INTO receipt_preservation_membership VALUES (\(quote(fixture.receiptID)),
+          \(quote(membership.sourceSubjectID)), \(quote(membership.subjectKind)),
+          \(quote(membership.anchorID)), \(quote(membership.anchorSubjectID)),
+          \(quote(membership.anchorSubjectKind)), \(membership.payloadID.map(quote) ?? "NULL"));
+        """)
+    }
+    let revisionID = try StableLedgerID.revision(transactionID: fixture.eventID, revision: 1)
+    let importedOrigin = String(repeating: "e", count: 64)
+    try execute(
+      database,
+      """
+      BEGIN IMMEDIATE;
+      INSERT INTO ledger_origin VALUES (\(quote(importedOrigin)), 'imported', NULL);
+      INSERT INTO ledger_account VALUES (\(quote(fixture.accountID)), 'synthetic-account',
+        'USD', \(quote(importedOrigin)), 'active');
+      INSERT INTO ledger_transaction VALUES (\(quote(fixture.eventID)), \(quote(revisionID)));
+      INSERT INTO ledger_transaction_revision VALUES (\(quote(revisionID)),
+        \(quote(fixture.eventID)), 1, NULL, NULL, 'expense', 1738540800000,
+        2025, 2, 3, 0, 0, 0, 0, 'fixed', '0', 'millisecond', 0, NULL, NULL,
+        \(quote(importedOrigin)), 'active', 1738540800000);
+      INSERT INTO ledger_transaction_effect VALUES (\(quote(revisionID)),
+        \(quote(fixture.accountID)), 'decrease', '12.30', 'USD');
+      INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), 0,
+        'import.eventID', \(quote(fixture.eventID)), NULL);
+      COMMIT;
+      """)
+    if includeCommitment {
+      try execute(
+        database,
+        "INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), 1, 'import.v19Commitment', \(quote(v19TemporalCommitment())), NULL);"
+      )
+    }
+    try execute(
+      database,
+      "INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), \(includeCommitment ? 2 : 1), '\(MoneyManagerV19Semantics.receiptGenerationField)', '\(includeCommitment ? MoneyManagerV19Semantics.currentReceiptGenerationLiteral : MoneyManagerV19Semantics.legacyReceiptGenerationLiteral)', NULL);"
+    )
+    if includeCommitment {
+      try execute(
+        database,
+        "INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), 3, '\(MoneyManagerV19Semantics.temporalAnchorField)', \(quote(v19TemporalCommitment())), NULL);"
+      )
+    }
+  }
+  guard chmod(url.path, mode_t(S_IRUSR | S_IWUSR)) == 0 else { throw ReplayError.sqlite }
+}
+
+private func mutateAndRehash(
+  at url: URL, fixture: V19Fixture, sql: String, overrides: V19DigestOverrides = .init(),
+  generation: MoneyManagerV19Semantics.ReceiptGeneration = .current
+) throws {
+  let eventSetHash = fixture.eventSetHash(overrides)
+  let reconciliationHash = try fixture.reconciliationHash(
+    eventSetHash: eventSetHash, preservationHash: fixture.preservationHash(overrides),
+    generation: generation)
+  try withSQLite(url) { database in
+    try execute(
+      database,
+      """
+      BEGIN IMMEDIATE;
+      \(sql)
+      UPDATE import_receipt SET event_set_hash=\(quote(eventSetHash)),
+        reconciliation_hash=\(quote(reconciliationHash))
+        WHERE idempotency_key=\(quote(fixture.receiptID));
+      COMMIT;
+      """)
+  }
+}
+
+private func removeEventAndRehash(at url: URL, fixture: V19Fixture) throws {
+  let emptyEventSet = CanonicalReceiptDigest.hash([CanonicalReceiptDigest.eventSetPrefix])
+  let integrity = try fixture.reconciliationHash(
+    eventSetHash: emptyEventSet, preservationHash: fixture.preservationHash(), eventCount: 0)
+  try withSQLite(url) { database in
+    try execute(
+      database,
+      """
+      BEGIN IMMEDIATE;
+      DELETE FROM receipt_binding WHERE idempotency_key=\(quote(fixture.receiptID));
+      DELETE FROM receipt_sidecar WHERE idempotency_key=\(quote(fixture.receiptID));
+      DELETE FROM sidecar_reference WHERE event_id=\(quote(fixture.eventID));
+      DELETE FROM event_source_binding WHERE event_id=\(quote(fixture.eventID));
+      DELETE FROM receipt_event WHERE idempotency_key=\(quote(fixture.receiptID));
+      DELETE FROM economic_event WHERE event_id=\(quote(fixture.eventID));
+      DELETE FROM provenance_reference
+        WHERE source_table='INOUTCOME' AND source_column_name<>'NOTE';
+      UPDATE import_receipt SET event_count=0, event_set_hash=\(quote(emptyEventSet)),
+        reconciliation_hash=\(quote(integrity))
+        WHERE idempotency_key=\(quote(fixture.receiptID));
+      COMMIT;
+      """)
+  }
+}
+
+private func rekeyEventID(at url: URL, from old: String, to new: String) throws {
+  try withSQLite(url) { database in
+    try execute(
+      database,
+      """
+      PRAGMA foreign_keys=OFF;
+      BEGIN IMMEDIATE;
+      UPDATE economic_event SET event_id=\(quote(new)) WHERE event_id=\(quote(old));
+      UPDATE event_source_binding SET event_id=\(quote(new)) WHERE event_id=\(quote(old));
+      UPDATE sidecar_reference SET event_id=\(quote(new)) WHERE event_id=\(quote(old));
+      UPDATE receipt_event SET event_id=\(quote(new)) WHERE event_id=\(quote(old));
+      UPDATE receipt_binding SET event_id=\(quote(new)) WHERE event_id=\(quote(old));
+      UPDATE receipt_sidecar SET event_id=\(quote(new)) WHERE event_id=\(quote(old));
+      COMMIT;
+      PRAGMA foreign_keys=ON;
+      """)
+  }
+}
+
+private func rekeyPersistedGraph(at url: URL, from old: V19Fixture, to new: V19Fixture) throws {
+  var ids: [String: String] = [
+    old.receiptID: new.receiptID, old.eventID: new.eventID,
+    old.transaction.id(in: old): new.transaction.id(in: new),
+  ]
+  for table in old.receiptOwnedTables {
+    ids[CanonicalStagingID.table(stagingID: old.receiptID, table: table)] =
+      CanonicalStagingID.table(stagingID: new.receiptID, table: table)
+  }
+  let oldFields = old.allFields()
+  let newFields = new.allFields()
+  for oldField in oldFields {
+    let newField = newFields.first {
+      $0.table == oldField.table && $0.recordKey == oldField.recordKey
+        && $0.ordinal == oldField.ordinal && $0.name == oldField.name
+    }!
+    ids[oldField.id(in: old)] = newField.id(in: new)
+  }
+  for oldRecord in old.receiptOwnedRecords {
+    let newRecord = new.receiptOwnedRecords.first {
+      $0.table == oldRecord.table && $0.recordKey == oldRecord.recordKey
+    }!
+    ids[oldRecord.id(in: old)] = newRecord.id(in: new)
+  }
+  let oldAnchors = try old.anchors()
+  let newAnchors = try new.anchors()
+  for oldAnchor in oldAnchors {
+    let newAnchor = newAnchors.first {
+      $0.sourceTable == oldAnchor.sourceTable && $0.sourceRecordKey == oldAnchor.sourceRecordKey
+        && $0.subjectKind == oldAnchor.subjectKind
+    }!
+    ids[oldAnchor.anchorID] = newAnchor.anchorID
+    ids[oldAnchor.sourceSubjectID] = newAnchor.sourceSubjectID
+  }
+  let oldPayloads = try old.payloads()
+  let newPayloads = try new.payloads()
+  for oldPayload in oldPayloads {
+    let newPayload = newPayloads.first {
+      $0.field.table == oldPayload.field.table && $0.field.recordKey == oldPayload.field.recordKey
+        && $0.field.ordinal == oldPayload.field.ordinal && $0.field.name == oldPayload.field.name
+    }!
+    ids[oldPayload.payloadID] = newPayload.payloadID
+  }
+
+  try withSQLite(url) { database in
+    try execute(
+      database, "PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON; BEGIN IMMEDIATE;")
+    try remap(database, table: "provenance_reference", column: "provenance_id", ids)
+    try execute(
+      database, "UPDATE provenance_reference SET adapter_version=\(quote(new.adapterVersion));")
+    try remap(database, table: "economic_event", column: "event_id", ids)
+    try remap(database, table: "economic_event", column: "source_record_id", ids)
+    try remap(database, table: "economic_event", column: "provenance_id", ids)
+    try remap(database, table: "event_source_binding", column: "event_id", ids)
+    try remap(database, table: "event_source_binding", column: "provenance_id", ids)
+    try remap(database, table: "sidecar_reference", column: "sidecar_id", ids)
+    try remap(database, table: "sidecar_reference", column: "event_id", ids)
+    try remap(database, table: "sidecar_reference", column: "provenance_id", ids)
+    try remap(database, table: "import_receipt", column: "idempotency_key", ids)
+    try execute(
+      database,
+      "UPDATE import_receipt SET staging_digest=\(quote(new.stagingDigest)), adapter_version=\(quote(new.adapterVersion));"
+    )
+    try remap(database, table: "receipt_event", column: "idempotency_key", ids)
+    try remap(database, table: "receipt_event", column: "event_id", ids)
+    try remap(database, table: "receipt_binding", column: "idempotency_key", ids)
+    try remap(database, table: "receipt_binding", column: "event_id", ids)
+    try remap(database, table: "receipt_binding", column: "provenance_id", ids)
+    try remap(database, table: "receipt_sidecar", column: "idempotency_key", ids)
+    try remap(database, table: "receipt_sidecar", column: "sidecar_id", ids)
+    try remap(database, table: "receipt_sidecar", column: "event_id", ids)
+    try remap(database, table: "receipt_sidecar", column: "provenance_id", ids)
+    try remap(database, table: "receipt_preservation_anchor", column: "anchor_id", ids)
+    try remap(database, table: "receipt_preservation_anchor", column: "idempotency_key", ids)
+    try remap(database, table: "receipt_preservation_anchor", column: "source_subject_id", ids)
+    try execute(
+      database,
+      "UPDATE receipt_preservation_anchor SET adapter_version=\(quote(new.adapterVersion));")
+    try remap(database, table: "receipt_preservation_payload", column: "payload_id", ids)
+    try remap(database, table: "receipt_preservation_payload", column: "idempotency_key", ids)
+    try remap(database, table: "receipt_preservation_payload", column: "anchor_id", ids)
+    try remap(database, table: "receipt_preservation_payload", column: "source_subject_id", ids)
+    try remap(database, table: "receipt_preservation_payload", column: "provenance_id", ids)
+    try remap(database, table: "receipt_preservation_membership", column: "idempotency_key", ids)
+    try remap(database, table: "receipt_preservation_membership", column: "source_subject_id", ids)
+    try remap(database, table: "receipt_preservation_membership", column: "anchor_id", ids)
+    try remap(database, table: "receipt_preservation_membership", column: "anchor_subject_id", ids)
+    try remap(database, table: "receipt_preservation_membership", column: "payload_id", ids)
+    try execute(database, "COMMIT; PRAGMA ignore_check_constraints=OFF;")
+  }
+}
+
+private func assertRejectedWithoutMutation(at url: URL) throws {
+  let before = try Data(contentsOf: url)
+  do {
+    let inspection = try LedgerStoreLifecycle.inspect(at: url)
+    #expect(inspection == .upgradeRequired)
+  } catch LedgerStoreLifecycle.Error.invalidStore {
+  }
+  #expect(try Data(contentsOf: url) == before)
+  do {
+    _ = try LedgerStoreLifecycle.open(at: url)
+    Issue.record("expected lifecycle rejection")
+  } catch LedgerStoreLifecycle.Error.invalidStore {
+  } catch LedgerStoreLifecycle.Error.unsupportedStore {
+  }
+  #expect(try Data(contentsOf: url) == before)
+}
+
+private func readReceiptEventCount(at url: URL, receipt: String) throws -> Int {
+  try withSQLite(url) { database in
+    var statement: OpaquePointer?
+    guard
+      sqlite3_prepare_v2(
+        database, "SELECT count(*) FROM receipt_event WHERE idempotency_key='\(receipt)'", -1,
+        &statement, nil) == SQLITE_OK, let statement
+    else { throw ReplayError.sqlite }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else { throw ReplayError.sqlite }
+    return Int(sqlite3_column_int64(statement, 0))
+  }
+}
+
+private func remap(
+  _ database: OpaquePointer, table: String, column: String, _ ids: [String: String]
+) throws {
+  let cases = ids.map { "WHEN \(quote($0.key)) THEN \(quote($0.value))" }.joined(separator: " ")
+  try execute(database, "UPDATE \(table) SET \(column)=CASE \(column) \(cases) ELSE \(column) END;")
+}
+
+private func withSQLite<T>(_ url: URL, _ body: (OpaquePointer) throws -> T) throws -> T {
+  var database: OpaquePointer?
+  guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+    throw ReplayError.sqlite
+  }
+  defer { sqlite3_close(database) }
+  return try body(database)
+}
+
+private func execute(_ database: OpaquePointer, _ sql: String) throws {
+  guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+    throw ReplayError.statement(String(cString: sqlite3_errmsg(database)))
+  }
+}
+
+private func quote(_ value: String) -> String {
+  "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+}
+
+private func hex(_ data: Data) -> String {
+  data.map { String(format: "%02x", $0) }.joined()
+}
+
+private func v19TemporalCommitment() -> String {
+  CanonicalReceiptDigest.hash([
+    "ledger-atlas/money-manager-v19-source-temporal/v1", "fixed", "0", "1738540800000",
+    "0",
+  ])
+}
+
+private func v19ChangedTemporalCommitment() -> String {
+  CanonicalReceiptDigest.hash([
+    "ledger-atlas/money-manager-v19-source-temporal/v1", "fixed", "3600", "1738537200000",
+    "3600",
+  ])
+}
+
+private enum ReplayError: Error {
+  case sqlite
+  case statement(String)
+}

@@ -1,0 +1,1 @@
+Light theme through asset-catalog appearance variants with a settings override; reminders scheduled only through user-granted UNUserNotificationCenter authorization; a widget-class surface on macOS where the system supports widgets; every new surface exposes VoiceOver row navigation rather than monolithic text blobs.

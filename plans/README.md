@@ -31,3 +31,20 @@ User was not available to choose findings; plans were written for the top 5 by l
 - **Missing CONTEXT.md**: Documented as optional per `docs/agents/domain.md` — created lazily via `/domain-modeling`, not a defect.
 - **Upgrade Next.js for PostCSS advisory**: Transitive dependency via Next 15; fix requires major version bump (`next@16`). Worth a separate migration plan once CI exists; not selected for this batch.
 - **Duplicate Transaction type in page.tsx**: Real but low leverage alone; subsumed by architecture deepening of Ledger UI module (see `/tmp/architecture-review-20260829-143906.html`).
+
+## Historical native-track plans
+
+The following plans came from the earlier macOS-first implementation and are
+retained as historical evidence. They are superseded; their old commit-gate and
+manifest-lock instructions do not control current work. Current native scope
+comes from `prd.json`, GitHub issues, `AGENTS.md`, and
+`docs/orchestration/RUNBOOK.md`.
+
+| Plan | Title | Status |
+|---|---|---|
+| 001 | Add receipt-owned source preservation | SUPERSEDED |
+| 002 | Establish a pending real Android v19 certification cell | SUPERSEDED |
+| 003 | Repair default-off autonomous admission | REMOVED |
+
+Neither historical plan certifies transfers, type 7, historical/iOS formats,
+attachments, or original-app round trips.

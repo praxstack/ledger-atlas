@@ -1,0 +1,1 @@
+Canonical store v11 migration machinery exists: frozen legacy fingerprints, explicit ALTER statement arrays executed by ensureSchema, and an upgrade test from a pinned v10 fixture; command-layer typed error cases replace the incompatibleCanonicalStore collapse; export packages carry an independent format version whose decode accepts older packages.

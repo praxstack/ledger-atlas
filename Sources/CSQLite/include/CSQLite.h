@@ -1,0 +1,27 @@
+#ifndef CSQLITE_H
+#define CSQLITE_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <sqlite3.h>
+
+int csqlite_inflate_raw(
+    const uint8_t *source,
+    size_t source_length,
+    uint8_t *destination,
+    size_t destination_length
+);
+uint32_t csqlite_crc32(const uint8_t *source, size_t source_length);
+
+int csqlite_open_pinned_rw(
+    const char *canonical_path,
+    int authenticated_fd,
+    int parent_directory_fd,
+    int authenticated_journal_fd,
+    const char *leaf_name,
+    sqlite3 **database_out,
+    void **registration_out
+);
+int csqlite_close_pinned(sqlite3 *database, void *registration);
+
+#endif

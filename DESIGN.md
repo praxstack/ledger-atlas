@@ -28,6 +28,7 @@ The first client is a native macOS application. Vendor formats remain at the imp
 3. A reviewer can understand import loss, preservation, timezone, and destination before approval.
 4. Money, dates, provenance, warnings, and empty states remain unambiguous at every window size.
 5. VoiceOver, Full Keyboard Access, Reduce Motion, increased contrast, and text scaling remain first-class.
+6. The visual identity is recognizable without copying Money Manager branding, proprietary assets, or pixel layouts.
 
 ## 2. Visual thesis
 
@@ -294,6 +295,7 @@ Every production surface must define:
 
 Never use:
 
+- A pixel-for-pixel Money Manager clone, its branding, or proprietary assets.
 - Purple/blue neon gradients, glowing buttons, glassmorphism everywhere, or pure black.
 - A dashboard composed of equal rounded statistic cards.
 - Huge marketing typography inside the working app.
