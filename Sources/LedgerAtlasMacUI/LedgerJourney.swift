@@ -441,6 +441,26 @@ public final class LedgerJourney {
     }
   }
 
+  public func exportPortablePackage(to destination: URL) throws {
+    guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let exported = try exportPackage()
+    let data = try LedgerPortablePackageFile.encode(
+      manifest: exported.manifest, payload: exported.payload)
+    let temporary = destination.deletingLastPathComponent().appendingPathComponent(
+      ".ledger-package-\(UUID().uuidString).tmp", isDirectory: false)
+    do {
+      try data.write(to: temporary, options: .atomic)
+      try FileManager.default.setAttributes(
+        [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: temporary.path)
+      try FileManager.default.moveItem(at: temporary, to: destination)
+    } catch {
+      try? FileManager.default.removeItem(at: temporary)
+      throw LedgerApplication.Error.invalidCommand
+    }
+  }
+
   public func restoreCanonicalBackup(from source: URL, to destination: URL) throws {
     guard source.standardizedFileURL != destination.standardizedFileURL else {
       throw LedgerApplication.Error.invalidCommand
@@ -451,6 +471,33 @@ public final class LedgerJourney {
     let sourceStore = try LedgerStore.openReadOnly(at: source)
     try sourceStore.backupCanonicalDatabase(to: destination)
     openLedger(destination)
+  }
+
+  public func restorePortablePackage(from source: URL, to destination: URL) throws {
+    guard source.isFileURL, destination.isFileURL,
+      source.standardizedFileURL != destination.standardizedFileURL,
+      !FileManager.default.fileExists(atPath: destination.path)
+    else { throw LedgerApplication.Error.invalidCommand }
+    let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+    guard values.isRegularFile == true, values.isSymbolicLink != true else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data: Data
+    do { data = try Data(contentsOf: source, options: .mappedIfSafe) }
+    catch { throw LedgerApplication.Error.invalidCommand }
+    let package: (manifest: LedgerExportManifest, payload: Data)
+    do { package = try LedgerPortablePackageFile.decode(data) }
+    catch { throw LedgerApplication.Error.invalidCommand }
+    let created = try LedgerStoreLifecycle.create(at: destination)
+    do {
+      let application = LedgerApplication(store: created.store)
+      try application.importPackage(manifest: package.manifest, payload: package.payload)
+      let snapshot = try created.store.readSnapshot()
+      adoptValidatedLedger(created.store, snapshot: snapshot, at: destination)
+    } catch {
+      _ = LedgerStoreLifecycle.discardCreated(created, at: destination)
+      throw LedgerApplication.Error.invalidCommand
+    }
   }
 
   public func createTransaction(

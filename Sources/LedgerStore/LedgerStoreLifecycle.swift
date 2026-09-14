@@ -21,6 +21,21 @@ public enum LedgerStoreLifecycle {
     public let store: LedgerStore
     public let disposition: Disposition
     public let recoveryImageURL: URL?
+    package let createdIdentity: FileIdentity?
+  }
+
+  package struct FileIdentity: Sendable, Equatable {
+    let device: UInt64
+    let inode: UInt64
+
+    init(_ value: stat) {
+      device = UInt64(value.st_dev)
+      inode = UInt64(value.st_ino)
+    }
+
+    func matches(_ value: stat) -> Bool {
+      device == UInt64(value.st_dev) && inode == UInt64(value.st_ino)
+    }
   }
 
   public enum Error: Swift.Error, Equatable, Sendable {
@@ -181,7 +196,9 @@ public enum LedgerStoreLifecycle {
       throw Error.publicationCompleted(
         phase: .currentPublished, recoveryImageExists: false)
     }
-    return Result(store: store, disposition: .created, recoveryImageURL: nil)
+    return Result(
+      store: store, disposition: .created, recoveryImageURL: nil,
+      createdIdentity: FileIdentity(publishedIdentity))
   }
 
   /// Publish from the already-authenticated descriptor. A pathname can be replaced after the
@@ -288,7 +305,9 @@ public enum LedgerStoreLifecycle {
       try lease.requireBound(destination)
       try requireInspectableCompanions(at: url, databaseDescriptor: source.descriptor)
       try requirePath(url, matches: source.identity)
-      return Result(store: store, disposition: .opened, recoveryImageURL: recovered?.url)
+      return Result(
+        store: store, disposition: .opened, recoveryImageURL: recovered?.url,
+        createdIdentity: nil)
     case .upgradeRequired:
       try invoke(hook, .afterSourceAuthenticated)
       try requirePath(url, matches: source.identity)
@@ -806,7 +825,30 @@ public enum LedgerStoreLifecycle {
           leaf: recoveryLeaf, parentDescriptor: destination.parentDescriptor,
           expectedDigest: recovery.contentDigest, expectedIdentity: recovery.identity))
     }
-    return Result(store: store, disposition: .upgraded, recoveryImageURL: recoveryURL)
+    return Result(
+      store: store, disposition: .upgraded, recoveryImageURL: recoveryURL,
+      createdIdentity: nil)
+  }
+
+  /// Removes only a just-created destination whose inode is still the one published by `create`.
+  /// A path replacement or unsafe file is left untouched.
+  package static func discardCreated(_ result: Result, at url: URL) -> Bool {
+    guard result.disposition == .created, let expected = result.createdIdentity,
+      let destination = try? Destination(url)
+    else { return false }
+    defer { Darwin.close(destination.parentDescriptor) }
+    guard let lease = try? LifecycleLease(destination) else { return false }
+    defer { lease.release() }
+    guard (try? lease.requireBound(destination)) != nil else { return false }
+    var current = stat()
+    guard
+      fstatat(destination.parentDescriptor, destination.leaf, &current, AT_SYMLINK_NOFOLLOW) == 0,
+      safeFile(current), expected.matches(current),
+      (try? lease.requireBound(destination)) != nil,
+      unlinkat(destination.parentDescriptor, destination.leaf, 0) == 0,
+      fsync(destination.parentDescriptor) == 0
+    else { return false }
+    return true
   }
 
   private struct UpgradeState: Codable {

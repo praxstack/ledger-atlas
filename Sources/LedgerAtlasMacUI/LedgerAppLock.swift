@@ -10,9 +10,10 @@ public final class LedgerAppLock {
   public enum Error: Swift.Error, Equatable, Sendable {
     case invalidPasscode
     case storageFailure
+    case authenticationRequired
   }
 
-  public typealias Reader = @MainActor (String) -> Data?
+  public typealias Reader = @MainActor (String) throws -> Data?
   public typealias Writer = @MainActor (String, Data?) throws -> Void
 
   private struct PersistedState: Codable {
@@ -25,56 +26,71 @@ public final class LedgerAppLock {
   private static let stateAccount = "lock-state"
   private static let service = "com.praxstack.ledgeratlas.app-lock.v1"
 
-  private let read: Reader
+  private let now: @MainActor () -> Date
+  private let authenticate: @MainActor () async -> Bool
   private let write: Writer
   private var digest: Data?
   public private(set) var failedAttempts = 0
   public private(set) var lockedUntil: Date?
   public private(set) var isLocked = false
+  public private(set) var storageUnavailable = false
 
   public init(
     reader: Reader? = nil,
-    writer: Writer? = nil
+    writer: Writer? = nil,
+    now: @escaping @MainActor () -> Date = { .now },
+    authenticate: (@MainActor () async -> Bool)? = nil
   ) {
     let reader = reader ?? Self.readKeychain
-    let writer = writer ?? Self.writeKeychain
-    read = reader
-    write = writer
-    digest = reader(Self.digestAccount)
-    if let data = reader(Self.stateAccount),
-      let state = try? JSONDecoder().decode(PersistedState.self, from: data)
-    {
-      failedAttempts = max(0, state.failedAttempts)
-      lockedUntil = state.lockedUntil
+    write = writer ?? Self.writeKeychain
+    self.now = now
+    self.authenticate = authenticate ?? Self.authenticateWithBiometrics
+    do {
+      digest = try reader(Self.digestAccount)
       isLocked = digest != nil
+      if let digest, digest.count != 32 { throw Error.storageFailure }
+      if let data = try reader(Self.stateAccount),
+        let state = try? JSONDecoder().decode(PersistedState.self, from: data)
+      {
+        failedAttempts = min(10, max(0, state.failedAttempts))
+        lockedUntil = state.lockedUntil
+      }
+    } catch {
+      isLocked = true
+      storageUnavailable = true
     }
   }
 
   public var hasPasscode: Bool { digest != nil }
 
   public func setPasscode(_ passcode: String) throws {
+    guard !isLocked else { throw Error.authenticationRequired }
     guard Self.validPasscode(passcode) else { throw Error.invalidPasscode }
+    let newDigest = Self.digest(for: passcode)
     do {
-      try write(Self.digestAccount, Self.digest(for: passcode))
-      digest = Self.digest(for: passcode)
-      failedAttempts = 0
-      lockedUntil = nil
-      isLocked = false
-      try persistState()
+      // Publish the credential last: an interrupted change retains the old passcode.
+      try write(Self.stateAccount, JSONEncoder().encode(PersistedState()))
+      try write(Self.digestAccount, newDigest)
+      digest = newDigest
+      apply(PersistedState())
     } catch {
+      isLocked = true
+      storageUnavailable = true
       throw Error.storageFailure
     }
   }
 
   public func removePasscode() throws {
+    guard !isLocked else { throw Error.authenticationRequired }
     do {
-      try write(Self.digestAccount, nil)
+      // If deletion stops halfway, the retained digest still locks on restart.
       try write(Self.stateAccount, nil)
+      try write(Self.digestAccount, nil)
       digest = nil
-      failedAttempts = 0
-      lockedUntil = nil
-      isLocked = false
+      apply(PersistedState())
     } catch {
+      isLocked = true
+      storageUnavailable = true
       throw Error.storageFailure
     }
   }
@@ -82,27 +98,65 @@ public final class LedgerAppLock {
   public func lock() {
     guard digest != nil else { return }
     isLocked = true
-    try? persistState()
+    guard !storageUnavailable else { return }
+    _ = save(PersistedState(
+      failedAttempts: failedAttempts, lockedUntil: lockedUntil, locked: true))
   }
 
   public func unlock(with passcode: String) -> Bool {
-    guard digest != nil, !isLockoutActive else { return false }
+    guard digest != nil, !storageUnavailable, !isLockoutActive else { return false }
     guard Self.digest(for: passcode) == digest else {
-      failedAttempts += 1
+      failedAttempts = min(10, failedAttempts + 1)
       if failedAttempts >= 10 {
-        lockedUntil = Date().addingTimeInterval(15 * 60)
+        lockedUntil = now().addingTimeInterval(15 * 60)
       } else if failedAttempts >= 5 {
-        lockedUntil = Date().addingTimeInterval(60)
+        lockedUntil = now().addingTimeInterval(60)
       }
-      try? persistState()
+      isLocked = true
+      _ = save(PersistedState(
+        failedAttempts: failedAttempts, lockedUntil: lockedUntil, locked: true))
       return false
     }
-    markUnlocked()
-    return true
+    return save(PersistedState())
   }
 
   public func unlockWithBiometrics() async -> Bool {
-    guard digest != nil, !isLockoutActive else { return false }
+    guard digest != nil, !storageUnavailable, !isLockoutActive else { return false }
+    guard await authenticate(), digest != nil, !storageUnavailable, !isLockoutActive else { return false }
+    return save(PersistedState())
+  }
+
+  public var lockoutMessage: String? {
+    guard let lockedUntil else { return nil }
+    let remaining = max(0, Int(lockedUntil.timeIntervalSince(now()).rounded(.up)))
+    guard remaining > 0 else { return nil }
+    return "Too many attempts. Try again in \(remaining) seconds."
+  }
+
+  private var isLockoutActive: Bool {
+    lockedUntil.map { $0 > now() } ?? false
+  }
+
+  private func save(_ state: PersistedState) -> Bool {
+    do {
+      try write(Self.stateAccount, JSONEncoder().encode(state))
+      apply(state)
+      return true
+    } catch {
+      isLocked = true
+      storageUnavailable = true
+      return false
+    }
+  }
+
+  private func apply(_ state: PersistedState) {
+    isLocked = state.locked
+    failedAttempts = state.failedAttempts
+    lockedUntil = state.lockedUntil
+    storageUnavailable = false
+  }
+
+  private static func authenticateWithBiometrics() async -> Bool {
     let context = LAContext()
     var error: NSError?
     guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
@@ -111,41 +165,10 @@ public final class LedgerAppLock {
     do {
       try await context.evaluatePolicy(
         .deviceOwnerAuthenticationWithBiometrics, localizedReason: "Unlock Ledger Atlas")
-      markUnlocked()
       return true
     } catch {
       return false
     }
-  }
-
-  public var lockoutMessage: String? {
-    guard let lockedUntil else { return nil }
-    let remaining = max(0, Int(lockedUntil.timeIntervalSinceNow.rounded(.up)))
-    guard remaining > 0 else { return nil }
-    return "Too many attempts. Try again in \(remaining) seconds."
-  }
-
-  private var isLockoutActive: Bool {
-    guard let lockedUntil else { return false }
-    if lockedUntil <= .now {
-      self.lockedUntil = nil
-      try? persistState()
-      return false
-    }
-    return true
-  }
-
-  private func markUnlocked() {
-    isLocked = false
-    failedAttempts = 0
-    lockedUntil = nil
-    try? persistState()
-  }
-
-  private func persistState() throws {
-    let state = PersistedState(
-      failedAttempts: failedAttempts, lockedUntil: lockedUntil, locked: isLocked)
-    try write(Self.stateAccount, JSONEncoder().encode(state))
   }
 
   private static func validPasscode(_ passcode: String) -> Bool {
@@ -157,7 +180,7 @@ public final class LedgerAppLock {
     Data(SHA256.hash(data: Data(passcode.utf8)))
   }
 
-  private static func readKeychain(_ account: String) -> Data? {
+  private static func readKeychain(_ account: String) throws -> Data? {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -166,8 +189,10 @@ public final class LedgerAppLock {
       kSecMatchLimit as String: kSecMatchLimitOne,
     ]
     var item: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
-    return item as? Data
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecItemNotFound { return nil }
+    guard status == errSecSuccess, let data = item as? Data else { throw Error.storageFailure }
+    return data
   }
 
   private static func writeKeychain(_ account: String, _ data: Data?) throws {

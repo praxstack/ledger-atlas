@@ -368,11 +368,12 @@ public struct LedgerApplication: LedgerClient {
     _ rule: LedgerRecurrenceRule, through end: SourceLocalDate, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision] {
     guard !rule.paused, rule.lifecycle == .active else { return [] }
-    var created: [LedgerTransactionRevision] = []
+    var requests: [LedgerStore.CreateTransactionRequest] = []
     var cursor = rule.start
     var index = 0
     while !cursor.isAfter(end) {
       if let until = rule.until, cursor.isAfter(until) { break }
+      guard index < 366 else { throw Error.invalidCommand }
       if !rule.skippedDates.contains(cursor) {
         let occurred = try SourceTemporal(
           resolving: SourceLocalDateTime(date: cursor), in: rule.timeZone, precision: .day)
@@ -387,25 +388,14 @@ public struct LedgerApplication: LedgerClient {
         let key = SHA256.hash(
           data: Data("recurrence:\(rule.id):\(cursor.year)-\(cursor.month)-\(cursor.day)".utf8)
         ).map { String(format: "%02x", $0) }.joined()
-        let revision = try createTransaction(
-          idempotencyKey: key, draft: draft, createdAt: createdAt)
-        created.append(revision)
-        if created.count > 1 {
-          try store.persistLink(
-            LedgerTransactionLink(
-              id: StableLedgerID.link(
-                fromTransactionID: created[0].transactionID,
-                toTransactionID: revision.transactionID, kind: .recurring),
-              fromTransactionID: created[0].transactionID,
-              toTransactionID: revision.transactionID, kind: .recurring))
-        }
+        requests.append(.init(idempotencyKey: key, draft: draft, createdAt: createdAt))
       }
       cursor = try advance(
         cursor, frequency: rule.frequency, interval: rule.interval, dayOfMonth: rule.dayOfMonth)
       index += 1
-      if index > 366 { break }
     }
-    return created
+    guard !requests.isEmpty else { return [] }
+    return try store.createLinkedTransactions(requests, linkKind: .recurring).map(\.revision)
   }
 
   public func createBudget(_ budget: LedgerBudget) throws {

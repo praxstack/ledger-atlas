@@ -96,9 +96,9 @@ public struct LedgerAtlasRootView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
   @State private var session = LedgerSession()
-  @State private var appLock = LedgerAppLock()
+  @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
-  @State private var productSettings = LedgerProductSettings.load()
+  @State private var productSettings: LedgerProductSettings
   @State private var pendingIntent: LedgerIntentRequest?
   @State private var isChoosingImportSource = false
   @State private var lifecycleMessage: String?
@@ -106,7 +106,8 @@ public struct LedgerAtlasRootView: View {
   @State private var lifecycleGeneration = 0
   @State private var lifecycleTask: Task<Void, Never>?
   @State private var sourceTimeZoneIdentifier = ""
-  private let bookmarkStore = SecurityScopedBookmarkStore()
+  private let bookmarkStore: SecurityScopedBookmarkStore
+  private let intentConsumer: () -> LedgerIntentRequest?
   private let widgetProjectionPublisher: RedactedWidgetProjectionPublisher?
   private let importReviewSummary: ImportReviewSummary
 
@@ -114,12 +115,32 @@ public struct LedgerAtlasRootView: View {
     initialSelection: AppDestination = .defaultSelection,
     importReviewSummary: ImportReviewSummary? = nil
   ) {
+    self.init(
+      initialSelection: initialSelection, importReviewSummary: importReviewSummary,
+      appLock: LedgerAppLock(), productSettings: .load(),
+      bookmarkStore: SecurityScopedBookmarkStore(),
+      widgetProjectionPublisher: FileManager.default.containerURL(
+        forSecurityApplicationGroupIdentifier: RedactedWidgetProjectionStore.appGroupIdentifier
+      ).map { RedactedWidgetProjectionPublisher(store: .init(containerURL: $0)) },
+      intentConsumer: { LedgerIntentBridge.consume() })
+  }
+
+  package init(
+    initialSelection: AppDestination = .defaultSelection,
+    importReviewSummary: ImportReviewSummary? = nil,
+    appLock: LedgerAppLock,
+    productSettings: LedgerProductSettings,
+    bookmarkStore: SecurityScopedBookmarkStore,
+    widgetProjectionPublisher: RedactedWidgetProjectionPublisher? = nil,
+    intentConsumer: @escaping () -> LedgerIntentRequest? = { nil }
+  ) {
     _selection = State(initialValue: initialSelection)
+    _appLock = State(initialValue: appLock)
+    _productSettings = State(initialValue: productSettings)
     self.importReviewSummary = importReviewSummary ?? .awaitingSyntheticMetadata
-    widgetProjectionPublisher = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: RedactedWidgetProjectionStore.appGroupIdentifier
-    )
-    .map { RedactedWidgetProjectionPublisher(store: .init(containerURL: $0)) }
+    self.bookmarkStore = bookmarkStore
+    self.widgetProjectionPublisher = widgetProjectionPublisher
+    self.intentConsumer = intentConsumer
   }
 
   public var body: some View {
@@ -133,7 +154,7 @@ public struct LedgerAtlasRootView: View {
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     } detail: {
-      if appLock.isLocked && selection != .settings {
+      if appLock.isLocked {
         LockedSurface(
           lock: appLock,
           unlock: { appLock.unlock(with: $0) },
@@ -153,17 +174,19 @@ public struct LedgerAtlasRootView: View {
           .accessibilityLabel(Self.createLedgerActionLabel)
           .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
           .keyboardShortcut("n", modifiers: [.command, .shift])
+          .disabled(appLock.isLocked)
         Button("Open Ledger…", action: openLedger)
           .accessibilityLabel(Self.openLedgerActionLabel)
           .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
           .keyboardShortcut("o", modifiers: .command)
+          .disabled(appLock.isLocked)
       }
     }
     .fileImporter(
       isPresented: $isChoosingImportSource, allowedContentTypes: Self.importTypes,
       allowsMultipleSelection: false
     ) { result in
-      guard case .success(let urls) = result, let url = urls.first else { return }
+      guard !appLock.isLocked, case .success(let urls) = result, let url = urls.first else { return }
       let accessing = url.startAccessingSecurityScopedResource()
       guard accessing else {
         recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
@@ -194,12 +217,19 @@ public struct LedgerAtlasRootView: View {
         canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
         sourceTimeZone: sourceTimeZone)
     }
-    .task { startSavedLedgerReopen() }
+    .task {
+      if appLock.isLocked { closeLockedLedger() } else { startSavedLedgerReopen() }
+    }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
     }
     .onChange(of: appLock.isLocked) { _, locked in
-      if !locked { consumePendingIntentIfUnlocked() }
+      if locked {
+        closeLockedLedger()
+      } else {
+        startSavedLedgerReopen()
+        consumePendingIntentIfUnlocked()
+      }
     }
     .onDisappear { lifecycleTask?.cancel() }
     .frame(minWidth: 720, minHeight: 480)
@@ -217,7 +247,13 @@ public struct LedgerAtlasRootView: View {
     return [.database]
   }
 
+  private static var packageTypes: [UTType] {
+    if let package = UTType(filenameExtension: "ledgerpackage") { return [package, .data] }
+    return [.data]
+  }
+
   private func createLedger() {
+    guard !appLock.isLocked else { return }
     let panel = NSSavePanel()
     panel.title = Self.createLedgerActionLabel
     panel.prompt = "Create"
@@ -231,6 +267,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   private func openLedger() {
+    guard !appLock.isLocked else { return }
     let panel = NSOpenPanel()
     panel.title = Self.openLedgerActionLabel
     panel.prompt = "Open"
@@ -243,7 +280,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   private func performLedgerSelection(_ operation: LedgerLifecycleOperation, url: URL?) {
-    guard url != nil else { return }
+    guard !appLock.isLocked, url != nil else { return }
     lifecycleTask?.cancel()
     lifecycleGeneration &+= 1
     let generation = lifecycleGeneration
@@ -253,7 +290,7 @@ public struct LedgerAtlasRootView: View {
         widgetPublisher: widgetProjectionPublisher, journey: journey, session: session,
         scopeStarter: { $0.startAccessingSecurityScopedResource() },
         scopeStopper: { $0.stopAccessingSecurityScopedResource() },
-        isCurrent: { lifecycleGeneration == generation })
+        isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
         return
@@ -265,6 +302,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   private func startSavedLedgerReopen() {
+    guard !appLock.isLocked else { return }
     lifecycleTask?.cancel()
     lifecycleGeneration &+= 1
     let generation = lifecycleGeneration
@@ -274,7 +312,7 @@ public struct LedgerAtlasRootView: View {
         journey: journey, session: session,
         scopeStarter: { $0.startAccessingSecurityScopedResource() },
         scopeStopper: { $0.stopAccessingSecurityScopedResource() },
-        isCurrent: { lifecycleGeneration == generation })
+        isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
         return
@@ -360,6 +398,69 @@ public struct LedgerAtlasRootView: View {
       selection = .ledger
     } catch {
       journey.recordFailure("The backup could not be restored without replacing existing data.")
+    }
+  }
+
+  private func exportPortablePackage() {
+    let panel = NSSavePanel()
+    panel.title = "Export portable package"
+    panel.prompt = "Export"
+    panel.allowedContentTypes = Self.packageTypes
+    panel.nameFieldStringValue = "ledger-atlas.ledgerpackage"
+    guard panel.runModal() == .OK, let destination = panel.url else { return }
+    do {
+      try journey.exportPortablePackage(to: destination)
+      lifecycleMessage =
+        "Portable package exported. Imported ledgers require the exact SQLite backup."
+    } catch {
+      journey.recordFailure("Portable package export failed.")
+    }
+  }
+
+  private func restorePortablePackage() {
+    let openPanel = NSOpenPanel()
+    openPanel.title = "Choose a portable package"
+    openPanel.allowedContentTypes = Self.packageTypes
+    openPanel.allowsMultipleSelection = false
+    openPanel.canChooseDirectories = false
+    guard openPanel.runModal() == .OK, let source = openPanel.url else { return }
+    guard source.startAccessingSecurityScopedResource() else {
+      journey.recordFailure("Package access was not granted.")
+      return
+    }
+    defer { source.stopAccessingSecurityScopedResource() }
+    guard
+      let data = try? Data(contentsOf: source, options: .mappedIfSafe),
+      (try? LedgerPortablePackageFile.decode(data)) != nil
+    else {
+      journey.recordFailure("The selected portable package is invalid or incomplete.")
+      return
+    }
+    let alert = NSAlert()
+    alert.messageText = "Import this portable package as a new ledger?"
+    alert.informativeText =
+      "The package is limited to representable Ledger Atlas data. The source stays unchanged."
+    alert.addButton(withTitle: "Choose destination")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    let savePanel = NSSavePanel()
+    savePanel.title = "Import portable package as a new ledger"
+    savePanel.prompt = "Import"
+    savePanel.allowedContentTypes = Self.ledgerTypes
+    savePanel.nameFieldStringValue = "ledger-atlas-imported.sqlite"
+    savePanel.canCreateDirectories = true
+    guard savePanel.runModal() == .OK, let destination = savePanel.url else { return }
+    guard destination.standardizedFileURL != source.standardizedFileURL else {
+      journey.recordFailure("Choose a new destination for the imported ledger.")
+      return
+    }
+    do {
+      try journey.restorePortablePackage(from: source, to: destination)
+      lifecycleMessage = "Portable package imported as a new ledger."
+      selection = .ledger
+    } catch {
+      journey.recordFailure(
+        "The portable package could not be imported without changing the source.")
     }
   }
 
@@ -834,7 +935,9 @@ public struct LedgerAtlasRootView: View {
             journey.recordFailure(Self.backupFailureMessage(for: error))
           }
         },
-        restoreBackup: restoreBackup
+        restoreBackup: restoreBackup,
+        exportPackage: exportPortablePackage,
+        restorePackage: restorePortablePackage
       )
       .id(selection)
     } else if selection == .transfers {
@@ -1009,6 +1112,12 @@ public struct LedgerAtlasRootView: View {
   private func lockApp() {
     guard appLock.hasPasscode else { return }
     appLock.lock()
+    closeLockedLedger()
+  }
+
+  private func closeLockedLedger() {
+    lifecycleTask?.cancel()
+    lifecycleGeneration &+= 1
     session.close()
     journey.closeLedger()
     _ = publishWidget(.reopenRequired)
@@ -1016,7 +1125,7 @@ public struct LedgerAtlasRootView: View {
 
   private func consumePendingIntentIfUnlocked() {
     guard !appLock.isLocked, pendingIntent == nil,
-      let request = LedgerIntentBridge.consume()
+      let request = intentConsumer()
     else { return }
     switch request.kind {
     case .addExpense, .addIncome:
@@ -1186,6 +1295,8 @@ private struct BackupSurface: View {
   let open: () -> Void
   let saveBackup: () -> Void
   let restoreBackup: () -> Void
+  let exportPackage: () -> Void
+  let restorePackage: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -1211,6 +1322,10 @@ private struct BackupSurface: View {
           .accessibilityLabel("Save 1:1 backup")
         Button("Restore backup…", action: restoreBackup)
           .accessibilityLabel("Restore backup as a new ledger")
+        Button("Export portable package…", action: exportPackage)
+          .accessibilityLabel("Export portable package")
+        Button("Import portable package…", action: restorePackage)
+          .accessibilityLabel("Import portable package as a new ledger")
       }
     }
     .padding(16)

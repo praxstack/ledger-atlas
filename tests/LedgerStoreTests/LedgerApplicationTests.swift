@@ -2347,3 +2347,47 @@ private func expenseDraft(
     sourceLiterals: literals,
     origin: origin)
 }
+
+// B08-R1/R2: generation validates its whole bounded batch before any canonical write.
+@Test(arguments: [365, 366, 367, -1])
+func b08RecurrenceGenerationIsBoundedAndAtomic(candidateCount: Int) throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "synthetic")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Synthetic account", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let invalidDate = candidateCount == -1
+  let start = try SourceLocalDate(
+    year: invalidDate ? 2011 : 2024, month: invalidDate ? 12 : 1, day: invalidDate ? 29 : 1)
+  let end = try SourceLocalDate(
+    year: invalidDate ? 2011 : candidateCount == 367 ? 2025 : 2024,
+    month: candidateCount == 367 ? 1 : 12,
+    day: candidateCount == 365 ? 30 : candidateCount == 367 ? 1 : 31)
+  let zone = try invalidDate
+    ? SourceTimeZone(ianaIdentifier: "Pacific/Apia") : SourceTimeZone(fixedOffsetSeconds: 0)
+  let rule = try LedgerRecurrenceRule(
+    id: StableLedgerID.recurrenceRule(origin: origin, localKey: String(repeating: "2", count: 64)),
+    origin: origin, accountID: account.id, categoryID: nil, kind: .expense,
+    amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("1.00")), frequency: .daily,
+    interval: 1, timeZone: zone, start: start)
+  try app.createRecurrence(rule)
+  let before = try app.checksum()
+  let createdAt = UTCInstant(epochMilliseconds: 1)
+  if invalidDate || candidateCount == 367 {
+    #expect(throws: (any Swift.Error).self) {
+      try app.generateOccurrences(rule, through: end, createdAt: createdAt)
+    }
+    #expect(try app.checksum() == before)
+    #expect(try app.snapshot().transactions.isEmpty)
+    #expect(try app.snapshot().transactions.flatMap(\.links).isEmpty)
+  } else {
+    let revisions = try app.generateOccurrences(rule, through: end, createdAt: createdAt)
+    #expect(revisions.count == candidateCount)
+    #expect(try app.snapshot().transactions.count == candidateCount)
+    #expect(Set(try app.snapshot().transactions.flatMap(\.links).map(\.id)).count == candidateCount - 1)
+    let after = try app.checksum()
+    #expect(try app.generateOccurrences(rule, through: end, createdAt: createdAt) == revisions)
+    #expect(try app.checksum() == after)
+  }
+}

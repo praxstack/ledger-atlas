@@ -18,7 +18,10 @@ struct LockedSurface: View {
         .textFieldStyle(.roundedBorder)
         .textContentType(.password)
         .accessibilityLabel("Ledger Atlas passcode")
-      if let message = lock.lockoutMessage {
+      if lock.storageUnavailable {
+        Text("Credential storage is unavailable. Restore access and reopen Ledger Atlas.")
+          .foregroundStyle(.red)
+      } else if let message = lock.lockoutMessage {
         Text(message).foregroundStyle(.red).accessibilityLabel(message)
       } else if invalidAttempt {
         Text("That passcode was not accepted.").foregroundStyle(.red)

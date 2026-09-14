@@ -320,6 +320,34 @@ import Testing
 }
 
 @MainActor
+@Test func journeyPortablePackageRoundTripsANativeLedger() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let accountID = try StableLedgerID.account(
+    origin: origin, localKey: String(repeating: "a", count: 64))
+  let source = directory.appendingPathComponent("native.sqlite")
+  try writeEmptyCanonicalLedger(to: source, origin: origin, accountID: accountID)
+  #expect(chmod(source.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+
+  let journey = LedgerJourney()
+  journey.openLedger(source)
+  try journey.beginEditing(source)
+  let expectedChecksum = try journey.checksum()
+  let packageURL = directory.appendingPathComponent("native.ledgerpackage")
+  try journey.exportPortablePackage(to: packageURL)
+  #expect(chmod(packageURL.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+
+  let restoredURL = directory.appendingPathComponent("restored.sqlite")
+  let restored = LedgerJourney()
+  try restored.restorePortablePackage(from: packageURL, to: restoredURL)
+  #expect(restored.phase == .imported)
+  #expect(restored.ledgerURL == restoredURL)
+  #expect(try restored.checksum() == expectedChecksum)
+}
+
+@MainActor
 @Test func backupRejectsAReplacementAtTheOpenedLedgerPath() throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
