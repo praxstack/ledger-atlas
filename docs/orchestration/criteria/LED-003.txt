@@ -1,0 +1,1 @@
+Vendor identifiers are SQL-bound, recurrence this-occurrence update is one transaction, occurrence generation prevalidates at most 366 candidates and commits one atomic batch, and named concurrency, boundary, injection, and rollback regressions prove issue 34 items 1 through 3.

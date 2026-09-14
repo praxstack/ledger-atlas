@@ -1,0 +1,1 @@
+LedgerJourney is the sole open and async state owner; onboarding, create, open, explicit upgrade, import, and backup states use balanced security scope and latest-generation presentation; typed domain surfaces, explicit exact backup actions and copy, 900 by 620 minimum size, focus and VoiceOver order, and one motion policy have focused and runtime evidence.

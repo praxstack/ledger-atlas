@@ -1,0 +1,1 @@
+Portable package v0 is frozen by a complete synthetic vector, new exports write manifest version 1 through the shared frozen v0/v1 decoder, complete destination projection rejects hidden conflicts, current typed command/store/package failures propagate unchanged, and every rejection leaves the destination unchanged.
