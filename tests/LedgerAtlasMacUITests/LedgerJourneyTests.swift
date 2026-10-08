@@ -742,6 +742,99 @@ import Testing
   #expect(journey.snapshot?.transactions.first(where: { $0.id == copied.id })?.currentRevision.lifecycle == .tombstoned)
 }
 
+@MainActor
+@Test func amountEditKeepsRoundingTagsAndTransferLegsAndRefusesCrossCurrency() throws {
+  // Review m3: cover the rounding, tag and transfer behaviour the amount-edit fix claims.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try journey.approveAndOpen(
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
+  try journey.performBeginEditing()
+  let imported = try #require(journey.snapshot)
+  let account = try #require(imported.accounts.first)
+  let macOrigin = try LedgerOrigin.macNative()
+  let when = try LedgerJourney.nativeTemporal(for: UTCInstant(epochMilliseconds: 1_000))
+  let unit = account.currencyUnit
+  let otherUnit = unit == "EUR" ? "USD" : "EUR"
+  let sibling = try LedgerAccount(
+    id: StableLedgerID.account(origin: macOrigin, localKey: String(repeating: "a", count: 64)),
+    name: "Synthetic sibling", currencyUnit: unit, origin: macOrigin)
+  let foreign = try LedgerAccount(
+    id: StableLedgerID.account(origin: macOrigin, localKey: String(repeating: "b", count: 64)),
+    name: "Synthetic foreign", currencyUnit: otherUnit, origin: macOrigin)
+  try journey.createAccount(sibling)
+  try journey.createAccount(foreign)
+  func money(_ literal: String, _ code: String) throws -> CurrencyAmount {
+    try CurrencyAmount(unitCode: code, amount: ExactDecimal(literal))
+  }
+
+  // Rounding policy and tag literals survive an amount edit.
+  let tagged = try journey.createTransaction(
+    idempotencyKey: String(repeating: "c", count: 64),
+    draft: LedgerTransactionDraft(
+      effects: [
+        try LedgerTransactionEffect(
+          accountID: account.id, direction: .decrease, amount: money("7.00", unit))
+      ], categoryID: nil, kind: .expense, occurredAt: when, note: "Tagged",
+      roundingPolicy: .halfEven,
+      sourceLiterals: [try LedgerSourceLiteral(field: "tag", literal: "synthetic-tag")],
+      origin: macOrigin),
+    createdAt: UTCInstant(epochMilliseconds: 2_000))
+  try journey.correctAmount(
+    transactionID: tagged.transactionID, amountLiteral: "7.25",
+    createdAt: UTCInstant(epochMilliseconds: 2_001))
+  let editedTagged = try #require(
+    journey.snapshot?.transactions.first { $0.id == tagged.transactionID }?.currentRevision.draft)
+  #expect(editedTagged.roundingPolicy == .halfEven)
+  #expect(editedTagged.sourceLiterals.contains { $0.field == "tag" && $0.literal == "synthetic-tag" })
+  #expect(editedTagged.note == "Tagged")
+  #expect(editedTagged.effects[0].amount == (try money("7.25", unit)))
+
+  // A same-currency transfer edit moves both legs and keeps their directions.
+  let local = try journey.createTransfer(
+    idempotencyKey: String(repeating: "d", count: 64), sourceAccountID: account.id,
+    destinationAccountID: sibling.id, sourceAmount: money("10.00", unit),
+    destinationAmount: money("10.00", unit), conversion: nil, fee: nil, feeAccountID: nil,
+    occurredAt: when, origin: macOrigin, createdAt: UTCInstant(epochMilliseconds: 3_000))
+  let directions = local.transfer.draft.effects.map(\.direction)
+  try journey.correctAmount(
+    transactionID: local.transfer.transactionID, amountLiteral: "12.00",
+    createdAt: UTCInstant(epochMilliseconds: 3_001))
+  let editedLocal = try #require(
+    journey.snapshot?.transactions.first { $0.id == local.transfer.transactionID }?
+      .currentRevision.draft)
+  #expect(editedLocal.effects.count == 2)
+  #expect(editedLocal.effects.map(\.direction) == directions)
+  #expect(try editedLocal.effects.allSatisfy { $0.amount == (try money("12.00", unit)) })
+
+  // A cross-currency transfer edit is refused and leaves the ledger unchanged.
+  let ten = try money("10.00", unit)
+  let nine = try money("9.00", otherUnit)
+  let fx = try journey.createTransfer(
+    idempotencyKey: String(repeating: "e", count: 64), sourceAccountID: account.id,
+    destinationAccountID: foreign.id, sourceAmount: ten, destinationAmount: nine,
+    conversion: LedgerConversion(
+      sourceAmount: ten, convertedAmount: nine, rate: ExactDecimal("1.1111"), rateScale: 4,
+      rounding: .halfEven),
+    fee: nil, feeAccountID: nil, occurredAt: when, origin: macOrigin,
+    createdAt: UTCInstant(epochMilliseconds: 4_000))
+  let before = try journey.checksum()
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try journey.correctAmount(
+      transactionID: fx.transfer.transactionID, amountLiteral: "11.00",
+      createdAt: UTCInstant(epochMilliseconds: 4_001))
+  }
+  #expect(try journey.checksum() == before)
+}
+
 private func writeSyntheticV19(to url: URL) throws {
   var database: OpaquePointer?
   guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
