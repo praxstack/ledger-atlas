@@ -207,13 +207,28 @@ public struct LedgerApplication: LedgerClient {
     }
   }
 
+  /// Reads split purchases. With `skippingInvalid`, a malformed group is omitted instead of
+  /// failing the whole read, so one bad group cannot hide every other split.
+  public static func splitPurchases(
+    from snapshot: LedgerStore.LedgerReadSnapshot, skippingInvalid: Bool
+  ) throws -> [LedgerSplitPurchase] {
+    guard skippingInvalid else { return try splitPurchases(from: snapshot) }
+    return try splitPurchaseGroups(from: snapshot).compactMap { try? $0() }
+  }
+
   public static func splitPurchases(
     from snapshot: LedgerStore.LedgerReadSnapshot
   ) throws -> [LedgerSplitPurchase] {
+    try splitPurchaseGroups(from: snapshot).map { try $0() }
+  }
+
+  private static func splitPurchaseGroups(
+    from snapshot: LedgerStore.LedgerReadSnapshot
+  ) -> [() throws -> LedgerSplitPurchase] {
     let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
     let links = snapshot.transactions.flatMap(\.links).filter { $0.kind == .split }
     let parentIDs = Set(links.map(\.fromTransactionID)).sorted()
-    return try parentIDs.map { parentID in
+    return parentIDs.map { parentID in {
       let linkedIDs = [parentID]
         + links.filter { $0.fromTransactionID == parentID }.map(\.toTransactionID)
       let uniqueIDs = Array(Set(linkedIDs)).sorted()
@@ -293,7 +308,7 @@ public struct LedgerApplication: LedgerClient {
       return try LedgerSplitPurchase(
         id: purchaseID ?? parentID, accountID: firstEffect.accountID, parentAmount: parentAmount,
         lines: lines, occurredAt: firstDraft.occurredAt, note: purchaseNote, origin: firstDraft.origin)
-    }
+    } }
   }
 
   public func createInstallmentPlan(

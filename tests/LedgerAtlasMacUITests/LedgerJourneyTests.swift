@@ -815,3 +815,64 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
     throw LedgerStore.Error.incompatibleCanonicalStore
   }
 }
+
+@MainActor
+@Test func amountEditPreservesNoteAndSplitMetadataAndKeepsSplitsVisible() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try journey.approveAndOpen(
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
+  try journey.performBeginEditing()
+  let imported = try #require(journey.snapshot)
+  let account = try #require(imported.accounts.first)
+  let category = try #require(imported.categories.first)
+  let macOrigin = try LedgerOrigin.macNative()
+  let when = try LedgerJourney.nativeTemporal(for: UTCInstant(epochMilliseconds: 1_000))
+
+  // A plain transaction keeps its note on amount edit.
+  let noted = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: category.id,
+    note: "Synthetic note", createdAt: UTCInstant(epochMilliseconds: 2_000))
+  try journey.correctAmount(
+    transactionID: noted.transactionID, amountLiteral: "4.50",
+    createdAt: UTCInstant(epochMilliseconds: 2_001))
+  let editedNote = try #require(
+    journey.snapshot?.transactions.first { $0.id == noted.transactionID })
+  #expect(editedNote.currentRevision.draft.note == "Synthetic note")
+  #expect(editedNote.currentRevision.draft.effects[0].amount.amount.rawLiteral == "4.50")
+
+  // Editing one split child keeps the split group readable.
+  let lines = try [
+    LedgerSplitLine(
+      id: StableLedgerID.splitLine(origin: macOrigin, localKey: String(repeating: "e", count: 64)),
+      amount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("2.00")),
+      categoryID: category.id, description: "One", displayOrder: 0),
+    LedgerSplitLine(
+      id: StableLedgerID.splitLine(origin: macOrigin, localKey: String(repeating: "f", count: 64)),
+      amount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("3.00")),
+      categoryID: category.id, description: "Two", displayOrder: 1),
+  ]
+  _ = try journey.createSplit(
+    LedgerSplitDraft(
+      id: StableLedgerID.transaction(origin: macOrigin, localKey: String(repeating: "d", count: 64)),
+      accountID: account.id,
+      parentAmount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("5.00")),
+      lines: lines, occurredAt: when, note: "Group", origin: macOrigin),
+    createdAt: UTCInstant(epochMilliseconds: 3_000))
+  let child = try #require(
+    journey.snapshot?.transactions.first { $0.links.contains { $0.kind == .split } })
+  try journey.correctAmount(
+    transactionID: child.id, amountLiteral: "2.25",
+    createdAt: UTCInstant(epochMilliseconds: 3_001))
+  let purchases = try LedgerApplication.splitPurchases(from: try #require(journey.snapshot))
+  #expect(purchases.count == 1)
+  #expect(purchases[0].lines.count == 2)
+}

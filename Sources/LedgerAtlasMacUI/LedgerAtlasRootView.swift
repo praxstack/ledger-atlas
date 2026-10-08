@@ -1098,7 +1098,7 @@ public struct LedgerAtlasRootView: View {
 
   private var splitPurchases: [LedgerSplitPurchase] {
     guard let snapshot = journey.snapshot else { return [] }
-    return (try? LedgerApplication.splitPurchases(from: snapshot)) ?? []
+    return (try? LedgerApplication.splitPurchases(from: snapshot, skippingInvalid: true)) ?? []
   }
 
   private var splitTransactionIDs: Set<String> {

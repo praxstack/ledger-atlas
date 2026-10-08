@@ -2438,3 +2438,58 @@ func b08RecurrenceGenerationIsBoundedAndAtomic(candidateCount: Int) throws {
   // Net of all effects: transfer legs cancel; income minus expense.
   #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("60"))
 }
+
+@Test func splitPurchasesSkippingInvalidKeepsValidGroupsVisible() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "8", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "One", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let category = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Food", kind: .expense, origin: origin)
+  try app.createCategory(category)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func split(_ key: Character, ms: Int64) throws -> [LedgerTransactionRevision] {
+    func line(_ k: Character, _ amount: String, _ order: Int) throws -> LedgerSplitLine {
+      try LedgerSplitLine(
+        id: StableLedgerID.splitLine(origin: origin, localKey: String(repeating: k, count: 64)),
+        amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(amount)),
+        categoryID: category.id, description: "Line \(order)", displayOrder: order)
+    }
+    let first = key == "f" ? "1" : "3"
+    let second = key == "f" ? "2" : "4"
+    let purchaseID = try StableLedgerID.transaction(
+      origin: origin, localKey: String(repeating: key, count: 64))
+    _ = try app.createSplit(
+      LedgerSplitDraft(
+        id: purchaseID,
+        accountID: account.id,
+        parentAmount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("5.00")),
+        lines: [try line(Character(first), "2.00", 0), try line(Character(second), "3.00", 1)],
+        occurredAt: when, note: "Group", origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: ms))
+    return try app.snapshot().transactions.filter {
+      $0.currentRevision.draft.sourceLiterals.contains {
+        $0.field == "split.purchaseID" && $0.literal == purchaseID
+      }
+    }.map(\.currentRevision)
+  }
+  _ = try split("f", ms: 1)
+  let broken = try split("e", ms: 2)
+  // Correct one child with its split metadata stripped, producing a malformed group.
+  let child = try #require(broken.first)
+  _ = try app.correctTransaction(
+    transactionID: child.transactionID, expectedCurrentRevisionID: child.id,
+    draft: LedgerTransactionDraft(
+      effects: child.draft.effects, categoryID: child.draft.categoryID, kind: .expense,
+      occurredAt: child.draft.occurredAt, origin: origin),
+    createdAt: UTCInstant(epochMilliseconds: 3))
+  let snapshot = try app.snapshot()
+  #expect(throws: (any Error).self) { try LedgerApplication.splitPurchases(from: snapshot) }
+  let tolerant = try LedgerApplication.splitPurchases(from: snapshot, skippingInvalid: true)
+  #expect(tolerant.count == 1)
+}

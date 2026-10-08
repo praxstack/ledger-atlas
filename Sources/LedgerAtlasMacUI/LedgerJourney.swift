@@ -236,15 +236,27 @@ public final class LedgerJourney {
       let current = snapshot?.transactions.first(where: { $0.id == transactionID })?
         .currentRevision
     else { throw LedgerApplication.Error.invalidCommand }
-    let effect = current.draft.effects[0]
+    // Only the amount changes; note, rounding, provenance literals and every other field carry over.
+    // Multi-effect drafts are edited only when every leg shares one currency (same-unit transfer),
+    // since the new amount would otherwise be ambiguous.
+    let unit = current.draft.effects[0].amount.unitCode
+    guard current.draft.effects.allSatisfy({ $0.amount.unitCode == unit }) else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let newAmount = try CurrencyAmount(unitCode: unit, amount: ExactDecimal(amountLiteral))
     let draft = try LedgerTransactionDraft(
-      effects: [
+      effects: try current.draft.effects.map {
         try LedgerTransactionEffect(
-          accountID: effect.accountID, direction: effect.direction,
-          amount: CurrencyAmount(
-            unitCode: effect.amount.unitCode, amount: ExactDecimal(amountLiteral)))
-      ], categoryID: current.draft.categoryID, kind: current.draft.kind,
-      occurredAt: current.draft.occurredAt, origin: current.draft.origin)
+          accountID: $0.accountID, direction: $0.direction, amount: newAmount)
+      }, categoryID: current.draft.categoryID, kind: current.draft.kind,
+      occurredAt: current.draft.occurredAt, note: current.draft.note,
+      roundingPolicy: current.draft.roundingPolicy,
+      sourceLiterals: current.draft.sourceLiterals.filter {
+        // Import receipt markers are owned by the import health proof and must not be duplicated
+        // onto a correction; user-level literals (tags, split/recurrence/installment ids) carry over.
+        !$0.field.hasPrefix("import.") && !$0.field.hasPrefix("conversion.")
+      },
+      origin: current.draft.origin)
     try edit(
       ledgerURL: ledgerURL ?? canonicalURL ?? URL(fileURLWithPath: "/"),
       transactionID: transactionID, expectedRevisionID: current.id, draft: draft,
