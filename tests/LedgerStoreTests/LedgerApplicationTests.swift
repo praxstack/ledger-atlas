@@ -2439,6 +2439,43 @@ func b08RecurrenceGenerationIsBoundedAndAtomic(candidateCount: Int) throws {
   #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("60"))
 }
 
+@Test func activityReportSignsNegativeAdjustments() throws {
+  // Review m3: a decrease adjustment shows as a negative adjustment row and lowers the total.
+  // (An increase on an expense is rejected by the domain, so there is no refund-style case.)
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "6", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "One", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func post(_ key: String, _ direction: LedgerEffectDirection, _ literal: String,
+    _ kind: LedgerTransactionKind, _ ms: Int64) throws {
+    _ = try app.createTransaction(
+      idempotencyKey: String(repeating: key, count: 64),
+      draft: LedgerTransactionDraft(
+        effects: [
+          try LedgerTransactionEffect(
+            accountID: account.id, direction: direction,
+            amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(literal)))
+        ], categoryID: nil, kind: kind, occurredAt: when, origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: ms))
+  }
+  try post("c", .increase, "100", .income, 1)
+  try post("d", .decrease, "40", .expense, 2)
+  try post("f", .decrease, "5", .adjustment, 3)
+  let report = try app.report(unitCode: "USD")
+  func row(_ id: String) throws -> ExactDecimal {
+    try ExactDecimal(#require(report.rows.first { $0.id == id }).amountLiteral)
+  }
+  #expect(try row("income") == ExactDecimal("100"))
+  #expect(try row("expense") == ExactDecimal("40"))
+  #expect(try row("adjustment") == ExactDecimal("-5"))
+  #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("55"))
+}
+
 @Test(arguments: ["excluded", "inAndOut", "crossCurrency"])
 func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) throws {
   // Review M1: a transfer with only one leg visible in the report (other leg excluded from
