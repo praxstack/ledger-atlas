@@ -502,7 +502,11 @@ public struct LedgerApplication: LedgerClient {
     from snapshot: LedgerStore.LedgerReadSnapshot, unitCode: String
   ) throws -> LedgerReport {
     let accounts = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
-    var totals: [LedgerTransactionKind: (ExactDecimal, Int)] = [:]
+    let zero = try ExactDecimal("0")
+    // Per kind: signed net (increase positive, decrease negative), received side, count.
+    var totals: [LedgerTransactionKind: (net: ExactDecimal, increases: ExactDecimal, count: Int)] =
+      [:]
+    var total = zero
     for transaction in snapshot.transactions where transaction.currentRevision.lifecycle == .active
     {
       let draft = transaction.currentRevision.draft
@@ -513,22 +517,35 @@ public struct LedgerApplication: LedgerClient {
           } == true
       }
       guard !matching.isEmpty else { continue }
-      var entry = totals[draft.kind]
-      if entry == nil { entry = (try ExactDecimal("0"), 0) }
+      var entry = totals[draft.kind] ?? (zero, zero, 0)
       for effect in matching {
-        entry!.0 = try entry!.0.adding(effect.amount.amount)
+        switch effect.direction {
+        case .increase:
+          entry.net = try entry.net.adding(effect.amount.amount)
+          entry.increases = try entry.increases.adding(effect.amount.amount)
+          total = try total.adding(effect.amount.amount)
+        case .decrease:
+          entry.net = try entry.net.subtracting(effect.amount.amount)
+          total = try total.subtracting(effect.amount.amount)
+        }
       }
-      entry!.1 += 1
+      entry.count += 1
       totals[draft.kind] = entry
     }
-    let rows = LedgerTransactionKind.allCases.compactMap { kind -> LedgerReportRow? in
+    let rows = try LedgerTransactionKind.allCases.compactMap { kind -> LedgerReportRow? in
       guard let entry = totals[kind] else { return nil }
+      let shown: ExactDecimal
+      switch kind {
+      case .income, .adjustment: shown = entry.net
+      case .expense: shown = try zero.subtracting(entry.net)
+      case .transfer:
+        // A transfer moves value once: show one leg, not both.
+        shown = try entry.increases == zero ? zero.subtracting(entry.net) : entry.increases
+      }
       return LedgerReportRow(
-        id: kind.rawValue, label: kind.rawValue, amountLiteral: entry.0.rawLiteral,
-        unitCode: unitCode, count: entry.1)
+        id: kind.rawValue, label: kind.rawValue, amountLiteral: shown.rawLiteral,
+        unitCode: unitCode, count: entry.count)
     }
-    var total = try ExactDecimal("0")
-    for row in rows { total = try total.adding(ExactDecimal(row.amountLiteral)) }
     return LedgerReport(
       title: "Activity by kind", rows: rows, totalLiteral: total.rawLiteral, unitCode: unitCode,
       inventory: inventory(from: snapshot), categoryRows: try categoryRows(

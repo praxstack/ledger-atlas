@@ -2391,3 +2391,50 @@ func b08RecurrenceGenerationIsBoundedAndAtomic(candidateCount: Int) throws {
     #expect(try app.checksum() == after)
   }
 }
+
+@Test func activityReportSignsByDirectionAndCountsTransferOnce() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "7", count: 64), label: "local")
+  let first = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "One", currencyUnit: "USD", origin: origin)
+  let second = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Two", currencyUnit: "USD", origin: origin)
+  try app.createAccount(first)
+  try app.createAccount(second)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func amount(_ literal: String) throws -> CurrencyAmount {
+    try CurrencyAmount(unitCode: "USD", amount: ExactDecimal(literal))
+  }
+  func simple(_ key: String, _ direction: LedgerEffectDirection, _ literal: String,
+    _ kind: LedgerTransactionKind, _ ms: Int64) throws {
+    _ = try app.createTransaction(
+      idempotencyKey: String(repeating: key, count: 64),
+      draft: LedgerTransactionDraft(
+        effects: [
+          try LedgerTransactionEffect(
+            accountID: first.id, direction: direction, amount: amount(literal))
+        ], categoryID: nil, kind: kind, occurredAt: when, origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: ms))
+  }
+  try simple("c", .increase, "100", .income, 1)
+  try simple("d", .decrease, "40", .expense, 2)
+  _ = try app.createTransfer(
+    idempotencyKey: String(repeating: "e", count: 64), sourceAccountID: first.id,
+    destinationAccountID: second.id, sourceAmount: amount("25"),
+    destinationAmount: amount("25"), conversion: nil, fee: nil, feeAccountID: nil,
+    occurredAt: when, origin: origin, createdAt: UTCInstant(epochMilliseconds: 3))
+
+  let report = try app.report(unitCode: "USD")
+  func row(_ id: String) throws -> ExactDecimal {
+    try ExactDecimal(#require(report.rows.first { $0.id == id }).amountLiteral)
+  }
+  #expect(try row("income") == ExactDecimal("100"))
+  #expect(try row("expense") == ExactDecimal("40"))
+  #expect(try row("transfer") == ExactDecimal("25"))
+  // Net of all effects: transfer legs cancel; income minus expense.
+  #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("60"))
+}
