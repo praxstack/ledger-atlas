@@ -2439,6 +2439,71 @@ func b08RecurrenceGenerationIsBoundedAndAtomic(candidateCount: Int) throws {
   #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("60"))
 }
 
+@Test(arguments: ["excluded", "inAndOut", "crossCurrency"])
+func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) throws {
+  // Review M1: a transfer with only one leg visible in the report (other leg excluded from
+  // totals or in another currency) must still add its leg next to fully visible transfers.
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "9", count: 64), label: "local")
+  func account(_ key: Character, _ name: String, _ unit: String, included: Bool = true) throws
+    -> LedgerAccount
+  {
+    let value = try LedgerAccount(
+      id: StableLedgerID.account(origin: origin, localKey: String(repeating: key, count: 64)),
+      name: name, currencyUnit: unit, origin: origin, includeInTotals: included)
+    try app.createAccount(value)
+    return value
+  }
+  let one = try account("a", "One", "USD")
+  let two = try account("b", "Two", "USD")
+  let off = try account("c", "Off", "USD", included: false)
+  let eur = try account("d", "Euro", "EUR")
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func usd(_ literal: String) throws -> CurrencyAmount {
+    try CurrencyAmount(unitCode: "USD", amount: ExactDecimal(literal))
+  }
+  var next: Int64 = 0
+  func transfer(
+    _ from: LedgerAccount, _ to: LedgerAccount, _ source: CurrencyAmount,
+    _ destination: CurrencyAmount, conversion: LedgerConversion? = nil
+  ) throws {
+    next += 1
+    _ = try app.createTransfer(
+      idempotencyKey: String(repeating: String(next), count: 64), sourceAccountID: from.id,
+      destinationAccountID: to.id, sourceAmount: source, destinationAmount: destination,
+      conversion: conversion, fee: nil, feeAccountID: nil, occurredAt: when, origin: origin,
+      createdAt: UTCInstant(epochMilliseconds: next))
+  }
+  let expectedTransfer: String
+  let expectedTotal: String
+  switch scenario {
+  case "excluded":
+    try transfer(one, two, usd("25"), usd("25"))
+    try transfer(one, off, usd("10"), usd("10"))
+    (expectedTransfer, expectedTotal) = ("35", "-10")
+  case "inAndOut":
+    try transfer(off, one, usd("10"), usd("10"))
+    try transfer(one, off, usd("10"), usd("10"))
+    (expectedTransfer, expectedTotal) = ("20", "0")
+  default:
+    try transfer(one, two, usd("25"), usd("25"))
+    let nine = try CurrencyAmount(unitCode: "EUR", amount: ExactDecimal("9"))
+    try transfer(
+      one, eur, usd("10"), nine,
+      conversion: LedgerConversion(
+        sourceAmount: usd("10"), convertedAmount: nine, rate: ExactDecimal("1.1111"),
+        rateScale: 4, rounding: .halfEven))
+    (expectedTransfer, expectedTotal) = ("35", "-10")
+  }
+  let report = try app.report(unitCode: "USD")
+  let row = try #require(report.rows.first { $0.id == "transfer" })
+  #expect(try ExactDecimal(row.amountLiteral) == ExactDecimal(expectedTransfer))
+  #expect(row.count == 2)
+  #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal(expectedTotal))
+}
+
 @Test func splitPurchasesSkippingInvalidKeepsValidGroupsVisible() throws {
   let app = LedgerApplication(store: try makeApplicationStore())
   let origin = try LedgerOrigin(id: String(repeating: "8", count: 64), label: "local")

@@ -518,8 +518,9 @@ public struct LedgerApplication: LedgerClient {
   ) throws -> LedgerReport {
     let accounts = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
     let zero = try ExactDecimal("0")
-    // Per kind: signed net (increase positive, decrease negative), received side, count.
-    var totals: [LedgerTransactionKind: (net: ExactDecimal, increases: ExactDecimal, count: Int)] =
+    // Per kind: signed net (increase positive, decrease negative), the larger visible side of
+    // each transaction summed across transactions (a transfer's value), and count.
+    var totals: [LedgerTransactionKind: (net: ExactDecimal, oneLeg: ExactDecimal, count: Int)] =
       [:]
     var total = zero
     for transaction in snapshot.transactions where transaction.currentRevision.lifecycle == .active
@@ -533,17 +534,23 @@ public struct LedgerApplication: LedgerClient {
       }
       guard !matching.isEmpty else { continue }
       var entry = totals[draft.kind] ?? (zero, zero, 0)
+      var transactionIn = zero
+      var transactionOut = zero
       for effect in matching {
         switch effect.direction {
         case .increase:
           entry.net = try entry.net.adding(effect.amount.amount)
-          entry.increases = try entry.increases.adding(effect.amount.amount)
+          transactionIn = try transactionIn.adding(effect.amount.amount)
           total = try total.adding(effect.amount.amount)
         case .decrease:
           entry.net = try entry.net.subtracting(effect.amount.amount)
+          transactionOut = try transactionOut.adding(effect.amount.amount)
           total = try total.subtracting(effect.amount.amount)
         }
       }
+      // Per transaction, so a transfer whose other leg is in another currency or an excluded
+      // account still contributes its visible leg alongside fully visible transfers.
+      entry.oneLeg = try entry.oneLeg.adding(max(transactionIn, transactionOut))
       entry.count += 1
       totals[draft.kind] = entry
     }
@@ -554,8 +561,8 @@ public struct LedgerApplication: LedgerClient {
       case .income, .adjustment: shown = entry.net
       case .expense: shown = try zero.subtracting(entry.net)
       case .transfer:
-        // A transfer moves value once: show one leg, not both.
-        shown = try entry.increases == zero ? zero.subtracting(entry.net) : entry.increases
+        // A transfer moves value once: per transaction, the larger visible leg.
+        shown = entry.oneLeg
       }
       return LedgerReportRow(
         id: kind.rawValue, label: kind.rawValue, amountLiteral: shown.rawLiteral,
