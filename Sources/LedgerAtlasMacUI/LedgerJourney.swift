@@ -236,7 +236,9 @@ public final class LedgerJourney {
       let current = snapshot?.transactions.first(where: { $0.id == transactionID })?
         .currentRevision
     else { throw LedgerApplication.Error.invalidCommand }
-    // Only the amount changes; note, rounding, provenance literals and every other field carry over.
+    // Only the amount changes. Note, rounding policy, category, kind, dates and user-level literals
+    // (tags, split/recurrence/installment ids) carry over; import provenance literals stay on the
+    // original revision only (see the filter below).
     // Multi-effect drafts are edited only when every leg shares one currency (same-unit transfer),
     // since the new amount would otherwise be ambiguous.
     let unit = current.draft.effects[0].amount.unitCode
@@ -254,6 +256,8 @@ public final class LedgerJourney {
       sourceLiterals: current.draft.sourceLiterals.filter {
         // Import receipt markers are owned by the import health proof and must not be duplicated
         // onto a correction; user-level literals (tags, split/recurrence/installment ids) carry over.
+        // `conversion.` is defensive: conversion literals only occur on cross-currency transfers,
+        // which the guard above already refuses.
         !$0.field.hasPrefix("import.") && !$0.field.hasPrefix("conversion.")
       },
       origin: current.draft.origin)
