@@ -2605,6 +2605,32 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
   let after = LedgerApplication.splitPurchaseListing(from: try app.snapshot())
   #expect(after.purchases.count == 2)
   #expect(after.unreadableGroupCount == 1)
+
+  // Codex P2: a retry that reuses the unreadable group's purchase ID with new line IDs
+  // must not insert a second group with the same purchase ID.
+  let brokenPurchaseID = try StableLedgerID.transaction(
+    origin: origin, localKey: String(repeating: "e", count: 64))
+  let countBeforeRetry = try app.snapshot().transactions.count
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try app.createSplit(
+      LedgerSplitDraft(
+        id: brokenPurchaseID,
+        accountID: account.id,
+        parentAmount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("5.00")),
+        lines: [
+          try LedgerSplitLine(
+            id: StableLedgerID.splitLine(origin: origin, localKey: String(repeating: "7", count: 64)),
+            amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("2.00")),
+            categoryID: category.id, description: "Retry 0", displayOrder: 0),
+          try LedgerSplitLine(
+            id: StableLedgerID.splitLine(origin: origin, localKey: String(repeating: "8", count: 64)),
+            amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("3.00")),
+            categoryID: category.id, description: "Retry 1", displayOrder: 1),
+        ],
+        occurredAt: when, note: "Group", origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: 5))
+  }
+  #expect(try app.snapshot().transactions.count == countBeforeRetry)
   #expect(
     LedgerSplitPurchaseListing(
       purchases: [], unreadableTransactionIDs: [], unreadableGroupCount: 0

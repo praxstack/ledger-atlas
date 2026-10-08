@@ -163,12 +163,21 @@ public struct LedgerApplication: LedgerClient {
       id: draft.id, accountID: draft.accountID, parentAmount: draft.parentAmount,
       lines: draft.lines, occurredAt: draft.occurredAt, note: draft.note, origin: draft.origin)
     // Tolerant reads: an unrelated malformed group must not block creating a new split.
-    if let existing = Self.splitPurchaseListing(from: try store.readSnapshot()).purchases.first(
-      where: { $0.id == draft.id })
-    {
+    let snapshot = try store.readSnapshot()
+    let listing = Self.splitPurchaseListing(from: snapshot)
+    if let existing = listing.purchases.first(where: { $0.id == draft.id }) {
       guard existing == expected else { throw Error.invalidCommand }
       return existing
     }
+    // An unreadable group may still own this purchase ID; a second group would duplicate it.
+    let idAlreadyClaimed =
+      listing.unreadableTransactionIDs.contains(draft.id)
+      || snapshot.transactions.contains { transaction in
+        transaction.currentRevision.draft.sourceLiterals.contains {
+          $0.field == "split.purchaseID" && $0.literal == draft.id
+        }
+      }
+    guard !idAlreadyClaimed else { throw Error.invalidCommand }
     _ = try store.createLinkedTransactions(
       try Self.splitRequests(for: draft, createdAt: createdAt), linkKind: .split)
     guard
