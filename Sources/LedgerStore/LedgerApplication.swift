@@ -162,15 +162,19 @@ public struct LedgerApplication: LedgerClient {
     let expected = try LedgerSplitPurchase(
       id: draft.id, accountID: draft.accountID, parentAmount: draft.parentAmount,
       lines: draft.lines, occurredAt: draft.occurredAt, note: draft.note, origin: draft.origin)
-    if let existing = try Self.splitPurchases(from: store.readSnapshot()).first(where: {
-      $0.id == draft.id
-    }) {
+    // Tolerant reads: an unrelated malformed group must not block creating a new split.
+    if let existing = Self.splitPurchaseListing(from: try store.readSnapshot()).purchases.first(
+      where: { $0.id == draft.id })
+    {
       guard existing == expected else { throw Error.invalidCommand }
       return existing
     }
     _ = try store.createLinkedTransactions(
       try Self.splitRequests(for: draft, createdAt: createdAt), linkKind: .split)
-    guard let purchase = try splitPurchases().first(where: { $0.id == draft.id }) else {
+    guard
+      let purchase = Self.splitPurchaseListing(from: try store.readSnapshot()).purchases.first(
+        where: { $0.id == draft.id })
+    else {
       throw Error.invalidCommand
     }
     return purchase
@@ -207,31 +211,44 @@ public struct LedgerApplication: LedgerClient {
     }
   }
 
-  /// Reads split purchases. With `skippingInvalid`, a malformed group is omitted instead of
-  /// failing the whole read, so one bad group cannot hide every other split.
-  public static func splitPurchases(
-    from snapshot: LedgerStore.LedgerReadSnapshot, skippingInvalid: Bool
-  ) throws -> [LedgerSplitPurchase] {
-    guard skippingInvalid else { return try splitPurchases(from: snapshot) }
-    return try splitPurchaseGroups(from: snapshot).compactMap { try? $0() }
+  /// Reads every split group without failing: groups that parse become purchases, and the
+  /// transactions of any group that does not are reported so callers can show them.
+  public static func splitPurchaseListing(
+    from snapshot: LedgerStore.LedgerReadSnapshot
+  ) -> LedgerSplitPurchaseListing {
+    var purchases: [LedgerSplitPurchase] = []
+    var unreadableIDs: Set<String> = []
+    var unreadableGroups = 0
+    for group in splitPurchaseGroups(from: snapshot) {
+      if let purchase = try? group.read() {
+        purchases.append(purchase)
+      } else {
+        unreadableIDs.formUnion(group.memberIDs)
+        unreadableGroups += 1
+      }
+    }
+    return LedgerSplitPurchaseListing(
+      purchases: purchases, unreadableTransactionIDs: unreadableIDs,
+      unreadableGroupCount: unreadableGroups)
   }
 
   public static func splitPurchases(
     from snapshot: LedgerStore.LedgerReadSnapshot
   ) throws -> [LedgerSplitPurchase] {
-    try splitPurchaseGroups(from: snapshot).map { try $0() }
+    try splitPurchaseGroups(from: snapshot).map { try $0.read() }
   }
 
   private static func splitPurchaseGroups(
     from snapshot: LedgerStore.LedgerReadSnapshot
-  ) -> [() throws -> LedgerSplitPurchase] {
+  ) -> [(memberIDs: [String], read: () throws -> LedgerSplitPurchase)] {
     let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
     let links = snapshot.transactions.flatMap(\.links).filter { $0.kind == .split }
     let parentIDs = Set(links.map(\.fromTransactionID)).sorted()
-    return parentIDs.map { parentID in {
+    return parentIDs.map { parentID in
       let linkedIDs = [parentID]
         + links.filter { $0.fromTransactionID == parentID }.map(\.toTransactionID)
       let uniqueIDs = Array(Set(linkedIDs)).sorted()
+      return (uniqueIDs, {
       guard uniqueIDs.count >= 2,
         let members = uniqueIDs.compactMap({ transactions[$0] }) as [LedgerTransactionSnapshot]?,
         members.count == uniqueIDs.count
@@ -308,7 +325,8 @@ public struct LedgerApplication: LedgerClient {
       return try LedgerSplitPurchase(
         id: purchaseID ?? parentID, accountID: firstEffect.accountID, parentAmount: parentAmount,
         lines: lines, occurredAt: firstDraft.occurredAt, note: purchaseNote, origin: firstDraft.origin)
-    } }
+      })
+    }
   }
 
   public func createInstallmentPlan(

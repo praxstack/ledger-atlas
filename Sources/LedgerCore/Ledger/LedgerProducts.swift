@@ -150,6 +150,35 @@ public struct LedgerSplitPurchase: Equatable, Sendable {
   }
 }
 
+/// Split groups read without failing: the purchases that parsed, and the transactions of any
+/// group that did not, so a caller can still show those rows and say why.
+public struct LedgerSplitPurchaseListing: Equatable, Sendable {
+  public let purchases: [LedgerSplitPurchase]
+  public let unreadableTransactionIDs: Set<String>
+  public let unreadableGroupCount: Int
+
+  public init(
+    purchases: [LedgerSplitPurchase], unreadableTransactionIDs: Set<String>,
+    unreadableGroupCount: Int
+  ) {
+    self.purchases = purchases
+    self.unreadableTransactionIDs = unreadableTransactionIDs
+    self.unreadableGroupCount = unreadableGroupCount
+  }
+
+  /// User-facing notice when some split groups could not be read; nil when all were read.
+  public var unreadableNotice: String? {
+    switch unreadableGroupCount {
+    case 0: return nil
+    case 1:
+      return "1 split purchase could not be read. Its transactions are listed individually."
+    default:
+      return
+        "\(unreadableGroupCount) split purchases could not be read. Their transactions are listed individually."
+    }
+  }
+}
+
 public enum LedgerRecurrenceFrequency: String, CaseIterable, Sendable {
   case daily
   case weekly

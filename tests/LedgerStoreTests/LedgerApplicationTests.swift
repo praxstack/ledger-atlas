@@ -2525,8 +2525,8 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
         amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(amount)),
         categoryID: category.id, description: "Line \(order)", displayOrder: order)
     }
-    let first = key == "f" ? "1" : "3"
-    let second = key == "f" ? "2" : "4"
+    let first = key == "f" ? "1" : key == "e" ? "3" : "5"
+    let second = key == "f" ? "2" : key == "e" ? "4" : "6"
     let purchaseID = try StableLedgerID.transaction(
       origin: origin, localKey: String(repeating: key, count: 64))
     _ = try app.createSplit(
@@ -2555,6 +2555,21 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
     createdAt: UTCInstant(epochMilliseconds: 3))
   let snapshot = try app.snapshot()
   #expect(throws: (any Error).self) { try LedgerApplication.splitPurchases(from: snapshot) }
-  let tolerant = try LedgerApplication.splitPurchases(from: snapshot, skippingInvalid: true)
-  #expect(tolerant.count == 1)
+  let listing = LedgerApplication.splitPurchaseListing(from: snapshot)
+  #expect(listing.purchases.count == 1)
+  // The malformed group's rows are reported so the UI can keep them visible and say why.
+  #expect(listing.unreadableGroupCount == 1)
+  #expect(listing.unreadableTransactionIDs == Set(broken.map(\.transactionID)))
+  #expect(listing.unreadableNotice?.contains("could not be read") == true)
+
+  // Review m1: one malformed group must not block creating an unrelated split.
+  let created = try split("d", ms: 4)
+  #expect(created.count == 2)
+  let after = LedgerApplication.splitPurchaseListing(from: try app.snapshot())
+  #expect(after.purchases.count == 2)
+  #expect(after.unreadableGroupCount == 1)
+  #expect(
+    LedgerSplitPurchaseListing(
+      purchases: [], unreadableTransactionIDs: [], unreadableGroupCount: 0
+    ).unreadableNotice == nil)
 }
