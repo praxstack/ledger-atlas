@@ -745,25 +745,22 @@ import Testing
 @MainActor
 @Test func amountEditKeepsRoundingTagsAndTransferLegsAndRefusesCrossCurrency() throws {
   // Review m3: cover the rounding, tag and transfer behaviour the amount-edit fix claims.
+  // Uses an empty canonical ledger (no import) to keep main-actor time short.
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
-  let source = directory.appendingPathComponent("synthetic.sqlite")
-  try writeSyntheticV19(to: source)
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+  _ = try LedgerStoreLifecycle.create(at: canonical)
   let journey = LedgerJourney()
-  try journey.selectSource(
-    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
-    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
-    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
-  try journey.approveAndOpen(
-    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
-  try journey.performBeginEditing()
-  let imported = try #require(journey.snapshot)
-  let account = try #require(imported.accounts.first)
+  try journey.beginEditing(canonical)
   let macOrigin = try LedgerOrigin.macNative()
   let when = try LedgerJourney.nativeTemporal(for: UTCInstant(epochMilliseconds: 1_000))
-  let unit = account.currencyUnit
-  let otherUnit = unit == "EUR" ? "USD" : "EUR"
+  let unit = "USD"
+  let otherUnit = "EUR"
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: macOrigin, localKey: String(repeating: "f", count: 64)),
+    name: "Synthetic primary", currencyUnit: unit, origin: macOrigin)
+  try journey.createAccount(account)
   let sibling = try LedgerAccount(
     id: StableLedgerID.account(origin: macOrigin, localKey: String(repeating: "a", count: 64)),
     name: "Synthetic sibling", currencyUnit: unit, origin: macOrigin)
