@@ -2391,3 +2391,248 @@ func b08RecurrenceGenerationIsBoundedAndAtomic(candidateCount: Int) throws {
     #expect(try app.checksum() == after)
   }
 }
+
+@Test func activityReportSignsByDirectionAndCountsTransferOnce() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "7", count: 64), label: "local")
+  let first = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "One", currencyUnit: "USD", origin: origin)
+  let second = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "b", count: 64)),
+    name: "Two", currencyUnit: "USD", origin: origin)
+  try app.createAccount(first)
+  try app.createAccount(second)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func amount(_ literal: String) throws -> CurrencyAmount {
+    try CurrencyAmount(unitCode: "USD", amount: ExactDecimal(literal))
+  }
+  func simple(_ key: String, _ direction: LedgerEffectDirection, _ literal: String,
+    _ kind: LedgerTransactionKind, _ ms: Int64) throws {
+    _ = try app.createTransaction(
+      idempotencyKey: String(repeating: key, count: 64),
+      draft: LedgerTransactionDraft(
+        effects: [
+          try LedgerTransactionEffect(
+            accountID: first.id, direction: direction, amount: amount(literal))
+        ], categoryID: nil, kind: kind, occurredAt: when, origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: ms))
+  }
+  try simple("c", .increase, "100", .income, 1)
+  try simple("d", .decrease, "40", .expense, 2)
+  _ = try app.createTransfer(
+    idempotencyKey: String(repeating: "e", count: 64), sourceAccountID: first.id,
+    destinationAccountID: second.id, sourceAmount: amount("25"),
+    destinationAmount: amount("25"), conversion: nil, fee: nil, feeAccountID: nil,
+    occurredAt: when, origin: origin, createdAt: UTCInstant(epochMilliseconds: 3))
+
+  let report = try app.report(unitCode: "USD")
+  func row(_ id: String) throws -> ExactDecimal {
+    try ExactDecimal(#require(report.rows.first { $0.id == id }).amountLiteral)
+  }
+  #expect(try row("income") == ExactDecimal("100"))
+  #expect(try row("expense") == ExactDecimal("40"))
+  #expect(try row("transfer") == ExactDecimal("25"))
+  // Net of all effects: transfer legs cancel; income minus expense.
+  #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("60"))
+}
+
+@Test func activityReportSignsNegativeAdjustments() throws {
+  // Review m3: a decrease adjustment shows as a negative adjustment row and lowers the total.
+  // (An increase on an expense is rejected by the domain, so there is no refund-style case.)
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "6", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "One", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func post(_ key: String, _ direction: LedgerEffectDirection, _ literal: String,
+    _ kind: LedgerTransactionKind, _ ms: Int64) throws {
+    _ = try app.createTransaction(
+      idempotencyKey: String(repeating: key, count: 64),
+      draft: LedgerTransactionDraft(
+        effects: [
+          try LedgerTransactionEffect(
+            accountID: account.id, direction: direction,
+            amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(literal)))
+        ], categoryID: nil, kind: kind, occurredAt: when, origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: ms))
+  }
+  try post("c", .increase, "100", .income, 1)
+  try post("d", .decrease, "40", .expense, 2)
+  try post("f", .decrease, "5", .adjustment, 3)
+  let report = try app.report(unitCode: "USD")
+  func row(_ id: String) throws -> ExactDecimal {
+    try ExactDecimal(#require(report.rows.first { $0.id == id }).amountLiteral)
+  }
+  #expect(try row("income") == ExactDecimal("100"))
+  #expect(try row("expense") == ExactDecimal("40"))
+  #expect(try row("adjustment") == ExactDecimal("-5"))
+  #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal("55"))
+}
+
+@Test(arguments: ["excluded", "inAndOut", "crossCurrency"])
+func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) throws {
+  // Review M1: a transfer with only one leg visible in the report (other leg excluded from
+  // totals or in another currency) must still add its leg next to fully visible transfers.
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "9", count: 64), label: "local")
+  func account(_ key: Character, _ name: String, _ unit: String, included: Bool = true) throws
+    -> LedgerAccount
+  {
+    let value = try LedgerAccount(
+      id: StableLedgerID.account(origin: origin, localKey: String(repeating: key, count: 64)),
+      name: name, currencyUnit: unit, origin: origin, includeInTotals: included)
+    try app.createAccount(value)
+    return value
+  }
+  let one = try account("a", "One", "USD")
+  let two = try account("b", "Two", "USD")
+  let off = try account("c", "Off", "USD", included: false)
+  let eur = try account("d", "Euro", "EUR")
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func usd(_ literal: String) throws -> CurrencyAmount {
+    try CurrencyAmount(unitCode: "USD", amount: ExactDecimal(literal))
+  }
+  var next: Int64 = 0
+  func transfer(
+    _ from: LedgerAccount, _ to: LedgerAccount, _ source: CurrencyAmount,
+    _ destination: CurrencyAmount, conversion: LedgerConversion? = nil
+  ) throws {
+    next += 1
+    _ = try app.createTransfer(
+      idempotencyKey: String(repeating: String(next), count: 64), sourceAccountID: from.id,
+      destinationAccountID: to.id, sourceAmount: source, destinationAmount: destination,
+      conversion: conversion, fee: nil, feeAccountID: nil, occurredAt: when, origin: origin,
+      createdAt: UTCInstant(epochMilliseconds: next))
+  }
+  let expectedTransfer: String
+  let expectedTotal: String
+  switch scenario {
+  case "excluded":
+    try transfer(one, two, usd("25"), usd("25"))
+    try transfer(one, off, usd("10"), usd("10"))
+    (expectedTransfer, expectedTotal) = ("35", "-10")
+  case "inAndOut":
+    try transfer(off, one, usd("10"), usd("10"))
+    try transfer(one, off, usd("10"), usd("10"))
+    (expectedTransfer, expectedTotal) = ("20", "0")
+  default:
+    try transfer(one, two, usd("25"), usd("25"))
+    let nine = try CurrencyAmount(unitCode: "EUR", amount: ExactDecimal("9"))
+    try transfer(
+      one, eur, usd("10"), nine,
+      conversion: LedgerConversion(
+        sourceAmount: usd("10"), convertedAmount: nine, rate: ExactDecimal("1.1111"),
+        rateScale: 4, rounding: .halfEven))
+    (expectedTransfer, expectedTotal) = ("35", "-10")
+  }
+  let report = try app.report(unitCode: "USD")
+  let row = try #require(report.rows.first { $0.id == "transfer" })
+  #expect(try ExactDecimal(row.amountLiteral) == ExactDecimal(expectedTransfer))
+  #expect(row.count == 2)
+  #expect(try ExactDecimal(report.totalLiteral) == ExactDecimal(expectedTotal))
+}
+
+@Test func splitPurchasesSkippingInvalidKeepsValidGroupsVisible() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "8", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "One", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let category = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Food", kind: .expense, origin: origin)
+  try app.createCategory(category)
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 1, day: 10)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func split(_ key: Character, ms: Int64) throws -> [LedgerTransactionRevision] {
+    func line(_ k: Character, _ amount: String, _ order: Int) throws -> LedgerSplitLine {
+      try LedgerSplitLine(
+        id: StableLedgerID.splitLine(origin: origin, localKey: String(repeating: k, count: 64)),
+        amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(amount)),
+        categoryID: category.id, description: "Line \(order)", displayOrder: order)
+    }
+    let first = key == "f" ? "1" : key == "e" ? "3" : "5"
+    let second = key == "f" ? "2" : key == "e" ? "4" : "6"
+    let purchaseID = try StableLedgerID.transaction(
+      origin: origin, localKey: String(repeating: key, count: 64))
+    _ = try app.createSplit(
+      LedgerSplitDraft(
+        id: purchaseID,
+        accountID: account.id,
+        parentAmount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("5.00")),
+        lines: [try line(Character(first), "2.00", 0), try line(Character(second), "3.00", 1)],
+        occurredAt: when, note: "Group", origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: ms))
+    return try app.snapshot().transactions.filter {
+      $0.currentRevision.draft.sourceLiterals.contains {
+        $0.field == "split.purchaseID" && $0.literal == purchaseID
+      }
+    }.map(\.currentRevision)
+  }
+  _ = try split("f", ms: 1)
+  let broken = try split("e", ms: 2)
+  // Correct one child with its split metadata stripped, producing a malformed group.
+  let child = try #require(broken.first)
+  _ = try app.correctTransaction(
+    transactionID: child.transactionID, expectedCurrentRevisionID: child.id,
+    draft: LedgerTransactionDraft(
+      effects: child.draft.effects, categoryID: child.draft.categoryID, kind: .expense,
+      occurredAt: child.draft.occurredAt, origin: origin),
+    createdAt: UTCInstant(epochMilliseconds: 3))
+  let snapshot = try app.snapshot()
+  #expect(throws: (any Error).self) { try LedgerApplication.splitPurchases(from: snapshot) }
+  let listing = LedgerApplication.splitPurchaseListing(from: snapshot)
+  #expect(listing.purchases.count == 1)
+  // The malformed group's rows are reported so the UI can keep them visible and say why.
+  #expect(listing.unreadableGroupCount == 1)
+  #expect(listing.unreadableTransactionIDs == Set(broken.map(\.transactionID)))
+  #expect(listing.unreadableNotice?.contains("could not be read") == true)
+
+  // Review m1: one malformed group must not block creating an unrelated split.
+  let created = try split("d", ms: 4)
+  #expect(created.count == 2)
+  let after = LedgerApplication.splitPurchaseListing(from: try app.snapshot())
+  #expect(after.purchases.count == 2)
+  #expect(after.unreadableGroupCount == 1)
+
+  // Codex P2: a retry that reuses the unreadable group's purchase ID with new line IDs
+  // must not insert a second group with the same purchase ID.
+  let brokenPurchaseID = try StableLedgerID.transaction(
+    origin: origin, localKey: String(repeating: "e", count: 64))
+  let countBeforeRetry = try app.snapshot().transactions.count
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try app.createSplit(
+      LedgerSplitDraft(
+        id: brokenPurchaseID,
+        accountID: account.id,
+        parentAmount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("5.00")),
+        lines: [
+          try LedgerSplitLine(
+            id: StableLedgerID.splitLine(origin: origin, localKey: String(repeating: "7", count: 64)),
+            amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("2.00")),
+            categoryID: category.id, description: "Retry 0", displayOrder: 0),
+          try LedgerSplitLine(
+            id: StableLedgerID.splitLine(origin: origin, localKey: String(repeating: "8", count: 64)),
+            amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("3.00")),
+            categoryID: category.id, description: "Retry 1", displayOrder: 1),
+        ],
+        occurredAt: when, note: "Group", origin: origin),
+      createdAt: UTCInstant(epochMilliseconds: 5))
+  }
+  #expect(try app.snapshot().transactions.count == countBeforeRetry)
+  #expect(
+    LedgerSplitPurchaseListing(
+      purchases: [], unreadableTransactionIDs: [], unreadableGroupCount: 0
+    ).unreadableNotice == nil)
+}

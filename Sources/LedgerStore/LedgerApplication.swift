@@ -162,15 +162,28 @@ public struct LedgerApplication: LedgerClient {
     let expected = try LedgerSplitPurchase(
       id: draft.id, accountID: draft.accountID, parentAmount: draft.parentAmount,
       lines: draft.lines, occurredAt: draft.occurredAt, note: draft.note, origin: draft.origin)
-    if let existing = try Self.splitPurchases(from: store.readSnapshot()).first(where: {
-      $0.id == draft.id
-    }) {
+    // Tolerant reads: an unrelated malformed group must not block creating a new split.
+    let snapshot = try store.readSnapshot()
+    let listing = Self.splitPurchaseListing(from: snapshot)
+    if let existing = listing.purchases.first(where: { $0.id == draft.id }) {
       guard existing == expected else { throw Error.invalidCommand }
       return existing
     }
+    // An unreadable group may still own this purchase ID; a second group would duplicate it.
+    let idAlreadyClaimed =
+      listing.unreadableTransactionIDs.contains(draft.id)
+      || snapshot.transactions.contains { transaction in
+        transaction.currentRevision.draft.sourceLiterals.contains {
+          $0.field == "split.purchaseID" && $0.literal == draft.id
+        }
+      }
+    guard !idAlreadyClaimed else { throw Error.invalidCommand }
     _ = try store.createLinkedTransactions(
       try Self.splitRequests(for: draft, createdAt: createdAt), linkKind: .split)
-    guard let purchase = try splitPurchases().first(where: { $0.id == draft.id }) else {
+    guard
+      let purchase = Self.splitPurchaseListing(from: try store.readSnapshot()).purchases.first(
+        where: { $0.id == draft.id })
+    else {
       throw Error.invalidCommand
     }
     return purchase
@@ -207,16 +220,44 @@ public struct LedgerApplication: LedgerClient {
     }
   }
 
+  /// Reads every split group without failing: groups that parse become purchases, and the
+  /// transactions of any group that does not are reported so callers can show them.
+  public static func splitPurchaseListing(
+    from snapshot: LedgerStore.LedgerReadSnapshot
+  ) -> LedgerSplitPurchaseListing {
+    var purchases: [LedgerSplitPurchase] = []
+    var unreadableIDs: Set<String> = []
+    var unreadableGroups = 0
+    for group in splitPurchaseGroups(from: snapshot) {
+      if let purchase = try? group.read() {
+        purchases.append(purchase)
+      } else {
+        unreadableIDs.formUnion(group.memberIDs)
+        unreadableGroups += 1
+      }
+    }
+    return LedgerSplitPurchaseListing(
+      purchases: purchases, unreadableTransactionIDs: unreadableIDs,
+      unreadableGroupCount: unreadableGroups)
+  }
+
   public static func splitPurchases(
     from snapshot: LedgerStore.LedgerReadSnapshot
   ) throws -> [LedgerSplitPurchase] {
+    try splitPurchaseGroups(from: snapshot).map { try $0.read() }
+  }
+
+  private static func splitPurchaseGroups(
+    from snapshot: LedgerStore.LedgerReadSnapshot
+  ) -> [(memberIDs: [String], read: () throws -> LedgerSplitPurchase)] {
     let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
     let links = snapshot.transactions.flatMap(\.links).filter { $0.kind == .split }
     let parentIDs = Set(links.map(\.fromTransactionID)).sorted()
-    return try parentIDs.map { parentID in
+    return parentIDs.map { parentID in
       let linkedIDs = [parentID]
         + links.filter { $0.fromTransactionID == parentID }.map(\.toTransactionID)
       let uniqueIDs = Array(Set(linkedIDs)).sorted()
+      return (uniqueIDs, {
       guard uniqueIDs.count >= 2,
         let members = uniqueIDs.compactMap({ transactions[$0] }) as [LedgerTransactionSnapshot]?,
         members.count == uniqueIDs.count
@@ -293,6 +334,7 @@ public struct LedgerApplication: LedgerClient {
       return try LedgerSplitPurchase(
         id: purchaseID ?? parentID, accountID: firstEffect.accountID, parentAmount: parentAmount,
         lines: lines, occurredAt: firstDraft.occurredAt, note: purchaseNote, origin: firstDraft.origin)
+      })
     }
   }
 
@@ -502,7 +544,12 @@ public struct LedgerApplication: LedgerClient {
     from snapshot: LedgerStore.LedgerReadSnapshot, unitCode: String
   ) throws -> LedgerReport {
     let accounts = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
-    var totals: [LedgerTransactionKind: (ExactDecimal, Int)] = [:]
+    let zero = try ExactDecimal("0")
+    // Per kind: signed net (increase positive, decrease negative), the larger visible side of
+    // each transaction summed across transactions (a transfer's value), and count.
+    var totals: [LedgerTransactionKind: (net: ExactDecimal, oneLeg: ExactDecimal, count: Int)] =
+      [:]
+    var total = zero
     for transaction in snapshot.transactions where transaction.currentRevision.lifecycle == .active
     {
       let draft = transaction.currentRevision.draft
@@ -513,22 +560,41 @@ public struct LedgerApplication: LedgerClient {
           } == true
       }
       guard !matching.isEmpty else { continue }
-      var entry = totals[draft.kind]
-      if entry == nil { entry = (try ExactDecimal("0"), 0) }
+      var entry = totals[draft.kind] ?? (zero, zero, 0)
+      var transactionIn = zero
+      var transactionOut = zero
       for effect in matching {
-        entry!.0 = try entry!.0.adding(effect.amount.amount)
+        switch effect.direction {
+        case .increase:
+          entry.net = try entry.net.adding(effect.amount.amount)
+          transactionIn = try transactionIn.adding(effect.amount.amount)
+          total = try total.adding(effect.amount.amount)
+        case .decrease:
+          entry.net = try entry.net.subtracting(effect.amount.amount)
+          transactionOut = try transactionOut.adding(effect.amount.amount)
+          total = try total.subtracting(effect.amount.amount)
+        }
       }
-      entry!.1 += 1
+      // Per transaction, so a transfer whose other leg is in another currency or an excluded
+      // account still contributes its visible leg alongside fully visible transfers.
+      entry.oneLeg = try entry.oneLeg.adding(max(transactionIn, transactionOut))
+      entry.count += 1
       totals[draft.kind] = entry
     }
-    let rows = LedgerTransactionKind.allCases.compactMap { kind -> LedgerReportRow? in
+    let rows = try LedgerTransactionKind.allCases.compactMap { kind -> LedgerReportRow? in
       guard let entry = totals[kind] else { return nil }
+      let shown: ExactDecimal
+      switch kind {
+      case .income, .adjustment: shown = entry.net
+      case .expense: shown = try zero.subtracting(entry.net)
+      case .transfer:
+        // A transfer moves value once: per transaction, the larger visible leg.
+        shown = entry.oneLeg
+      }
       return LedgerReportRow(
-        id: kind.rawValue, label: kind.rawValue, amountLiteral: entry.0.rawLiteral,
-        unitCode: unitCode, count: entry.1)
+        id: kind.rawValue, label: kind.rawValue, amountLiteral: shown.rawLiteral,
+        unitCode: unitCode, count: entry.count)
     }
-    var total = try ExactDecimal("0")
-    for row in rows { total = try total.adding(ExactDecimal(row.amountLiteral)) }
     return LedgerReport(
       title: "Activity by kind", rows: rows, totalLiteral: total.rawLiteral, unitCode: unitCode,
       inventory: inventory(from: snapshot), categoryRows: try categoryRows(

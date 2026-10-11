@@ -854,12 +854,14 @@ public struct LedgerAtlasRootView: View {
       }
       .id(selection)
     } else if selection == .ledger {
+      let listing = splitListing
       LedgerView(
         state: session.state, rows: journey.rows(for: .ledger), isEditing: journey.isEditing,
         accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
         transactions: journey.snapshot?.transactions ?? [],
-        splitPurchases: splitPurchases,
-        splitTransactionIDs: splitTransactionIDs,
+        splitPurchases: listing?.purchases ?? [],
+        splitTransactionIDs: splitTransactionIDs(listing),
+        splitNotice: listing?.unreadableNotice,
         intentRequest: pendingIntent,
         consumeIntent: { pendingIntent = nil },
         open: openLedger,
@@ -1096,17 +1098,18 @@ public struct LedgerAtlasRootView: View {
     }
   }
 
-  private var splitPurchases: [LedgerSplitPurchase] {
-    guard let snapshot = journey.snapshot else { return [] }
-    return (try? LedgerApplication.splitPurchases(from: snapshot)) ?? []
+  private var splitListing: LedgerSplitPurchaseListing? {
+    journey.snapshot.map(LedgerApplication.splitPurchaseListing(from:))
   }
 
-  private var splitTransactionIDs: Set<String> {
+  /// Members of split groups that were read; members of unreadable groups stay in the main list.
+  private func splitTransactionIDs(_ listing: LedgerSplitPurchaseListing?) -> Set<String> {
     guard let snapshot = journey.snapshot else { return [] }
     return Set(
       snapshot.transactions.filter { transaction in
         transaction.links.contains { $0.kind == .split }
-      }.map(\.id))
+      }.map(\.id)
+    ).subtracting(listing?.unreadableTransactionIDs ?? [])
   }
 
   private func lockApp() {
@@ -1407,6 +1410,7 @@ private struct LedgerView: View {
   let transactions: [LedgerTransactionSnapshot]
   let splitPurchases: [LedgerSplitPurchase]
   let splitTransactionIDs: Set<String>
+  let splitNotice: String?
   let intentRequest: LedgerIntentRequest?
   let consumeIntent: () -> Void
   let open: () -> Void
@@ -1473,6 +1477,13 @@ private struct LedgerView: View {
           .padding(.horizontal, 16)
           .accessibilityLabel("Ledger view")
           .onChange(of: viewMode) { _, _ in page = 0 }
+          if let splitNotice {
+            Text(splitNotice)
+              .font(.caption)
+              .foregroundStyle(.orange)
+              .padding(.horizontal, 16)
+              .accessibilityLabel(splitNotice)
+          }
           List(selection: $selectedID) {
             ForEach(groupedRows, id: \.0) { title, sectionRows in
               Section(title) {
