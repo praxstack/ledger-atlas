@@ -36,7 +36,7 @@ jobs:
     permissions:
       contents: write   # only used to publish a Release on v* tags
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -114,7 +114,7 @@ jobs:
         run: ./scripts/ci/smoke-launch.sh "${{ steps.package.outputs.dmg }}"
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: LedgerAtlas-${{ steps.version.outputs.version }}-${{ steps.package.outputs.mode }}
           path: |
@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload build log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: xcodebuild-log
           path: .build/xcode.log

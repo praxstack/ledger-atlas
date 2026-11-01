@@ -43,6 +43,7 @@ fi
 
 log "Xcode: $(xcodebuild -version | tr '\n' ' ')"
 
+mkdir -p "$(dirname "$DERIVED")"
 log "Building LedgerAtlas ($CONFIGURATION, version $VERSION build $BUILD_NUMBER)"
 # Signing is done by hand below, so Xcode never needs the team's provisioning profiles.
 xcodebuild build \
