@@ -22,6 +22,7 @@ Vendor terms such as `INOUTCOME`, `DO_TYPE`, `PERIOD_TYPE`, and `.mmbak` appear 
 - Data-backed: the observed Android SQLite profile has `user_version=19`; the supplied newer `.sqlite` and direct `.mmbak` pair are byte-identical. Source: `/Users/prax/Developer/money-manager-reverse-engineering/research/compatibility/waves/wave-03/shard-sqlite-mmbak.md`.
 - Data-backed: the supplied XLSX is a flattened partial report and omits source identities/metadata. Source: `/Users/prax/Developer/money-manager-reverse-engineering/research/compatibility/waves/wave-03/shard-xlsx-export.md`.
 - Observed: 25 restricted Android screenshots cover 14 route families; the synthetic target catalog has 98 screens with explicit unknowns. Source: `/Users/prax/Developer/money-manager-reverse-engineering/research/ui-reconstruction/waves/pass-02/design-navigation-audit.md`.
+- Data-backed: a 2026-11-01 Android v19 snapshot has the same DDL as the August pair. The frozen input contract, field meanings, and open questions are in `docs/compatibility/money-manager-v19-schema-contract.md`; `scripts/mm_v19_contract_check.py` checks any backup against it with counts-only output.
 - Unknown: historical Android/iOS schema/container families, attachment packaging, original-app round trips, and several enum/calculation behaviors are not certified.
 
 ## Architecture in force
