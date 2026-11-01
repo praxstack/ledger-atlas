@@ -3,8 +3,7 @@ name: CI
 # Runs on every pull request and every push to main.
 # - checks (Linux, cheap): web demo lint/typecheck/tests/build + Python lint/tests
 # - swift (macOS): swift build, swift test, mmctl smoke
-# macOS minutes cost 10x Linux minutes on private repos, so the Swift job skips
-# docs-only changes and older runs on the same branch are cancelled.
+# The Swift job skips docs-only PRs, and older runs on the same branch are cancelled.
 
 on:
   pull_request:

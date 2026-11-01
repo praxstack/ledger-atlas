@@ -54,8 +54,8 @@ The same script works on a Mac: `./scripts/package-dmg.sh` writes `dist/LedgerAt
 
 **Ad-hoc (default, no secrets).** The app and widget are signed with `codesign -s -`
 and their entitlements. Good for personal installs and testing. Not accepted by
-Gatekeeper without the manual approval above, and app-group/sandbox behaviour may
-differ from a Developer ID build (see LA-005 in `docs/audit/REPORT.md`).
+Gatekeeper without the manual approval above. The sandbox is active, so the
+entitlements (including the LA-005 bookmark and loopback-server ones) are exercised.
 
 **Developer ID + notarization (when secrets exist).** Add these repository secrets
 (Settings › Secrets and variables › Actions). The workflow switches mode automatically.
@@ -79,6 +79,7 @@ set the repository **variable** `XCODE_VERSION` (e.g. `26.1`).
 
 ## Cost note
 
-The repository is private, so macOS runner minutes count 10x against the GitHub Actions
-allowance. To save minutes, the Swift job skips docs-only PRs, newer pushes cancel older
-runs, and PR DMG builds only happen when the PR has the `build-dmg` label.
+The repository is public, so GitHub-hosted runners (including macOS) are free and
+unlimited. Ad-hoc signing needs no Apple Developer account. The whole pipeline costs
+nothing. Newer pushes still cancel older runs, and PR DMG builds still need the
+`build-dmg` label, to keep feedback fast.
