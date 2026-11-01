@@ -1,0 +1,93 @@
+name: CI
+
+# Runs on every pull request and every push to main.
+# - checks (Linux, cheap): web demo lint/typecheck/tests/build + Python lint/tests
+# - swift (macOS): swift build, swift test, mmctl smoke
+# macOS minutes cost 10x Linux minutes on private repos, so the Swift job skips
+# docs-only changes and older runs on the same branch are cancelled.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Web + Python checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - name: Ruff
+        run: |
+          .venv/bin/ruff check scripts .codex/hooks tests/orchestration
+          .venv/bin/ruff format --check scripts .codex/hooks tests/orchestration
+      - run: .venv/bin/python -m pytest tests/orchestration
+      - name: JSON files parse
+        run: |
+          .venv/bin/python -m json.tool .codex/hooks.json >/dev/null
+          .venv/bin/python -m json.tool prd.json >/dev/null
+
+  changes:
+    name: Detect Swift changes
+    runs-on: ubuntu-latest
+    outputs:
+      swift: ${{ steps.filter.outputs.swift }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            swift:
+              - 'Sources/**'
+              - 'tests/**'
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'project.yml'
+              - 'LedgerAtlas.xcodeproj/**'
+              - '*.entitlements'
+              - 'scripts/**'
+              - '.github/workflows/**'
+
+  swift:
+    name: Swift build + test (macOS)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true' || github.event_name != 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: ./scripts/ci/select-xcode.sh
+        env:
+          XCODE_VERSION: ${{ vars.XCODE_VERSION }}
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+      - run: swift build
+      - run: swift test --parallel
+      - run: swift run mmctl

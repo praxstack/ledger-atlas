@@ -27,6 +27,12 @@ The native `mmctl` surface is redacted `inspect`, `coverage`, `stage`, and
 `reconcile`. The positive import cell is a named synthetic text-only v19 subset;
 real Android v19 SQLite and `.mmbak` inputs remain classification-only.
 
+## Cloud development and DMG builds
+
+CI runs the web, Python, and Swift checks on every pull request, and the
+`Mac app (DMG)` workflow builds an installable DMG on GitHub's macOS runners. See
+[docs/development/cloud-and-dmg.md](docs/development/cloud-and-dmg.md).
+
 ## Scripts
 
 | Command | Description |

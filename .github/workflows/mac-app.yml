@@ -1,0 +1,151 @@
+name: Mac app (DMG)
+
+# Builds Ledger Atlas.app, wraps it in a DMG, and launches it once as a smoke test.
+#
+# When it runs:
+#   - every push to main          -> DMG attached to the run as an artifact (kept 30 days)
+#   - a tag like v1.2.0           -> DMG also published as a GitHub Release
+#   - Actions tab > "Run workflow" -> on any branch, e.g. to try a feature branch on your Mac
+#   - a pull request labelled "build-dmg"
+#
+# Signing: ad-hoc by default (no Apple account needed). If the repository has the
+# MACOS_CERTIFICATE_P12 secrets set (see docs/development/cloud-and-dmg.md), it signs
+# with Developer ID and notarizes instead.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: mac-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    name: Build DMG
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'build-dmg')
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: write   # only used to publish a Release on v* tags
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: ./scripts/ci/select-xcode.sh
+        env:
+          XCODE_VERSION: ${{ vars.XCODE_VERSION }}
+
+      - name: Work out version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            base=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.1.0)
+            version="${base#v}-dev.${GITHUB_RUN_NUMBER}+$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Import Developer ID certificate (only if secrets are set)
+        id: signing
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          APP_PROFILE: ${{ secrets.MACOS_APP_PROFILE }}
+          WIDGET_PROFILE: ${{ secrets.MACOS_WIDGET_PROFILE }}
+        run: |
+          if [ -z "$P12" ] || [ -z "$IDENTITY" ]; then
+            echo "No signing secrets; building an ad-hoc signed DMG."
+            exit 0
+          fi
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kc_pass=$(openssl rand -hex 16)
+          security create-keychain -p "$kc_pass" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_pass" "$kc"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_pass" "$kc" >/dev/null
+          # Keep the runner's existing keychains in the search list after ours.
+          read -r -a existing <<< "$(security list-keychains -d user | tr -d '"' | xargs)"
+          security list-keychains -d user -s "$kc" "${existing[@]}"
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          if [ -n "$NOTARY_KEY" ]; then
+            echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            echo "notary_key=$RUNNER_TEMP/notary.p8" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$APP_PROFILE" ]; then
+            echo "$APP_PROFILE" | base64 --decode > "$RUNNER_TEMP/app.provisionprofile"
+            echo "app_profile=$RUNNER_TEMP/app.provisionprofile" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$WIDGET_PROFILE" ]; then
+            echo "$WIDGET_PROFILE" | base64 --decode > "$RUNNER_TEMP/widget.provisionprofile"
+            echo "widget_profile=$RUNNER_TEMP/widget.provisionprofile" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and package
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+          NOTARY_KEY_PATH: ${{ steps.signing.outputs.notary_key }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APP_PROFILE_PATH: ${{ steps.signing.outputs.app_profile }}
+          WIDGET_PROFILE_PATH: ${{ steps.signing.outputs.widget_profile }}
+        run: ./scripts/package-dmg.sh
+
+      - name: Smoke test (launch from the DMG)
+        run: ./scripts/ci/smoke-launch.sh "${{ steps.package.outputs.dmg }}"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: LedgerAtlas-${{ steps.version.outputs.version }}-${{ steps.package.outputs.mode }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: .build/xcode.log
+          if-no-files-found: ignore
+
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Built from ${GITHUB_SHA::7}. Signing: ${{ steps.package.outputs.mode }}."
+          if [ "${{ steps.package.outputs.mode }}" = "ad-hoc" ]; then
+            notes="$notes Not notarized: the first time you open it, go to System Settings > Privacy & Security and click Open Anyway."
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.sha256 \
+            --title "Ledger Atlas $GITHUB_REF_NAME" --notes "$notes" --prerelease
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          [ -f "$kc" ] && security delete-keychain "$kc" || true
+          rm -f "$RUNNER_TEMP"/*.p8 "$RUNNER_TEMP"/*.provisionprofile
