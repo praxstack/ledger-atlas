@@ -50,6 +50,9 @@ jobs:
   changes:
     name: Detect Swift changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # paths-filter lists the PR's changed files
     outputs:
       swift: ${{ steps.filter.outputs.swift }}
     steps:
