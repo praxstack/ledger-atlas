@@ -20,6 +20,7 @@ public struct LedgerAtlasRootView: View {
     testingScopeStopper: { LedgerLocations.stopAccess($0) })
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
+  @State private var portal = LedgerPortalController()
   @State private var productSettings: LedgerProductSettings
   /// macOS Reduce Motion, or always on when Settings says so.
   private var effectiveReduceMotion: Bool {
@@ -149,12 +150,17 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: sourceTimeZone)
     }
     .task {
+      portal.lockDidChange(isLocked: appLock.isLocked)
       if appLock.isLocked { closeLockedLedger() } else { startSavedLedgerReopen() }
     }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
     }
+    .onChange(of: journey.ledgerURL) { _, ledger in
+      portal.ledgerDidChange(to: ledger)
+    }
     .onChange(of: appLock.isLocked) { _, locked in
+      portal.lockDidChange(isLocked: locked)
       if locked {
         closeLockedLedger()
       } else {
@@ -1047,7 +1053,8 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .localAccess {
       LocalAccessSurface(
         accountCount: journey.snapshot?.accounts.count ?? 0,
-        transactionCount: journey.snapshot?.transactions.count ?? 0)
+        transactionCount: journey.snapshot?.transactions.count ?? 0,
+        ledgerURL: journey.ledgerURL, portal: portal)
         .id(selection)
     } else if selection == .backupRestore {
       BackupSurface(
