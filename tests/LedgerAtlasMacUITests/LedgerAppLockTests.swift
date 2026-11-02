@@ -216,9 +216,9 @@ private let testIterations: UInt32 = 1_000
   #expect(lock.unlock(with: "correct"))
   let upgraded = try #require(storage["passcode-digest"])
   #expect(upgraded.count == 56 && upgraded.prefix(4) == Data("LAK2".utf8))
+  // A restart always starts locked; the upgraded credential still opens it.
   let reopened = restart()
-  #expect(reopened.isLocked == false)
-  reopened.lock()
+  #expect(reopened.isLocked && !reopened.storageUnavailable)
   #expect(!reopened.unlock(with: "wrong"))
   #expect(reopened.unlock(with: "correct"))
 }
