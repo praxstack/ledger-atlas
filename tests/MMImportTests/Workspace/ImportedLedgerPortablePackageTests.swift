@@ -255,6 +255,25 @@ struct ImportedLedgerPortablePackageTests {
         try makeV11(&graph, checksum: String(repeating: "0", count: 64))
       }
       try expectRestoreRefused(tampered, in: directory, with: .packageTampered)
+
+      // v11 has no tags, so a v11 package that carries one is refused, not a crash.
+      let withTag = try editingGraph(previous.payload) { _ in }
+      var object = try packageObject(withTag.payload)
+      let account = try #require((object["accounts"] as? [[String: Any]])?.first)
+      let origin = try LedgerOrigin(
+        id: try #require(account["originID"] as? String),
+        label: try #require(account["originLabel"] as? String),
+        provenanceID: account["originProvenanceID"] as? String)
+      object["tags"] = [
+        [
+          "id": try StableLedgerID.tag(origin: origin, localKey: String(repeating: "d", count: 64)),
+          "name": "Not in v11", "originID": origin.id, "originLabel": origin.label,
+          "originProvenanceID": account["originProvenanceID"] ?? NSNull(), "lifecycle": "active",
+        ] as [String: Any]
+      ]
+      let tagged = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+      try expectRestoreRefused(
+        (withTag.manifest.resealed(tagged), tagged), in: directory, with: .invalidCommand)
     }
   }
 
@@ -277,6 +296,15 @@ struct ImportedLedgerPortablePackageTests {
 }
 
 // MARK: - Helpers
+
+extension LedgerExportManifest {
+  fileprivate func resealed(_ payload: Data) -> LedgerExportManifest {
+    LedgerExportManifest(
+      formatVersion: formatVersion, formatFingerprint: formatFingerprint,
+      payloadSHA256: SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined(),
+      createdAtMilliseconds: createdAtMilliseconds)
+  }
+}
 
 private func importedLedger(in directory: URL, includingTransfers: Bool = true) throws
   -> LedgerStore
@@ -358,8 +386,14 @@ private func previousReleaseChecksum(in directory: URL) throws -> String {
   var checksum = ""
   try withDatabase(copy, readOnly: false) { database in
     // A v11 ledger has no transfer pairs, so this one must not either.
-    try exec(database, "DELETE FROM ledger_meta WHERE EXISTS (SELECT 1 FROM economic_event_transfer)")
-    #expect(sqlite3_changes(database) == 0)
+    var statement: OpaquePointer?
+    #expect(
+      sqlite3_prepare_v2(
+        database, "SELECT count(*) FROM economic_event_transfer", -1, &statement, nil)
+        == SQLITE_OK)
+    #expect(sqlite3_step(statement) == SQLITE_ROW)
+    #expect(sqlite3_column_int64(statement, 0) == 0)
+    sqlite3_finalize(statement)
     for drop in drops { try exec(database, drop) }
     try exec(
       database,

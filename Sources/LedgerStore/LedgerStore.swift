@@ -3290,10 +3290,11 @@ extension LedgerStore {
     {
       try execute(object.ddl, on: scratch)
     }
-    try run(
-      // The same rows LedgerStoreLifecycle.create writes; the checksum covers ledger_meta.
-      "INSERT INTO main.ledger_meta(key, value) VALUES ('schema_version', ?), ('ledger_identity', 'ledger-atlas-canonical'), ('schema_fingerprint', ?)",
-      values: [.text(String(release.version)), .text(release.fingerprint)], on: scratch)
+    for (key, value) in release.metaRows.sorted(by: { $0.key < $1.key }) {
+      try run(
+        "INSERT INTO main.ledger_meta(key, value) VALUES (?, ?)", values: [.text(key), .text(value)],
+        on: scratch)
+    }
     try writeImportGraph(graph, phase: .beforeProductRows, on: scratch)
     try writeProductRows(
       package, snapshot: snapshot, on: scratch, afterImportGraph: true,

@@ -57,6 +57,15 @@ package enum LedgerReceiptTrust {
     CanonicalReceiptDigest.sha256(Data("ledger-atlas/receipt-key/\(namespace)\n\(identity)".utf8))
   }
 
+  #if DEBUG
+    /// Tests only, never in release builds: stores a known key for a receipt identity, so a
+    /// committed package fixture signed with that key can be restored. Returns false when a
+    /// different key already exists for the identity; nothing is replaced.
+    package static func installKeyForTesting(_ key: Data, identity: String) throws -> Bool {
+      try storeLocal(key, account: account(for: identity, namespace: currentNamespace)) == key
+    }
+  #endif
+
   private static func read(account: String, synchronizable: Bool?) throws -> Data? {
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
@@ -113,6 +122,28 @@ package enum LedgerReceiptTrust {
     }
     return existing
   }
+
+  #if DEBUG
+    /// Like `store`, but always device-only: a test key must never reach iCloud Keychain.
+    private static func storeLocal(_ value: Data, account: String) throws -> Data {
+      guard value.count == 32 else { throw LedgerReceiptTrustError.invalidKey }
+      let attributes: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+        kSecAttrSynchronizable as String: false,
+        kSecValueData as String: value,
+      ]
+      let status = SecItemAdd(attributes as CFDictionary, nil)
+      if status == errSecSuccess { return value }
+      guard status == errSecDuplicateItem else { throw LedgerReceiptTrustError.keychain(status) }
+      guard let existing = try read(account: account, synchronizable: nil) else {
+        throw LedgerReceiptTrustError.keychain(errSecItemNotFound)
+      }
+      return existing
+    }
+  #endif
 
   private static func persistedReceiptIdentity(at url: URL) -> String? {
     var database: OpaquePointer?

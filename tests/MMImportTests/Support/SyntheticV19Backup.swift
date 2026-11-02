@@ -6,7 +6,9 @@ import Foundation
 enum SyntheticV19Backup {
   /// `includingTransfers: false` leaves out every transfer leg, for ledgers that must also be
   /// valid at schema v11, which has no transfer pairs.
-  static func write(to url: URL, includingTransfers: Bool = true) throws {
+  /// `marker` adds one preserved settings row, which gives the backup (and so its import
+  /// receipt) an identity no other test shares.
+  static func write(to url: URL, includingTransfers: Bool = true, marker: String? = nil) throws {
     let ddlURL = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent()
@@ -70,6 +72,10 @@ enum SyntheticV19Backup {
         INSERT INTO BUDGET_AMOUNT (uid, budgetUid, IS_DEL, AMOUNT) VALUES ('ba-1', 'budget-1', 0, 50.0);
         """)
     if !includingTransfers { try dropTransfers(url) }
+    if let marker {
+      try execute(
+        url, "INSERT INTO ZETC (uid, ZDATATYPE, ZDATA) VALUES ('etc-marker', 100, '\(marker)')")
+    }
   }
 
   private static func dropTransfers(_ url: URL) throws {

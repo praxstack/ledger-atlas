@@ -45,7 +45,10 @@ let package = Package(
     .testTarget(
       name: "LedgerStoreTests",
       dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "LedgerAdapterSemantics"]),
-    .testTarget(name: "MMImportTests", dependencies: ["CSQLite", "MMImport"]),
+    .testTarget(
+      name: "MMImportTests", dependencies: ["CSQLite", "MMImport"],
+      // Read from disk by path, not bundled.
+      exclude: ["Fixtures"]),
     .testTarget(name: "MMFixturesTests", dependencies: ["MMFixtures"]),
     .testTarget(
       name: "LedgerAtlasMacUITests",
