@@ -24,7 +24,7 @@ public final class LedgerAppLock {
   }
 
   /// Default PBKDF2-HMAC-SHA256 work factor (OWASP 2023 guidance for SHA-256).
-  public static let defaultKDFIterations: UInt32 = 600_000
+  nonisolated public static let defaultKDFIterations: UInt32 = 600_000
 
   // The account name predates the salted format; existing Keychain items keep working.
   private static let digestAccount = "passcode-digest"
