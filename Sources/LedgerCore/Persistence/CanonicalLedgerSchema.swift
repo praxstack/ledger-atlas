@@ -732,7 +732,8 @@ public enum CanonicalLedgerSchema {
 
   public static let legacyV12Release = SchemaRelease(
     version: 12, fingerprint: legacyV12Fingerprint, objects: legacyV12Objects,
-    authenticatesImportedEvents: true, checksumQueries: legacyV12ChecksumQueries)
+    authenticatesImportedEvents: true, checksumQueries: legacyV12ChecksumQueries,
+    metaRows: v12MetaRows(version: 12, fingerprint: legacyV12Fingerprint))
 
   /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
   /// next step's `from`, and the last step ends at `currentRelease`.
