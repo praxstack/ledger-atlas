@@ -59,6 +59,85 @@ struct ObservedV19FullSchemaImportTests {
     }
   }
 
+  @Test("every source field survives import: photos, recurring rules and drift columns")
+  func preservesEverySourceField() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeFullSchemaBackup(to: source)
+      // Additive drift: a column and a table that a future Money Manager might add.
+      try execute(
+        at: source,
+        sql: """
+          ALTER TABLE INOUTCOME ADD COLUMN ZFUTURE_COLUMN TEXT;
+          UPDATE INOUTCOME SET ZFUTURE_COLUMN = 'future-' || uid;
+          CREATE TABLE ZFUTURE_TABLE (uid TEXT PRIMARY KEY, note TEXT);
+          INSERT INTO ZFUTURE_TABLE (uid, note) VALUES ('future-1', 'synthetic');
+          INSERT INTO PHOTO (uid, IS_DEL, txUid, FILE_SIZE, FILE_PATH, FILE_NAME)
+            VALUES ('photo-gone', 1, 'tx-missing', 11, '/synthetic/gone.jpg', 'gone.jpg');
+          """)
+      let staging = directory.appendingPathComponent("stage.sqlite")
+      let canonical = directory.appendingPathComponent("canonical.sqlite")
+      let workspace = ImportWorkspace()
+      let preparation = try workspace.prepare(
+        .init(
+          sourceURL: source, stagingDatabaseURL: staging, canonicalDatabaseURL: canonical,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+      #expect(preparation.review.blockingCount == 0)
+      let handle = try #require(preparation.preparedHandle)
+      let result = try workspace.commit(handle, approval: workspace.approve(handle))
+      #expect(result.status == .committed)
+
+      // The drift really was staged, so the checks below cover it.
+      #expect(
+        try scalar(
+          at: staging, "SELECT count(*) FROM staged_field WHERE column_name='ZFUTURE_COLUMN'")
+          > 0)
+
+      // No staged field is missing from the canonical store: each one is a semantic binding,
+      // an event sidecar, or a receipt-owned preservation payload.
+      #expect(
+        try scalar(
+          at: canonical, attaching: staging,
+          """
+          SELECT count(*) FROM s.staged_field f WHERE f.field_id NOT IN (
+            SELECT provenance_id FROM event_source_binding
+            UNION SELECT provenance_id FROM sidecar_reference
+            UNION SELECT source_subject_id FROM receipt_preservation_payload)
+          """) == 0)
+
+      // Preserved bytes are the staged bytes, not a re-encoding.
+      #expect(
+        try scalar(
+          at: canonical, attaching: staging,
+          "SELECT count(*) FROM receipt_preservation_payload x JOIN s.staged_field f ON f.field_id=x.source_subject_id WHERE x.payload<>f.payload OR x.storage_class<>f.storage_class OR x.declared_type IS NOT f.declared_type"
+        ) == 0)
+      #expect(
+        try scalar(
+          at: canonical, attaching: staging,
+          "SELECT count(*) FROM sidecar_reference x JOIN s.staged_field f ON f.field_id=x.sidecar_id WHERE x.payload<>f.payload OR x.storage_class<>f.storage_class OR x.declared_type IS NOT f.declared_type"
+        ) == 0)
+
+      // Attachments keep their path metadata only, including a photo whose transaction is gone.
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM receipt_preservation_payload x JOIN provenance_reference p ON p.provenance_id=x.provenance_id WHERE p.source_table='PHOTO' AND p.source_column_name='FILE_PATH' AND CAST(x.payload AS TEXT) IN ('/synthetic/photo.jpg','/synthetic/gone.jpg')"
+        ) == 2)
+      // The recurring rule keeps its schedule code.
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM receipt_preservation_payload x JOIN provenance_reference p ON p.provenance_id=x.provenance_id WHERE p.source_table='REPEATTRANSACTION' AND p.source_column_name='REPEAT_TYPE'"
+        ) == 1)
+      // The unknown table is preserved too.
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM receipt_preservation_payload x JOIN provenance_reference p ON p.provenance_id=x.provenance_id WHERE p.source_table='ZFUTURE_TABLE'"
+        ) == 2)
+    }
+  }
+
   @Test("balance edits and transfer legs map only with the expected category")
   func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
@@ -165,6 +244,25 @@ private func scalar(at url: URL, _ sql: String) throws -> Int {
     let database
   else { throw FullSchemaTestError.sqlite }
   defer { sqlite3_close(database) }
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+    throw FullSchemaTestError.sqlite
+  }
+  defer { sqlite3_finalize(statement) }
+  guard sqlite3_step(statement) == SQLITE_ROW else { throw FullSchemaTestError.sqlite }
+  return Int(sqlite3_column_int64(statement, 0))
+}
+
+private func scalar(at url: URL, attaching attached: URL, _ sql: String) throws -> Int {
+  var database: OpaquePointer?
+  guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+    let database
+  else { throw FullSchemaTestError.sqlite }
+  defer { sqlite3_close(database) }
+  let escaped = attached.path.replacingOccurrences(of: "'", with: "''")
+  guard sqlite3_exec(database, "ATTACH DATABASE '\(escaped)' AS s", nil, nil, nil)
+    == SQLITE_OK
+  else { throw FullSchemaTestError.sqlite }
   var statement: OpaquePointer?
   guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
     throw FullSchemaTestError.sqlite

@@ -259,6 +259,9 @@ reported, never dropped.
    `3` leg plus one `4` leg stays preserved and blocks lossless certification.
 8. Map balance edits as the table above says. Preserve and flag: `txUidFee`, `CARDDIVIDMONTH`, budgets,
    recurring rules, photos, settings, and sync columns. Each gets a LossReport line.
+   Every staged field must land in the canonical store as a binding, an event sidecar, or a
+   receipt-owned preservation payload with identical bytes; the full-schema import test
+   checks this for photos (paths only), recurring rules, and drift columns and tables.
 9. Fixtures in Git are synthetic only, built from the DDL file. Real backups stay
    outside the repo (see `EVIDENCE.md`).
 
