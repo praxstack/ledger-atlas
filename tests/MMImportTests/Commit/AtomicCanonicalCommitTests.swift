@@ -5,6 +5,12 @@ import Testing
 
 @testable import MMImport
 
+/// v12 tables, children first, so tests can rebuild an older store shape.
+private let v12AnnotationTables = [
+  "ledger_revision_tag", "ledger_template_tag", "ledger_transaction_template", "ledger_memo",
+  "ledger_tag", "economic_event_transfer",
+]
+
 @Suite("Atomic idempotent canonical commit")
 struct AtomicCanonicalCommitTests {
   @Test("first commit persists once and an identical retry is unchanged")
@@ -44,7 +50,7 @@ struct AtomicCanonicalCommitTests {
         ] {
           try executeTestSQL(database, "DROP TRIGGER \(trigger)")
         }
-        for table in [
+        for table in v12AnnotationTables + [
           "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
           "ledger_receipt_trust_anchor",
           "ledger_transaction_link", "ledger_transaction_source_literal",
@@ -74,14 +80,14 @@ struct AtomicCanonicalCommitTests {
     }
   }
 
-  @Test("an exact v10 canonical store extends atomically through v11")
+  @Test("an exact v10 canonical store extends atomically through the current schema")
   func exactV10MigratesToV11() throws {
     try withCommitDirectory { directory in
       let fixture = try makeFixture(directory: directory, variant: .first)
       let committer = SQLiteCanonicalCommitter()
       _ = try committer.commit(fixture.request)
       try withDatabase(fixture.request.canonicalDatabaseURL) { database in
-        for table in [
+        for table in v12AnnotationTables + [
           "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
           "ledger_receipt_trust_anchor",
         ] {
@@ -104,9 +110,41 @@ struct AtomicCanonicalCommitTests {
           database,
           "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_category_tree','ledger_account_group','ledger_account_preferences')"
         )
-        #expect(version == "11")
+        #expect(version == String(CanonicalLedgerSchema.version))
         #expect(fingerprint == CanonicalLedgerSchema.fingerprint)
         #expect(foundationCount == "3")
+      }
+    }
+  }
+
+  @Test("an exact v11 canonical store gains the v12 annotation tables on retry")
+  func exactV11MigratesToV12() throws {
+    try withCommitDirectory { directory in
+      let fixture = try makeFixture(directory: directory, variant: .first)
+      let committer = SQLiteCanonicalCommitter()
+      _ = try committer.commit(fixture.request)
+      try withDatabase(fixture.request.canonicalDatabaseURL) { database in
+        for table in v12AnnotationTables {
+          try executeTestSQL(database, "DROP TABLE \(table)")
+        }
+        try executeTestSQL(
+          database,
+          "UPDATE ledger_meta SET value='11' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.legacyV11Fingerprint)' WHERE key='schema_fingerprint'"
+        )
+      }
+
+      let retry = try committer.commit(fixture.request)
+      #expect(retry.status == .unchanged)
+      #expect(try committer.eventCount(at: fixture.request.canonicalDatabaseURL) == 1)
+      try withDatabase(fixture.request.canonicalDatabaseURL) { database in
+        let version = try scalarTestText(
+          database, "SELECT value FROM ledger_meta WHERE key='schema_version'")
+        let annotationCount = try scalarTestText(
+          database,
+          "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_tag','ledger_revision_tag','ledger_transaction_template','ledger_template_tag','ledger_memo','economic_event_transfer')"
+        )
+        #expect(version == "12")
+        #expect(annotationCount == "6")
       }
     }
   }

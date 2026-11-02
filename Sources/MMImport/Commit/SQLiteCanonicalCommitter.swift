@@ -1589,13 +1589,18 @@ public struct SQLiteCanonicalCommitter: Sendable {
       && tableNames(database) == legacyTables
       && CanonicalLedgerSchema.schemaFingerprint(for: legacyObjects)
         == CanonicalLedgerSchema.legacyV8Fingerprint
-    let legacyV10 =
-      allowingLegacyV8
-      && scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_version'") == "10"
-      && scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
-        == CanonicalLedgerSchema.legacyV10Fingerprint
-      && schemaObjects(database) == CanonicalLedgerSchema.legacyV10Objects
-    guard current || legacy || legacyV10 else {
+    // Any frozen release on the lifecycle upgrade chain (v10, v11, ...) may extend additively.
+    let chainRelease = scalarText(
+      database, "SELECT value FROM ledger_meta WHERE key='schema_version'"
+    ).flatMap(Int.init).flatMap { version in
+      scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
+        .flatMap {
+          CanonicalLedgerSchema.lifecycleLegacyRelease(version: version, fingerprint: $0)
+        }
+    }
+    let legacyChain =
+      allowingLegacyV8 && chainRelease.map { schemaObjects(database) == $0.objects } == true
+    guard current || legacy || legacyChain else {
       throw CanonicalCommitError.incompatibleCanonicalStore
     }
   }

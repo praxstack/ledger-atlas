@@ -17,6 +17,11 @@ public final class LedgerStore {
     public let budgets: [LedgerBudget]
     public let installmentPlans: [LedgerInstallmentPlan]
     public let preservedSource: [LedgerPreservedSourceRecord]
+    public let tags: [LedgerTag]
+    public let transactionTemplates: [LedgerTransactionTemplate]
+    public let memos: [LedgerMemo]
+    /// Tag links by revision ID. Revisions without tags are absent.
+    public let revisionTags: [String: LedgerTagLinks]
 
     public init(
       accounts: [LedgerAccount], accountGroups: [LedgerAccountGroup] = [],
@@ -24,7 +29,9 @@ public final class LedgerStore {
       revisionHistory: [LedgerTransactionRevision], undisplayedImportedEventCount: Int,
       categories: [LedgerCategory] = [], recurrenceRules: [LedgerRecurrenceRule] = [],
       budgets: [LedgerBudget] = [], installmentPlans: [LedgerInstallmentPlan] = [],
-      preservedSource: [LedgerPreservedSourceRecord] = []
+      preservedSource: [LedgerPreservedSourceRecord] = [], tags: [LedgerTag] = [],
+      transactionTemplates: [LedgerTransactionTemplate] = [], memos: [LedgerMemo] = [],
+      revisionTags: [String: LedgerTagLinks] = [:]
     ) {
       self.accounts = accounts
       self.accountGroups = accountGroups
@@ -36,6 +43,15 @@ public final class LedgerStore {
       self.budgets = budgets
       self.installmentPlans = installmentPlans
       self.preservedSource = preservedSource
+      self.tags = tags
+      self.transactionTemplates = transactionTemplates
+      self.memos = memos
+      self.revisionTags = revisionTags
+    }
+
+    /// The tags on a revision, empty when it has none.
+    public func tags(forRevision revisionID: String) -> LedgerTagLinks {
+      revisionTags[revisionID] ?? .empty
     }
   }
 
@@ -63,12 +79,13 @@ public final class LedgerStore {
     /// The transaction changed after the caller read it: the expected revision is no longer
     /// current.  Nothing was written; reread and show the latest revision.
     case revisionConflict
+    case duplicateTagName
     case sqliteFailure(code: Int32)
 
     fileprivate var preservesMutationError: Bool {
       switch self {
       case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts,
-        .revisionConflict:
+        .revisionConflict, .duplicateTagName:
         true
       default:
         false
@@ -109,11 +126,16 @@ public final class LedgerStore {
     package let idempotencyKey: String
     package let draft: LedgerTransactionDraft
     package let createdAt: UTCInstant
+    package let tags: LedgerTagLinks
 
-    package init(idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant) {
+    package init(
+      idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant,
+      tags: LedgerTagLinks = .empty
+    ) {
       self.idempotencyKey = idempotencyKey
       self.draft = draft
       self.createdAt = createdAt
+      self.tags = tags
     }
   }
 
@@ -122,15 +144,18 @@ public final class LedgerStore {
     package let expectedCurrentRevisionID: String
     package let draft: LedgerTransactionDraft
     package let createdAt: UTCInstant
+    /// The new revision's tags. Nil keeps the tags of the revision being corrected.
+    package let tags: LedgerTagLinks?
 
     package init(
       transactionID: String, expectedCurrentRevisionID: String, draft: LedgerTransactionDraft,
-      createdAt: UTCInstant
+      createdAt: UTCInstant, tags: LedgerTagLinks? = nil
     ) {
       self.transactionID = transactionID
       self.expectedCurrentRevisionID = expectedCurrentRevisionID
       self.draft = draft
       self.createdAt = createdAt
+      self.tags = tags
     }
   }
 
@@ -414,13 +439,18 @@ public final class LedgerStore {
       recurrenceRules: try Self.loadRecurrenceRules(on: database),
       budgets: try Self.loadBudgets(on: database),
       installmentPlans: try Self.loadInstallmentPlans(on: database),
-      preservedSource: try Self.loadPreservedSource(on: database))
+      preservedSource: try Self.loadPreservedSource(on: database),
+      tags: try Self.loadTags(on: database),
+      transactionTemplates: try Self.loadTransactionTemplates(on: database),
+      memos: try Self.loadMemos(on: database),
+      revisionTags: try Self.loadRevisionTags(on: database))
   }
 
   public func createTransaction(_ request: CreateTransactionRequest) throws -> MutationResult {
     let revision = try preparedRevision(for: request)
     return try mutate { snapshot in
-      let result = try Self.insertNew(revision, in: snapshot, on: database)
+      let result = try Self.insertNew(
+        revision, tags: request.tags, in: snapshot, on: database)
       try mutationTestHook?(.afterInsertingTransaction)
       return result
     }
@@ -433,9 +463,10 @@ public final class LedgerStore {
     let feeRevision = try fee.map { try preparedRevision(for: $0) }
     var feeResult: MutationResult?
     let transferResult = try mutate { snapshot in
-      let transferResult = try Self.insertNew(transferRevision, in: snapshot, on: database)
-      if let feeRevision {
-        feeResult = try Self.insertNew(feeRevision, in: snapshot, on: database)
+      let transferResult = try Self.insertNew(
+        transferRevision, tags: transfer.tags, in: snapshot, on: database)
+      if let feeRevision, let fee {
+        feeResult = try Self.insertNew(feeRevision, tags: fee.tags, in: snapshot, on: database)
         let link = try LedgerTransactionLink(
           id: StableLedgerID.link(
             fromTransactionID: transferRevision.transactionID,
@@ -461,8 +492,9 @@ public final class LedgerStore {
     var results: [MutationResult] = []
     _ = try mutate { snapshot in
       results = []
-      for revision in revisions {
-        results.append(try Self.insertNew(revision, in: snapshot, on: database))
+      for (revision, request) in zip(revisions, requests) {
+        results.append(
+          try Self.insertNew(revision, tags: request.tags, in: snapshot, on: database))
       }
       if let parent = revisions.first, revisions.count > 1 {
         for child in revisions.dropFirst() {
@@ -497,13 +529,15 @@ public final class LedgerStore {
   }
 
   private static func insertNew(
-    _ revision: LedgerTransactionRevision, in snapshot: LedgerReadSnapshot,
-    on database: OpaquePointer
+    _ revision: LedgerTransactionRevision, tags: LedgerTagLinks = .empty,
+    in snapshot: LedgerReadSnapshot, on database: OpaquePointer
   ) throws -> MutationResult {
     // A repeated submission (same idempotency key and content) returns what is stored, even
-    // when it arrives later with a newer timestamp.
+    // when it arrives later with a newer timestamp. Its tags must match too.
     if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-      guard sameSubmission(existing, revision) else { throw Error.incompatibleCanonicalStore }
+      guard sameSubmission(existing, revision),
+        try loadRevisionTags(on: database)[revision.id] ?? .empty == tags
+      else { throw Error.incompatibleCanonicalStore }
       return .init(status: .unchanged, revision: existing)
     }
     guard !snapshot.transactions.contains(where: { $0.id == revision.transactionID }) else {
@@ -515,6 +549,7 @@ public final class LedgerStore {
       "INSERT INTO main.ledger_transaction(transaction_id, current_revision_id) VALUES (?, ?)",
       values: [.text(revision.transactionID), .text(revision.id)], on: database)
     try insert(revision, on: database)
+    try writeRevisionTags(tags, revisionID: revision.id, previous: .empty, on: database)
     return .init(status: .committed, revision: revision)
   }
 
@@ -542,8 +577,12 @@ public final class LedgerStore {
         transactionID: request.transactionID, number: predecessor.revision + 1,
         predecessorID: predecessor.id,
         draft: request.draft, lifecycle: .active, createdAt: request.createdAt)
+      let storedTags = try Self.loadRevisionTags(on: database)
+      let previousTags = storedTags[predecessor.id] ?? .empty
+      let tags = previousTags.carriedForward(replacing: request.tags)
       if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-        guard Self.sameSubmission(existing, revision) else { throw Error.revisionConflict }
+        guard Self.sameSubmission(existing, revision), storedTags[existing.id] ?? .empty == tags
+        else { throw Error.revisionConflict }
         return .init(status: .unchanged, revision: existing)
       }
       guard
@@ -554,6 +593,8 @@ public final class LedgerStore {
       }
       try Self.validateReferences(revision, in: snapshot, on: database)
       try Self.insert(revision, on: database)
+      try Self.writeRevisionTags(
+        tags, revisionID: revision.id, previous: previousTags, on: database)
       try Self.run(
         "UPDATE main.ledger_transaction SET current_revision_id=? WHERE transaction_id=? AND current_revision_id=?",
         values: [.text(revision.id), .text(request.transactionID), .text(predecessor.id)],
@@ -576,6 +617,7 @@ public final class LedgerStore {
         transactionID: request.transactionID, number: predecessor.revision + 1,
         predecessorID: predecessor.id,
         draft: predecessor.draft, lifecycle: .tombstoned, createdAt: request.createdAt)
+      let previousTags = try Self.loadRevisionTags(on: database)[predecessor.id] ?? .empty
       if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
         guard Self.sameSubmission(existing, revision) else { throw Error.revisionConflict }
         return .init(status: .unchanged, revision: existing)
@@ -587,6 +629,9 @@ public final class LedgerStore {
         throw Error.revisionConflict
       }
       try Self.insert(revision, on: database)
+      // A tombstone keeps the labels it had, so history reads the same either way.
+      try Self.writeRevisionTags(
+        previousTags, revisionID: revision.id, previous: previousTags, on: database)
       try Self.run(
         "UPDATE main.ledger_transaction SET current_revision_id=? WHERE transaction_id=? AND current_revision_id=?",
         values: [.text(revision.id), .text(request.transactionID), .text(predecessor.id)],
@@ -776,8 +821,9 @@ public final class LedgerStore {
     var results: [MutationResult] = []
     _ = try mutate { snapshot in
       results = []
-      for revision in revisions {
-        results.append(try Self.insertNew(revision, in: snapshot, on: database))
+      for (revision, request) in zip(revisions, requests) {
+        results.append(
+          try Self.insertNew(revision, tags: request.tags, in: snapshot, on: database))
         try mutationTestHook?(.afterInsertingTransaction)
       }
       if let parent = revisions.first, revisions.count > 1 {
@@ -864,7 +910,7 @@ public final class LedgerStore {
     guard category.lifecycle == .tombstoned || category.hidden else { return }
     let children = Dictionary(grouping: snapshot.categories.compactMap { value in
       value.parentID.map { ($0, value) }
-    }, by: \.0).mapValues { $0.map(\.1) }
+    }, by: { $0.0 }).mapValues { $0.map(\.1) }
     var pending = children[category.id] ?? []
     while let descendant = pending.popLast() {
       if descendant.lifecycle == .active { throw Error.categoryHasActiveChildren }
@@ -1487,7 +1533,16 @@ public final class LedgerStore {
         )
         """, on: database)
     else { throw Error.incompatibleCanonicalStore }
-    return standaloneOriginCount != 1
+    // The portable package cannot carry tags, templates or memos yet. Refuse rather than drop
+    // them silently.
+    guard
+      let annotationRows = scalarInt(
+        """
+        SELECT EXISTS(SELECT 1 FROM main.ledger_tag) + EXISTS(SELECT 1 FROM main.ledger_transaction_template)
+          + EXISTS(SELECT 1 FROM main.ledger_memo)
+        """, on: database)
+    else { throw Error.incompatibleCanonicalStore }
+    return standaloneOriginCount != 1 && annotationRows == 0
   }
 
   package func isEmptyForPortablePackageImport() throws -> Bool {
@@ -2517,5 +2572,245 @@ public final class LedgerStore {
     guard sqlite3_step(statement) == SQLITE_ROW,
       text(statement, column: 0)?.lowercased() == "delete"
     else { throw Error.incompatibleCanonicalStore }
+  }
+}
+
+// MARK: - Tags, transaction templates and memos (schema v12)
+
+extension LedgerStore {
+  /// Adds a tag. Retrying with the same tag is a no-op; a different tag under the same ID fails.
+  public func createTag(_ tag: LedgerTag) throws {
+    _ = try mutate { _ in
+      let tags = try Self.loadTags(on: database)
+      if let existing = tags.first(where: { $0.id == tag.id }) {
+        guard existing == tag else { throw Error.incompatibleCanonicalStore }
+        return try Self.placeholderResult(origin: tag.origin, status: .unchanged)
+      }
+      guard tag.lifecycle == .active else { throw Error.incompatibleCanonicalStore }
+      try Self.ensureUniqueActiveTagNames(tags + [tag])
+      try Self.ensureOrigin(tag.origin, on: database)
+      try Self.run(
+        "INSERT INTO main.ledger_tag(tag_id, name, origin_id, lifecycle) VALUES (?, ?, ?, ?)",
+        values: [
+          .text(tag.id), .text(tag.name), .text(tag.origin.id), .text(tag.lifecycle.rawValue),
+        ], on: database)
+      return try Self.placeholderResult(origin: tag.origin)
+    }
+  }
+
+  /// Renames or tombstones a tag. Its ID, origin and every stored link stay as they are, so
+  /// history shows the new name and a tombstoned tag still labels the revisions it was on.
+  public func updateTag(_ tag: LedgerTag) throws {
+    _ = try mutate { _ in
+      let tags = try Self.loadTags(on: database)
+      guard let existing = tags.first(where: { $0.id == tag.id }), existing.origin == tag.origin
+      else { throw Error.incompatibleCanonicalStore }
+      if existing == tag {
+        return try Self.placeholderResult(origin: tag.origin, status: .unchanged)
+      }
+      guard existing.lifecycle == .active else { throw Error.incompatibleCanonicalStore }
+      try Self.ensureUniqueActiveTagNames(tags.map { $0.id == tag.id ? tag : $0 })
+      try Self.run(
+        "UPDATE main.ledger_tag SET name=?, lifecycle=? WHERE tag_id=?",
+        values: [.text(tag.name), .text(tag.lifecycle.rawValue), .text(tag.id)], on: database)
+      return try Self.placeholderResult(origin: tag.origin)
+    }
+  }
+
+  /// Creates or edits a template. Editing changes future drafts only; a tombstoned template
+  /// cannot change again.
+  public func saveTransactionTemplate(_ template: LedgerTransactionTemplate) throws {
+    _ = try mutate { snapshot in
+      let existing = try Self.loadTransactionTemplates(on: database)
+        .first(where: { $0.id == template.id })
+      if let existing {
+        if existing == template {
+          return try Self.placeholderResult(origin: template.origin, status: .unchanged)
+        }
+        guard existing.origin == template.origin, existing.lifecycle == .active else {
+          throw Error.incompatibleCanonicalStore
+        }
+      } else {
+        guard template.lifecycle == .active else { throw Error.incompatibleCanonicalStore }
+      }
+      try Self.validateTemplateReferences(template, previous: existing, in: snapshot, on: database)
+      try Self.ensureOrigin(template.origin, on: database)
+      try Self.run(
+        """
+        INSERT INTO main.ledger_transaction_template(
+          template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id,
+          counter_account_id, origin_id, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(template_id) DO UPDATE SET
+          name=excluded.name, kind=excluded.kind, category_id=excluded.category_id,
+          amount_literal=excluded.amount_literal, currency_unit=excluded.currency_unit,
+          note=excluded.note, account_id=excluded.account_id,
+          counter_account_id=excluded.counter_account_id, lifecycle=excluded.lifecycle
+        """,
+        values: [
+          .text(template.id), .text(template.name), .text(template.kind.rawValue),
+          .optionalText(template.categoryID), .text(template.amount.amount.rawLiteral),
+          .text(template.amount.unitCode), .optionalText(template.note),
+          .text(template.accountID), .optionalText(template.counterAccountID),
+          .text(template.origin.id), .text(template.lifecycle.rawValue),
+        ], on: database)
+      try Self.run(
+        "DELETE FROM main.ledger_template_tag WHERE template_id=?",
+        values: [.text(template.id)], on: database)
+      for tagID in template.tags.tagIDs {
+        try Self.run(
+          "INSERT INTO main.ledger_template_tag(template_id, tag_id) VALUES (?, ?)",
+          values: [.text(template.id), .text(tagID)], on: database)
+      }
+      return try Self.placeholderResult(origin: template.origin)
+    }
+  }
+
+  /// Creates, edits or tombstones a dated memo. Memos never touch balances.
+  public func saveMemo(_ memo: LedgerMemo) throws {
+    _ = try mutate { _ in
+      if let existing = try Self.loadMemos(on: database).first(where: { $0.id == memo.id }) {
+        if existing == memo {
+          return try Self.placeholderResult(origin: memo.origin, status: .unchanged)
+        }
+        guard existing.origin == memo.origin, existing.lifecycle == .active else {
+          throw Error.incompatibleCanonicalStore
+        }
+      } else {
+        guard memo.lifecycle == .active else { throw Error.incompatibleCanonicalStore }
+      }
+      try Self.ensureOrigin(memo.origin, on: database)
+      try Self.run(
+        """
+        INSERT INTO main.ledger_memo(
+          memo_id, body, local_year, local_month, local_day, origin_id, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(memo_id) DO UPDATE SET
+          body=excluded.body, local_year=excluded.local_year,
+          local_month=excluded.local_month, local_day=excluded.local_day,
+          lifecycle=excluded.lifecycle
+        """,
+        values: [
+          .text(memo.id), .text(memo.body), .int(memo.date.year), .int(memo.date.month),
+          .int(memo.date.day), .text(memo.origin.id), .text(memo.lifecycle.rawValue),
+        ], on: database)
+      return try Self.placeholderResult(origin: memo.origin)
+    }
+  }
+
+  private static func ensureUniqueActiveTagNames(_ tags: [LedgerTag]) throws {
+    do {
+      try LedgerTag.validateActiveNamesAreUnique(tags)
+    } catch {
+      throw Error.duplicateTagName
+    }
+  }
+
+  private static func tagsByID(on database: OpaquePointer) throws -> [String: LedgerTag] {
+    Dictionary(uniqueKeysWithValues: try loadTags(on: database).map { ($0.id, $0) })
+  }
+
+  /// Writes a new revision's links. Links it shares with `previous` may point at tombstoned
+  /// tags; any other link must point at an active tag.
+  private static func writeRevisionTags(
+    _ tags: LedgerTagLinks, revisionID: String, previous: LedgerTagLinks,
+    on database: OpaquePointer
+  ) throws {
+    guard !tags.isEmpty else { return }
+    try tags.validateNewLinks(previous: previous, tags: tagsByID(on: database))
+    for tagID in tags.tagIDs {
+      try run(
+        "INSERT INTO main.ledger_revision_tag(revision_id, tag_id) VALUES (?, ?)",
+        values: [.text(revisionID), .text(tagID)], on: database)
+    }
+  }
+
+  private static func validateTemplateReferences(
+    _ template: LedgerTransactionTemplate, previous: LedgerTransactionTemplate?,
+    in snapshot: LedgerReadSnapshot, on database: OpaquePointer
+  ) throws {
+    let accounts = Dictionary(uniqueKeysWithValues: snapshot.accounts.map { ($0.id, $0) })
+    for accountID in [template.accountID] + (template.counterAccountID.map { [$0] } ?? []) {
+      guard let account = accounts[accountID], account.lifecycle == .active,
+        account.currencyUnit == template.amount.unitCode
+      else { throw Error.incompatibleCanonicalStore }
+    }
+    guard categoryIsActive(template.categoryID, for: template.kind, on: database) else {
+      throw Error.incompatibleCanonicalStore
+    }
+    try template.tags.validateNewLinks(
+      previous: previous?.tags ?? .empty, tags: tagsByID(on: database))
+  }
+
+  fileprivate static func loadTags(on database: OpaquePointer) throws -> [LedgerTag] {
+    let tags = try load(
+      sql:
+        "SELECT t.tag_id, t.name, t.lifecycle, o.origin_id, o.label, o.provenance_id FROM main.ledger_tag t JOIN main.ledger_origin o ON o.origin_id=t.origin_id ORDER BY t.tag_id",
+      on: database
+    ) { row in
+      try LedgerTag(
+        id: row[0], name: row[1],
+        origin: LedgerOrigin(
+          id: row[3], label: row[4], provenanceID: row[5].isEmpty ? nil : row[5]),
+        lifecycle: try requireRaw(LedgerLifecycleState.self, row[2]))
+    }
+    try LedgerTag.validateActiveNamesAreUnique(tags)
+    return tags
+  }
+
+  fileprivate static func loadRevisionTags(on database: OpaquePointer) throws
+    -> [String: LedgerTagLinks]
+  {
+    let pairs = try load(
+      sql: "SELECT revision_id, tag_id FROM main.ledger_revision_tag ORDER BY revision_id, tag_id",
+      on: database
+    ) { row in (row[0], row[1]) }
+    return try Dictionary(grouping: pairs, by: { $0.0 }).mapValues {
+      try LedgerTagLinks($0.map { $0.1 })
+    }
+  }
+
+  fileprivate static func loadTransactionTemplates(on database: OpaquePointer) throws
+    -> [LedgerTransactionTemplate]
+  {
+    let pairs = try load(
+      sql: "SELECT template_id, tag_id FROM main.ledger_template_tag ORDER BY template_id, tag_id",
+      on: database
+    ) { row in (row[0], row[1]) }
+    let links = try Dictionary(grouping: pairs, by: { $0.0 }).mapValues {
+      try LedgerTagLinks($0.map { $0.1 })
+    }
+    return try load(
+      sql:
+        "SELECT t.template_id, t.name, t.kind, t.category_id, t.amount_literal, t.currency_unit, t.note, t.account_id, t.counter_account_id, t.lifecycle, o.origin_id, o.label, o.provenance_id FROM main.ledger_transaction_template t JOIN main.ledger_origin o ON o.origin_id=t.origin_id ORDER BY t.template_id",
+      on: database
+    ) { row in
+      try LedgerTransactionTemplate(
+        id: row[0], name: row[1], kind: try requireRaw(LedgerTransactionKind.self, row[2]),
+        categoryID: row[3].isEmpty ? nil : row[3],
+        amount: CurrencyAmount(unitCode: row[5], amount: ExactDecimal(row[4])),
+        note: row[6].isEmpty ? nil : row[6], accountID: row[7],
+        counterAccountID: row[8].isEmpty ? nil : row[8], tags: links[row[0]] ?? .empty,
+        origin: LedgerOrigin(
+          id: row[10], label: row[11], provenanceID: row[12].isEmpty ? nil : row[12]),
+        lifecycle: try requireRaw(LedgerLifecycleState.self, row[9]))
+    }
+  }
+
+  fileprivate static func loadMemos(on database: OpaquePointer) throws -> [LedgerMemo] {
+    try load(
+      sql:
+        "SELECT m.memo_id, m.body, m.local_year, m.local_month, m.local_day, m.lifecycle, o.origin_id, o.label, o.provenance_id FROM main.ledger_memo m JOIN main.ledger_origin o ON o.origin_id=m.origin_id ORDER BY m.memo_id",
+      on: database
+    ) { row in
+      try LedgerMemo(
+        id: row[0], body: row[1],
+        date: SourceLocalDate(
+          year: try requireInt(row[2]), month: try requireInt(row[3]),
+          day: try requireInt(row[4])),
+        origin: LedgerOrigin(
+          id: row[6], label: row[7], provenanceID: row[8].isEmpty ? nil : row[8]),
+        lifecycle: try requireRaw(LedgerLifecycleState.self, row[5]))
+    }
   }
 }
