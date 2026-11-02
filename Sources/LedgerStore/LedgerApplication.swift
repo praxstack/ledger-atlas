@@ -1673,3 +1673,144 @@ private func jsonIntegerLiteral(_ row: [String: Any], _ key: String) throws -> S
   return number.stringValue
 }
 
+
+// MARK: - Restore merge and reset (MACV2-15)
+
+/// What a reset keeps. Both scopes build a new ledger; the current one is never changed.
+public enum LedgerResetScope: Equatable, Sendable {
+  /// Keeps accounts, account groups, categories, tags and templates. Drops transactions,
+  /// budgets, recurring rules, installment plans and memos.
+  case contentsOnly
+  /// Keeps nothing.
+  case complete
+}
+
+/// What merging a backup into the open ledger adds. Counts only, never names or amounts.
+public struct LedgerMergeSummary: Equatable, Sendable {
+  public let addedAccounts: Int
+  public let addedCategories: Int
+  public let addedTransactions: Int
+  public let addedRevisions: Int
+  public let addedOther: Int
+
+  public var isEmpty: Bool {
+    addedAccounts + addedCategories + addedTransactions + addedRevisions + addedOther == 0
+  }
+}
+
+public enum LedgerMergeError: Swift.Error, Equatable, Sendable {
+  /// The same transaction revision differs between the two ledgers, so they edited the same
+  /// history in different ways. Nothing is merged.
+  case conflictingHistory(revisions: Int)
+}
+
+extension LedgerApplication {
+  /// The package a reset ledger starts from. Built from the snapshot, so it also works for
+  /// ledgers whose full history can't be exported as a package.
+  public static func resetPackage(
+    from snapshot: LedgerStore.LedgerReadSnapshot, scope: LedgerResetScope
+  ) throws -> (manifest: LedgerExportManifest, payload: Data) {
+    let keepsSetup = scope == .contentsOnly
+    return try sealedPackage(
+      LedgerCanonicalPackage(
+        formatVersion: LedgerPortablePackageFormat.version,
+        formatFingerprint: LedgerPortablePackageFormat.fingerprint,
+        accounts: keepsSetup ? snapshot.accounts : [],
+        accountGroups: keepsSetup ? snapshot.accountGroups : [],
+        categories: keepsSetup ? snapshot.categories : [], revisions: [], links: [],
+        recurrenceRules: [], budgets: [], installmentPlans: [],
+        tags: keepsSetup ? snapshot.tags : [],
+        transactionTemplates: keepsSetup ? snapshot.transactionTemplates : []))
+  }
+
+  /// Adds what `incoming` has and `current` lacks. Transaction history is joined revision by
+  /// revision. For accounts, categories, tags and the other editable records, the open ledger's
+  /// version wins and only records it lacks are added. If both ledgers hold a different version
+  /// of the same revision, the merge is refused.
+  public static func mergedPackage(
+    current: (manifest: LedgerExportManifest, payload: Data),
+    incoming: (manifest: LedgerExportManifest, payload: Data)
+  ) throws -> (manifest: LedgerExportManifest, payload: Data, summary: LedgerMergeSummary) {
+    let base: LedgerCanonicalPackage
+    let other: LedgerCanonicalPackage
+    do {
+      base = try decodePackage(current.payload, manifest: current.manifest)
+      other = try decodePackage(incoming.payload, manifest: incoming.manifest)
+    } catch {
+      throw Error.invalidCommand
+    }
+    var revisionsByID = Dictionary(base.revisions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    var conflicts = 0
+    var addedRevisions: [LedgerTransactionRevision] = []
+    for revision in other.revisions {
+      if let existing = revisionsByID[revision.id] {
+        if existing != revision { conflicts += 1 }
+      } else {
+        revisionsByID[revision.id] = revision
+        addedRevisions.append(revision)
+      }
+    }
+    var revisionTags = base.revisionTags
+    for (revisionID, links) in other.revisionTags {
+      if let existing = revisionTags[revisionID] {
+        if existing != links { conflicts += 1 }
+      } else {
+        revisionTags[revisionID] = links
+      }
+    }
+    guard conflicts == 0 else { throw LedgerMergeError.conflictingHistory(revisions: conflicts) }
+
+    func adding<T>(_ mine: [T], _ theirs: [T], id: (T) -> String) -> (all: [T], added: Int) {
+      let known = Set(mine.map(id))
+      let extra = theirs.filter { !known.contains(id($0)) }
+      return (mine + extra, extra.count)
+    }
+    let accounts = adding(base.accounts, other.accounts, id: \.id)
+    let groups = adding(base.accountGroups, other.accountGroups, id: \.id)
+    let categories = adding(base.categories, other.categories, id: \.id)
+    let links = adding(base.links, other.links, id: \.id)
+    let rules = adding(base.recurrenceRules, other.recurrenceRules, id: \.id)
+    let budgets = adding(base.budgets, other.budgets, id: \.id)
+    let plans = adding(base.installmentPlans, other.installmentPlans, id: \.id)
+    let tags = adding(base.tags, other.tags, id: \.id)
+    let templates = adding(base.transactionTemplates, other.transactionTemplates, id: \.id)
+    let memos = adding(base.memos, other.memos, id: \.id)
+    let preserved = adding(base.preservedSource, other.preservedSource, id: { "\($0.table)|\($0.recordKey)|\($0.columnName)" })
+
+    let knownTransactions = Set(base.revisions.map(\.transactionID))
+    let addedTransactions = Set(addedRevisions.map(\.transactionID)).subtracting(knownTransactions)
+    let summary = LedgerMergeSummary(
+      addedAccounts: accounts.added, addedCategories: categories.added,
+      addedTransactions: addedTransactions.count,
+      addedRevisions: addedRevisions.count,
+      addedOther: groups.added + links.added + rules.added + budgets.added + plans.added
+        + tags.added + templates.added + memos.added + preserved.added)
+    let merged = LedgerCanonicalPackage(
+      formatVersion: LedgerPortablePackageFormat.version,
+      formatFingerprint: LedgerPortablePackageFormat.fingerprint, accounts: accounts.all,
+      accountGroups: groups.all, categories: categories.all,
+      revisions: (base.revisions + addedRevisions).sorted {
+        ($0.transactionID, $0.revision) < ($1.transactionID, $1.revision)
+      }, links: links.all,
+      recurrenceRules: rules.all, budgets: budgets.all, installmentPlans: plans.all,
+      preservedSource: preserved.all, tags: tags.all, transactionTemplates: templates.all,
+      memos: memos.all, revisionTags: revisionTags)
+    let sealed = try sealedPackage(merged)
+    return (sealed.manifest, sealed.payload, summary)
+  }
+
+  private static func sealedPackage(_ package: LedgerCanonicalPackage) throws
+    -> (manifest: LedgerExportManifest, payload: Data)
+  {
+    let payload = try encode(package)
+    guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
+    let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    return (
+      LedgerExportManifest(
+        formatVersion: LedgerPortablePackageFormat.version,
+        formatFingerprint: LedgerPortablePackageFormat.fingerprint, payloadSHA256: digest,
+        createdAtMilliseconds: 0),
+      payload
+    )
+  }
+}

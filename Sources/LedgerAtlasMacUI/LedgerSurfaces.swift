@@ -129,6 +129,11 @@ struct BackupSurface: View {
   let restoreBackup: () -> Void
   let exportPackage: () -> Void
   let restorePackage: () -> Void
+  /// Contents-only or complete reset. Nil hides the button.
+  var reset: (() -> Void)? = nil
+  /// Spreadsheet exchange, wired by the XLSX work. Nil hides the buttons.
+  var exportXLSX: (() -> Void)? = nil
+  var importXLSX: (() -> Void)? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -156,11 +161,25 @@ struct BackupSurface: View {
         Button("Save 1:1 backup…", action: saveBackup)
           .accessibilityLabel("Save 1:1 backup")
         Button("Restore backup…", action: restoreBackup)
-          .accessibilityLabel("Restore backup as a new ledger")
+          .accessibilityLabel("Restore backup")
         Button("Export portable package…", action: exportPackage)
           .accessibilityLabel("Export portable package")
         Button("Import portable package…", action: restorePackage)
-          .accessibilityLabel("Import portable package as a new ledger")
+          .accessibilityLabel("Import portable package")
+      }
+      if exportXLSX != nil || importXLSX != nil || reset != nil {
+        HStack {
+          if let exportXLSX {
+            Button("Export spreadsheet…", action: exportXLSX)
+          }
+          if let importXLSX {
+            Button("Import spreadsheet…", action: importXLSX)
+          }
+          if let reset {
+            Button("Reset ledger…", role: .destructive, action: reset)
+              .accessibilityLabel("Reset ledger")
+          }
+        }
       }
     }
     .padding(16)

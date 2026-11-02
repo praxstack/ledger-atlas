@@ -545,6 +545,17 @@ public final class LedgerJourney {
     let package: (manifest: LedgerExportManifest, payload: Data)
     do { package = try LedgerPortablePackageFile.decode(data) }
     catch { throw LedgerApplication.Error.invalidCommand }
+    try createLedger(from: package, at: destination)
+  }
+
+  /// Builds a new ledger at `destination` from a package and switches to it. If any step fails,
+  /// the half-made file is removed and the open ledger stays as it was.
+  private func createLedger(
+    from package: (manifest: LedgerExportManifest, payload: Data), at destination: URL
+  ) throws {
+    guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
+      throw LedgerApplication.Error.invalidCommand
+    }
     let created = try LedgerStoreLifecycle.create(at: destination)
     do {
       let application = LedgerApplication(store: created.store)
@@ -555,6 +566,78 @@ public final class LedgerJourney {
       _ = LedgerStoreLifecycle.discardCreated(created, at: destination)
       throw LedgerApplication.Error.invalidCommand
     }
+  }
+
+  /// Reads a backup the person picked as a package: either an exact SQLite backup or a
+  /// portable package file. Nothing is written.
+  public static func incomingPackage(from source: URL) throws
+    -> (manifest: LedgerExportManifest, payload: Data)
+  {
+    if let store = try? LedgerStore.openReadOnly(at: source) {
+      return try LedgerApplication(store: store).exportPackage()
+    }
+    let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+    guard values.isRegularFile == true, values.isSymbolicLink != true else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    do {
+      return try LedgerPortablePackageFile.decode(
+        try Data(contentsOf: source, options: .mappedIfSafe))
+    } catch {
+      throw LedgerApplication.Error.invalidCommand
+    }
+  }
+
+  /// What merging `incoming` into the open ledger would add. Nothing is written.
+  public func previewMerge(
+    _ incoming: (manifest: LedgerExportManifest, payload: Data)
+  ) throws -> LedgerMergeSummary {
+    try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming).summary
+  }
+
+  /// Merges `incoming` into a copy of the open ledger at `destination` and switches to it.
+  /// The previous ledger file is left unchanged, so it can be reopened to undo the merge.
+  @discardableResult
+  public func mergeIntoNewLedger(
+    _ incoming: (manifest: LedgerExportManifest, payload: Data), at destination: URL
+  ) throws -> LedgerMergeSummary {
+    let merged = try LedgerApplication.mergedPackage(
+      current: try exportPackage(), incoming: incoming)
+    try createLedger(from: (merged.manifest, merged.payload), at: destination)
+    return merged.summary
+  }
+
+  /// Starts a replacement ledger at `destination` and switches to it. Contents-only keeps the
+  /// accounts, categories, tags and templates; complete keeps nothing. The previous ledger file
+  /// is left unchanged, so it can be reopened to undo the reset.
+  public func resetLedger(_ scope: LedgerResetScope, at destination: URL) throws {
+    guard let snapshot else { throw LedgerApplication.Error.invalidCommand }
+    try createLedger(
+      from: try LedgerApplication.resetPackage(from: snapshot, scope: scope), at: destination)
+  }
+
+  /// The words shown before a merge, from counts only.
+  package static func mergePreviewMessage(_ summary: LedgerMergeSummary) -> String {
+    if summary.isEmpty { return "The open ledger already has everything in this backup." }
+    func count(_ value: Int, _ noun: String) -> String? {
+      value == 0 ? nil : "\(value) \(noun)\(value == 1 ? "" : "s")"
+    }
+    let parts = [
+      count(summary.addedAccounts, "account"), count(summary.addedCategories, "category"),
+      count(summary.addedTransactions, "new transaction"),
+      count(summary.addedRevisions - summary.addedTransactions, "edit"),
+      count(summary.addedOther, "other record"),
+    ].compactMap { $0 }
+    return "Merging adds \(parts.joined(separator: ", ")). Where both ledgers changed the same account, category or other record, the open ledger's version is kept."
+  }
+
+  package static func mergeFailureMessage(for error: any Swift.Error) -> String {
+    if case LedgerMergeError.conflictingHistory(let revisions) = error {
+      return
+        "The backup and the open ledger edited \(revisions) of the same transactions in different ways, so nothing was merged. Restore the backup as a separate ledger instead."
+    }
+    return
+      "This backup can't be merged. Merging needs ledgers made in Ledger Atlas; imported ledgers can be restored as a separate ledger. Nothing was changed."
   }
 
   public func createTransaction(

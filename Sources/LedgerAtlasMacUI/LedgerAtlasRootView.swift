@@ -324,13 +324,15 @@ public struct LedgerAtlasRootView: View {
       journey.recordFailure("The selected backup could not be validated.")
       return
     }
-    let alert = NSAlert()
-    alert.messageText = "Restore this backup as a new ledger?"
-    alert.informativeText =
+    let contents =
       "The backup contains \(preview.accounts.count) accounts, \(preview.transactions.count) transactions, and \(preview.categories.count) categories. The original backup stays unchanged."
-    alert.addButton(withTitle: "Restore")
-    alert.addButton(withTitle: "Cancel")
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    switch chooseRestoreMode(title: "Restore this backup?", contents: contents) {
+    case .cancel: return
+    case .merge:
+      mergeBackup(from: source)
+      return
+    case .replace: break
+    }
     guard let directory = try? LedgerLocations.ledgersDirectory() else {
       journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
       return
@@ -382,13 +384,17 @@ public struct LedgerAtlasRootView: View {
       journey.recordFailure("The selected portable package is invalid or incomplete.")
       return
     }
-    let alert = NSAlert()
-    alert.messageText = "Import this portable package as a new ledger?"
-    alert.informativeText =
-      "The package is limited to representable Ledger Atlas data. The source stays unchanged."
-    alert.addButton(withTitle: "Import")
-    alert.addButton(withTitle: "Cancel")
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    switch chooseRestoreMode(
+      title: "Import this portable package?",
+      contents:
+        "The package is limited to representable Ledger Atlas data. The source stays unchanged.")
+    {
+    case .cancel: return
+    case .merge:
+      mergeBackup(from: source)
+      return
+    case .replace: break
+    }
     guard let directory = try? LedgerLocations.ledgersDirectory() else {
       journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
       return
@@ -403,6 +409,111 @@ public struct LedgerAtlasRootView: View {
       journey.recordFailure(
         "The portable package could not be imported without changing the source.")
     }
+  }
+
+  private enum RestoreMode { case replace, merge, cancel }
+
+  /// Asks how to use a backup. With a ledger open, the person picks replace or merge; both
+  /// build a new ledger file and keep the current one, so either can be undone by reopening it.
+  private func chooseRestoreMode(title: String, contents: String) -> RestoreMode {
+    let alert = NSAlert()
+    alert.messageText = title
+    guard journey.snapshot != nil else {
+      alert.informativeText = contents
+      alert.addButton(withTitle: "Restore")
+      alert.addButton(withTitle: "Cancel")
+      return alert.runModal() == .alertFirstButtonReturn ? .replace : .cancel
+    }
+    alert.informativeText = contents + " " + Self.restoreModesExplanation
+    alert.addButton(withTitle: "Replace open ledger")
+    alert.addButton(withTitle: "Merge into open ledger…")
+    alert.addButton(withTitle: "Cancel")
+    switch alert.runModal() {
+    case .alertFirstButtonReturn: return .replace
+    case .alertSecondButtonReturn: return .merge
+    default: return .cancel
+    }
+  }
+
+  package static let restoreModesExplanation =
+    "Replace switches to the backup. Merge adds what the backup has and the open ledger lacks. Either way your current ledger file is kept, so you can reopen it from Open Ledger."
+
+  /// Previews a merge from counts only, then builds the merged ledger as a new file.
+  private func mergeBackup(from source: URL) {
+    let incoming: (manifest: LedgerExportManifest, payload: Data)
+    let summary: LedgerMergeSummary
+    do {
+      incoming = try LedgerJourney.incomingPackage(from: source)
+      summary = try journey.previewMerge(incoming)
+    } catch {
+      journey.recordFailure(LedgerJourney.mergeFailureMessage(for: error))
+      return
+    }
+    guard !summary.isEmpty else {
+      lifecycleMessage = LedgerJourney.mergePreviewMessage(summary)
+      return
+    }
+    let alert = NSAlert()
+    alert.messageText = "Merge this backup into the open ledger?"
+    alert.informativeText = LedgerJourney.mergePreviewMessage(summary)
+    alert.addButton(withTitle: "Merge")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    guard let directory = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
+      return
+    }
+    let destination = LedgerLocations.availableURL(
+      named: Self.currentLedgerName(journey) + " merged", in: directory)
+    do {
+      try journey.mergeIntoNewLedger(incoming, at: destination)
+      performLedgerSelection(.open, url: destination)
+      lifecycleMessage = "Backup merged. The ledger from before the merge is kept in Open Ledger."
+    } catch {
+      journey.recordFailure(LedgerJourney.mergeFailureMessage(for: error))
+    }
+  }
+
+  /// Contents-only or complete reset. Builds a replacement ledger and switches to it only
+  /// once it is complete, so an interrupted reset leaves the current ledger in use.
+  private func resetLedger() {
+    guard journey.snapshot != nil else {
+      journey.recordFailure("Open a ledger before resetting it.")
+      return
+    }
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Reset this ledger?"
+    alert.informativeText = Self.resetExplanation
+    alert.addButton(withTitle: "Erase transactions only")
+    alert.addButton(withTitle: "Erase everything")
+    alert.addButton(withTitle: "Cancel")
+    let scope: LedgerResetScope
+    switch alert.runModal() {
+    case .alertFirstButtonReturn: scope = .contentsOnly
+    case .alertSecondButtonReturn: scope = .complete
+    default: return
+    }
+    guard let directory = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
+      return
+    }
+    let destination = LedgerLocations.availableURL(
+      named: Self.currentLedgerName(journey) + " reset", in: directory)
+    do {
+      try journey.resetLedger(scope, at: destination)
+      performLedgerSelection(.open, url: destination)
+      lifecycleMessage = "Ledger reset. The ledger from before the reset is kept in Open Ledger."
+    } catch {
+      journey.recordFailure("The ledger could not be reset. Nothing was changed.")
+    }
+  }
+
+  package static let resetExplanation =
+    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans and memos. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
+
+  package static func currentLedgerName(_ journey: LedgerJourney) -> String {
+    journey.ledgerURL?.deletingPathExtension().lastPathComponent ?? "Ledger"
   }
 
   private func recordSupersededPublication(_ outcome: LedgerLifecycleOutcome) {
@@ -940,7 +1051,8 @@ public struct LedgerAtlasRootView: View {
         },
         restoreBackup: restoreBackup,
         exportPackage: exportPortablePackage,
-        restorePackage: restorePortablePackage
+        restorePackage: restorePortablePackage,
+        reset: journey.snapshot.map { _ in resetLedger }
       )
       .id(selection)
     } else if selection == .transfers {
