@@ -47,7 +47,7 @@ public struct LedgerStatement: Equatable, Sendable {
     let codes = reports.map(\.unitCode).joined(separator: ", ")
     var lines = [
       first.title,
-      "Currencies: \(codes). Each currency is shown on its own and never added to another.",
+      "Shown separately by currency: \(codes). Amounts in different currencies are never added together.",
     ]
     for report in reports {
       lines += ["", "\(report.unitCode)"] + report.currencyLines

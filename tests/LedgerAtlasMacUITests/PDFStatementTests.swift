@@ -90,8 +90,8 @@ private func snapshot(
   #expect(try ExactDecimal(statement.reports[1].totalLiteral) == ExactDecimal("60"))
 
   let text = statement.text
-  #expect(text.contains("Currencies: INR, USD."))
-  #expect(text.contains("never added"))
+  #expect(text.contains("Shown separately by currency: INR, USD."))
+  #expect(text.contains("never added together"))
   let netLines = text.split(separator: "\n").filter { $0.hasPrefix("Net: ") }
   #expect(netLines.count == 2)
   #expect(netLines.allSatisfy { $0.hasSuffix(" INR") || $0.hasSuffix(" USD") })
@@ -126,5 +126,5 @@ private func snapshot(
   #expect(LedgerStatement.unitCodes(in: ledger) == ["USD"])
   let text = try LedgerStatement(snapshot: ledger).text
   #expect(text.hasPrefix("Activity by kind"))
-  #expect(!text.contains("Currencies:"))
+  #expect(!text.contains("Shown separately by currency"))
 }
