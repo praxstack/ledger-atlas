@@ -2093,17 +2093,21 @@ public struct SQLiteCanonicalCommitter: Sendable {
         database,
         "SELECT 1 FROM import_receipt r WHERE r.event_count <> (SELECT count(*) FROM receipt_event e WHERE e.idempotency_key=r.idempotency_key)"
       ),
+      // Coverage checks are set differences (EXCEPT), not correlated NOT EXISTS: the receipt
+      // tables are keyed by idempotency_key first, so a per-row lookup scanned the whole table
+      // and a real-size backup took minutes per check. Right-hand NULLs are filtered so the
+      // answer matches NOT EXISTS exactly.
       queryHasNoRows(
         database,
-        "SELECT 1 FROM economic_event e WHERE NOT EXISTS (SELECT 1 FROM receipt_event r WHERE r.event_id=e.event_id)"
+        "SELECT event_id FROM economic_event EXCEPT SELECT event_id FROM receipt_event WHERE event_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM event_source_binding b WHERE NOT EXISTS (SELECT 1 FROM receipt_binding r WHERE r.event_id=b.event_id AND r.semantic=b.semantic AND r.provenance_id=b.provenance_id)"
+        "SELECT event_id, semantic, provenance_id FROM event_source_binding EXCEPT SELECT event_id, semantic, provenance_id FROM receipt_binding WHERE event_id IS NOT NULL AND semantic IS NOT NULL AND provenance_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM sidecar_reference s WHERE NOT EXISTS (SELECT 1 FROM receipt_sidecar r WHERE r.sidecar_id=s.sidecar_id AND r.event_id=s.event_id AND r.provenance_id=s.provenance_id)"
+        "SELECT sidecar_id, event_id, provenance_id FROM sidecar_reference EXCEPT SELECT sidecar_id, event_id, provenance_id FROM receipt_sidecar WHERE sidecar_id IS NOT NULL AND event_id IS NOT NULL AND provenance_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
@@ -2171,7 +2175,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM provenance_reference p WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM sidecar_reference s WHERE s.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM receipt_preservation_payload x WHERE x.provenance_id=p.provenance_id)"
+        "SELECT provenance_id FROM provenance_reference EXCEPT SELECT provenance_id FROM event_source_binding WHERE provenance_id IS NOT NULL EXCEPT SELECT provenance_id FROM sidecar_reference WHERE provenance_id IS NOT NULL EXCEPT SELECT provenance_id FROM receipt_preservation_payload WHERE provenance_id IS NOT NULL"
       ),
       // CanonicalLedgerHealth owns persisted digest recomputation. Retain this importer-only
       // semantic replay until those typed receipt models are shared without a dependency cycle.
@@ -2659,27 +2663,27 @@ public struct SQLiteCanonicalCommitter: Sendable {
     guard
       queryHasNoRows(
         database,
-        "SELECT 1 FROM economic_event e WHERE NOT EXISTS (SELECT 1 FROM receipt_event r WHERE r.event_id=e.event_id)"
+        "SELECT event_id FROM economic_event EXCEPT SELECT event_id FROM receipt_event WHERE event_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM event_source_binding b WHERE NOT EXISTS (SELECT 1 FROM receipt_binding r WHERE r.event_id=b.event_id AND r.semantic=b.semantic AND r.provenance_id=b.provenance_id)"
+        "SELECT event_id, semantic, provenance_id FROM event_source_binding EXCEPT SELECT event_id, semantic, provenance_id FROM receipt_binding WHERE event_id IS NOT NULL AND semantic IS NOT NULL AND provenance_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM sidecar_reference s WHERE NOT EXISTS (SELECT 1 FROM receipt_sidecar r WHERE r.sidecar_id=s.sidecar_id AND r.event_id=s.event_id AND r.provenance_id=s.provenance_id)"
+        "SELECT sidecar_id, event_id, provenance_id FROM sidecar_reference EXCEPT SELECT sidecar_id, event_id, provenance_id FROM receipt_sidecar WHERE sidecar_id IS NOT NULL AND event_id IS NOT NULL AND provenance_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM receipt_preservation_anchor a WHERE NOT EXISTS (SELECT 1 FROM receipt_preservation_membership m WHERE m.anchor_id=a.anchor_id AND m.source_subject_id=a.source_subject_id AND m.payload_id IS NULL)"
+        "SELECT anchor_id, source_subject_id FROM receipt_preservation_anchor EXCEPT SELECT anchor_id, source_subject_id FROM receipt_preservation_membership WHERE payload_id IS NULL AND anchor_id IS NOT NULL AND source_subject_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM receipt_preservation_payload x WHERE NOT EXISTS (SELECT 1 FROM receipt_preservation_membership m WHERE m.payload_id=x.payload_id AND m.source_subject_id=x.source_subject_id)"
+        "SELECT payload_id, source_subject_id FROM receipt_preservation_payload EXCEPT SELECT payload_id, source_subject_id FROM receipt_preservation_membership WHERE payload_id IS NOT NULL AND source_subject_id IS NOT NULL"
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM provenance_reference p WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM sidecar_reference s WHERE s.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM receipt_preservation_payload x WHERE x.provenance_id=p.provenance_id)"
+        "SELECT provenance_id FROM provenance_reference EXCEPT SELECT provenance_id FROM event_source_binding WHERE provenance_id IS NOT NULL EXCEPT SELECT provenance_id FROM sidecar_reference WHERE provenance_id IS NOT NULL EXCEPT SELECT provenance_id FROM receipt_preservation_payload WHERE provenance_id IS NOT NULL"
       )
     else { return false }
     // Checksum computation is deliberately included in retry validation: any malformed
