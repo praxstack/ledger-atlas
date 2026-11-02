@@ -979,6 +979,9 @@ import Testing
     amountLiteral: "4.00", kind: .expense, accountID: accountID, categoryID: nil,
     note: "Lunch", createdAt: UTCInstant(epochMilliseconds: now + 5), submissionID: "form-1")
   #expect(reopened.snapshot?.transactions.count == count)
+  #expect(
+    reopened.snapshot?.transactions.first { $0.id == keptID }?.currentRevision
+      == kept.currentRevision)
 }
 
 private func writeSyntheticV19(to url: URL) throws {
