@@ -16,6 +16,22 @@ package enum CanonicalLedgerHealth {
   static func validate(
     _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true
   ) throws {
+    // Run the whole check in one read transaction with a larger page cache. Otherwise SQLite
+    // re-takes its file lock for each of the many small queries below, and a ~900 MB imported
+    // ledger keeps evicting the pages the next query needs. A caller already inside a
+    // transaction keeps its own.
+    let ownsTransaction = sqlite3_get_autocommit(database) != 0
+    let previousCacheSize = try rows(database, "PRAGMA cache_size", { $0.int64(0) }).first
+    guard let previousCacheSize,
+      sqlite3_exec(database, "PRAGMA cache_size=-262144", nil, nil, nil) == SQLITE_OK
+    else { throw HealthError.invalid }
+    defer { sqlite3_exec(database, "PRAGMA cache_size=\(previousCacheSize)", nil, nil, nil) }
+    if ownsTransaction {
+      guard sqlite3_exec(database, "BEGIN", nil, nil, nil) == SQLITE_OK else {
+        throw HealthError.invalid
+      }
+    }
+    defer { if ownsTransaction { sqlite3_exec(database, "COMMIT", nil, nil, nil) } }
     try validateImportGraph(database, trustKey: trustKey)
     try validateReceiptAttachments(database, verifyingImages: verifyingReceiptImages)
     _ = try readSnapshot(database)
@@ -1038,10 +1054,12 @@ package enum CanonicalLedgerHealth {
           guard let pointer = sqlite3_column_text(statement, column) else { return Value.invalid }
           let byteCount = sqlite3_column_bytes(statement, column)
           guard byteCount >= 0, byteCount <= Self.maximumTextBytes else { return Value.invalid }
-          let data = Data(bytes: pointer, count: Int(byteCount))
-          guard !data.contains(0), let value = String(data: data, encoding: .utf8) else {
-            return Value.invalid
-          }
+          // Read straight from SQLite's buffer: no NUL bytes, and valid UTF-8.
+          guard memchr(pointer, 0, Int(byteCount)) == nil,
+            let value = String(
+              validating: UnsafeBufferPointer(start: pointer, count: Int(byteCount)),
+              as: UTF8.self)
+          else { return Value.invalid }
           return Value.text(value)
         case SQLITE_BLOB:
           let byteCount = sqlite3_column_bytes(statement, column)

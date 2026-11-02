@@ -319,20 +319,9 @@ public final class LedgerStore {
       Darwin.close(descriptor)
       throw Error.incompatibleCanonicalStore
     }
-    if recoveryJournalDescriptor == nil {
-      do {
-        let authenticated = try openReadOnlyDatabase(descriptor)
-        defer { sqlite3_close(authenticated) }
-        try validateCanonicalSchema(on: authenticated)
-        try CanonicalLedgerHealth.validate(
-          authenticated, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
-        try validatePath(url, matches: identity)
-        try validateNoSQLiteCompanions(at: url)
-      } catch {
-        Darwin.close(descriptor)
-        throw Error.incompatibleCanonicalStore
-      }
-    }
+    // The full schema and health check runs once, below, on the pinned connection this store
+    // keeps. A separate read-only pass first would repeat a check that takes most of the time
+    // to open a large ledger; the recovery-journal path has always relied on the pinned check.
     let parentURL = url.deletingLastPathComponent()
     let parentDescriptor = Darwin.open(
       parentURL.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
