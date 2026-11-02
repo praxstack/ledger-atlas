@@ -1,6 +1,13 @@
 import Foundation
-import SwiftUI
 
+#if canImport(SwiftUI)
+  import SwiftUI
+#endif
+
+/// Typed presentation and behaviour settings (MACV2-13).
+///
+/// Settings change how values are shown, never the stored values themselves. Nothing here
+/// parses display text back into amounts or dates; see `LedgerDisplayFormatter`.
 public struct LedgerProductSettings: Codable, Equatable, Sendable {
   public enum Appearance: String, CaseIterable, Codable, Sendable {
     case system
@@ -8,44 +15,192 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
     case dark
   }
 
+  /// How income and expense amounts are tinted. Colour is never the only signal:
+  /// amounts always keep their sign.
+  public enum AmountColors: String, CaseIterable, Codable, Sendable {
+    case incomeGreenExpenseRed
+    case incomeBlueExpenseRed
+    case monochrome
+  }
+
+  public enum Motion: String, CaseIterable, Codable, Sendable {
+    case followSystem
+    case reduced
+  }
+
+  /// Fields that can hold an invalid value. Settings UI focuses the reported field.
+  public enum Field: String, CaseIterable, Hashable, Sendable {
+    case localeIdentifier
+    case timeZoneIdentifier
+    case firstWeekday
+    case periodStartDay
+    case startScreen
+    case reminderHour
+  }
+
+  /// Destinations a user can pick as the screen shown after a ledger opens.
+  public static let startScreenChoices: [AppDestination] = [
+    .ledger, .accounts, .insights, .budgets, .categories,
+  ]
+
+  public static let periodStartDays = 1...31
+  public static let reminderHours = 0...23
+
   public var appearance: Appearance
   public var localeIdentifier: String
+  /// `nil` follows the Mac's time zone. Stored dates are civil dates and never shift.
+  public var timeZoneIdentifier: String?
+  /// 1 = Sunday … 7 = Saturday, matching `Calendar.firstWeekday`.
   public var firstWeekday: Int
+  /// Day of the month a monthly period starts. Months shorter than this start on their last day.
   public var periodStartDay: Int
+  public var startScreen: AppDestination
+  public var amountColors: AmountColors
+  /// Carry a period's unspent budget and balance into the next period.
+  public var carryOverEnabled: Bool
+  public var motion: Motion
   public var remindersEnabled: Bool
-
-  public var colorScheme: ColorScheme? {
-    switch appearance {
-    case .system: nil
-    case .light: .light
-    case .dark: .dark
-    }
-  }
+  public var reminderHour: Int
 
   public init(
     appearance: Appearance = .system, localeIdentifier: String = "en_US",
-    firstWeekday: Int = 1, periodStartDay: Int = 1, remindersEnabled: Bool = false
+    timeZoneIdentifier: String? = nil,
+    firstWeekday: Int = 1, periodStartDay: Int = 1,
+    startScreen: AppDestination = .ledger, amountColors: AmountColors = .incomeGreenExpenseRed,
+    carryOverEnabled: Bool = false, motion: Motion = .followSystem,
+    remindersEnabled: Bool = false, reminderHour: Int = 9
   ) {
     self.appearance = appearance
     self.localeIdentifier = localeIdentifier
+    self.timeZoneIdentifier = timeZoneIdentifier
     self.firstWeekday = min(max(firstWeekday, 1), 7)
-    self.periodStartDay = min(max(periodStartDay, 1), 28)
+    self.periodStartDay = min(max(periodStartDay, Self.periodStartDays.lowerBound), Self.periodStartDays.upperBound)
+    self.startScreen = startScreen
+    self.amountColors = amountColors
+    self.carryOverEnabled = carryOverEnabled
+    self.motion = motion
     self.remindersEnabled = remindersEnabled
+    self.reminderHour = min(max(reminderHour, Self.reminderHours.lowerBound), Self.reminderHours.upperBound)
   }
 
+  // MARK: Validation
+
+  /// Every invalid field with a message the settings screen can show next to it.
+  public func validationErrors() -> [Field: String] {
+    var errors: [Field: String] = [:]
+    if !Self.isKnownLocale(localeIdentifier) {
+      errors[.localeIdentifier] = "Choose a locale from the list."
+    }
+    if let timeZoneIdentifier, TimeZone(identifier: timeZoneIdentifier) == nil {
+      errors[.timeZoneIdentifier] = "Choose a time zone from the list."
+    }
+    if !(1...7).contains(firstWeekday) {
+      errors[.firstWeekday] = "Choose a weekday."
+    }
+    if !Self.periodStartDays.contains(periodStartDay) {
+      errors[.periodStartDay] = "Use a day from 1 to 31."
+    }
+    if !Self.startScreenChoices.contains(startScreen) {
+      errors[.startScreen] = "Choose a start screen from the list."
+    }
+    if !Self.reminderHours.contains(reminderHour) {
+      errors[.reminderHour] = "Use an hour from 0 to 23."
+    }
+    return errors
+  }
+
+  /// The first invalid field in display order, or nil when everything is valid.
+  public var firstInvalidField: Field? {
+    let errors = validationErrors()
+    return Field.allCases.first { errors[$0] != nil }
+  }
+
+  /// Applies `candidate` only if it is fully valid. On failure the current (last known good)
+  /// value is kept and the field to focus is returned.
+  @discardableResult
+  public mutating func apply(_ candidate: LedgerProductSettings) -> Field? {
+    if let field = candidate.firstInvalidField { return field }
+    self = candidate
+    return nil
+  }
+
+  // MARK: Derived presentation values
+
+  public var locale: Locale { Locale(identifier: localeIdentifier) }
+
+  public var timeZone: TimeZone {
+    timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+  }
+
+  public var periodRule: LedgerPeriodRule {
+    LedgerPeriodRule(monthStartDay: periodStartDay, firstWeekday: firstWeekday)
+  }
+
+  public func reduceMotion(systemReduceMotion: Bool) -> Bool {
+    motion == .reduced || systemReduceMotion
+  }
+
+  // MARK: Persistence
+
   public static func load(from defaults: UserDefaults = .standard) -> Self {
-    guard let data = defaults.data(forKey: key), let value = try? JSONDecoder().decode(Self.self, from: data)
+    guard let data = defaults.data(forKey: key),
+      let value = try? JSONDecoder().decode(Self.self, from: data)
     else { return .init() }
-    return .init(
-      appearance: value.appearance, localeIdentifier: value.localeIdentifier,
-      firstWeekday: value.firstWeekday, periodStartDay: value.periodStartDay,
-      remindersEnabled: value.remindersEnabled)
+    return value
   }
 
   public func save(to defaults: UserDefaults = .standard) {
-    guard let data = try? JSONEncoder().encode(self) else { return }
+    guard firstInvalidField == nil, let data = try? JSONEncoder().encode(self) else { return }
     defaults.set(data, forKey: Self.key)
   }
 
+  // The key keeps its v1 name: new fields are additive and decode with defaults.
   private static let key = "ledger-atlas.product-settings.v1"
+
+  private enum CodingKeys: String, CodingKey {
+    case appearance, localeIdentifier, timeZoneIdentifier, firstWeekday, periodStartDay
+    case startScreen, amountColors, carryOverEnabled, motion, remindersEnabled, reminderHour
+  }
+
+  /// Decodes field by field. A missing or invalid field falls back to its default instead of
+  /// discarding every other stored preference.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    let defaults = Self()
+    func value<T: Decodable>(_ key: CodingKeys, _ fallback: T, valid: (T) -> Bool = { _ in true }) -> T {
+      guard let decoded = try? c.decodeIfPresent(T.self, forKey: key), valid(decoded) else { return fallback }
+      return decoded
+    }
+    appearance = value(.appearance, defaults.appearance)
+    localeIdentifier = value(.localeIdentifier, defaults.localeIdentifier, valid: Self.isKnownLocale)
+    timeZoneIdentifier = value(.timeZoneIdentifier, Optional<String>.none) {
+      $0.map { TimeZone(identifier: $0) != nil } ?? true
+    }
+    firstWeekday = value(.firstWeekday, defaults.firstWeekday) { (1...7).contains($0) }
+    periodStartDay = value(.periodStartDay, defaults.periodStartDay) { Self.periodStartDays.contains($0) }
+    startScreen = value(.startScreen, defaults.startScreen) { Self.startScreenChoices.contains($0) }
+    amountColors = value(.amountColors, defaults.amountColors)
+    carryOverEnabled = value(.carryOverEnabled, defaults.carryOverEnabled)
+    motion = value(.motion, defaults.motion)
+    remindersEnabled = value(.remindersEnabled, defaults.remindersEnabled)
+    reminderHour = value(.reminderHour, defaults.reminderHour) { Self.reminderHours.contains($0) }
+  }
+
+  private static func isKnownLocale(_ identifier: String) -> Bool {
+    !identifier.isEmpty && Locale.availableIdentifiers.contains(identifier)
+  }
 }
+
+extension AppDestination: Codable {}
+
+#if canImport(SwiftUI)
+  extension LedgerProductSettings {
+    public var colorScheme: ColorScheme? {
+      switch appearance {
+      case .system: nil
+      case .light: .light
+      case .dark: .dark
+      }
+    }
+  }
+#endif
