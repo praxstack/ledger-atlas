@@ -500,6 +500,68 @@ public enum CanonicalLedgerSchema {
 
   public static let fingerprint = schemaFingerprint(for: expectedObjects)
 
+  /// One released canonical schema: its version, fingerprint, and exact objects.
+  public struct SchemaRelease: Equatable, Sendable {
+    public let version: Int
+    public let fingerprint: String
+    public let objects: [CanonicalSchemaObject]
+    /// False for releases before v11. Those have no receipt trust anchors, so an imported
+    /// graph in them cannot be re-authenticated after the file has been writable.
+    public let authenticatesImportedEvents: Bool
+  }
+
+  /// One additive step from a released schema to the next. Statements run inside the
+  /// lifecycle's migration transaction; the lifecycle updates `ledger_meta` itself.
+  public struct LifecycleUpgradeStep: Sendable {
+    public let from: SchemaRelease
+    public let to: SchemaRelease
+    public let statements: [String]
+  }
+
+  public static let currentRelease = SchemaRelease(
+    version: version, fingerprint: fingerprint, objects: expectedObjects,
+    authenticatesImportedEvents: true)
+
+  public static let legacyV10Release = SchemaRelease(
+    version: 10, fingerprint: legacyV10Fingerprint, objects: legacyV10Objects,
+    authenticatesImportedEvents: false)
+
+  /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
+  /// next step's `from`, and the last step ends at `currentRelease`.
+  ///
+  /// To add a schema version N+1: freeze today's objects and fingerprint as a `vN` release
+  /// (stop deriving them from the evolving schema), point the last step's `to` at it, and append
+  /// a step from it to `currentRelease` with the new objects' DDL.  Lifecycle validates legacy
+  /// files without the receipt trust key, so check that the frozen release's health checks
+  /// still pass that way.
+  public static let lifecycleUpgradeSteps: [LifecycleUpgradeStep] = [
+    LifecycleUpgradeStep(
+      from: legacyV10Release, to: currentRelease, statements: v10ToV11MigrationStatements)
+  ]
+
+  /// The released schema with this exact version and fingerprint that the lifecycle can upgrade,
+  /// or nil when it is unknown or already current.
+  public static func lifecycleLegacyRelease(version: Int, fingerprint: String) -> SchemaRelease? {
+    lifecycleUpgradeSteps.first {
+      $0.from.version == version && $0.from.fingerprint == fingerprint
+    }?.from
+  }
+
+  /// The steps that upgrade `release` to the current schema, in order, or nil when no unbroken
+  /// chain reaches `currentRelease`.
+  public static func lifecycleUpgradePath(from release: SchemaRelease) -> [LifecycleUpgradeStep]? {
+    var path: [LifecycleUpgradeStep] = []
+    var at = release
+    while at != currentRelease {
+      guard let step = lifecycleUpgradeSteps.first(where: { $0.from == at }),
+        step.to.version > at.version, path.count < lifecycleUpgradeSteps.count
+      else { return nil }
+      path.append(step)
+      at = step.to
+    }
+    return path.isEmpty ? nil : path
+  }
+
   public static func schemaFingerprint(for objects: [CanonicalSchemaObject]) -> String {
     var hasher = SHA256()
     update(&hasher, Data("ledger-atlas/canonical-schema/v1".utf8))

@@ -27,6 +27,39 @@ struct CanonicalPersistenceModelsTests {
     }
   }
 
+  @Test("lifecycle upgrade chain is contiguous, additive, and ends at the current schema")
+  func lifecycleUpgradeChain() throws {
+    let steps = CanonicalLedgerSchema.lifecycleUpgradeSteps
+    #expect(!steps.isEmpty)
+    #expect(steps.last?.to == CanonicalLedgerSchema.currentRelease)
+    for (step, next) in zip(steps, steps.dropFirst()) { #expect(step.to == next.from) }
+    for step in steps {
+      #expect(step.to.version > step.from.version)
+      #expect(
+        CanonicalLedgerSchema.schemaFingerprint(for: step.from.objects) == step.from.fingerprint)
+      // Additive only: every earlier object survives unchanged into the next release.
+      #expect(step.from.objects.allSatisfy { step.to.objects.contains($0) })
+      #expect(step.statements.count == step.to.objects.count - step.from.objects.count)
+      let path = try #require(CanonicalLedgerSchema.lifecycleUpgradePath(from: step.from))
+      #expect(path.last?.to == CanonicalLedgerSchema.currentRelease)
+    }
+    let v10 = try #require(
+      CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: 10, fingerprint: CanonicalLedgerSchema.legacyV10Fingerprint))
+    #expect(v10 == CanonicalLedgerSchema.legacyV10Release)
+    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v10)?.count == 1)
+    #expect(
+      CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: 10, fingerprint: CanonicalLedgerSchema.legacyV8Fingerprint) == nil)
+    #expect(
+      CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: CanonicalLedgerSchema.version, fingerprint: CanonicalLedgerSchema.fingerprint)
+        == nil)
+    #expect(
+      CanonicalLedgerSchema.lifecycleUpgradePath(from: CanonicalLedgerSchema.currentRelease)
+        == nil)
+  }
+
   @Test("canonical schema has an exact stable fingerprint and no permissive DDL")
   func canonicalSchemaFingerprint() {
     #expect(CanonicalIdentifier.isValid(CanonicalLedgerSchema.fingerprint))

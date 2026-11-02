@@ -6,7 +6,7 @@ import LedgerCore
 
 /// The only path-based boundary for creating, opening, and upgrading canonical ledgers.
 public enum LedgerStoreLifecycle {
-  // In-memory v10 migration uses sqlite3 backup plus sqlite3_serialize.  Keep this
+  // In-memory legacy migration uses sqlite3 backup plus sqlite3_serialize.  Keep this
   // preflight bounded so a sparse/hostile legacy file cannot force an unbounded allocation;
   // larger ledgers need a future streaming migration path.
   private static let maximumMigratedImageBytes: UInt64 = 512 * 1024 * 1024
@@ -128,6 +128,9 @@ public enum LedgerStoreLifecycle {
     }
   }
 
+  /// Where an upgrade keeps the untouched pre-upgrade ledger.  The `.v10-recovery` suffix is
+  /// kept from the first upgrade path so recovery images from earlier builds are still found;
+  /// the file holds whichever older release was upgraded.
   public static func recoveryImageURL(for url: URL) -> URL {
     URL(fileURLWithPath: url.path + ".v10-recovery")
   }
@@ -350,7 +353,7 @@ public enum LedgerStoreLifecycle {
       try copy(source.descriptor, to: temporary)
       try requirePath(url, matches: source.identity)
       guard filesEqual(source.descriptor, temporary.descriptor) else { throw Error.pathChanged }
-      try validate(temporary.descriptor, as: .legacyV10)
+      try validate(temporary.descriptor, as: .legacy)
       try invoke(hook, .afterRecoveryValidated)
       try requireTemporaryRecoveryStillSafe(
         temporary, source: source, parentDescriptor: destination.parentDescriptor)
@@ -1245,7 +1248,7 @@ public enum LedgerStoreLifecycle {
     try requireNoCompanions(leaf: leaf, in: parentDescriptor)
     let recovery = try openPinnedLeaf(leaf, parentDescriptor: parentDescriptor, url: url)
     do {
-      try validate(recovery.descriptor, as: .legacyV10)
+      try validate(recovery.descriptor, as: .legacy)
       return recovery
     } catch {
       Darwin.close(recovery.descriptor)
@@ -1382,7 +1385,7 @@ public enum LedgerStoreLifecycle {
         fstatat(parentDescriptor, leaf, &atPath, AT_SYMLINK_NOFOLLOW) == 0,
         sameFile(value, atPath), filesEqual(source.descriptor, descriptor)
       else { throw Error.recoveryImageExists }
-      try validate(descriptor, as: .legacyV10)
+      try validate(descriptor, as: .legacy)
       return PinnedFile(
         descriptor: descriptor, identity: value, url: url, contentDigest: try digest(descriptor))
     } catch {
@@ -1437,7 +1440,7 @@ public enum LedgerStoreLifecycle {
       safeFile(atPath), sameFile(retained, atPath),
       try digest(recovery.descriptor) == expectedDigest
     else { throw Error.pathChanged }
-    try validate(recovery.descriptor, as: .legacyV10)
+    try validate(recovery.descriptor, as: .legacy)
   }
 
   private static func hasValidRecoveryImage(
@@ -1455,7 +1458,7 @@ public enum LedgerStoreLifecycle {
       return false
     }
     guard expectedDigest == nil || recovery.contentDigest == expectedDigest,
-      (try? validate(recovery.descriptor, as: .legacyV10)) != nil
+      (try? validate(recovery.descriptor, as: .legacy)) != nil
     else { return false }
     // Validation reads the database after the initial digest.  Re-read the digest at the
     // reporting boundary so a valid recovery image cannot be replaced during validation and
@@ -1554,12 +1557,17 @@ public enum LedgerStoreLifecycle {
       try validateDatabase(database, as: .current, trustKey: trustKey)
       return .current
     }
-    if version == "10", fingerprint == CanonicalLedgerSchema.legacyV10Fingerprint {
-      // Validate only the cheap v10 metadata before accepting the file for an in-memory
+    if let version, let fingerprint, let versionNumber = Int(version),
+      String(versionNumber) == version,
+      let release = CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: versionNumber, fingerprint: fingerprint),
+      CanonicalLedgerSchema.lifecycleUpgradePath(from: release) != nil
+    {
+      // Validate only the cheap legacy metadata before accepting the file for an in-memory
       // migration.  The migration path uses sqlite3_backup/serialize and is bounded below;
-      // current v11 inspection remains uncapped.
+      // current-schema inspection remains uncapped.
       try requireMigrationSizeBound(source.descriptor)
-      try validateDatabase(database, as: .legacyV10)
+      try validateDatabase(database, as: .legacy)
       return .upgradeRequired
     }
     if scalarInt(database, "PRAGMA application_id") == Int(CanonicalLedgerSchema.applicationID),
@@ -1571,7 +1579,9 @@ public enum LedgerStoreLifecycle {
     throw Error.invalidStore
   }
 
-  private enum Schema { case current, legacyV10 }
+  /// `.legacy` is any released schema in the upgrade chain, identified by the file's own
+  /// version and fingerprint and checked against that release's exact objects.
+  private enum Schema { case current, legacy }
 
   private static func validate(_ descriptor: Int32, as schema: Schema, trustKey: Data? = nil) throws
   {
@@ -1583,23 +1593,42 @@ public enum LedgerStoreLifecycle {
   private static func validateDatabase(
     _ database: OpaquePointer, as schema: Schema, trustKey: Data? = nil
   ) throws {
-    let expectedVersion = schema == .current ? CanonicalLedgerSchema.version : 10
-    let expectedFingerprint =
-      schema == .current
-      ? CanonicalLedgerSchema.fingerprint : CanonicalLedgerSchema.legacyV10Fingerprint
-    let expectedObjects =
-      schema == .current
-      ? CanonicalLedgerSchema.expectedObjects : CanonicalLedgerSchema.legacyV10Objects
+    switch schema {
+    case .current:
+      try validateDatabase(database, as: CanonicalLedgerSchema.currentRelease, trustKey: trustKey)
+    case .legacy:
+      guard let release = legacyRelease(of: database) else { throw Error.invalidStore }
+      try validateDatabase(database, as: release, trustKey: trustKey)
+    }
+  }
+
+  private static func legacyRelease(of database: OpaquePointer)
+    -> CanonicalLedgerSchema.SchemaRelease?
+  {
+    guard
+      let versionText = scalarText(
+        database, "SELECT value FROM ledger_meta WHERE key='schema_version'"),
+      let version = Int(versionText), String(version) == versionText,
+      let fingerprint = scalarText(
+        database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
+    else { return nil }
+    return CanonicalLedgerSchema.lifecycleLegacyRelease(version: version, fingerprint: fingerprint)
+  }
+
+  private static func validateDatabase(
+    _ database: OpaquePointer, as release: CanonicalLedgerSchema.SchemaRelease,
+    trustKey: Data? = nil
+  ) throws {
     guard
       scalarInt(database, "PRAGMA application_id") == Int(CanonicalLedgerSchema.applicationID),
       scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_version'")
-        == String(expectedVersion),
+        == String(release.version),
       scalarText(database, "SELECT value FROM ledger_meta WHERE key='ledger_identity'")
         == "ledger-atlas-canonical",
       scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
-        == expectedFingerprint,
+        == release.fingerprint,
       scalarInt(database, "SELECT count(*) FROM ledger_meta") == 3,
-      schemaObjects(database) == expectedObjects,
+      schemaObjects(database) == release.objects,
       scalarText(database, "PRAGMA quick_check") == "ok",
       hasNoRows(database, "PRAGMA foreign_key_check"),
       CanonicalLedgerHealth.isHealthy(database, trustKey: trustKey)
@@ -1621,7 +1650,7 @@ public enum LedgerStoreLifecycle {
     guard
       execute(
         database,
-        "INSERT INTO ledger_meta(key, value) VALUES('schema_version', '11'), ('ledger_identity', 'ledger-atlas-canonical'), ('schema_fingerprint', '\(CanonicalLedgerSchema.fingerprint)')"
+        "INSERT INTO ledger_meta(key, value) VALUES('schema_version', '\(CanonicalLedgerSchema.version)'), ('ledger_identity', 'ledger-atlas-canonical'), ('schema_fingerprint', '\(CanonicalLedgerSchema.fingerprint)')"
       )
     else { throw Error.invalidStore }
     try validateDatabase(database, as: .current)
@@ -1640,16 +1669,11 @@ public enum LedgerStoreLifecycle {
     try requireMigrationSizeBound(descriptor)
     let source = try openReadOnlyDatabase(descriptor)
     defer { sqlite3_close(source) }
-    try validateDatabase(source, as: .legacyV10)
-    // A v10 graph has no external authenticator for the semantic fields that v11 protects.
-    // Refuse to bless an admitted vendor graph after it has crossed the mutable v10 boundary;
-    // callers must re-import from the immutable, authenticated source instead.
-    guard
-      scalarText(
-        source,
-        "SELECT 1 FROM import_receipt WHERE profile_id IN (\(admittedProfileSQL())) LIMIT 1"
-      ) == nil
+    try validateDatabase(source, as: .legacy)
+    guard let release = legacyRelease(of: source),
+      let path = CanonicalLedgerSchema.lifecycleUpgradePath(from: release)
     else { throw Error.unsupportedStore }
+    try requireMigrationSupported(source, from: release)
     var destination: OpaquePointer?
     guard sqlite3_open(":memory:", &destination) == SQLITE_OK, let destination else {
       throw Error.invalidStore
@@ -1663,37 +1687,48 @@ public enum LedgerStoreLifecycle {
     guard step == SQLITE_DONE, finish == SQLITE_OK,
       execute(destination, "PRAGMA foreign_keys=ON"), execute(destination, "BEGIN IMMEDIATE")
     else { throw Error.invalidStore }
+    // All steps share one transaction, so a failure at any step leaves nothing half-upgraded.
     do {
-      for statement in CanonicalLedgerSchema.v10ToV11MigrationStatements {
-        guard execute(destination, statement) else { throw Error.invalidStore }
+      for upgrade in path {
+        for statement in upgrade.statements {
+          guard execute(destination, statement) else { throw Error.invalidStore }
+        }
+        guard
+          execute(
+            destination,
+            "UPDATE ledger_meta SET value='\(upgrade.to.version)' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(upgrade.to.fingerprint)' WHERE key='schema_fingerprint'"
+          ),
+          schemaObjects(destination) == upgrade.to.objects
+        else { throw Error.invalidStore }
       }
-      guard
-        execute(
-          destination,
-          "UPDATE ledger_meta SET value='11' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.fingerprint)' WHERE key='schema_fingerprint'"
-        ),
-        execute(destination, "COMMIT")
-      else { throw Error.invalidStore }
+      guard execute(destination, "COMMIT") else { throw Error.invalidStore }
     } catch {
       _ = execute(destination, "ROLLBACK")
       throw error
     }
-    do {
-      try validateDatabase(destination, as: .current)
-    } catch {
-      throw error
-    }
+    try validateDatabase(destination, as: .current)
     return try serialized(destination)
   }
 
   private static func requireLegacyMigrationSupported(_ descriptor: Int32) throws {
     let database = try openReadOnlyDatabase(descriptor)
     defer { sqlite3_close(database) }
+    guard let release = legacyRelease(of: database) else { throw Error.invalidStore }
+    try requireMigrationSupported(database, from: release)
+  }
+
+  /// A release without receipt trust anchors has no external authenticator for the semantic
+  /// fields later schemas protect.  Refuse to bless an admitted vendor graph after it has crossed
+  /// that mutable boundary; callers must re-import from the immutable, authenticated source.
+  private static func requireMigrationSupported(
+    _ database: OpaquePointer, from release: CanonicalLedgerSchema.SchemaRelease
+  ) throws {
     guard
-      scalarText(
-        database,
-        "SELECT 1 FROM import_receipt WHERE profile_id IN (\(admittedProfileSQL())) LIMIT 1"
-      ) == nil
+      release.authenticatesImportedEvents
+        || scalarText(
+          database,
+          "SELECT 1 FROM import_receipt WHERE profile_id IN (\(admittedProfileSQL())) LIMIT 1"
+        ) == nil
     else { throw Error.unsupportedStore }
   }
 
