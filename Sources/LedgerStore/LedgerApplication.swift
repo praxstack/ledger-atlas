@@ -1646,11 +1646,19 @@ private func decodeImportGraph(value: Any?) throws -> LedgerImportGraph? {
     Set(object.keys) == ["schemaVersion", "schemaFingerprint", "canonicalChecksum", "tables"],
     let fingerprint = object["schemaFingerprint"] as? String,
     let checksum = object["canonicalChecksum"] as? String, checksum.count == 64,
-    let tableObjects = object["tables"] as? [[String: Any]],
-    tableObjects.count == LedgerImportGraph.tableNames.count
+    let tableObjects = object["tables"] as? [[String: Any]]
   else { throw LedgerApplication.Error.invalidCommand }
+  let schemaVersion = try jsonInt(object, "schemaVersion")
+  // An older release has fewer graph tables. An unknown schema is checked against today's list
+  // and then refused by the store with its own reason.
+  let expectedNames =
+    LedgerImportGraph.release(schemaVersion: schemaVersion, schemaFingerprint: fingerprint)
+    .map(LedgerImportGraph.tableNames(in:)) ?? LedgerImportGraph.tableNames
+  guard tableObjects.count == expectedNames.count else {
+    throw LedgerApplication.Error.invalidCommand
+  }
   var rowCount = 0
-  let tables = try zip(tableObjects, LedgerImportGraph.tableNames).map {
+  let tables = try zip(tableObjects, expectedNames).map {
     tableObject, expectedName -> LedgerImportGraph.Table in
     guard Set(tableObject.keys) == ["name", "columns", "rows"],
       tableObject["name"] as? String == expectedName,
@@ -1688,7 +1696,7 @@ private func decodeImportGraph(value: Any?) throws -> LedgerImportGraph? {
     return .init(name: expectedName, columns: columns, rows: rows)
   }
   return .init(
-    schemaVersion: try jsonInt(object, "schemaVersion"), schemaFingerprint: fingerprint,
+    schemaVersion: schemaVersion, schemaFingerprint: fingerprint,
     canonicalChecksum: checksum, tables: tables)
 }
 
