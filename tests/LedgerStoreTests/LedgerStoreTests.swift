@@ -429,6 +429,50 @@ private func makeStoreWithAccountForRevisionTests() throws
   #expect(try Data(contentsOf: url) == before)
 }
 
+/// The mutable opener validates only on the pinned connection it keeps, so a refused file must
+/// come out of that open byte-identical and with no SQLite companion files left behind.
+@Test func mutableOpenerRefusesInvalidFilesWithoutTouchingThem() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+
+  let notSQLite = directory.appendingPathComponent("not-sqlite.sqlite")
+  try Data(repeating: 0x5A, count: 8192).write(to: notSQLite)
+
+  let oldSchema = directory.appendingPathComponent("old-schema.sqlite")
+  let oldDatabase = try makeCanonicalDatabase(at: oldSchema)
+  try execute(oldDatabase, "UPDATE ledger_meta SET value='1' WHERE key='schema_version'")
+  sqlite3_close(oldDatabase)
+
+  let unhealthy = directory.appendingPathComponent("unhealthy.sqlite")
+  let unhealthyDatabase = try makeCanonicalDatabase(at: unhealthy)
+  // An account whose origin row is missing: schema-valid, but the health replay refuses it.
+  try execute(
+    unhealthyDatabase,
+    """
+    PRAGMA foreign_keys=OFF;
+    INSERT INTO ledger_account VALUES ('\(String(repeating: "c", count: 64))', 'Cash', 'USD', '\(String(repeating: "d", count: 64))', 'active');
+    """)
+  sqlite3_close(unhealthyDatabase)
+
+  let wal = directory.appendingPathComponent("wal.sqlite")
+  let walDatabase = try makeCanonicalDatabase(at: wal)
+  try execute(walDatabase, "PRAGMA journal_mode=WAL")
+  sqlite3_close(walDatabase)
+
+  for url in [notSQLite, oldSchema, unhealthy, wal] {
+    #expect(chmod(url.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+    let before = try Data(contentsOf: url)
+    #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+      try LedgerStore.openForMutation(at: url)
+    }
+    #expect(try Data(contentsOf: url) == before)
+    for suffix in ["-journal", "-journal.ledger-atlas-binding", "-wal", "-shm"] {
+      #expect(!FileManager.default.fileExists(atPath: url.path + suffix))
+    }
+  }
+}
+
 @Test func fileBackedMutationReopensOnlyASafeCanonicalLedger() throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
