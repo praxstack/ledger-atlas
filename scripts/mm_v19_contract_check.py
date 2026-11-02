@@ -31,7 +31,7 @@ CONTRACT = (
     / "money-manager-android-v19.schema.sql"
 )
 SQLITE_MAGIC = b"SQLite format 3\x00"
-KNOWN_DO_TYPES = {"0", "1", "3", "4", "7"}
+KNOWN_DO_TYPES = {"0", "1", "3", "4", "7", "8"}
 PLAIN_DECIMAL = re.compile(r"^\d+(\.\d+)?$")
 LOCAL_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EPOCH_MS = re.compile(r"^\d{13}$")

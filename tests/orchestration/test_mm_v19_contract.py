@@ -34,7 +34,8 @@ def _build(path: Path, *extra_sql: str) -> Path:
           ('t-1', 'a-1', 'k-1', '1', '12.50', '{ZDATE}', '{WDATE}'),
           ('t-2', 'a-1', NULL, '3', '40.0', '{ZDATE}', '{WDATE}'),
           ('t-3', 'a-2', NULL, '4', '40.0', '{ZDATE}', '{WDATE}'),
-          ('t-4', 'a-1', '-4', '7', '3.0', '{ZDATE}', '{WDATE}');
+          ('t-4', 'a-1', '-4', '7', '3.0', '{ZDATE}', '{WDATE}'),
+          ('t-5', 'a-2', '-4', '8', '1.0', '{ZDATE}', '{WDATE}');
         UPDATE INOUTCOME SET toAssetUid = 'a-2', txUidTrans = 'g-1' WHERE uid = 't-2';
         UPDATE INOUTCOME SET toAssetUid = 'a-1', txUidTrans = 'g-1' WHERE uid = 't-3';
         """
