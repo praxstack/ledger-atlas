@@ -2156,15 +2156,23 @@ public struct SQLiteCanonicalCommitter: Sendable {
   private func persistedV19ReceiptGeneration(
     _ database: OpaquePointer, receipt: String
   ) throws -> MoneyManagerV19Vocabulary.ReceiptGeneration {
+    // Ledgers older than v12 have no transfer table and no paired legs.
+    let transactionOfEvent =
+      scalarText(
+        database,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='economic_event_transfer'"
+      ) == nil
+      ? "r.event_id"
+      : "COALESCE((SELECT t.transfer_id FROM economic_event_transfer t WHERE t.debit_event_id=r.event_id OR t.credit_event_id=r.event_id), r.event_id)"
     let current =
       scalarText(
         database,
-        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=COALESCE((SELECT t.transfer_id FROM economic_event_transfer t WHERE t.debit_event_id=r.event_id OR t.credit_event_id=r.event_id), r.event_id) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Vocabulary.receiptGenerationField)', '\(MoneyManagerV19Vocabulary.receiptGenerationField).debit', '\(MoneyManagerV19Vocabulary.receiptGenerationField).credit') AND l.literal='\(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral)' LIMIT 1"
+        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=\(transactionOfEvent) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Vocabulary.receiptGenerationField)', '\(MoneyManagerV19Vocabulary.receiptGenerationField).debit', '\(MoneyManagerV19Vocabulary.receiptGenerationField).credit') AND l.literal='\(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral)' LIMIT 1"
       ) != nil
     let legacy =
       scalarText(
         database,
-        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=COALESCE((SELECT t.transfer_id FROM economic_event_transfer t WHERE t.debit_event_id=r.event_id OR t.credit_event_id=r.event_id), r.event_id) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Vocabulary.receiptGenerationField)', '\(MoneyManagerV19Vocabulary.receiptGenerationField).debit', '\(MoneyManagerV19Vocabulary.receiptGenerationField).credit') AND l.literal='\(MoneyManagerV19Vocabulary.legacyReceiptGenerationLiteral)' LIMIT 1"
+        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=\(transactionOfEvent) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Vocabulary.receiptGenerationField)', '\(MoneyManagerV19Vocabulary.receiptGenerationField).debit', '\(MoneyManagerV19Vocabulary.receiptGenerationField).credit') AND l.literal='\(MoneyManagerV19Vocabulary.legacyReceiptGenerationLiteral)' LIMIT 1"
       ) != nil
     guard !(current && legacy) else { throw CanonicalCommitError.canonicalReadFailed }
     return current || !legacy ? .current : .legacy
