@@ -289,9 +289,9 @@ import Testing
     sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
   try journey.approveAndOpen(
     canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
-  #expect(throws: LedgerApplication.Error.invalidCommand) {
-    _ = try journey.exportPackage()
-  }
+  // Imported ledgers export a v4 package that carries their import history.
+  let package = try journey.exportPackage()
+  #expect(!package.payload.isEmpty)
   let restoredURL = directory.appendingPathComponent("restored.sqlite")
   let digest = try journey.backupCanonicalLedger(to: restoredURL)
   #expect(
