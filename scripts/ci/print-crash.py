@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prints the faulting thread of a macOS .ips crash report (used by CI on test crashes)."""
+
 import json
 import sys
 
@@ -13,4 +14,6 @@ for thread in report.get("threads", []):
         continue
     for frame in thread.get("frames", [])[:60]:
         image = images[frame.get("imageIndex", 0)] if images else {}
-        print(f'{image.get("name", "?")}  {frame.get("symbol", "?")}  +{frame.get("symbolLocation", "")}')
+        print(
+            f"{image.get('name', '?')}  {frame.get('symbol', '?')}  +{frame.get('symbolLocation', '')}"
+        )
