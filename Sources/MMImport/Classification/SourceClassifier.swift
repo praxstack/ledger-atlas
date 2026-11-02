@@ -236,14 +236,13 @@ public struct SourceClassifier: Sendable {
     // profile and is refused as schema drift, never imported as an empty ledger.
     var contractMissing = false
     if exact == nil, family != nil {
-      let android = inventory.tableNames.contains("android_metadata")
       guard let columns = columnNames(database, tableNames: inventory.tableNames) else {
         return finalized(
           source: source, container: outerContainer, before: outerBefore, status: .corrupt,
           diagnostics: [.invalidSQLite], companionSnapshot: companionSnapshot,
           invokeTestingHook: invokeTestingHook)
       }
-      if !MoneyManagerV19Contract.isSatisfied(android: android, columnsByTable: columns) {
+      if !MoneyManagerV19Contract.isSatisfied(columnsByTable: columns) {
         family = nil
         contractMissing = true
       }

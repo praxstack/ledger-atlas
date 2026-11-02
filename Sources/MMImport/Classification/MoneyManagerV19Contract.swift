@@ -3,8 +3,9 @@ import LedgerAdapterSemantics
 
 /// The frozen Money Manager Android v19 contract
 /// (docs/compatibility/money-manager-android-v19.schema.sql). Rule 2 of the contract: a v19
-/// file missing any of these tables or columns is a different profile and is refused, never
-/// guessed. Extra tables and columns are additive drift and stay admitted.
+/// file missing any of these tables or columns is a different profile. The classifier enforces
+/// the core binding columns below for every family; this full table is the reference that the
+/// DDL-sync test and contract checker compare against. Extra columns stay admitted.
 enum MoneyManagerV19Contract {
   static let androidTables: [String: [String]] = [
     "ASSETGROUP": ["DEVICE_ID", "uid", "IS_DEL", "USETIME", "ACC_GROUP_NAME", "TYPE", "ORDERSEQ", "isSynced", "syncTime", "syncVersion"],
@@ -47,16 +48,11 @@ enum MoneyManagerV19Contract {
     ),
   ]
 
-  /// True when `columnsByTable` (lower-cased column names, keyed by exact table name) has
-  /// everything the contract needs for this family.
-  static func isSatisfied(android: Bool, columnsByTable: [String: Set<String>]) -> Bool {
-    if android {
-      for (table, columns) in androidTables {
-        guard let present = columnsByTable[table] else { return false }
-        for column in columns where !present.contains(column.lowercased()) { return false }
-      }
-      return true
-    }
+  /// True when `columnsByTable` (lower-cased column names, keyed by exact table name) has the
+  /// core binding columns. A family file may omit whole optional tables (budgets, photos), but
+  /// a core table without the column an event binds to is a different profile, not an empty
+  /// ledger. `androidTables` stays the reference for the full contract checker.
+  static func isSatisfied(columnsByTable: [String: Set<String>]) -> Bool {
     for requirement in coreColumns {
       guard let table = requirement.tables.first(where: { columnsByTable[$0] != nil }),
         let present = columnsByTable[table]

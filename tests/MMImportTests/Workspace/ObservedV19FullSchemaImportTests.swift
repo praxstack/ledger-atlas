@@ -150,7 +150,7 @@ struct ObservedV19FullSchemaImportTests {
 
   @Test("a backup missing a contract column is refused before anything is written")
   func refusesMissingContractColumn() throws {
-    for (table, column) in [("INOUTCOME", "ZMONEY"), ("REPEATTRANSACTION", "NEXT_DATE")] {
+    for (table, column) in [("INOUTCOME", "ZMONEY"), ("CURRENCY", "ISO")] {
       try withDirectory { directory in
         let source = directory.appendingPathComponent("MM(synthetic).mmbak")
         try writeFullSchemaBackup(to: source)
