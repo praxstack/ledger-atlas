@@ -28,6 +28,10 @@ package enum CanonicalLedgerHealth {
   ///   that SQLite's update hook does not report.
   /// - Transaction revisions and source literals can't be updated or deleted (schema triggers),
   ///   so the count of marker literals changes if a write adds one.
+  ///
+  /// The receipt trust key is not part of the mark: it lives in the Keychain, is fixed per
+  /// ledger, and the one save that can name a new key (a package restore) writes import rows,
+  /// so it always gets the full replay.
   package struct ImportGraphMark: Equatable, Sendable {
     let dataVersion: Int64
     let tableCounts: [Int64]

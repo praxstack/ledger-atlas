@@ -2296,6 +2296,7 @@ public final class LedgerStore {
     trustIdentity: String? = nil, _ body: (LedgerReadSnapshot) throws -> MutationResult
   ) throws -> MutationResult {
     try validateMutationIdentity(requiringNoCompanions: true)
+    let writtenBefore = writeWatch?.writtenTables ?? []
     try Self.execute("BEGIN IMMEDIATE", on: database)
     do {
       try mutationTestHook?(.afterBeginImmediate)
@@ -2333,7 +2334,11 @@ public final class LedgerStore {
       writeWatch?.reset()
       return result
     } catch {
-      _ = try? Self.execute("ROLLBACK", on: database)
+      // A rolled-back save leaves nothing behind, so forget the tables it wrote; otherwise one
+      // refused save would send the next save down the full check.
+      if (try? Self.execute("ROLLBACK", on: database)) != nil {
+        writeWatch?.restore(writtenBefore)
+      }
       if let error = error as? Error, error.preservesMutationError { throw error }
       throw Error.incompatibleCanonicalStore
     }
@@ -3743,6 +3748,7 @@ final class TableWriteWatch {
   var wroteImportGraph: Bool { !writtenTables.isDisjoint(with: Self.importOnlyTables) }
 
   func reset() { writtenTables.removeAll(keepingCapacity: true) }
+  func restore(_ tables: Set<String>) { writtenTables = tables }
 
   init(watching database: OpaquePointer) {
     sqlite3_update_hook(
