@@ -293,7 +293,12 @@ import Testing
     _ = try journey.exportPackage()
   }
   let restoredURL = directory.appendingPathComponent("restored.sqlite")
-  try journey.backupCanonicalLedger(to: restoredURL)
+  let digest = try journey.backupCanonicalLedger(to: restoredURL)
+  #expect(
+    digest
+      == SHA256.hash(data: try Data(contentsOf: restoredURL))
+      .map { String(format: "%02x", $0) }.joined())
+  #expect(LedgerAtlasRootView.backupSavedMessage(sha256: digest).hasSuffix(digest))
   let restored = LedgerJourney()
   restored.openLedger(restoredURL)
   #expect(restored.phase == .imported)
@@ -317,6 +322,12 @@ import Testing
   reopened.openLedger(secondURL)
   #expect(reopened.rows(for: .ledger).map(\.id) == firstRows.map(\.id))
   #expect(try reopened.checksum() == journey.checksum())
+}
+
+@Test func plaintextExportWarningSaysTheCopyIsNotEncrypted() {
+  let warning = LedgerJourney.plaintextExportWarning
+  #expect(warning.title.contains("not encrypted"))
+  #expect(warning.message.contains("Anyone who can open the file"))
 }
 
 @MainActor

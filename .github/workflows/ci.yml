@@ -116,3 +116,8 @@ jobs:
           path: ${{ runner.temp }}/test-artifacts
           if-no-files-found: ignore
       - run: swift run mmctl
+      # Measures which file operations the App Sandbox allows next to a user-chosen
+      # path (see scripts/ci/sandbox-probe.sh). Prints a table in the job summary.
+      - name: Sandbox file-access probe
+        run: ./scripts/ci/sandbox-probe.sh
+        continue-on-error: true

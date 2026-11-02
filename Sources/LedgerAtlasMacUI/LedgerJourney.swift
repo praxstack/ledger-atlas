@@ -476,7 +476,16 @@ public final class LedgerJourney {
       resolving: SourceLocalDateTime(date: localDate), in: nativeTimeZone, precision: .day)
   }
 
-  public func backupCanonicalLedger(to destination: URL) throws {
+  /// Shown before any plaintext copy of the ledger leaves the app (LA-004).
+  nonisolated package static let plaintextExportWarning = (
+    title: "This copy is not encrypted",
+    message:
+      "Anyone who can open the file can read every account, amount, and note in it. Store it somewhere only you can reach, such as an encrypted disk."
+  )
+
+  /// Writes an exact 1:1 backup and returns the SHA-256 hex digest of its bytes.
+  @discardableResult
+  public func backupCanonicalLedger(to destination: URL) throws -> String {
     guard let source = ledgerURL ?? canonicalURL else {
       throw LedgerApplication.Error.invalidCommand
     }
@@ -487,7 +496,9 @@ public final class LedgerJourney {
       guard let store = mutableStore ?? openedStore else {
         throw LedgerApplication.Error.invalidCommand
       }
-      try store.backupCanonicalDatabase(to: destination)
+      let digest = try store.backupCanonicalDatabase(to: destination)
+      lastFailure = nil
+      return digest
     } catch LedgerStore.Error.backupPublicationCompleted {
       throw LedgerStore.Error.backupPublicationCompleted
     } catch {

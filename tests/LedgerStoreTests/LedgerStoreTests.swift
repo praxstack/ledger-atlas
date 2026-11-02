@@ -1,4 +1,5 @@
 import CSQLite
+import CryptoKit
 import Foundation
 import LedgerCore
 import Testing
@@ -510,6 +511,30 @@ private func makeStoreWithAccountForRevisionTests() throws
   #expect(
     try LedgerStore.openReadOnly(at: destination).semanticChecksum()
       == store.semanticChecksum())
+}
+
+@Test func backupIsOwnerOnlyAndReportsTheChecksumOfItsExactBytes() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: directory)
+  let destination = directory.appendingPathComponent("backup.sqlite")
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+
+  let digest = try store.backupCanonicalDatabase(to: destination)
+
+  let bytes = try Data(contentsOf: destination)
+  let expected = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+  #expect(digest == expected)
+  #expect(digest.count == 64)
+  var published = stat()
+  #expect(lstat(destination.path, &published) == 0)
+  #expect((published.st_mode & mode_t(0o777)) == mode_t(S_IRUSR | S_IWUSR))
+  #expect(
+    try LedgerStore.openReadOnly(at: destination).semanticChecksum() == store.semanticChecksum())
+  // A second backup of the same ledger is byte-identical, so its checksum matches.
+  let again = directory.appendingPathComponent("backup-again.sqlite")
+  #expect(try store.backupCanonicalDatabase(to: again) == digest)
 }
 
 @Test func backupDetectsAReplacementAtTheFinalPublicationSeam() throws {
