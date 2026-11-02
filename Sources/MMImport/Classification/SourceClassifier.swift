@@ -349,13 +349,19 @@ public struct SourceClassifier: Sendable {
         diagnostics: [.zipSQLiteInspectionUnavailable])
     }
     defer { sqlite3_close(database) }
-    let copy = UnsafeMutablePointer<UInt8>.allocate(capacity: bytes.count)
+    // FREEONCLOSE hands the buffer to SQLite, which frees it with sqlite3_free (also when
+    // deserialize fails), so it must come from sqlite3_malloc64.
+    guard let raw = sqlite3_malloc64(UInt64(bytes.count)) else {
+      return finalized(
+        source: zipSource, container: .zip, before: outerBefore, status: .unsupported,
+        diagnostics: [.zipSQLiteInspectionUnavailable])
+    }
+    let copy = raw.assumingMemoryBound(to: UInt8.self)
     bytes.copyBytes(to: copy, count: bytes.count)
     let flags: UInt32 = 0x01 | 0x04  // SQLITE_DESERIALIZE_FREEONCLOSE | READONLY
     let rc = sqlite3_deserialize(
       database, "main", copy, Int64(bytes.count), Int64(bytes.count), flags)
     guard rc == SQLITE_OK else {
-      copy.deallocate()
       return finalized(
         source: zipSource, container: .zip, before: outerBefore, status: .unsupported,
         diagnostics: [.zipSQLiteInspectionUnavailable])

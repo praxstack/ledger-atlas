@@ -112,7 +112,8 @@ struct MoneyManagerV19AdapterTests {
         == (try StableCanonicalID.account(
           profileID: staged.manifest.profileID, sourceAccountID: "synthetic-asset")))
     #expect(event.occurredAt.timeZone == zone)
-    #expect(event.occurredAt.instant.epochMilliseconds == 1_738_527_400_000)
+    // ZDATE is the UTC instant; the zone only sets the wall time (07:16 IST on 3 February).
+    #expect(event.occurredAt.instant.epochMilliseconds == 1_738_547_200_000)
     let currencyBinding = try #require(event.sourceBindings.first { $0.semantic == .currency })
     #expect(currencyBinding.provenance.locator.table == "CURRENCY")
     #expect(currencyBinding.provenance.locator.columnName == "ISO")

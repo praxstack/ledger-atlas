@@ -282,13 +282,18 @@ public struct ImmutableSourceStager: Sendable {
       if database != nil { sqlite3_close(database) }
       throw StagingError.sourceSQLiteInvalid
     }
-    let copy = UnsafeMutablePointer<UInt8>.allocate(capacity: bytes.count)
+    // FREEONCLOSE hands the buffer to SQLite, which frees it with sqlite3_free (also when
+    // deserialize fails), so it must come from sqlite3_malloc64.
+    guard let raw = sqlite3_malloc64(UInt64(bytes.count)) else {
+      sqlite3_close(database)
+      throw StagingError.sourceSQLiteInvalid
+    }
+    let copy = raw.assumingMemoryBound(to: UInt8.self)
     bytes.copyBytes(to: copy, count: bytes.count)
     let flags: UInt32 = 0x01 | 0x04
     guard sqlite3_deserialize(database, "main", copy, Int64(bytes.count), Int64(bytes.count), flags)
       == SQLITE_OK
     else {
-      copy.deallocate()
       sqlite3_close(database)
       throw StagingError.sourceSQLiteInvalid
     }
