@@ -912,7 +912,8 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .categories {
       CategoriesView(
         state: session.state, rows: journey.rows(for: .categories),
-        categories: journey.snapshot?.categories ?? [], isEditing: journey.isEditing,
+        categories: journey.snapshot?.categories ?? [],
+        transactions: journey.snapshot?.transactions ?? [], isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         saveCategory: { category in
