@@ -148,26 +148,57 @@ struct ObservedV19FullSchemaImportTests {
     }
   }
 
-  @Test("a backup missing a contract column is refused before anything is written")
+  @Test("a backup missing a core binding column is refused before anything is written")
   func refusesMissingContractColumn() throws {
-    for (table, column) in [("INOUTCOME", "ZMONEY"), ("CURRENCY", "ISO")] {
+    // Indexed columns lose their index first; SQLite cannot drop an indexed column.
+    let cases = [
+      "ALTER TABLE INOUTCOME DROP COLUMN ZMONEY;",
+      "DROP INDEX INOUTCOME_IDX3; ALTER TABLE INOUTCOME DROP COLUMN ZDATE;",
+      "DROP INDEX INOUTCOME_IDX4; ALTER TABLE INOUTCOME DROP COLUMN WDATE;",
+      "DROP INDEX INOUTCOME_IDX2; ALTER TABLE INOUTCOME DROP COLUMN DO_TYPE;",
+      "DROP INDEX INOUTCOME_IDX7; ALTER TABLE INOUTCOME DROP COLUMN assetUid;",
+      "DROP INDEX INOUTCOME_IDX8; ALTER TABLE INOUTCOME DROP COLUMN ctgUid;",
+      "DROP INDEX INOUTCOME_IDX9; ALTER TABLE INOUTCOME DROP COLUMN currencyUid;",
+      "DROP INDEX UNIQUE_IDX_INOUTCOME_UID; ALTER TABLE INOUTCOME DROP COLUMN uid;",
+      "ALTER TABLE CURRENCY DROP COLUMN ISO;",
+    ]
+    for sql in cases {
       try withDirectory { directory in
         let source = directory.appendingPathComponent("MM(synthetic).mmbak")
         try writeFullSchemaBackup(to: source)
-        try execute(at: source, sql: "ALTER TABLE \(table) DROP COLUMN \(column);")
+        try execute(at: source, sql: sql)
         let canonical = directory.appendingPathComponent("canonical.sqlite")
-        let preparation = try? ImportWorkspace().prepare(
+        let preparation = try ImportWorkspace().prepare(
           .init(
             sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
             canonicalDatabaseURL: canonical,
             sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
-        if let preparation {
-          #expect(preparation.preparedHandle == nil)
-          #expect(preparation.review.status != .prepared)
-          #expect(preparation.review.classificationStatus == .unsupported)
-        }
-        #expect(!FileManager.default.fileExists(atPath: canonical.path))
+        #expect(preparation.preparedHandle == nil, "\(sql)")
+        #expect(preparation.review.status == .classificationOnly, "\(sql)")
+        #expect(preparation.review.classificationStatus == .unsupported, "\(sql)")
+        #expect(preparation.review.diagnosticCodes == ["schema_drift"], "\(sql)")
+        #expect(!FileManager.default.fileExists(atPath: canonical.path), "\(sql)")
       }
+    }
+  }
+
+  @Test("a transaction carrying a deletion flag is preserved, never imported")
+  func flaggedDeletedRowIsPreserved() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeFullSchemaBackup(to: source)
+      try execute(at: source, sql: "UPDATE INOUTCOME SET IS_DEL=1 WHERE uid='tx-expense';")
+      let canonical = directory.appendingPathComponent("canonical.sqlite")
+      let workspace = ImportWorkspace()
+      let preparation = try workspace.prepare(
+        .init(
+          sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+          canonicalDatabaseURL: canonical,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+      #expect(preparation.review.losslessCertificationBlocked == true)
+      let handle = try #require(preparation.preparedHandle)
+      let result = try workspace.commit(handle, approval: workspace.approve(handle))
+      #expect(result.eventCount == 7)
     }
   }
 
@@ -247,6 +278,16 @@ struct ObservedV19FullSchemaImportTests {
       resolving: legacyLocal, in: ist, precision: .millisecond, ambiguityPolicy: .reject)
     #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", legacy))
     #expect(!MoneyManagerV19Vocabulary.occurredMatches("1767295800001", current))
+    // A legacy wall time with an instant that is not that wall time in the zone is rejected,
+    // for an IANA zone as well as a fixed offset.
+    let kolkata = try SourceTimeZone(ianaIdentifier: "Asia/Kolkata")
+    let legacyKolkata = try SourceTemporal(
+      resolving: legacyLocal, in: kolkata, precision: .millisecond, ambiguityPolicy: .reject)
+    #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", legacyKolkata))
+    let wrongInstant = try SourceTemporal(
+      instant: UTCInstant(epochMilliseconds: 1_767_295_800_000), localDateTime: legacyLocal,
+      timeZone: kolkata, precision: .millisecond, resolvedOffsetSeconds: 0)
+    #expect(!MoneyManagerV19Vocabulary.occurredMatches("1767295800000", wrongInstant))
   }
 
   @Test("balance edits and transfer legs map only with the expected category")

@@ -626,6 +626,11 @@ public enum MoneyManagerV19Adapter {
     else {
       return preserve(.missingRequiredField)
     }
+    if let deleted = sourceField(record, aliases: MoneyManagerV19Vocabulary.deletedAliases)
+      .flatMap(mappingLiteral), !deleted.isEmpty, deleted != "0"
+    {
+      return preserve(.flaggedDeleted)
+    }
     let categoryLiteral = sourceField(
       record, aliases: MoneyManagerV19Vocabulary.categoryAliases
     ).flatMap(mappingLiteral)
@@ -834,7 +839,10 @@ public enum MoneyManagerV19BlockReason: String, Equatable, Sendable {
     unsupportedTransactionType, unknownStagedTable,
     /// Both legs of a transfer name the same account. It moves no money, so the legs are kept
     /// as preserved source records instead of a ledger transfer.
-    sameAccountTransfer
+    sameAccountTransfer,
+    /// The row carries a deletion flag. Money Manager removes deleted transactions instead of
+    /// flagging them (observed), so a flagged row is unexplained: preserved, never imported.
+    flaggedDeleted
 }
 
 /// The two source records of one transfer, matched on their shared group id.

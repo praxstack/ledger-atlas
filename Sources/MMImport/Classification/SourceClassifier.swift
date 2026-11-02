@@ -236,13 +236,9 @@ public struct SourceClassifier: Sendable {
     // profile and is refused as schema drift, never imported as an empty ledger.
     var contractMissing = false
     if exact == nil, family != nil {
-      guard let columns = columnNames(database, tableNames: inventory.tableNames) else {
-        return finalized(
-          source: source, container: outerContainer, before: outerBefore, status: .corrupt,
-          diagnostics: [.invalidSQLite], companionSnapshot: companionSnapshot,
-          invokeTestingHook: invokeTestingHook)
-      }
-      if !MoneyManagerV19Contract.isSatisfied(columnsByTable: columns) {
+      // An unreadable or oversized column inventory cannot prove the contract: unsupported.
+      let columns = columnNames(database, tableNames: inventory.tableNames)
+      if columns.map({ !MoneyManagerV19Contract.isSatisfied(columnsByTable: $0) }) ?? true {
         family = nil
         contractMissing = true
       }

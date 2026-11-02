@@ -38,6 +38,7 @@ enum MoneyManagerV19Contract {
         MoneyManagerV19Semantics.uidAliases, MoneyManagerV19Semantics.amountAliases,
         MoneyManagerV19Semantics.zdateAliases, MoneyManagerV19Semantics.assetAliases,
         MoneyManagerV19Semantics.doTypeAliases, MoneyManagerV19Semantics.categoryAliases,
+        MoneyManagerV19Semantics.wdateAliases, MoneyManagerV19Semantics.currencyUIDAliases,
       ]
     ),
     (["ASSETS", "ZASSETS"], [MoneyManagerV19Semantics.uidAliases]),

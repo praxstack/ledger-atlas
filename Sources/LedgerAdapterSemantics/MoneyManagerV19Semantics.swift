@@ -279,10 +279,15 @@ public enum MoneyManagerV19Semantics {
     guard let legacyLocal = observedLocalDateTime(zdateLiteral),
       legacyLocal == occurredAt.localDateTime
     else { return false }
-    return occurredAt.timeZone.fixedOffsetSeconds == nil
-      || (try? SourceTemporal(
-        resolving: legacyLocal, in: occurredAt.timeZone,
-        precision: occurredAt.precision, ambiguityPolicy: .reject)) == occurredAt
+    // The instant must be the legacy wall time resolved in the event's zone, as the earlier
+    // build wrote it. Only an IANA zone this OS no longer knows skips the check; SourceTemporal
+    // itself still guarantees instant + offset == wall time.
+    if let identifier = occurredAt.timeZone.ianaIdentifier, TimeZone(identifier: identifier) == nil {
+      return true
+    }
+    return (try? SourceTemporal(
+      resolving: legacyLocal, in: occurredAt.timeZone,
+      precision: occurredAt.precision, ambiguityPolicy: .reject)) == occurredAt
   }
 
   public static func mappingLiteral(storageClass: CanonicalFieldStorageClass, payload: Data)
