@@ -47,7 +47,7 @@ import Vision
         initialSelection: destination, importReviewSummary: summary,
         appLock: lock, productSettings: .init(), bookmarkStore: bookmarks,
         widgetProjectionPublisher: widgetPublisher)
-      let window = NSWindow(
+      let window = UnconstrainedTestWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1100, height: 1000),
         styleMask: [.titled, .closable], backing: .buffered, defer: false)
       window.isReleasedWhenClosed = false
@@ -68,6 +68,14 @@ import Vision
       if destination == .settings { #expect(text.contains("Enabled")) }
       window.close()
     }
+  }
+}
+
+/// CI Mac runners have a small virtual display. A normal window gets shrunk to fit it,
+/// which clips the lock screen text before OCR reads it. Keep the requested size.
+private final class UnconstrainedTestWindow: NSWindow {
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    frameRect
   }
 }
 

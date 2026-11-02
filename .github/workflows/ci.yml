@@ -90,6 +90,8 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
           restore-keys: |
             swiftpm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+      - name: Runner display (for UI tests that render windows)
+        run: system_profiler SPDisplaysDataType | grep -iE 'resolution|display type' || true
       - run: swift build
       # Serial on purpose: several tests block a thread (condition/semaphore waits,
       # waitUntilExit) while another test-side task finishes the work. On a 3-core
