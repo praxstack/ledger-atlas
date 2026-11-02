@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import LedgerCore
 import LedgerStore
@@ -530,6 +531,100 @@ public final class LedgerJourney {
     guard includesImportHistory else { return "Portable package exported." }
     return
       "Portable package exported with its imported Money Manager history. It restores only on a Mac that has this ledger's receipt key (iCloud Keychain carries it) and on this version of Ledger Atlas. Keep the original Money Manager backup (.mmbak) and an XLSX export as fallbacks."
+  }
+
+  // MARK: XLSX exchange (LA-040)
+
+  /// Largest workbook the import reads, matching the archive reader's total limit.
+  static let maximumXLSXImportBytes = 256 << 20
+
+  /// Writes the open ledger as an XLSX workbook, deleted records included and marked.
+  /// The save panel has already asked before replacing an existing file.
+  public func exportXLSX(to destination: URL) throws {
+    guard destination.isFileURL,
+      let snapshot = try application?.snapshot() ?? (mutableStore ?? openedStore)?.readSnapshot()
+    else { throw LedgerApplication.Error.invalidCommand }
+    let data = try LedgerXLSXExchange.xlsxData(LedgerXLSXExchange.Content(snapshot: snapshot))
+    try SavedFile.write(data, to: destination, replacing: true)
+    lastFailure = nil
+  }
+
+  /// Reads and checks a workbook, then works out what importing it would add. Nothing is
+  /// written. Throws `LedgerXLSXExchange.Error.invalid` with the problems a person can fix.
+  public func planXLSXImport(from source: URL) throws -> LedgerXLSXImportPlan {
+    // Planning only reads, so it works on a ledger that is open but not yet being edited.
+    guard source.isFileURL, let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data = try Self.readRegularFile(source, maximumBytes: Self.maximumXLSXImportBytes)
+    return try (application ?? LedgerApplication(store: store))
+      .planXLSXImport(LedgerXLSXExchange.content(fromXLSX: data))
+  }
+
+  /// Reads a picked file without following a symlink, refusing anything that is not a regular
+  /// file. The size limit applies to the bytes actually read, so a file that grows after it
+  /// was chosen is still refused.
+  nonisolated package static func readRegularFile(_ url: URL, maximumBytes: Int) throws -> Data {
+    let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+    guard descriptor >= 0 else { throw LedgerApplication.Error.invalidCommand }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    var info = Darwin.stat()
+    guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data: Data
+    do { data = try handle.read(upToCount: maximumBytes + 1) ?? Data() } catch {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    guard data.count <= maximumBytes else { throw LedgerApplication.Error.invalidCommand }
+    return data
+  }
+
+  /// Adds everything in the plan in one step, or nothing.
+  public func applyXLSXImport(_ plan: LedgerXLSXImportPlan, createdAt: UTCInstant) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    do {
+      try application.applyXLSXImport(plan, createdAt: createdAt)
+      snapshot = try application.snapshot()
+      lastFailure = nil
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
+  /// Counts only, for the confirmation before an import.
+  nonisolated public static func xlsxImportPreview(_ plan: LedgerXLSXImportPlan) -> String {
+    if !plan.canApply {
+      let shown = plan.conflicts.prefix(5).map { "• \($0.message)" }
+      let more = plan.conflicts.count > shown.count
+        ? ["…and \(plan.conflicts.count - shown.count) more."] : []
+      return (["Nothing was imported. This workbook differs from the open ledger:"] + shown + more)
+        .joined(separator: "\n")
+    }
+    if plan.isEmpty {
+      return "Everything in this workbook is already in the open ledger. Nothing to add."
+    }
+    func count(_ value: Int, _ one: String, _ many: String? = nil) -> String? {
+      value == 0 ? nil : "\(value) \(value == 1 ? one : many ?? one + "s")"
+    }
+    let parts = [
+      count(plan.transactions.count, "transaction"), count(plan.accounts.count, "account"),
+      count(plan.accountGroups.count, "account group"),
+      count(plan.categories.count, "category", "categories"), count(plan.tags.count, "tag"),
+    ].compactMap { $0 }
+    var lines = ["Importing adds " + parts.joined(separator: ", ") + "."]
+    let unchanged = plan.summary.values.reduce(0) { $0 + $1.unchanged }
+    if unchanged > 0 { lines.append("\(unchanged) already in this ledger and skipped.") }
+    if plan.skippedDeletedTransactions > 0 {
+      let skipped = plan.skippedDeletedTransactions
+      lines.append(
+        skipped == 1
+          ? "1 deleted transaction is not imported."
+          : "\(skipped) deleted transactions are not imported.")
+    }
+    lines.append("Existing records are never changed.")
+    return lines.joined(separator: " ")
   }
 
   public func restoreCanonicalBackup(from source: URL, to destination: URL) throws {
