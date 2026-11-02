@@ -91,5 +91,11 @@ jobs:
           restore-keys: |
             swiftpm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
       - run: swift build
-      - run: swift test --parallel
+      # Serial on purpose: several tests block a thread (condition/semaphore waits,
+      # waitUntilExit) while another test-side task finishes the work. On a 3-core
+      # runner the parallel Swift Testing pool runs out of threads and every test
+      # stalls (seen on run 41355070020). Serial runs keep a free thread.
+      - name: swift test
+        run: swift test --no-parallel
+        timeout-minutes: 30
       - run: swift run mmctl
