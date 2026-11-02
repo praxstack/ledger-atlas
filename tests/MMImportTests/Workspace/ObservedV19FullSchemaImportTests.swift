@@ -148,6 +148,62 @@ struct ObservedV19FullSchemaImportTests {
     }
   }
 
+  @Test("a backup missing a contract column is refused before anything is written")
+  func refusesMissingContractColumn() throws {
+    for (table, column) in [("INOUTCOME", "ZMONEY"), ("REPEATTRANSACTION", "NEXT_DATE")] {
+      try withDirectory { directory in
+        let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+        try writeFullSchemaBackup(to: source)
+        try execute(at: source, sql: "ALTER TABLE \(table) DROP COLUMN \(column);")
+        let canonical = directory.appendingPathComponent("canonical.sqlite")
+        let preparation = try? ImportWorkspace().prepare(
+          .init(
+            sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+            canonicalDatabaseURL: canonical,
+            sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+        if let preparation {
+          #expect(preparation.preparedHandle == nil)
+          #expect(preparation.review.status != .prepared)
+          #expect(preparation.review.classificationStatus == .unsupported)
+        }
+        #expect(!FileManager.default.fileExists(atPath: canonical.path))
+      }
+    }
+  }
+
+  @Test("the contract column table matches the frozen v19 DDL")
+  func contractMatchesFrozenDDL() throws {
+    var database: OpaquePointer?
+    guard sqlite3_open(":memory:", &database) == SQLITE_OK, let database else {
+      throw FullSchemaTestError.sqlite
+    }
+    defer { sqlite3_close(database) }
+    guard sqlite3_exec(database, try frozenDDL(), nil, nil, nil) == SQLITE_OK else {
+      throw FullSchemaTestError.sqlite
+    }
+    var fromDDL: [String: [String]] = [:]
+    var tables: OpaquePointer?
+    guard sqlite3_prepare_v2(
+      database, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+      -1, &tables, nil) == SQLITE_OK, let tables
+    else { throw FullSchemaTestError.sqlite }
+    defer { sqlite3_finalize(tables) }
+    while sqlite3_step(tables) == SQLITE_ROW {
+      let name = String(cString: sqlite3_column_text(tables, 0))
+      var info: OpaquePointer?
+      guard sqlite3_prepare_v2(database, "PRAGMA table_info(\"\(name)\")", -1, &info, nil)
+        == SQLITE_OK, let info
+      else { throw FullSchemaTestError.sqlite }
+      var columns: [String] = []
+      while sqlite3_step(info) == SQLITE_ROW {
+        columns.append(String(cString: sqlite3_column_text(info, 1)))
+      }
+      sqlite3_finalize(info)
+      fromDDL[name] = columns
+    }
+    #expect(fromDDL == MoneyManagerV19Contract.androidTables)
+  }
+
   @Test("balance edits and transfer legs map only with the expected category")
   func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
@@ -207,13 +263,16 @@ struct ObservedV19FullSchemaImportTests {
   }
 }
 
-private func writeFullSchemaBackup(to url: URL) throws {
+private func frozenDDL() throws -> String {
   let ddlURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent()
     .appendingPathComponent("docs/compatibility/money-manager-android-v19.schema.sql")
-  let ddl = try String(contentsOf: ddlURL, encoding: .utf8)
-  try execute(at: url, sql: ddl)
+  return try String(contentsOf: ddlURL, encoding: .utf8)
+}
+
+private func writeFullSchemaBackup(to url: URL) throws {
+  try execute(at: url, sql: try frozenDDL())
   try execute(
     at: url,
     sql: """

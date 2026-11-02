@@ -230,8 +230,24 @@ public struct SourceClassifier: Sendable {
       $0.isExactSchemaCell && $0.applicationID == applicationID && $0.userVersion == userVersion
         && $0.schemaSHA256 == schemaHash
     }
-    let family = resolvedFamilyProfile(
+    var family = resolvedFamilyProfile(
       userVersion: userVersion, tableNames: inventory.tableNames)
+    // A family match still needs the contract's columns: a v19 file missing one is a different
+    // profile and is refused as schema drift, never imported as an empty ledger.
+    var contractMissing = false
+    if exact == nil, family != nil {
+      let android = inventory.tableNames.contains("android_metadata")
+      guard let columns = columnNames(database, tableNames: inventory.tableNames) else {
+        return finalized(
+          source: source, container: outerContainer, before: outerBefore, status: .corrupt,
+          diagnostics: [.invalidSQLite], companionSnapshot: companionSnapshot,
+          invokeTestingHook: invokeTestingHook)
+      }
+      if !MoneyManagerV19Contract.isSatisfied(android: android, columnsByTable: columns) {
+        family = nil
+        contractMissing = true
+      }
+    }
     let profile = exact ?? family
     let coverage: SourceStructuralCoverage?
     if collectStructuralCoverage {
@@ -263,6 +279,9 @@ public struct SourceClassifier: Sendable {
     } else if family != nil {
       diagnostic = .familyProfileMatch
       status = .familyMatch
+    } else if contractMissing {
+      diagnostic = .schemaDrift
+      status = .unsupported
     } else if profiles.contains(where: {
       $0.applicationID == applicationID && $0.userVersion == userVersion
     }) {
@@ -455,6 +474,27 @@ public struct SourceClassifier: Sendable {
     defer { sqlite3_finalize(statement) }
     guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
     return strictText(statement, column: 0)
+  }
+
+  /// Lower-cased column names per table, read with PRAGMA table_info.
+  private func columnNames(_ database: OpaquePointer, tableNames: [String]) -> [String: Set<String>]? {
+    guard tableNames.count <= 256 else { return nil }
+    var result: [String: Set<String>] = [:]
+    for table in tableNames {
+      let quoted = table.replacingOccurrences(of: "\"", with: "\"\"")
+      var statement: OpaquePointer?
+      guard sqlite3_prepare_v2(database, "PRAGMA table_info(\"\(quoted)\")", -1, &statement, nil)
+        == SQLITE_OK, let statement
+      else { return nil }
+      defer { sqlite3_finalize(statement) }
+      var names: Set<String> = []
+      while sqlite3_step(statement) == SQLITE_ROW {
+        guard let name = strictText(statement, column: 1) else { return nil }
+        names.insert(name.lowercased())
+      }
+      result[table] = names
+    }
+    return result
   }
 
   private func schemaInventory(_ database: OpaquePointer) -> (
