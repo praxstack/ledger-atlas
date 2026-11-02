@@ -16,11 +16,18 @@ enum MoneyManagerV19ObservedGraph {
       graph.fields.values.allSatisfy({ field in
         guard let record = graph.records[field.recordID] else { return false }
         guard recognizedTableIDs.contains(record.tableID) else { return true }
-        if field.storageClass == CanonicalFieldStorageClass.text.rawValue {
+        // Real backups carry NULLs and REAL copies (e.g. AMOUNT_ACCOUNT) on every row. They are
+        // preserved byte-exact and never read as mapping literals, so they only need a sound shape.
+        switch field.storageClass {
+        case CanonicalFieldStorageClass.text.rawValue:
           return String(data: field.payload, encoding: .utf8) != nil
+        case CanonicalFieldStorageClass.integer.rawValue, CanonicalFieldStorageClass.real.rawValue:
+          return field.payload.count == 8
+        case CanonicalFieldStorageClass.null.rawValue:
+          return field.payload.isEmpty
+        default:
+          return false
         }
-        return field.storageClass == CanonicalFieldStorageClass.integer.rawValue
-          && field.payload.count == 8
       })
     else { throw CanonicalCommitError.unsafeMapping }
 
