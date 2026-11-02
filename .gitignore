@@ -58,3 +58,6 @@ __pycache__/
 /fixtures/*
 !/fixtures/synthetic/
 !/fixtures/synthetic/**
+
+# DMG packaging output
+/dist/

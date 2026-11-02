@@ -47,7 +47,7 @@ import Vision
         initialSelection: destination, importReviewSummary: summary,
         appLock: lock, productSettings: .init(), bookmarkStore: bookmarks,
         widgetProjectionPublisher: widgetPublisher)
-      let window = NSWindow(
+      let window = UnconstrainedTestWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1100, height: 1000),
         styleMask: [.titled, .closable], backing: .buffered, defer: false)
       window.isReleasedWhenClosed = false
@@ -71,26 +71,93 @@ import Vision
   }
 }
 
+/// CI Mac runners have a small virtual display. A normal window gets shrunk to fit it,
+/// which clips the lock screen text before OCR reads it. Keep the requested size.
+private final class UnconstrainedTestWindow: NSWindow {
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    frameRect
+  }
+}
+
 @MainActor
 private func waitForRenderedText(_ expected: String, in window: NSWindow) async throws -> String {
   var text = ""
+  var lastImages: [CGImage] = []
   for _ in 0..<30 {
     try await Task.sleep(for: .milliseconds(100))
     guard let view = window.contentView else { continue }
     view.layoutSubtreeIfNeeded()
-    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-    view.cacheDisplay(in: view.bounds, to: bitmap)
-    guard let image = bitmap.cgImage else { continue }
-    // Vision work must not stall the app actor or other native responsiveness checks.
-    text = try await Task.detached {
-      let request = VNRecognizeTextRequest()
-      request.recognitionLevel = .accurate
-      try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
-      return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-        .joined(separator: "\n")
-    }.value
+    // Two captures of the same hosted view: AppKit's cached display, and the layer tree
+    // rendered in software. On GPU-less CI runners the first can miss layer-backed
+    // SwiftUI text, so read both and use everything either one shows.
+    let images = [cachedDisplayImage(of: view)].compactMap { $0 } + layerImages(of: view)
+    guard !images.isEmpty else { continue }
+    lastImages = images
+    var observed: [String] = []
+    for image in images {
+      // Vision work must not stall the app actor or other native responsiveness checks.
+      observed.append(try await Task.detached { try recognizedText(in: image) }.value)
+    }
+    text = observed.joined(separator: "\n")
     if text.contains(expected) { return text }
   }
+  for image in lastImages { saveDiagnosticImage(image, named: expected) }
   Issue.record("Native rendered text omitted \(expected); observed: \(text)")
   return text
+}
+
+@MainActor
+private func cachedDisplayImage(of view: NSView) -> CGImage? {
+  guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+  view.cacheDisplay(in: view.bounds, to: bitmap)
+  return bitmap.cgImage
+}
+
+/// The layer tree rendered in software, once as-is and once flipped vertically, because
+/// whether AppKit marks this layer geometry as flipped varies; OCR only reads upright text.
+@MainActor
+private func layerImages(of view: NSView) -> [CGImage] {
+  guard let layer = view.layer else { return [] }
+  let scale = view.window?.backingScaleFactor ?? 2
+  let width = Int(view.bounds.width * scale)
+  let height = Int(view.bounds.height * scale)
+  guard width > 0, height > 0 else { return [] }
+  return [false, true].compactMap { flip in
+    guard
+      let context = CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+    context.setFillColor(NSColor.white.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    if flip {
+      context.translateBy(x: 0, y: CGFloat(height))
+      context.scaleBy(x: 1, y: -1)
+    }
+    context.scaleBy(x: scale, y: scale)
+    layer.render(in: context)
+    return context.makeImage()
+  }
+}
+
+private func recognizedText(in image: CGImage) throws -> String {
+  let request = VNRecognizeTextRequest()
+  request.recognitionLevel = .accurate
+  try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+  return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+    .joined(separator: "\n")
+}
+
+/// When LEDGER_ATLAS_TEST_ARTIFACTS is set (CI does), keep the last capture of a failed
+/// lookup so a rendering problem on a runner can be seen instead of guessed.
+private func saveDiagnosticImage(_ image: CGImage?, named name: String) {
+  guard let image, let directory = ProcessInfo.processInfo.environment["LEDGER_ATLAS_TEST_ARTIFACTS"]
+  else { return }
+  let folder = URL(fileURLWithPath: directory, isDirectory: true)
+  try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  let safeName = name.replacingOccurrences(of: " ", with: "-")
+  let url = folder.appendingPathComponent("lock-\(safeName)-\(UUID().uuidString.prefix(8)).png")
+  let rep = NSBitmapImageRep(cgImage: image)
+  try? rep.representation(using: .png, properties: [:])?.write(to: url)
 }

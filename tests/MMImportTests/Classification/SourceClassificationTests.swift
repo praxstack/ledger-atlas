@@ -530,7 +530,9 @@ private func appendNULSuffixToSchemaSQL(_ url: URL, object: String) throws {
   let process = Process()
   process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
   process.arguments = [
-    "sqlite3", "-batch", url.path,
+    // Newer sqlite3 shells (e.g. Homebrew's, first on PATH on CI runners) start in
+    // defensive mode, which forbids writing sqlite_schema even with writable_schema.
+    "sqlite3", "-batch", "-cmd", ".dbconfig defensive off", url.path,
     "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql = sql || CAST(X'0048494444454E5F4452494654' AS TEXT) WHERE type='table' AND name='\(object)';",
   ]
   try process.run()
