@@ -2775,3 +2775,31 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
       == ["2.50", "2.50", "2.50", "3.00"])
   #expect(throughApril[1].draft.occurredAt.localDay == (try SourceLocalDate(year: 2026, month: 2, day: 28)))
 }
+
+@Test func reopenedLedgerAcceptsWritesEverySession() throws {
+  // A write leaves an empty journal beside the ledger. Each later session must adopt that
+  // journal and keep writing, not refuse the ledger after its first reopen.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("ledger.sqlite")
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let names = ["Cash", "Bank", "Card"]
+  let accounts = try names.enumerated().map { index, name in
+    try LedgerAccount(
+      id: StableLedgerID.account(
+        origin: origin, localKey: String(repeating: "\(index + 4)", count: 64)),
+      name: name, currencyUnit: "USD", origin: origin)
+  }
+
+  do {
+    let app = LedgerApplication(store: try LedgerStoreLifecycle.create(at: url).store)
+    try app.createAccount(accounts[0])
+  }
+  for session in 1..<accounts.count {
+    let app = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
+    try app.createAccount(accounts[session])
+  }
+  let reopened = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
+  #expect(Set(try reopened.snapshot().accounts.map(\.name)) == Set(names))
+}
