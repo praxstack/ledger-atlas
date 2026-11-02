@@ -3234,28 +3234,24 @@ extension LedgerStore {
     else { throw Error.importGraphMismatch }
     guard let url, try LedgerReceiptTrust.key(for: url, create: false, stableIdentity: identity) != nil
     else { throw Error.importGraphKeyMissing }
-    do {
-      try Self.validateProductRows(package, allowingImportProvenance: true)
-      _ = try mutate(trustIdentity: identity) { snapshot in
-        let tables = CanonicalLedgerSchema.expectedObjects
-          .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
-        guard try !Self.hasRows(in: tables, on: database) else {
-          throw Error.incompatibleCanonicalStore
-        }
-        try Self.writeImportGraph(graph, phase: .beforeProductRows, on: database)
-        try Self.writeProductRows(
-          package, snapshot: snapshot, on: database, afterImportGraph: true)
-        try Self.writeImportGraph(graph, phase: .afterProductRows, on: database)
-        try Self.materializeImportedEvents(on: database)
-        guard try Self.canonicalChecksum(database) == graph.canonicalChecksum else {
-          throw Error.importGraphMismatch
-        }
-        return try Self.placeholderResult(origin: LedgerOrigin.imported())
+    // Only a real mismatch (wrong tables or columns, a refused insert, a different checksum)
+    // reports as tampered. A busy or full disk or a health failure surfaces as itself.
+    try Self.validateProductRows(package, allowingImportProvenance: true)
+    _ = try mutate(trustIdentity: identity) { snapshot in
+      let tables = CanonicalLedgerSchema.expectedObjects
+        .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
+      guard try !Self.hasRows(in: tables, on: database) else {
+        throw Error.incompatibleCanonicalStore
       }
-    } catch let error as Error where error == .importGraphKeyMissing {
-      throw error
-    } catch {
-      throw Error.importGraphMismatch
+      try Self.writeImportGraph(graph, phase: .beforeProductRows, on: database)
+      try Self.writeProductRows(
+        package, snapshot: snapshot, on: database, afterImportGraph: true)
+      try Self.writeImportGraph(graph, phase: .afterProductRows, on: database)
+      try Self.materializeImportedEvents(on: database)
+      guard try Self.canonicalChecksum(database) == graph.canonicalChecksum else {
+        throw Error.importGraphMismatch
+      }
+      return try Self.placeholderResult(origin: LedgerOrigin.imported())
     }
   }
 
@@ -3325,7 +3321,15 @@ extension LedgerStore {
             throw Error.importGraphMismatch
           }
         }
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw Error.importGraphMismatch }
+        let step = sqlite3_step(statement)
+        guard step == SQLITE_DONE else {
+          // A row the schema rejects is a mismatch; anything else (busy, full) is a failure.
+          switch step & 0xff {
+          case SQLITE_CONSTRAINT, SQLITE_MISMATCH, SQLITE_TOOBIG, SQLITE_RANGE:
+            throw Error.importGraphMismatch
+          default: throw Error.sqliteFailure(code: step)
+          }
+        }
       }
     }
   }
@@ -3370,8 +3374,14 @@ extension LedgerStore {
     case .integer(let value): return sqlite3_bind_int64(statement, index, value) == SQLITE_OK
     case .real(let value): return sqlite3_bind_double(statement, index, value) == SQLITE_OK
     case .text(let text):
-      return text.withCString {
-        sqlite3_bind_text(statement, index, $0, -1, transient) == SQLITE_OK
+      // Bind the full UTF-8 byte count so an embedded NUL can't cut the text short.
+      var text = text
+      return text.withUTF8 {
+        sqlite3_bind_text(
+          statement, index,
+          UnsafeRawPointer($0.baseAddress ?? UnsafePointer(bitPattern: 1)!)
+            .assumingMemoryBound(to: CChar.self),
+          Int32($0.count), transient) == SQLITE_OK
       }
     case .blob(let data):
       // An empty blob binds as a zero-length blob, not as NULL.
