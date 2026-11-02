@@ -187,6 +187,9 @@ public struct ExactDecimal: Sendable, CustomStringConvertible, Codable, Hashable
     try adding(other.negated())
   }
 
+  /// True for values greater than zero.
+  public var isPositive: Bool { sign > 0 }
+
   public func multiplied(by other: ExactDecimal) throws -> ExactDecimal {
     if sign == 0 || other.sign == 0 {
       return try ExactDecimal(sign: 0, digits: [0], scale: 0)
