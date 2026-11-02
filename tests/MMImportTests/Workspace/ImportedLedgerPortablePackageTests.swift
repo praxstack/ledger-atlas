@@ -188,6 +188,20 @@ struct ImportedLedgerPortablePackageTests {
     }
   }
 
+  @Test("an import graph too large for a package is sized, not read")
+  func oversizedGraphIsNotRead() throws {
+    try withPackageDirectory { directory in
+      let store = try importedLedger(in: directory)
+      let fits = try store.portablePackageExportSnapshot()
+      #expect(!fits.importGraphTooLarge)
+      #expect(fits.importGraph != nil)
+      // This ledger's preserved payloads are larger than one byte, so a one-byte cap refuses.
+      let tooLarge = try store.portablePackageExportSnapshot(maximumPayloadBytes: 1)
+      #expect(tooLarge.importGraphTooLarge)
+      #expect(tooLarge.importGraph == nil)
+    }
+  }
+
   @Test("a malformed import graph is refused before anything is written")
   func malformedGraphIsRefused() throws {
     try withPackageDirectory { directory in
