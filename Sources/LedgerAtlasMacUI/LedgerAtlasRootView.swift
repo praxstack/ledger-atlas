@@ -685,16 +685,12 @@ public struct LedgerAtlasRootView: View {
     case .missing:
       _ = publishWidget(.empty, publisher: widgetPublisher, journey: journey, session: session)
       return .init(kind: .missingBookmark, recoveryImageExists: false, message: nil)
-    case .resolved(let url), .renewed(let url), .stale(let url):
+    case .resolved(let url), .stale(let url):
+      // A stale bookmark is renewed by the successful open below, which saves it again.
       return await performLedgerLifecycle(
         .open, at: url, bookmarkStore: bookmarkStore, widgetPublisher: widgetPublisher,
         journey: journey, session: session, scopeStarter: scopeStarter,
         scopeStopper: scopeStopper, lifecycle: lifecycle, isCurrent: isCurrent)
-    case .denied(let url):
-      return await performLedgerLifecycle(
-        .open, at: url, bookmarkStore: bookmarkStore, widgetPublisher: widgetPublisher,
-        journey: journey, session: session, scopeStarter: { _ in false },
-        scopeStopper: { _ in }, lifecycle: lifecycle, isCurrent: isCurrent)
     case .corrupt:
       session.close()
       journey.closeLedger()
