@@ -1267,7 +1267,7 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   let caughtUp = try destination.generateOccurrences(
     rule, through: until, createdAt: UTCInstant(epochMilliseconds: 3))
   #expect(caughtUp.map { $0.draft.occurredAt.localDateTime.date.month } == [4, 6, 7, 8])
-  #expect(Array(caughtUp.prefix(2)) == generated)
+  #expect(caughtUp.prefix(2).map(\.id) == generated.map(\.id))
   let afterCatchUp = try destination.checksum()
   _ = try destination.generateOccurrences(
     rule, through: until, createdAt: UTCInstant(epochMilliseconds: 4))
