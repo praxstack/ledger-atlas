@@ -546,7 +546,7 @@ public struct LedgerImportGraph: Equatable, Sendable {
   /// so they are written before the accounts, categories and transactions that point at them.
   /// The last three hang off product rows and go in after them, verbatim: the import's literal
   /// order and its explicit default tree and preference rows are not kept by the typed records,
-  /// and the receipt signature and ledger checksum cover them.
+  /// and the ledger checksum covers them. Like every product row, they are not signed.
   public static let tableNames = [
     "provenance_reference", "import_receipt", "economic_event", "economic_event_transfer",
     "event_source_binding", "sidecar_reference", "receipt_event", "receipt_binding",
@@ -554,6 +554,31 @@ public struct LedgerImportGraph: Equatable, Sendable {
     "receipt_preservation_membership", "ledger_receipt_trust_anchor",
     "ledger_transaction_source_literal", "ledger_category_tree", "ledger_account_preferences",
   ]
+
+  /// The released schema a graph was exported at, when this build can restore it: the current
+  /// schema, or an older release with signed receipts that upgrades to it.
+  public static func release(schemaVersion: Int, schemaFingerprint: String)
+    -> CanonicalLedgerSchema.SchemaRelease?
+  {
+    if schemaVersion == CanonicalLedgerSchema.version,
+      schemaFingerprint == CanonicalLedgerSchema.fingerprint
+    {
+      return CanonicalLedgerSchema.currentRelease
+    }
+    guard
+      let release = CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: schemaVersion, fingerprint: schemaFingerprint),
+      release.authenticatesImportedEvents,
+      CanonicalLedgerSchema.lifecycleUpgradePath(from: release) != nil
+    else { return nil }
+    return release
+  }
+
+  /// The graph tables that exist in `release`, in write order.
+  public static func tableNames(in release: CanonicalLedgerSchema.SchemaRelease) -> [String] {
+    let present = Set(release.objects.filter { $0.type == "table" }.map(\.name))
+    return tableNames.filter(present.contains)
+  }
 
   /// Graph tables written after the product rows.
   public static let productLinkedTableNames: Set<String> = [

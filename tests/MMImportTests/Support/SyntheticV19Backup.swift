@@ -4,7 +4,9 @@ import Foundation
 /// A synthetic Money Manager v19 backup built from the frozen DDL
 /// (docs/compatibility/money-manager-android-v19.schema.sql). No real data.
 enum SyntheticV19Backup {
-  static func write(to url: URL) throws {
+  /// `includingTransfers: false` leaves out every transfer leg, for ledgers that must also be
+  /// valid at schema v11, which has no transfer pairs.
+  static func write(to url: URL, includingTransfers: Bool = true) throws {
     let ddlURL = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent()
@@ -67,6 +69,11 @@ enum SyntheticV19Backup {
           VALUES ('budget-1', 'cat-food', 1, 6, 0);
         INSERT INTO BUDGET_AMOUNT (uid, budgetUid, IS_DEL, AMOUNT) VALUES ('ba-1', 'budget-1', 0, 50.0);
         """)
+    if !includingTransfers { try dropTransfers(url) }
+  }
+
+  private static func dropTransfers(_ url: URL) throws {
+    try execute(url, "DELETE FROM INOUTCOME WHERE DO_TYPE IN ('3', '4')")
   }
 
   private static func execute(_ url: URL, _ sql: String) throws {
