@@ -55,27 +55,23 @@ struct SettingsSurface: View {
   let lockNow: () -> Void
   let reducedMotion: Bool
   let exportDiagnostics: () -> Void
-  @State private var showingPasscodeForm = false
+  @State private var passcodeForm: PasscodeForm.Mode?
   @State private var message: String?
 
   var body: some View {
     Form {
       Section("Privacy") {
         LabeledContent("Application lock", value: lock.hasPasscode ? "Enabled" : "Not configured")
-        Text("Financial content is redacted in the app and widget while locked.")
-          .font(.caption).foregroundStyle(.secondary)
+        Text(
+          "Financial content is redacted in the app and widget while locked. The lock hides the open ledger; it does not encrypt ledger files on disk."
+        )
+        .font(.caption).foregroundStyle(.secondary)
         if lock.hasPasscode {
           Button("Lock now", action: lockNow)
-          Button("Remove passcode", role: .destructive) {
-            do {
-              try lock.removePasscode()
-              message = "Application lock removed."
-            } catch {
-              message = "Passcode could not be removed."
-            }
-          }
+          Button("Change passcode…") { passcodeForm = .change }
+          Button("Remove passcode…", role: .destructive) { passcodeForm = .remove }
         } else {
-          Button("Set passcode…") { showingPasscodeForm = true }
+          Button("Set passcode…") { passcodeForm = .set }
         }
       }
       Section("Accessibility") {
@@ -135,53 +131,97 @@ struct SettingsSurface: View {
     .formStyle(.grouped)
     .navigationTitle("Settings")
     .onChange(of: settings) { _, value in value.save() }
-    .sheet(isPresented: $showingPasscodeForm) {
-      PasscodeForm { passcode in
+    .sheet(item: $passcodeForm) { mode in
+      PasscodeForm(mode: mode) { current, passcode in
         do {
-          try lock.setPasscode(passcode)
-          message = "Application lock enabled."
+          switch mode {
+          case .set:
+            try lock.setPasscode(passcode)
+            message = "Application lock enabled."
+          case .change:
+            try lock.changePasscode(current: current, to: passcode)
+            message = "Passcode changed."
+          case .remove:
+            try lock.removePasscode(current: current)
+            message = "Application lock removed."
+          }
           return nil
         } catch LedgerAppLock.Error.invalidPasscode {
           return "Use an ASCII passcode between 4 and 128 characters."
+        } catch LedgerAppLock.Error.incorrectPasscode {
+          return lock.lockoutMessage ?? "The current passcode was not accepted."
+        } catch LedgerAppLock.Error.authenticationRequired {
+          return lock.lockoutMessage ?? "Unlock Ledger Atlas first."
         } catch {
-          return "Passcode could not be saved."
+          return "The passcode could not be saved."
         }
       }
     }
   }
 }
 
-private struct PasscodeForm: View {
-  let save: (String) -> String?
+struct PasscodeForm: View {
+  enum Mode: String, Identifiable {
+    case set, change, remove
+    var id: String { rawValue }
+
+    var title: String {
+      switch self {
+      case .set: "Set passcode"
+      case .change: "Change passcode"
+      case .remove: "Remove passcode"
+      }
+    }
+
+    var needsCurrent: Bool { self != .set }
+    var needsNew: Bool { self != .remove }
+  }
+
+  let mode: Mode
+  /// Returns an error message, or nil when the change succeeded.
+  let save: (_ current: String, _ passcode: String) -> String?
   @Environment(\.dismiss) private var dismiss
+  @State private var current = ""
   @State private var passcode = ""
   @State private var confirmation = ""
   @State private var error: String?
 
   var body: some View {
     Form {
-      SecureField("Passcode", text: $passcode).textContentType(.newPassword)
-      SecureField("Confirm passcode", text: $confirmation).textContentType(.newPassword)
-      if let error { Text(error).foregroundStyle(.red) }
+      Text(mode.title).font(.headline)
+      if mode.needsCurrent {
+        SecureField("Current passcode", text: $current).textContentType(.password)
+      }
+      if mode.needsNew {
+        SecureField("New passcode", text: $passcode).textContentType(.newPassword)
+        SecureField("Confirm new passcode", text: $confirmation).textContentType(.newPassword)
+      }
+      if let error { Text(error).foregroundStyle(.red).accessibilityLabel(error) }
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()
-        Button("Save") {
-          guard passcode == confirmation else {
+        Button(mode == .remove ? "Remove" : "Save", role: mode == .remove ? .destructive : nil) {
+          guard !mode.needsNew || passcode == confirmation else {
             error = "Passcodes do not match."
             return
           }
-          if let message = save(passcode) {
+          if let message = save(current, passcode) {
             error = message
           } else {
             dismiss()
           }
         }
-        .disabled(passcode.isEmpty || confirmation.isEmpty)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!canSubmit)
       }
     }
     .padding(20)
     .frame(width: 380)
     .accessibilityElement(children: .contain)
+  }
+
+  private var canSubmit: Bool {
+    (!mode.needsCurrent || !current.isEmpty)
+      && (!mode.needsNew || (!passcode.isEmpty && !confirmation.isEmpty))
   }
 }
