@@ -1048,7 +1048,7 @@ public struct LedgerAtlasRootView: View {
       )
       .id(selection)
     } else if selection == .receipts {
-      ReceiptSurface()
+      ReceiptSurface(journey: journey)
         .id(selection)
     } else if selection == .localAccess {
       LocalAccessSurface(

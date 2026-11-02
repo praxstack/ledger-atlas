@@ -731,6 +731,78 @@ public final class LedgerJourney {
     lastFailure = nil
   }
 
+  // MARK: Receipts
+
+  /// The open ledger's receipts, newest first. Metadata only; bytes load on demand.
+  public func receiptAttachments() throws -> [LedgerReceiptAttachment] {
+    guard let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try store.receiptAttachments().sorted {
+      ($0.createdAt.epochMilliseconds, $0.id) > ($1.createdAt.epochMilliseconds, $1.id)
+    }
+  }
+
+  /// One receipt's bytes, checked against its stored digest.
+  public func receiptBytes(_ receiptID: String) throws -> Data {
+    guard let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try store.receiptBytes(receiptID)
+  }
+
+  /// Copies a picked file into the ledger. The same image added twice is one receipt.
+  @discardableResult
+  public func addReceipt(
+    from source: URL, linkedTo transactionID: String? = nil, createdAt: UTCInstant
+  ) throws -> LedgerReceiptAttachment {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data = try ReceiptFiles.read(source)
+    return try store.addReceipt(
+      data, origin: LedgerOrigin.macNative(), linkedTo: transactionID, createdAt: createdAt)
+  }
+
+  /// Links a receipt to a transaction, or unlinks it with nil.
+  public func linkReceipt(_ receiptID: String, to transactionID: String?) throws {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    try store.linkReceipt(receiptID, to: transactionID)
+  }
+
+  /// Removes a receipt from the app. Its bytes stay in the ledger, so older backups and this
+  /// ledger's history still match; deleting forever is not part of v1.
+  public func removeReceipt(_ receiptID: String) throws {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    try store.tombstoneReceipt(receiptID)
+  }
+
+  /// The only path from a receipt to ledger data. The person reviews the amount, account and
+  /// category (text recognition may have suggested the amount) and confirms. This records one
+  /// expense and links the receipt to it. The submission ID keys the write, so confirming
+  /// twice records one expense.
+  public func createExpense(
+    fromReceipt receiptID: String, amountLiteral: String, accountID: String,
+    categoryID: String?, createdAt: UTCInstant, submissionID: String
+  ) throws -> LedgerTransactionRevision {
+    guard application != nil, let store = mutableStore,
+      try store.receiptAttachments().contains(where: {
+        $0.id == receiptID && $0.lifecycle == .active
+      })
+    else { throw LedgerApplication.Error.invalidCommand }
+    let revision = try createNativeTransaction(
+      amountLiteral: amountLiteral.trimmingCharacters(in: .whitespacesAndNewlines),
+      kind: .expense, accountID: accountID, categoryID: categoryID, note: nil,
+      createdAt: createdAt, submissionID: "receipt:\(submissionID)")
+    try store.linkReceipt(receiptID, to: revision.transactionID)
+    lastFailure = nil
+    return revision
+  }
+
   /// Records one transaction from a template, dated today, carrying the template's tags.
   /// The submission ID keys the write, so pressing Use twice records one transaction.
   public func createTransaction(
