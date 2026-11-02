@@ -5,7 +5,7 @@ public enum LedgerNotificationScheduler {
   public static let reminderIdentifier = "com.praxstack.ledgeratlas.daily-reminder"
 
   @MainActor
-  public static func setDailyReminder(enabled: Bool) async -> Bool {
+  public static func setDailyReminder(enabled: Bool, hour: Int = 9) async -> Bool {
     let center = UNUserNotificationCenter.current()
     guard enabled else {
       center.removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
@@ -14,7 +14,8 @@ public enum LedgerNotificationScheduler {
     do {
       guard try await center.requestAuthorization(options: [.alert, .sound]) else { return false }
       var components = DateComponents()
-      components.hour = 9
+      components.hour = min(max(hour, 0), 23)
+      components.minute = 0
       let content = UNMutableNotificationContent()
       content.title = "Ledger Atlas"
       content.body = "Review your Ledger Atlas activity."
