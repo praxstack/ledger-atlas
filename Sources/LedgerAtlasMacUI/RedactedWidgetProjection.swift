@@ -210,7 +210,7 @@ public struct RedactedWidgetProjectionPublisher: Sendable {
     try write(.init(state: state))
   }
 
-  public func publish(_ projection: RedactedWidgetProjection) throws {
+  public func publish(projection: RedactedWidgetProjection) throws {
     try write(projection)
   }
 }

@@ -556,7 +556,7 @@ public struct LedgerAtlasRootView: View {
       return false
     }
     do {
-      try publisher.publish(widgetProjection(for: state, journey: journey))
+      try publisher.publish(projection: widgetProjection(for: state, journey: journey))
       return true
     } catch {
       journey.recordFailure("Widget status could not be published.")
