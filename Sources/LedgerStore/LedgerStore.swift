@@ -80,12 +80,15 @@ public final class LedgerStore {
     /// current.  Nothing was written; reread and show the latest revision.
     case revisionConflict
     case duplicateTagName
+    /// The import plan has conflicts, or the ledger changed after the plan was made. Nothing
+    /// was written; plan the import again.
+    case importPlanNotApplicable
     case sqliteFailure(code: Int32)
 
     fileprivate var preservesMutationError: Bool {
       switch self {
       case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts,
-        .revisionConflict, .duplicateTagName:
+        .revisionConflict, .duplicateTagName, .importPlanNotApplicable:
         true
       default:
         false
@@ -3006,5 +3009,146 @@ extension LedgerStore {
           id: row[6], label: row[7], provenanceID: row[8].isEmpty ? nil : row[8]),
         lifecycle: try requireRaw(LedgerLifecycleState.self, row[5]))
     }
+  }
+}
+
+// MARK: - XLSX import (LA-040)
+
+extension LedgerStore {
+  /// Applies an XLSX import plan in one database transaction: every record and transaction
+  /// is added, or nothing is.
+  ///
+  /// Import only adds. The plan must have no conflicts, and none of its new records may have
+  /// appeared since it was made. Records are created active so new transactions can point at
+  /// them; records the workbook marks deleted are closed at the end, inside the same
+  /// transaction, and the usual health check runs on the result before it commits.
+  public func applyXLSXImport(_ plan: LedgerXLSXImportPlan, createdAt: UTCInstant) throws {
+    guard plan.canApply else { throw Error.importPlanNotApplicable }
+    guard !plan.isEmpty else { return }
+    let requests = plan.transactions.map {
+      CreateTransactionRequest(
+        idempotencyKey: $0.idempotencyKey, draft: $0.draft, createdAt: createdAt, tags: $0.tags)
+    }
+    let revisions = try requests.map { try preparedRevision(for: $0) }
+    _ = try mutate { start in
+      try Self.ensureImportIsNew(plan, revisions: revisions, in: start)
+      let active = LedgerLifecycleState.active.rawValue
+      for group in plan.accountGroups {
+        try Self.run(
+          "INSERT INTO main.ledger_account_group(group_id, name, display_order, lifecycle) VALUES (?, ?, ?, ?)",
+          values: [.text(group.id), .text(group.name), .int(group.displayOrder), .text(active)],
+          on: database)
+      }
+      for account in plan.accounts {
+        try Self.ensureOrigin(account.origin, on: database)
+        try Self.run(
+          "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+          values: [
+            .text(account.id), .text(account.name), .text(account.currencyUnit),
+            .text(account.origin.id), .text(active),
+          ], on: database)
+        try Self.writeAccountPreferences(account, on: database)
+      }
+      for category in plan.categories {
+        try Self.ensureOrigin(category.origin, on: database)
+        try Self.run(
+          "INSERT INTO main.ledger_category(category_id, name, kind, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+          values: [
+            .text(category.id), .text(category.name), .text(category.kind.rawValue),
+            .text(category.origin.id), .text(active),
+          ], on: database)
+        try Self.writeCategoryTree(category, on: database)
+      }
+      for tag in plan.tags {
+        try Self.ensureOrigin(tag.origin, on: database)
+        try Self.run(
+          "INSERT INTO main.ledger_tag(tag_id, name, origin_id, lifecycle) VALUES (?, ?, ?, ?)",
+          values: [.text(tag.id), .text(tag.name), .text(tag.origin.id), .text(active)],
+          on: database)
+      }
+
+      // Transactions see the records above through a fresh read, and go through the same
+      // checks as any new transaction.
+      let withRecords = try CanonicalLedgerHealth.readSnapshot(database)
+      var last = try Self.placeholderResult(origin: try LedgerXLSXImportPlan.origin())
+      for (revision, request) in zip(revisions, requests) {
+        last = try Self.insertNew(revision, tags: request.tags, in: withRecords, on: database)
+        try mutationTestHook?(.afterInsertingTransaction)
+      }
+
+      // Close what the workbook marks deleted, children before parents.
+      let tombstoned = LedgerLifecycleState.tombstoned.rawValue
+      for tag in plan.tags where tag.lifecycle == .tombstoned {
+        try Self.run(
+          "UPDATE main.ledger_tag SET lifecycle=? WHERE tag_id=?",
+          values: [.text(tombstoned), .text(tag.id)], on: database)
+      }
+      for category in plan.categories.reversed() where category.lifecycle == .tombstoned {
+        try Self.run(
+          "UPDATE main.ledger_category SET lifecycle=? WHERE category_id=?",
+          values: [.text(tombstoned), .text(category.id)], on: database)
+      }
+      for account in plan.accounts where account.lifecycle == .tombstoned {
+        try Self.run(
+          "UPDATE main.ledger_account SET lifecycle=? WHERE account_id=?",
+          values: [.text(tombstoned), .text(account.id)], on: database)
+      }
+      for group in plan.accountGroups where group.lifecycle == .tombstoned {
+        try Self.run(
+          "UPDATE main.ledger_account_group SET lifecycle=? WHERE group_id=?",
+          values: [.text(tombstoned), .text(group.id)], on: database)
+      }
+      try Self.ensureImportedRecordRules(plan, in: CanonicalLedgerHealth.readSnapshot(database))
+      return last
+    }
+  }
+
+  /// Refuses a plan made against an older state of the ledger.
+  private static func ensureImportIsNew(
+    _ plan: LedgerXLSXImportPlan, revisions: [LedgerTransactionRevision],
+    in snapshot: LedgerReadSnapshot
+  ) throws {
+    let groups = Set(snapshot.accountGroups.map(\.id))
+    let accounts = Set(snapshot.accounts.map(\.id))
+    let categories = Set(snapshot.categories.map(\.id))
+    let tags = Set(snapshot.tags.map(\.id))
+    let transactions = Set(snapshot.transactions.map(\.id))
+    guard plan.accountGroups.allSatisfy({ !groups.contains($0.id) }),
+      plan.accounts.allSatisfy({ !accounts.contains($0.id) }),
+      plan.categories.allSatisfy({ !categories.contains($0.id) }),
+      plan.tags.allSatisfy({ !tags.contains($0.id) }),
+      revisions.allSatisfy({ !transactions.contains($0.transactionID) })
+    else { throw Error.importPlanNotApplicable }
+  }
+
+  /// The rules the app keeps when records are made one at a time, checked on the final
+  /// state: an active account sits in an active group, an active category under an active,
+  /// shown parent of the same kind with no loop, and active tag names stay unique.
+  private static func ensureImportedRecordRules(
+    _ plan: LedgerXLSXImportPlan, in snapshot: LedgerReadSnapshot
+  ) throws {
+    let groups = Dictionary(uniqueKeysWithValues: snapshot.accountGroups.map { ($0.id, $0) })
+    for account in plan.accounts where account.lifecycle == .active {
+      if let groupID = account.groupID, groups[groupID]?.lifecycle != .active {
+        throw Error.importPlanNotApplicable
+      }
+    }
+    let categories = Dictionary(uniqueKeysWithValues: snapshot.categories.map { ($0.id, $0) })
+    for category in plan.categories {
+      guard let parentID = category.parentID else { continue }
+      guard let parent = categories[parentID], parent.kind == category.kind else {
+        throw Error.importPlanNotApplicable
+      }
+      if category.lifecycle == .active, parent.lifecycle != .active || parent.hidden {
+        throw Error.importPlanNotApplicable
+      }
+      var visited: Set<String> = []
+      var cursor: String? = category.id
+      while let id = cursor {
+        guard visited.insert(id).inserted else { throw Error.categoryCycleDetected }
+        cursor = categories[id]?.parentID
+      }
+    }
+    try ensureUniqueActiveTagNames(snapshot.tags)
   }
 }
