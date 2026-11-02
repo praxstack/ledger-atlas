@@ -661,6 +661,9 @@ public enum CanonicalLedgerSchema {
     /// False for releases before v11. Those have no receipt trust anchors, so an imported
     /// graph in them cannot be re-authenticated after the file has been writable.
     public let authenticatesImportedEvents: Bool
+    /// The semantic checksum queries of this release. A portable package records its ledger's
+    /// checksum at export, so restoring an older package recomputes it with these.
+    public let checksumQueries: [String]
   }
 
   /// One additive step from a released schema to the next. Statements run inside the
@@ -673,19 +676,28 @@ public enum CanonicalLedgerSchema {
 
   public static let currentRelease = SchemaRelease(
     version: version, fingerprint: fingerprint, objects: expectedObjects,
-    authenticatesImportedEvents: true)
+    authenticatesImportedEvents: true, checksumQueries: checksumQueries)
 
   public static let legacyV10Release = SchemaRelease(
     version: 10, fingerprint: legacyV10Fingerprint, objects: legacyV10Objects,
-    authenticatesImportedEvents: false)
+    authenticatesImportedEvents: false, checksumQueries: legacyV10ChecksumQueries)
 
   /// Released v11 identity. A literal, not derived, so a later schema edit cannot move it.
   public static let legacyV11Fingerprint =
     "513702f73c663ad72e0af52304e9f4eabf3ba31aafae259abdbd3d0f74d73fc4"
 
+  /// Released v11 checksum queries, frozen like its fingerprint.
+  public static let legacyV11ChecksumQueries =
+    legacyV10ChecksumQueries + [
+      "SELECT idempotency_key, algorithm, signature FROM ledger_receipt_trust_anchor ORDER BY idempotency_key",
+      "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
+      "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
+      "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
+    ]
+
   public static let legacyV11Release = SchemaRelease(
     version: 11, fingerprint: legacyV11Fingerprint, objects: legacyV11Objects,
-    authenticatesImportedEvents: true)
+    authenticatesImportedEvents: true, checksumQueries: legacyV11ChecksumQueries)
 
   /// Released v12 identity. A literal, not derived, so a later schema edit cannot move it.
   public static let legacyV12Fingerprint =
@@ -698,9 +710,10 @@ public enum CanonicalLedgerSchema {
   /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
   /// next step's `from`, and the last step ends at `currentRelease`.
   ///
-  /// To add a schema version N+1: freeze today's objects and fingerprint as a `vN` release
-  /// (stop deriving them from the evolving schema), point the last step's `to` at it, and append
-  /// a step from it to `currentRelease` with the new objects' DDL.  Lifecycle validates legacy
+  /// To add a schema version N+1: freeze today's objects, fingerprint and checksum queries as a
+  /// `vN` release (stop deriving them from the evolving schema), point the last step's `to` at
+  /// it, and append a step from it to `currentRelease` with the new objects' DDL. Portable
+  /// packages of imported ledgers restore through this chain, so never drop a release from v12 on.  Lifecycle validates legacy
   /// files without the receipt trust key, so check that the frozen release's health checks
   /// still pass that way.
   public static let lifecycleUpgradeSteps: [LifecycleUpgradeStep] = [

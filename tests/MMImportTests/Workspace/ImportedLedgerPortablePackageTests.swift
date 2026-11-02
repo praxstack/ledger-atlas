@@ -228,23 +228,61 @@ struct ImportedLedgerPortablePackageTests {
     }
   }
 
-  /// A package with import history restores only at the canonical schema it was exported from.
-  /// When the schema version changes, restoring an older imported package needs an upgrade path
-  /// (issue #115), so this pins the version to make that step impossible to miss.
-  @Test("bumping the canonical schema needs an upgrade path for imported packages")
-  func importGraphSchemaIsPinned() {
-    #expect(
-      CanonicalLedgerSchema.version == 12,
-      "Imported-ledger packages from schema 12 must still restore: add the upgrade path, then update this pin."
-    )
+  @Test("a package from the previous schema restores through the upgrade chain")
+  func previousSchemaPackageRestores() throws {
+    try withPackageDirectory { directory in
+      let source = try importedLedger(in: directory, includingTransfers: false)
+      let exported = try LedgerApplication(store: source).exportPackage()
+      // Turn today's package into one written at v11: the same ledger without the v12 objects,
+      // with its v11 checksum, and without the v12 graph table.
+      let v11Checksum = try previousReleaseChecksum(in: directory)
+      let previous = try editingGraph(exported.payload) { graph in
+        try makeV11(&graph, checksum: v11Checksum)
+      }
+      let destinationURL = directory.appendingPathComponent("upgraded.sqlite")
+      let destination = try LedgerStoreLifecycle.create(at: destinationURL).store
+      try LedgerApplication(store: destination).importPackage(
+        manifest: previous.manifest, payload: previous.payload)
+      // The v12 tables are empty in this ledger, so upgrading gives back the same ledger.
+      #expect(try destination.semanticChecksum() == source.semanticChecksum())
+      #expect(
+        try destination.readSnapshot().transactions.count
+          == source.readSnapshot().transactions.count)
+      #expect(try LedgerApplication(store: destination).exportPackage().payload == exported.payload)
+
+      // The checksum is checked at the package's own schema, before the upgrade.
+      let tampered = try editingGraph(exported.payload) { graph in
+        try makeV11(&graph, checksum: String(repeating: "0", count: 64))
+      }
+      try expectRestoreRefused(tampered, in: directory, with: .packageTampered)
+    }
+  }
+
+  /// v12 is the first schema a package with import history was written at. Every later schema
+  /// must keep it in the upgrade chain, or those packages stop restoring (issue #115).
+  @Test("every schema since package v4 still restores")
+  func everyPackageSchemaHasAnUpgradePath() {
+    #expect(CanonicalLedgerSchema.version >= 12)
+    for version in 12..<max(12, CanonicalLedgerSchema.version) {
+      let release = CanonicalLedgerSchema.lifecycleUpgradeSteps.first {
+        $0.from.version == version
+      }?.from
+      #expect(
+        release.flatMap {
+          LedgerImportGraph.release(schemaVersion: $0.version, schemaFingerprint: $0.fingerprint)
+        } != nil,
+        "Schema \(version) must stay in the upgrade chain so its packages still restore.")
+    }
   }
 }
 
 // MARK: - Helpers
 
-private func importedLedger(in directory: URL) throws -> LedgerStore {
+private func importedLedger(in directory: URL, includingTransfers: Bool = true) throws
+  -> LedgerStore
+{
   let backup = directory.appendingPathComponent("MM(synthetic).mmbak")
-  try SyntheticV19Backup.write(to: backup)
+  try SyntheticV19Backup.write(to: backup, includingTransfers: includingTransfers)
   let canonical = directory.appendingPathComponent("imported.sqlite")
   let workspace = ImportWorkspace()
   let preparation = try workspace.prepare(
@@ -306,6 +344,40 @@ private func exec(_ database: OpaquePointer, _ sql: String) throws {
   guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
     throw SyntheticV19BackupError.sqlite
   }
+}
+
+/// The imported ledger as it would have been at v11: a copy without the v12 objects, hashed
+/// with the v11 checksum queries.
+private func previousReleaseChecksum(in directory: URL) throws -> String {
+  let v11Names = Set(CanonicalLedgerSchema.legacyV11Objects.map(\.name))
+  let added = CanonicalLedgerSchema.expectedObjects.filter { !v11Names.contains($0.name) }
+  let drops =
+    added.filter { $0.type != "table" }.map { "DROP \($0.type.uppercased()) \($0.name)" }
+    + added.filter { $0.type == "table" }.map { "DROP TABLE \($0.name)" }
+  let copy = try editedCopy(in: directory, named: "v11.sqlite") { "SELECT 1" }
+  var checksum = ""
+  try withDatabase(copy, readOnly: false) { database in
+    // A v11 ledger has no transfer pairs, so this one must not either.
+    try exec(database, "DELETE FROM ledger_meta WHERE EXISTS (SELECT 1 FROM economic_event_transfer)")
+    #expect(sqlite3_changes(database) == 0)
+    for drop in drops { try exec(database, drop) }
+    try exec(
+      database,
+      "UPDATE ledger_meta SET value='11' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.legacyV11Fingerprint)' WHERE key='schema_fingerprint'"
+    )
+    checksum = try LedgerStore.canonicalChecksum(
+      database, queries: CanonicalLedgerSchema.legacyV11ChecksumQueries)
+  }
+  return checksum
+}
+
+private func makeV11(_ graph: inout [String: Any], checksum: String) throws {
+  graph["schemaVersion"] = 11
+  graph["schemaFingerprint"] = CanonicalLedgerSchema.legacyV11Fingerprint
+  graph["canonicalChecksum"] = checksum
+  var tables = try #require(graph["tables"] as? [[String: Any]])
+  tables.removeAll { $0["name"] as? String == "economic_event_transfer" }
+  graph["tables"] = tables
 }
 
 private func cell(in graph: [String: Any], table name: String, column: String) -> String? {

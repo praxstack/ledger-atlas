@@ -1206,10 +1206,11 @@ public final class LedgerStore {
 
   private static func writeProductRows(
     _ package: LedgerCanonicalPackage, snapshot: LedgerReadSnapshot, on database: OpaquePointer,
-    afterImportGraph: Bool = false, afterCore: (() throws -> Void)? = nil
+    afterImportGraph: Bool = false, afterCore: (() throws -> Void)? = nil,
+    schemaObjects: [CanonicalSchemaObject] = CanonicalLedgerSchema.expectedObjects
   ) throws {
       // After an import graph write, only its own tables may already hold rows.
-      let tables = CanonicalLedgerSchema.expectedObjects
+      let tables = schemaObjects
         .filter {
           $0.type == "table" && $0.name != "ledger_meta"
             && !(afterImportGraph && LedgerImportGraph.tableNames.contains($0.name))
@@ -2155,10 +2156,12 @@ public final class LedgerStore {
     pinnedIdentity.map { Self.sameInode($0, expected) } == true
   }
 
-  package static func canonicalChecksum(_ database: OpaquePointer) throws -> String {
+  package static func canonicalChecksum(
+    _ database: OpaquePointer, queries: [String] = CanonicalLedgerSchema.checksumQueries
+  ) throws -> String {
     var hasher = SHA256()
     updateChecksum(&hasher, Data("ledger-atlas/canonical-checksum/v1".utf8))
-    for sql in CanonicalLedgerSchema.checksumQueries {
+    for sql in queries {
       updateChecksum(&hasher, Data(sql.utf8))
       var statement: OpaquePointer?
       guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
@@ -3426,11 +3429,12 @@ extension LedgerStore {
   fileprivate func applyImportedExport(
     _ package: LedgerCanonicalPackage, graph: LedgerImportGraph
   ) throws {
-    guard graph.schemaVersion == CanonicalLedgerSchema.version,
-      graph.schemaFingerprint == CanonicalLedgerSchema.fingerprint
+    guard
+      let release = LedgerImportGraph.release(
+        schemaVersion: graph.schemaVersion, schemaFingerprint: graph.schemaFingerprint)
     else { throw Error.importGraphSchemaMismatch }
     guard package.preservedSource.isEmpty,
-      graph.tables.map(\.name) == LedgerImportGraph.tableNames,
+      graph.tables.map(\.name) == LedgerImportGraph.tableNames(in: release),
       graph.tables.reduce(0, { $0 + $1.rows.count }) <= Self.maximumImportGraphRows,
       let identity = graph.trustIdentity
     else { throw Error.importGraphMismatch }
@@ -3445,6 +3449,12 @@ extension LedgerStore {
       guard try !Self.hasRows(in: tables, on: database) else {
         throw Error.incompatibleCanonicalStore
       }
+      // A package from an older schema is rebuilt and checked at that schema first, then
+      // upgraded; the target must then match the upgraded ledger.
+      let graph =
+        release == CanonicalLedgerSchema.currentRelease
+        ? graph
+        : try Self.upgradedImportGraph(package, graph: graph, from: release, snapshot: snapshot)
       try Self.writeImportGraph(graph, phase: .beforeProductRows, on: database)
       try Self.writeProductRows(
         package, snapshot: snapshot, on: database, afterImportGraph: true)
@@ -3455,6 +3465,56 @@ extension LedgerStore {
       }
       return try Self.placeholderResult(origin: LedgerOrigin.imported())
     }
+  }
+
+  /// Rebuilds the packaged ledger in memory at the schema it was exported from, checks the
+  /// checksum recorded at export there, runs the lifecycle upgrade chain, and returns the graph
+  /// at today's schema with the upgraded ledger's checksum. Receipt signatures are checked
+  /// afterwards, on the target, with this Mac's key.
+  private static func upgradedImportGraph(
+    _ package: LedgerCanonicalPackage, graph: LedgerImportGraph,
+    from release: CanonicalLedgerSchema.SchemaRelease, snapshot: LedgerReadSnapshot
+  ) throws -> LedgerImportGraph {
+    guard let path = CanonicalLedgerSchema.lifecycleUpgradePath(from: release) else {
+      throw Error.importGraphSchemaMismatch
+    }
+    var opened: OpaquePointer?
+    guard sqlite3_open(":memory:", &opened) == SQLITE_OK, let scratch = opened else {
+      sqlite3_close(opened)
+      throw Error.incompatibleCanonicalStore
+    }
+    defer { sqlite3_close(scratch) }
+    try execute("PRAGMA foreign_keys=ON", on: scratch)
+    try execute("BEGIN IMMEDIATE", on: scratch)
+    // Tables before the triggers and indexes that refer to them.
+    for object in release.objects.filter({ $0.type == "table" })
+      + release.objects.filter({ $0.type != "table" })
+    {
+      try execute(object.ddl, on: scratch)
+    }
+    try run(
+      // The same rows LedgerStoreLifecycle.create writes; the checksum covers ledger_meta.
+      "INSERT INTO main.ledger_meta(key, value) VALUES ('schema_version', ?), ('ledger_identity', 'ledger-atlas-canonical'), ('schema_fingerprint', ?)",
+      values: [.text(String(release.version)), .text(release.fingerprint)], on: scratch)
+    try writeImportGraph(graph, phase: .beforeProductRows, on: scratch)
+    try writeProductRows(
+      package, snapshot: snapshot, on: scratch, afterImportGraph: true,
+      schemaObjects: release.objects)
+    try writeImportGraph(graph, phase: .afterProductRows, on: scratch)
+    guard try canonicalChecksum(scratch, queries: release.checksumQueries) == graph.canonicalChecksum
+    else { throw Error.importGraphMismatch }
+    for step in path {
+      for statement in step.statements { try execute(statement, on: scratch) }
+      try run(
+        "UPDATE main.ledger_meta SET value=? WHERE key='schema_version'",
+        values: [.text(String(step.to.version))], on: scratch)
+      try run(
+        "UPDATE main.ledger_meta SET value=? WHERE key='schema_fingerprint'",
+        values: [.text(step.to.fingerprint)], on: scratch)
+    }
+    let upgraded = try readImportGraph(on: scratch)
+    try execute("COMMIT", on: scratch)
+    return upgraded
   }
 
   /// Reads every import-graph table in rowid order, so the first receipt stays first and keeps
