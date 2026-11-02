@@ -60,11 +60,15 @@ public final class LedgerStore {
     case categoryCycleDetected
     case categoryHasActiveChildren
     case accountGroupHasActiveAccounts
+    /// The transaction changed after the caller read it: the expected revision is no longer
+    /// current.  Nothing was written; reread and show the latest revision.
+    case revisionConflict
     case sqliteFailure(code: Int32)
 
     fileprivate var preservesMutationError: Bool {
       switch self {
-      case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts:
+      case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts,
+        .revisionConflict:
         true
       default:
         false
@@ -416,9 +420,9 @@ public final class LedgerStore {
   public func createTransaction(_ request: CreateTransactionRequest) throws -> MutationResult {
     let revision = try preparedRevision(for: request)
     return try mutate { snapshot in
-      let status = try Self.insertNew(revision, in: snapshot, on: database)
+      let result = try Self.insertNew(revision, in: snapshot, on: database)
       try mutationTestHook?(.afterInsertingTransaction)
-      return .init(status: status, revision: revision)
+      return result
     }
   }
 
@@ -429,9 +433,9 @@ public final class LedgerStore {
     let feeRevision = try fee.map { try preparedRevision(for: $0) }
     var feeResult: MutationResult?
     let transferResult = try mutate { snapshot in
-      let transferStatus = try Self.insertNew(transferRevision, in: snapshot, on: database)
+      let transferResult = try Self.insertNew(transferRevision, in: snapshot, on: database)
       if let feeRevision {
-        let feeStatus = try Self.insertNew(feeRevision, in: snapshot, on: database)
+        feeResult = try Self.insertNew(feeRevision, in: snapshot, on: database)
         let link = try LedgerTransactionLink(
           id: StableLedgerID.link(
             fromTransactionID: transferRevision.transactionID,
@@ -444,9 +448,8 @@ public final class LedgerStore {
             .text(link.id), .text(link.fromTransactionID), .text(link.toTransactionID),
             .text(link.kind.rawValue),
           ], on: database)
-        feeResult = .init(status: feeStatus, revision: feeRevision)
       }
-      return .init(status: transferStatus, revision: transferRevision)
+      return transferResult
     }
     return (transferResult, feeResult)
   }
@@ -459,8 +462,7 @@ public final class LedgerStore {
     _ = try mutate { snapshot in
       results = []
       for revision in revisions {
-        let status = try Self.insertNew(revision, in: snapshot, on: database)
-        results.append(.init(status: status, revision: revision))
+        results.append(try Self.insertNew(revision, in: snapshot, on: database))
       }
       if let parent = revisions.first, revisions.count > 1 {
         for child in revisions.dropFirst() {
@@ -497,10 +499,12 @@ public final class LedgerStore {
   private static func insertNew(
     _ revision: LedgerTransactionRevision, in snapshot: LedgerReadSnapshot,
     on database: OpaquePointer
-  ) throws -> MutationStatus {
+  ) throws -> MutationResult {
+    // A repeated submission (same idempotency key and content) returns what is stored, even
+    // when it arrives later with a newer timestamp.
     if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-      guard existing == revision else { throw Error.incompatibleCanonicalStore }
-      return .unchanged
+      guard sameSubmission(existing, revision) else { throw Error.incompatibleCanonicalStore }
+      return .init(status: .unchanged, revision: existing)
     }
     guard !snapshot.transactions.contains(where: { $0.id == revision.transactionID }) else {
       throw Error.incompatibleCanonicalStore
@@ -511,7 +515,16 @@ public final class LedgerStore {
       "INSERT INTO main.ledger_transaction(transaction_id, current_revision_id) VALUES (?, ?)",
       values: [.text(revision.transactionID), .text(revision.id)], on: database)
     try insert(revision, on: database)
-    return .committed
+    return .init(status: .committed, revision: revision)
+  }
+
+  /// Two revisions record the same submission when everything but the clock reading matches.
+  private static func sameSubmission(
+    _ lhs: LedgerTransactionRevision, _ rhs: LedgerTransactionRevision
+  ) -> Bool {
+    lhs.id == rhs.id && lhs.transactionID == rhs.transactionID && lhs.revision == rhs.revision
+      && lhs.predecessorID == rhs.predecessorID && lhs.draft == rhs.draft
+      && lhs.lifecycle == rhs.lifecycle
   }
 
   public func correctTransaction(_ request: CorrectTransactionRequest) throws -> MutationResult {
@@ -530,14 +543,14 @@ public final class LedgerStore {
         predecessorID: predecessor.id,
         draft: request.draft, lifecycle: .active, createdAt: request.createdAt)
       if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-        guard existing == revision else { throw Error.incompatibleCanonicalStore }
+        guard Self.sameSubmission(existing, revision) else { throw Error.revisionConflict }
         return .init(status: .unchanged, revision: existing)
       }
       guard
         snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
           == predecessor.id
       else {
-        throw Error.incompatibleCanonicalStore
+        throw Error.revisionConflict
       }
       try Self.validateReferences(revision, in: snapshot, on: database)
       try Self.insert(revision, on: database)
@@ -564,14 +577,14 @@ public final class LedgerStore {
         predecessorID: predecessor.id,
         draft: predecessor.draft, lifecycle: .tombstoned, createdAt: request.createdAt)
       if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-        guard existing == revision else { throw Error.incompatibleCanonicalStore }
+        guard Self.sameSubmission(existing, revision) else { throw Error.revisionConflict }
         return .init(status: .unchanged, revision: existing)
       }
       guard
         snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
           == predecessor.id
       else {
-        throw Error.incompatibleCanonicalStore
+        throw Error.revisionConflict
       }
       try Self.insert(revision, on: database)
       try Self.run(
@@ -764,9 +777,8 @@ public final class LedgerStore {
     _ = try mutate { snapshot in
       results = []
       for revision in revisions {
-        let status = try Self.insertNew(revision, in: snapshot, on: database)
+        results.append(try Self.insertNew(revision, in: snapshot, on: database))
         try mutationTestHook?(.afterInsertingTransaction)
-        results.append(.init(status: status, revision: revision))
       }
       if let parent = revisions.first, revisions.count > 1 {
         for child in revisions.dropFirst() {

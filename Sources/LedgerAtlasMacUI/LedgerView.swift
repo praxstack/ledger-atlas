@@ -41,7 +41,7 @@ struct LedgerView: View {
   let tombstone: (String) -> Void
   let copy: (String) -> Void
   let addMacTransaction: (String) -> Void
-  let createTransaction: (String, LedgerTransactionKind, String, String?, String?) -> Void
+  let createTransaction: (String, String, LedgerTransactionKind, String, String?, String?) -> Void
   let createSplit: (LedgerSplitDraft) -> Void
   @State private var selectedID: String?
   @State private var amountLiteral = ""
@@ -281,8 +281,8 @@ struct LedgerView: View {
     .sheet(isPresented: $showingTransactionForm) {
       NativeTransactionForm(
         accounts: accounts, categories: categories, intent: intentRequest,
-        onSave: { amount, kind, accountID, categoryID, note in
-          createTransaction(amount, kind, accountID, categoryID, note)
+        onSave: { submissionID, amount, kind, accountID, categoryID, note in
+          createTransaction(submissionID, amount, kind, accountID, categoryID, note)
           if intentRequest != nil { consumeIntent() }
         })
     }
