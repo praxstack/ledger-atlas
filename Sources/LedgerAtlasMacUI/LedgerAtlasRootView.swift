@@ -150,6 +150,10 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: sourceTimeZone)
     }
     .task {
+      if LedgerDemoTour.isRequested {
+        await runDemoTour()
+        return
+      }
       portal.lockDidChange(isLocked: appLock.isLocked)
       if appLock.isLocked { closeLockedLedger() } else { startSavedLedgerReopen() }
     }
@@ -297,6 +301,42 @@ public struct LedgerAtlasRootView: View {
       if let pendingIntent { route(pendingIntent) }
       consumePendingIntentIfUnlocked()
     }
+  }
+
+  /// See `LedgerDemoTour`. Creates the synthetic demo ledger, opens it like Open Ledger does,
+  /// saves one PNG per screen, writes `tour.txt` and quits. Prints where the files are.
+  private func runDemoTour() async {
+    func log(_ line: String) {
+      FileHandle.standardOutput.write(Data("[demo-tour] \(line)\n".utf8))
+    }
+    do {
+      let output = try LedgerDemoTour.outputDirectory()
+      log("output \(output.path)")
+      let ledgers = try LedgerLocations.ledgersDirectory()
+      let url = LedgerLocations.availableURL(named: "Demo Household", in: ledgers)
+      try LedgerDemoTour.makeDemoLedger(at: url)
+      log("demo ledger created")
+      performLedgerSelection(.open, url: url)
+      for _ in 0..<100 where journey.snapshot == nil {
+        try await Task.sleep(for: .milliseconds(200))
+      }
+      log(journey.snapshot == nil ? "ledger did not open: \(journey.lastFailure ?? lifecycleMessage ?? "-")" : "ledger opened")
+      var lines: [String] = []
+      for (index, destination) in LedgerDemoTour.destinations.enumerated() {
+        selection = destination
+        try await Task.sleep(for: .milliseconds(1_500))
+        let name = String(format: "%02d-%@.png", index + 1, destination.rawValue)
+        let saved = LedgerDemoTour.capture(to: output.appendingPathComponent(name))
+        lines.append("\(name)\t\(destination.title)\t\(saved ? "ok" : "failed")")
+        log("\(destination.title): \(saved ? "saved" : "capture failed")")
+      }
+      try lines.joined(separator: "\n").write(
+        to: output.appendingPathComponent("tour.txt"), atomically: true, encoding: .utf8)
+      log("done")
+    } catch {
+      log("failed: \(error)")
+    }
+    NSApplication.shared.terminate(nil)
   }
 
   private func retryLedger(_ operation: LedgerLifecycleOperation) {

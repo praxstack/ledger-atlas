@@ -120,6 +120,20 @@ jobs:
           DMG_PATH: ${{ steps.package.outputs.dmg }}
         run: ./scripts/ci/smoke-launch.sh "$DMG_PATH"
 
+      - name: Demo tour (screens of the real app with a synthetic ledger)
+        env:
+          DMG_PATH: ${{ steps.package.outputs.dmg }}
+        run: ./scripts/ci/demo-tour.sh "$DMG_PATH"
+
+      - name: Upload demo tour
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: demo-tour-${{ steps.version.outputs.version }}
+          path: dist/demo-tour
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Upload DMG
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
