@@ -1731,13 +1731,17 @@ public final class LedgerStore {
     }
   }
 
-  public func backupCanonicalDatabase(to destination: URL) throws {
+  /// Publish an exact plaintext copy of the ledger with mode 0600.
+  /// - Returns: the lowercase SHA-256 hex digest of the published bytes.
+  @discardableResult
+  public func backupCanonicalDatabase(to destination: URL) throws -> String {
     try backupCanonicalDatabase(to: destination, testing: nil)
   }
 
+  @discardableResult
   package func backupCanonicalDatabase(
     to destination: URL, testing backupTestHook: BackupTestHook?
-  ) throws {
+  ) throws -> String {
     guard destination.isFileURL, destination.path.hasPrefix("/") else {
       throw Error.incompatibleCanonicalStore
     }
@@ -1758,6 +1762,9 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     defer { sqlite3_free(serialized) }
+    let digest = SHA256.hash(
+      data: UnsafeRawBufferPointer(start: serialized, count: Int(byteCount))
+    ).map { String(format: "%02x", $0) }.joined()
 
     let parentURL = destination.deletingLastPathComponent()
     let leaf = destination.lastPathComponent
@@ -1881,6 +1888,7 @@ public final class LedgerStore {
     } catch {
       throw Error.backupPublicationCompleted
     }
+    return digest
   }
 
   private static func backupTemporaryIsBound(

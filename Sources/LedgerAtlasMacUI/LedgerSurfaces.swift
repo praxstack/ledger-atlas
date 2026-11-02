@@ -123,6 +123,7 @@ struct BackupSurface: View {
   let rows: [LedgerJourney.SurfaceRow]
   let emptyMessage: String
   let lastFailure: String?
+  var status: String? = nil
   let open: () -> Void
   let saveBackup: () -> Void
   let restoreBackup: () -> Void
@@ -146,6 +147,9 @@ struct BackupSurface: View {
       }
       if let lastFailure {
         Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
+      } else if let status {
+        Text(status).foregroundStyle(.secondary).textSelection(.enabled)
+          .accessibilityLabel(status)
       }
       HStack {
         Button("Open ledger…", action: open)

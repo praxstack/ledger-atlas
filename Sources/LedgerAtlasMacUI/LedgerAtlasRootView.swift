@@ -320,6 +320,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   private func exportPortablePackage() {
+    guard Self.confirmPlaintextExport() else { return }
     let panel = NSSavePanel()
     panel.title = "Export portable package"
     panel.prompt = "Export"
@@ -447,6 +448,21 @@ public struct LedgerAtlasRootView: View {
     default:
       nil
     }
+  }
+
+  /// Asks before a plaintext copy of the ledger is written (LA-004).
+  private static func confirmPlaintextExport() -> Bool {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = LedgerJourney.plaintextExportWarning.title
+    alert.informativeText = LedgerJourney.plaintextExportWarning.message
+    alert.addButton(withTitle: "Continue")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+  }
+
+  package static func backupSavedMessage(sha256: String) -> String {
+    "Backup saved. SHA-256: \(sha256)"
   }
 
   package static func backupFailureMessage(for error: any Swift.Error) -> String {
@@ -844,15 +860,19 @@ public struct LedgerAtlasRootView: View {
         rows: journey.rows(for: .backupRestore),
         emptyMessage: selection.emptyStateMessage,
         lastFailure: journey.lastFailure,
+        status: lifecycleMessage,
         open: openLedger,
         saveBackup: {
+          guard Self.confirmPlaintextExport() else { return }
           let panel = NSSavePanel()
           panel.allowedContentTypes = [.database, .data]
           panel.nameFieldStringValue = "ledger-atlas-backup.sqlite"
           guard panel.runModal() == .OK, let url = panel.url else { return }
           do {
-            try journey.backupCanonicalLedger(to: url)
+            let digest = try journey.backupCanonicalLedger(to: url)
+            lifecycleMessage = Self.backupSavedMessage(sha256: digest)
           } catch {
+            lifecycleMessage = nil
             journey.recordFailure(Self.backupFailureMessage(for: error))
           }
         },
