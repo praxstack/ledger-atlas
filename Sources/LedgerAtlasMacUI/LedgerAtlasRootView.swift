@@ -831,13 +831,13 @@ public struct LedgerAtlasRootView: View {
             amountLiteral: amountLiteral,
             createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
         },
-        createTransaction: { submissionID, amount, kind, accountID, categoryID, note in
+        createTransaction: { submissionID, amount, kind, accountID, categoryID, note, tags in
           do {
             _ = try journey.createNativeTransaction(
               amountLiteral: amount, kind: kind, accountID: accountID,
               categoryID: categoryID, note: note,
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
-              submissionID: submissionID)
+              submissionID: submissionID, tags: tags)
           } catch {
             journey.recordFailure("Transaction could not be saved.")
           }
@@ -848,6 +848,24 @@ public struct LedgerAtlasRootView: View {
               draft, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
           } catch {
             journey.recordFailure("Split purchase could not be saved.")
+          }
+        },
+        tags: journey.snapshot?.tags ?? [],
+        revisionTags: journey.snapshot?.revisionTags ?? [:],
+        saveTags: { transactionID, tags in
+          do {
+            try journey.setTags(
+              tags, onTransaction: transactionID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch {
+            journey.recordFailure(
+              LedgerJourney.editFailureMessage(for: error, otherwise: "Tags could not be saved."))
+          }
+        },
+        saveAsTemplate: { transactionID, name in
+          do { try journey.saveTemplate(fromTransaction: transactionID, name: name) }
+          catch {
+            journey.recordFailure("This transaction can't be saved as a template.")
           }
         }
       )

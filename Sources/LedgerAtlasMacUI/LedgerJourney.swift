@@ -344,7 +344,8 @@ public final class LedgerJourney {
 
   public func createNativeTransaction(
     amountLiteral: String, kind: LedgerTransactionKind, accountID: String,
-    categoryID: String?, note: String?, createdAt: UTCInstant, submissionID: String? = nil
+    categoryID: String?, note: String?, createdAt: UTCInstant, submissionID: String? = nil,
+    tags: LedgerTagLinks = .empty
   ) throws -> LedgerTransactionRevision {
     guard application != nil, let snapshot,
       let account = snapshot.accounts.first(where: { $0.id == accountID }),
@@ -366,7 +367,8 @@ public final class LedgerJourney {
           accountID: account.id,
           direction: kind == .income ? .increase : .decrease, amount: amount)
       ], categoryID: categoryID, kind: kind, occurredAt: when, note: note, origin: origin)
-    return try createTransaction(idempotencyKey: key, draft: draft, createdAt: createdAt)
+    return try createTransaction(
+      idempotencyKey: key, draft: draft, createdAt: createdAt, tags: tags)
   }
 
   public func createNativeTransfer(
@@ -674,6 +676,49 @@ public final class LedgerJourney {
     return revision
   }
 
+  /// Replaces the tags on a transaction by recording a correction with an unchanged draft.
+  /// Import receipt markers stay on the original revision, as for any correction.
+  public func setTags(
+    _ tags: LedgerTagLinks, onTransaction transactionID: String, createdAt: UTCInstant
+  ) throws {
+    guard let snapshot,
+      let current = snapshot.transactions.first(where: { $0.id == transactionID })?
+        .currentRevision
+    else { throw LedgerApplication.Error.invalidCommand }
+    guard snapshot.tags(forRevision: current.id) != tags else { return }
+    let draft = try LedgerTransactionDraft(
+      effects: current.draft.effects, categoryID: current.draft.categoryID,
+      kind: current.draft.kind, occurredAt: current.draft.occurredAt, note: current.draft.note,
+      roundingPolicy: current.draft.roundingPolicy,
+      sourceLiterals: current.draft.sourceLiterals.filter { !$0.field.hasPrefix("import.") },
+      origin: current.draft.origin)
+    try edit(
+      ledgerURL: ledgerURL ?? canonicalURL ?? URL(fileURLWithPath: "/"),
+      transactionID: transactionID, expectedRevisionID: current.id, draft: draft,
+      createdAt: createdAt, tags: tags)
+    lastFailure = nil
+  }
+
+  /// Saves a recorded income, expense or one-to-one transfer as a new Mac-native template,
+  /// with the transaction's active tags. The transaction itself is not changed.
+  public func saveTemplate(fromTransaction transactionID: String, name: String) throws {
+    guard let snapshot,
+      let current = snapshot.transactions.first(where: { $0.id == transactionID })?
+        .currentRevision
+    else { throw LedgerApplication.Error.invalidCommand }
+    let active = Set(snapshot.tags.filter { $0.lifecycle == .active }.map(\.id))
+    let tags = try LedgerTagLinks(
+      snapshot.tags(forRevision: current.id).tagIDs.filter(active.contains))
+    let origin = try LedgerOrigin.macNative()
+    let key = SHA256.hash(data: Data("ledger-atlas/template/\(UUID().uuidString)".utf8))
+      .map { String(format: "%02x", $0) }.joined()
+    let template = try LedgerTransactionTemplate(
+      capturing: current.draft, tags: tags,
+      id: StableLedgerID.transactionTemplate(origin: origin, localKey: key), name: name,
+      origin: origin)
+    try saveTransactionTemplate(template)
+  }
+
   /// Plain-language message for an annotation save that the store refused.
   package static func annotationFailureMessage(for error: Error, otherwise message: String)
     -> String
@@ -826,13 +871,13 @@ public final class LedgerJourney {
   public func edit(
     ledgerURL: URL, transactionID: String, expectedRevisionID: String,
     draft: LedgerTransactionDraft,
-    createdAt: UTCInstant
+    createdAt: UTCInstant, tags: LedgerTagLinks? = nil
   ) throws {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
     do {
       _ = try application.correctTransaction(
         transactionID: transactionID, expectedCurrentRevisionID: expectedRevisionID, draft: draft,
-        createdAt: createdAt)
+        createdAt: createdAt, tags: tags)
       snapshot = try application.snapshot()
     } catch {
       snapshot = try? application.snapshot()

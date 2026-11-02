@@ -24,11 +24,13 @@ public struct LedgerBrowseFilter: Equatable, Sendable {
   public var includesClosed: Bool
   /// A calendar day picked by the person; only that day's entries match.
   public var day: SourceLocalDate?
+  /// Only entries whose current revision carries this tag match.
+  public var tagID: String?
 
   public init(
     text: String = "", accountID: String? = nil, categoryID: String? = nil,
     kinds: Set<LedgerTransactionKind> = [], includesClosed: Bool = true,
-    day: SourceLocalDate? = nil
+    day: SourceLocalDate? = nil, tagID: String? = nil
   ) {
     self.text = text
     self.accountID = accountID
@@ -36,12 +38,14 @@ public struct LedgerBrowseFilter: Equatable, Sendable {
     self.kinds = kinds
     self.includesClosed = includesClosed
     self.day = day
+    self.tagID = tagID
   }
 
   /// True when anything narrows the ledger, so an empty result means "no match", not "empty".
   public var isActive: Bool {
     !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || accountID != nil
       || categoryID != nil || !kinds.isEmpty || !includesClosed || day != nil
+      || tagID != nil
   }
 }
 
@@ -61,6 +65,8 @@ public struct LedgerBrowseEntry: Identifiable, Equatable, Sendable {
   public let accountIDs: [String]
   public let revision: Int
   public let indicators: [LedgerBrowseIndicator]
+  /// Tags on the current revision, sorted by ID.
+  public let tagIDs: [String]
   /// Lowercased text the search box matches against.
   let searchText: String
 }
@@ -108,7 +114,8 @@ public struct LedgerBrowser: Sendable {
 
   public init(
     transactions: [LedgerTransactionSnapshot], hiding hiddenIDs: Set<String> = [],
-    accountNames: [String: String] = [:], categoryNames: [String: String] = [:]
+    accountNames: [String: String] = [:], categoryNames: [String: String] = [:],
+    revisionTags: [String: LedgerTagLinks] = [:], tagNames: [String: String] = [:]
   ) {
     var built: [LedgerBrowseEntry] = []
     built.reserveCapacity(transactions.count)
@@ -133,12 +140,14 @@ public struct LedgerBrowser: Sendable {
       if let categoryID = draft.categoryID, let name = categoryNames[categoryID] {
         words.append(name)
       }
+      let tagIDs = revisionTags[revision.id]?.tagIDs ?? []
+      words += tagIDs.compactMap { tagNames[$0] }
       built.append(
         LedgerBrowseEntry(
           id: transaction.id, occurredAt: draft.occurredAt.localDateTime, kind: draft.kind,
           lifecycle: revision.lifecycle, amount: first.amount, note: draft.note,
           categoryID: draft.categoryID, accountIDs: accountIDs, revision: revision.revision,
-          indicators: indicators, searchText: words.joined(separator: " ").lowercased()))
+          indicators: indicators, tagIDs: tagIDs, searchText: words.joined(separator: " ").lowercased()))
     }
     built.sort { lhs, rhs in
       lhs.occurredAt != rhs.occurredAt ? lhs.occurredAt > rhs.occurredAt : lhs.id < rhs.id
@@ -166,6 +175,7 @@ public struct LedgerBrowser: Sendable {
       if let accountID = filter.accountID, !entry.accountIDs.contains(accountID) { continue }
       if let categoryID = filter.categoryID, entry.categoryID != categoryID { continue }
       if let day = filter.day, entry.occurredAt.date != day { continue }
+      if let tagID = filter.tagID, !entry.tagIDs.contains(tagID) { continue }
       if !needles.allSatisfy({ entry.searchText.contains($0) }) { continue }
       result.append(index)
     }

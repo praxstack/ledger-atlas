@@ -9,9 +9,12 @@ struct NativeTransactionForm: View {
   let accounts: [LedgerAccount]
   let categories: [LedgerCategory]
   let intent: LedgerIntentRequest?
-  /// (submission ID, amount literal, kind, account ID, category ID, note).  The submission ID is
-  /// fixed for the life of the form, so a repeated Save is the same submission, not a new entry.
-  let onSave: (String, String, LedgerTransactionKind, String, String?, String?) -> Void
+  let tags: [LedgerTag]
+  /// (submission ID, amount literal, kind, account ID, category ID, note, tags).  The submission
+  /// ID is fixed for the life of the form, so a repeated Save is the same submission, not a new
+  /// entry.
+  let onSave:
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var submissionID = UUID().uuidString
   @State private var isSaving = false
@@ -20,14 +23,19 @@ struct NativeTransactionForm: View {
   @State private var accountID = ""
   @State private var categoryID: String?
   @State private var note = ""
+  @State private var selectedTags: Set<String> = []
 
   init(
     accounts: [LedgerAccount], categories: [LedgerCategory], intent: LedgerIntentRequest? = nil,
-    onSave: @escaping (String, String, LedgerTransactionKind, String, String?, String?) -> Void
+    tags: [LedgerTag] = [],
+    onSave: @escaping (
+      String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks
+    ) -> Void
   ) {
     self.accounts = accounts
     self.categories = categories
     self.intent = intent
+    self.tags = tags
     self.onSave = onSave
     _amount = State(initialValue: intent?.amountLiteral ?? "")
     _kind = State(initialValue: intent?.kind == .addIncome ? .income : .expense)
@@ -64,6 +72,18 @@ struct NativeTransactionForm: View {
           }
         }
         TextField("Note (optional)", text: $note)
+        let activeTags = AnnotationPresentation.selectableTags(tags, keeping: [])
+        if !activeTags.isEmpty {
+          Section("Tags") {
+            ForEach(activeTags, id: \.id) { tag in
+              Toggle(
+                tag.name,
+                isOn: Binding(
+                  get: { selectedTags.contains(tag.id) },
+                  set: { if $0 { selectedTags.insert(tag.id) } else { selectedTags.remove(tag.id) } }))
+            }
+          }
+        }
         HStack {
           Button("Cancel", role: .cancel) { dismiss() }
           Spacer()
@@ -92,8 +112,10 @@ struct NativeTransactionForm: View {
     isSaving = true
     let cleanAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
     let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+    let links = (try? LedgerTagLinks(Array(selectedTags))) ?? .empty
     onSave(
-      submissionID, cleanAmount, kind, accountID, categoryID, cleanNote.isEmpty ? nil : cleanNote)
+      submissionID, cleanAmount, kind, accountID, categoryID, cleanNote.isEmpty ? nil : cleanNote,
+      links)
     dismiss()
   }
 }

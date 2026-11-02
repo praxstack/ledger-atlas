@@ -24,9 +24,18 @@ struct LedgerView: View {
   let tombstone: (String) -> Void
   let copy: (String) -> Void
   let addMacTransaction: (String) -> Void
-  let createTransaction: (String, String, LedgerTransactionKind, String, String?, String?) -> Void
+  let createTransaction:
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> Void
   let createSplit: (LedgerSplitDraft) -> Void
+  var tags: [LedgerTag] = []
+  var revisionTags: [String: LedgerTagLinks] = [:]
+  /// (transaction ID, new tags).
+  var saveTags: ((String, LedgerTagLinks) -> Void)?
+  /// (transaction ID, template name).
+  var saveAsTemplate: ((String, String) -> Void)?
   @State private var selectedID: String?
+  @State private var taggingID: String?
+  @State private var templatingID: String?
   @State private var amountLiteral = ""
   @State private var macAmountLiteral = ""
   @State private var showingTransactionForm = false
@@ -46,7 +55,10 @@ struct LedgerView: View {
           LedgerBrowseList(
             transactions: transactions, hiddenIDs: splitTransactionIDs, accounts: accounts,
             categories: categories, splitPurchases: splitPurchases, selectedID: $selectedID,
-            copy: copy, tombstone: tombstone)
+            copy: copy, tombstone: tombstone, tags: tags, revisionTags: revisionTags,
+            editTags: isEditing && saveTags != nil ? { (id: String) in taggingID = id } : nil,
+            saveAsTemplate: isEditing && saveAsTemplate != nil
+              ? { (id: String) in templatingID = id } : nil)
         if let lifecycleMessage {
           Text(lifecycleMessage)
             .foregroundStyle(.secondary)
@@ -87,6 +99,14 @@ struct LedgerView: View {
               tombstone(selectedID)
             }
             .disabled(selectedID == nil)
+            if saveTags != nil {
+              Button("Edit tags…") { taggingID = selectedID }
+                .disabled(selectedID == nil)
+            }
+            if saveAsTemplate != nil {
+              Button("Save as template…") { templatingID = selectedID }
+                .disabled(selectedID == nil)
+            }
           }
           .padding(.horizontal, 16)
           HStack {
@@ -166,14 +186,39 @@ struct LedgerView: View {
     }
     .sheet(isPresented: $showingTransactionForm) {
       NativeTransactionForm(
-        accounts: accounts, categories: categories, intent: intentRequest,
-        onSave: { submissionID, amount, kind, accountID, categoryID, note in
-          createTransaction(submissionID, amount, kind, accountID, categoryID, note)
+        accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
+        onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
+          createTransaction(submissionID, amount, kind, accountID, categoryID, note, links)
           if intentRequest != nil { consumeIntent() }
         })
     }
     .sheet(isPresented: $showingSplitForm) {
       SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
+    }
+    .sheet(
+      isPresented: Binding(get: { taggingID != nil }, set: { if !$0 { taggingID = nil } })
+    ) {
+      if let id = taggingID,
+        let revisionID = transactions.first(where: { $0.id == id })?.currentRevision.id
+      {
+        TagPickerForm(tags: tags, selected: revisionTags[revisionID] ?? .empty) { links in
+          saveTags?(id, links)
+        }
+      }
+    }
+    .sheet(
+      isPresented: Binding(get: { templatingID != nil }, set: { if !$0 { templatingID = nil } })
+    ) {
+      if let id = templatingID {
+        TagNameForm(
+          title: "Save as template", initialName: "", fieldLabel: "Template name",
+          isValid: {
+            !$0.isEmpty && $0.utf8.count <= LedgerTransactionTemplate.maximumNameBytes
+          }
+        ) { name in
+          saveAsTemplate?(id, name)
+        }
+      }
     }
     .onChange(of: selectedID) { _, id in
       // Start an amount edit from the selected entry's current amount.

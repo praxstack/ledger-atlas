@@ -203,4 +203,32 @@ struct LedgerBrowserTests {
     #expect(locate < .seconds(1), "locating an entry took \(locate)")
     #expect(totals < .seconds(2), "totals took \(totals)")
   }
+
+  @Test func tagFilterAndSearchUseTheCurrentRevisionsTags() throws {
+    let transactions = try Self.sample()
+    let trip = String(repeating: "e", count: 64)
+    let shared = String(repeating: "f", count: 64)
+    let first = transactions[0].currentRevision.id
+    let third = transactions[2].currentRevision.id
+    let browser = LedgerBrowser(
+      transactions: transactions,
+      revisionTags: [first: try LedgerTagLinks([trip, shared]), third: try LedgerTagLinks([trip])],
+      tagNames: [trip: "Goa trip", shared: "Shared"])
+
+    #expect(browser.entry(id: transactions[0].id)?.tagIDs == [trip, shared].sorted())
+    #expect(browser.entry(id: transactions[1].id)?.tagIDs == [])
+
+    let byTag = LedgerBrowseFilter(tagID: trip)
+    #expect(byTag.isActive)
+    #expect(
+      Set(browser.page(mode: .total, filter: byTag, pageIndex: 0).entries.map(\.id))
+        == [transactions[0].id, transactions[2].id])
+    #expect(
+      browser.page(mode: .total, filter: .init(tagID: shared), pageIndex: 0).entries.map(\.id)
+        == [transactions[0].id])
+
+    // Tag names are searchable like category and account names.
+    #expect(
+      browser.page(mode: .total, filter: .init(text: "goa"), pageIndex: 0).matchCount == 2)
+  }
 }
