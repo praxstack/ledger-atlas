@@ -965,8 +965,12 @@ import Testing
 @Test func nativeLedgerActionsHaveFixedAccessibleLabelsAndPanelCopy() {
   #expect(LedgerAtlasRootView.createLedgerActionLabel == "Create Ledger")
   #expect(LedgerAtlasRootView.openLedgerActionLabel == "Open Ledger")
-  #expect(LedgerAtlasRootView.createLedgerPanelMessage == "Choose where to save the new ledger.")
-  #expect(LedgerAtlasRootView.openLedgerPanelMessage == "Choose a Ledger Atlas ledger.")
+  #expect(
+    LedgerAtlasRootView.createLedgerPanelMessage
+      == "Name the new ledger. Ledger Atlas keeps it in its own storage; use Backup to save copies anywhere.")
+  #expect(
+    LedgerAtlasRootView.openLedgerPanelMessage
+      == "Choose a Ledger Atlas ledger. A ledger from elsewhere is copied into Ledger Atlas; the original is not changed.")
   #expect(LedgerLifecycleOperation.create.retryButtonTitle == "Create Ledger…")
   #expect(LedgerLifecycleOperation.create.retryAccessibilityLabel == "Create Ledger")
   #expect(LedgerLifecycleOperation.open.retryButtonTitle == "Open Ledger…")

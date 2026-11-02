@@ -24,7 +24,7 @@ cat > "$work/probe.entitlements" <<PLIST
 <plist version="1.0"><dict>
   <key>com.apple.security.app-sandbox</key><true/>
   <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
-  <array><string>$granted</string><string>$work/folder/</string></array>
+  <array><string>$granted</string><string>$work/chosen/fresh-openat.sqlite</string><string>$work/chosen/fresh-open.sqlite</string><string>$work/chosen/fresh-rename.sqlite</string><string>$work/folder/</string></array>
 </dict></plist>
 PLIST
 codesign -s - -f -i com.praxstack.ledgeratlas.sandbox-probe \

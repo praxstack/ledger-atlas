@@ -8,12 +8,16 @@ import UniformTypeIdentifiers
 public struct LedgerAtlasRootView: View {
   package static let createLedgerActionLabel = "Create Ledger"
   package static let openLedgerActionLabel = "Open Ledger"
-  package static let createLedgerPanelMessage = "Choose where to save the new ledger."
-  package static let openLedgerPanelMessage = "Choose a Ledger Atlas ledger."
+  package static let createLedgerPanelMessage =
+    "Name the new ledger. Ledger Atlas keeps it in its own storage; use Backup to save copies anywhere."
+  package static let openLedgerPanelMessage =
+    "Choose a Ledger Atlas ledger. A ledger from elsewhere is copied into Ledger Atlas; the original is not changed."
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
-  @State private var session = LedgerSession()
+  @State private var session = LedgerSession(
+    testingScopeStarter: { LedgerLocations.startAccess($0) },
+    testingScopeStopper: { LedgerLocations.stopAccess($0) })
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
   @State private var productSettings: LedgerProductSettings
@@ -134,9 +138,14 @@ public struct LedgerAtlasRootView: View {
         (try? FileManager.default.createDirectory(
           at: directory, withIntermediateDirectories: true)) != nil
       else { return }
+      // The staging copy is scratch; the approved ledger goes to app storage so it survives.
+      guard let ledgers = try? LedgerLocations.ledgersDirectory() else {
+        journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
+        return
+      }
       journey.performSelectSource(
         url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
-        canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+        canonicalDatabaseURL: LedgerLocations.availableURL(named: "Money Manager import", in: ledgers),
         sourceTimeZone: sourceTimeZone)
     }
     .task {
@@ -174,22 +183,33 @@ public struct LedgerAtlasRootView: View {
     return [.data]
   }
 
+  /// New ledgers live in app storage (see `LedgerLocations`), so creating one only asks for a
+  /// name.
   private func createLedger() {
     guard !appLock.isLocked else { return }
-    let panel = NSSavePanel()
-    panel.title = Self.createLedgerActionLabel
-    panel.prompt = "Create"
-    panel.message = Self.createLedgerPanelMessage
-    panel.nameFieldLabel = "Ledger file:"
-    panel.nameFieldStringValue = "ledger-atlas.sqlite"
-    panel.allowedContentTypes = Self.ledgerTypes
-    panel.canCreateDirectories = true
-    panel.isExtensionHidden = false
-    performLedgerSelection(.create, url: panel.runModal() == .OK ? panel.url : nil)
+    let alert = NSAlert()
+    alert.messageText = Self.createLedgerActionLabel
+    alert.informativeText = Self.createLedgerPanelMessage
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+    field.stringValue = "My Ledger"
+    alert.accessoryView = field
+    alert.addButton(withTitle: "Create")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = field
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    guard let directory = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
+      return
+    }
+    performLedgerSelection(
+      .create, url: LedgerLocations.availableURL(named: field.stringValue, in: directory))
   }
 
+  /// A ledger already in app storage opens in place. One from anywhere else is copied in first,
+  /// because the sandbox will not let SQLite write its journal next to a picked file.
   private func openLedger() {
     guard !appLock.isLocked else { return }
+    let directory = try? LedgerLocations.ledgersDirectory()
     let panel = NSOpenPanel()
     panel.title = Self.openLedgerActionLabel
     panel.prompt = "Open"
@@ -198,7 +218,22 @@ public struct LedgerAtlasRootView: View {
     panel.allowsMultipleSelection = false
     panel.canChooseDirectories = false
     panel.canChooseFiles = true
-    performLedgerSelection(.open, url: panel.runModal() == .OK ? panel.url : nil)
+    panel.directoryURL = directory
+    guard panel.runModal() == .OK, let picked = panel.url, let directory else { return }
+    if LedgerLocations.isInside(picked, directory) {
+      performLedgerSelection(.open, url: picked)
+      return
+    }
+    guard picked.startAccessingSecurityScopedResource() else {
+      journey.recordFailure("Ledger access was not granted. Choose Open Ledger to retry.")
+      return
+    }
+    defer { picked.stopAccessingSecurityScopedResource() }
+    do {
+      performLedgerSelection(.open, url: try LedgerLocations.importCopy(of: picked, into: directory))
+    } catch {
+      journey.recordFailure("The ledger could not be copied into Ledger Atlas. The original is unchanged.")
+    }
   }
 
   private func performLedgerSelection(_ operation: LedgerLifecycleOperation, url: URL?) {
@@ -210,8 +245,8 @@ public struct LedgerAtlasRootView: View {
       let outcome = await Self.performLedgerSelection(
         operation, url: url, bookmarkStore: bookmarkStore,
         widgetPublisher: widgetProjectionPublisher, journey: journey, session: session,
-        scopeStarter: { $0.startAccessingSecurityScopedResource() },
-        scopeStopper: { $0.stopAccessingSecurityScopedResource() },
+        scopeStarter: { LedgerLocations.startAccess($0) },
+        scopeStopper: { LedgerLocations.stopAccess($0) },
         isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
@@ -232,8 +267,8 @@ public struct LedgerAtlasRootView: View {
       let outcome = await Self.reopenSavedLedger(
         bookmarkStore: bookmarkStore, widgetPublisher: widgetProjectionPublisher,
         journey: journey, session: session,
-        scopeStarter: { $0.startAccessingSecurityScopedResource() },
-        scopeStopper: { $0.stopAccessingSecurityScopedResource() },
+        scopeStarter: { LedgerLocations.startAccess($0) },
+        scopeStopper: { LedgerLocations.stopAccess($0) },
         isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
@@ -296,29 +331,19 @@ public struct LedgerAtlasRootView: View {
     alert.messageText = "Restore this backup as a new ledger?"
     alert.informativeText =
       "The backup contains \(preview.accounts.count) accounts, \(preview.transactions.count) transactions, and \(preview.categories.count) categories. The original backup stays unchanged."
-    alert.addButton(withTitle: "Choose destination")
+    alert.addButton(withTitle: "Restore")
     alert.addButton(withTitle: "Cancel")
     guard alert.runModal() == .alertFirstButtonReturn else { return }
-    let savePanel = NSSavePanel()
-    savePanel.title = "Restore backup as a new ledger"
-    savePanel.prompt = "Restore"
-    savePanel.allowedContentTypes = Self.ledgerTypes
-    savePanel.nameFieldStringValue = "ledger-atlas-restored.sqlite"
-    savePanel.canCreateDirectories = true
-    guard savePanel.runModal() == .OK, let destination = savePanel.url else { return }
-    guard destination.standardizedFileURL != source.standardizedFileURL else {
-      journey.recordFailure("Choose a new destination for the restored ledger.")
+    guard let directory = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
       return
     }
-    guard destination.startAccessingSecurityScopedResource() else {
-      journey.recordFailure("Restore destination access was not granted.")
-      return
-    }
-    defer { destination.stopAccessingSecurityScopedResource() }
+    let destination = LedgerLocations.availableURL(
+      named: source.deletingPathExtension().lastPathComponent + " restored", in: directory)
     do {
       try journey.restoreCanonicalBackup(from: source, to: destination)
+      performLedgerSelection(.open, url: destination)
       lifecycleMessage = "Backup restored as a new ledger."
-      selection = .ledger
     } catch {
       journey.recordFailure("The backup could not be restored without replacing existing data.")
     }
@@ -364,24 +389,19 @@ public struct LedgerAtlasRootView: View {
     alert.messageText = "Import this portable package as a new ledger?"
     alert.informativeText =
       "The package is limited to representable Ledger Atlas data. The source stays unchanged."
-    alert.addButton(withTitle: "Choose destination")
+    alert.addButton(withTitle: "Import")
     alert.addButton(withTitle: "Cancel")
     guard alert.runModal() == .alertFirstButtonReturn else { return }
-    let savePanel = NSSavePanel()
-    savePanel.title = "Import portable package as a new ledger"
-    savePanel.prompt = "Import"
-    savePanel.allowedContentTypes = Self.ledgerTypes
-    savePanel.nameFieldStringValue = "ledger-atlas-imported.sqlite"
-    savePanel.canCreateDirectories = true
-    guard savePanel.runModal() == .OK, let destination = savePanel.url else { return }
-    guard destination.standardizedFileURL != source.standardizedFileURL else {
-      journey.recordFailure("Choose a new destination for the imported ledger.")
+    guard let directory = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
       return
     }
+    let destination = LedgerLocations.availableURL(
+      named: source.deletingPathExtension().lastPathComponent, in: directory)
     do {
       try journey.restorePortablePackage(from: source, to: destination)
+      performLedgerSelection(.open, url: destination)
       lifecycleMessage = "Portable package imported as a new ledger."
-      selection = .ledger
     } catch {
       journey.recordFailure(
         "The portable package could not be imported without changing the source.")
