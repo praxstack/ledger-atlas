@@ -31,9 +31,21 @@ enum MoneyManagerV19ObservedGraph {
       })
     else { throw CanonicalCommitError.unsafeMapping }
 
+    // Index fields by record and records by table once: looking them up by scanning the whole
+    // graph per record was quadratic and took minutes on a real-size backup.
+    var fieldIDsByRecord: [String: [String]] = [:]
+    for (fieldID, field) in graph.fields {
+      fieldIDsByRecord[field.recordID, default: []].append(fieldID)
+    }
+    var recordIDsByTable: [String: [String]] = [:]
+    for (recordID, record) in graph.records {
+      recordIDsByTable[record.tableID, default: []].append(recordID)
+    }
+
     func fields(for recordID: String) throws -> [String: (String, StagedFieldTarget)] {
       var result: [String: (String, StagedFieldTarget)] = [:]
-      for (fieldID, field) in graph.fields where field.recordID == recordID {
+      for fieldID in fieldIDsByRecord[recordID] ?? [] {
+        guard let field = graph.fields[fieldID] else { throw CanonicalCommitError.unsafeMapping }
         guard result.updateValue((fieldID, field), forKey: field.columnName) == nil else {
           throw CanonicalCommitError.unsafeMapping
         }
@@ -52,7 +64,7 @@ enum MoneyManagerV19ObservedGraph {
     }
     func records(in table: String) -> [String] {
       guard let tableID = tableIDs[table] else { return [] }
-      return graph.records.filter { $0.value.tableID == tableID }.map(\.key).sorted()
+      return (recordIDsByTable[tableID] ?? []).sorted()
     }
     func records(inTables tables: [String]) -> [String] {
       tables.flatMap { records(in: $0) }
@@ -93,7 +105,7 @@ enum MoneyManagerV19ObservedGraph {
       else {
         throw CanonicalCommitError.unsafeMapping
       }
-      let sourceFieldIDs = Set(graph.fields.filter { $0.value.recordID == recordID }.map(\.key))
+      let sourceFieldIDs = Set(fieldIDsByRecord[recordID] ?? [])
       guard effects.allSatisfy({ Set($0.sidecarReferences.map(\.sidecarID)) == sourceFieldIDs })
       else { throw CanonicalCommitError.unsafeMapping }
     }

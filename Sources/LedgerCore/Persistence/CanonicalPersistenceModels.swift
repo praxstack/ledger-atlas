@@ -14,7 +14,7 @@ package enum CanonicalReceiptDigest {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return hasher.finalize().lowercaseHex
   }
 
   package static func optionalComponents(_ value: String?) -> [String] {
@@ -22,7 +22,7 @@ package enum CanonicalReceiptDigest {
   }
 
   package static func sha256(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    SHA256.hash(data: data).lowercaseHex
   }
 }
 
@@ -373,7 +373,7 @@ public enum StableCanonicalID {
       CanonicalIdentifier.isValid(sourceSubjectID), formatVersion == 1,
       declaredType?.utf8.count ?? 0 <= 1_024
     else { throw CanonicalPersistenceError.invalidIdentifier }
-    let payloadDigest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    let payloadDigest = SHA256.hash(data: payload).lowercaseHex
     var components = [
       "ledger-atlas/receipt-owned-payload/v3", receiptID, anchorID, sourceSubjectID,
       String(formatVersion),
@@ -396,7 +396,7 @@ public enum StableCanonicalID {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return hasher.finalize().lowercaseHex
   }
 }
 

@@ -188,8 +188,13 @@ public struct SQLiteCanonicalCommitter: Sendable {
     if existingIdentity != nil {
       try validateNoSQLiteCompanions(at: request.canonicalDatabaseURL)
     }
+    // A real backup writes about 800k rows into indexes keyed by hashes, so inserts land in
+    // random pages. With the default 2 MB cache SQLite spills pages to disk mid-transaction;
+    // 256 MB keeps the working set in memory. It is a per-connection cache limit, not a fixed
+    // allocation, and a small ledger never fills it.
     guard execute(database, "PRAGMA foreign_keys=ON"),
-      execute(database, "PRAGMA journal_mode=DELETE")
+      execute(database, "PRAGMA journal_mode=DELETE"),
+      execute(database, "PRAGMA cache_size=-262144")
     else { throw CanonicalCommitError.canonicalWriteFailed }
     if existingIdentity != nil {
       try validateNoSQLiteCompanions(at: request.canonicalDatabaseURL)
@@ -984,8 +989,18 @@ public struct SQLiteCanonicalCommitter: Sendable {
       throw CanonicalCommitError.unsafeMapping
     }
 
+    var recordIDsByKey: [String: String] = [:]
+    for (id, record) in graph.records {
+      let key = record.tableID + "\u{0}" + record.recordKey
+      recordIDsByKey[key] = min(recordIDsByKey[key] ?? id, id)
+    }
+    func recordID(for record: StagedRecordTarget, graph _: StagingGraph) -> String {
+      recordIDsByKey[record.tableID + "\u{0}" + record.recordKey] ?? ""
+    }
+    var fieldsByRecord: [String: [StagedFieldTarget]] = [:]
+    for field in graph.fields.values { fieldsByRecord[field.recordID, default: []].append(field) }
     func fields(for recordID: String) -> [StagedFieldTarget] {
-      graph.fields.values.filter { $0.recordID == recordID }
+      fieldsByRecord[recordID] ?? []
     }
     func literal(_ fields: [StagedFieldTarget], aliases: [String]) -> String? {
       for alias in aliases {
@@ -1252,11 +1267,6 @@ public struct SQLiteCanonicalCommitter: Sendable {
             : LedgerLifecycleState.active.rawValue),
         ])
     }
-  }
-
-  private func recordID(for record: StagedRecordTarget, graph: StagingGraph) -> String {
-    graph.records.first(where: { $0.value.recordKey == record.recordKey && $0.value.tableID == record.tableID })?.key
-      ?? ""
   }
 
   private func normalizedParentUID(_ value: String?) -> String? {
@@ -2338,9 +2348,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
     }
     for payload in preservation.payloads {
       let locator = payload.provenance.locator
-      let payloadHash = SHA256.hash(data: payload.payload).map {
-        String(format: "%02x", $0)
-      }.joined()
+      let payloadHash = SHA256.hash(data: payload.payload).lowercaseHex
       components.append(contentsOf: [
         payload.payloadID, payload.receiptID, payload.anchorID, payload.sourceSubjectID,
         String(payload.formatVersion),

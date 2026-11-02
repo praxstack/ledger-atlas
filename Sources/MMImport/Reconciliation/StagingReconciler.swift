@@ -2,6 +2,7 @@ import CSQLite
 import CryptoKit
 import Darwin
 import Foundation
+import LedgerCore
 
 public struct StagingReconciler: Sendable {
   private let testingAfterDatabaseOpen: (@Sendable () -> Void)?
@@ -293,9 +294,7 @@ public struct StagingReconciler: Sendable {
         return "invalid-blob:"
       }
       return "invalid-blob:"
-        + Data(bytes: bytes, count: count).map {
-          String(format: "%02x", $0)
-        }.joined()
+        + Data(bytes: bytes, count: count).lowercaseHex
     default:
       return "invalid-null"
     }
@@ -596,7 +595,7 @@ public struct StagingReconciler: Sendable {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return hasher.finalize().lowercaseHex
   }
 }
 

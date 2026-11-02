@@ -732,7 +732,7 @@ public struct ImmutableSourceStager: Sendable {
     } catch {
       throw StagingError.sourceReadFailed
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return hasher.finalize().lowercaseHex
   }
 
   private func stableIdentity(_ lhs: stat, _ rhs: stat) -> Bool {

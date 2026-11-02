@@ -2,6 +2,7 @@ import CSQLite
 import CryptoKit
 import Darwin
 import Foundation
+import LedgerCore
 
 struct SQLiteStagingStore {
   private let testingAfterExclusiveCreate: (() throws -> Void)?
@@ -550,7 +551,7 @@ struct SQLiteStagingStore {
         }
       }
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return hasher.finalize().lowercaseHex
   }
 
   private func digestValue(_ statement: OpaquePointer, ordinal: Int32) throws -> Data {
