@@ -280,3 +280,25 @@ private struct Workbook {
   #expect(try app.checksum() == checksum)
   #expect(try app.snapshot().accounts.isEmpty)
 }
+
+@Test func aRowFixedInTheSourceAndExportedAgainIsAConflictNotADuplicate() throws {
+  let workbook = try Workbook()
+  let app = try makeMemoryApp()
+  try app.applyXLSXImport(try app.planXLSXImport(workbook.content), createdAt: createdAt)
+  let checksum = try app.checksum()
+
+  var reexport = workbook.content
+  let row = reexport.transactions[0]
+  reexport.transactions[0].draft = try LedgerTransactionDraft(
+    effects: row.draft.effects, categoryID: row.draft.categoryID, kind: row.draft.kind,
+    occurredAt: row.draft.occurredAt, note: "corrected", origin: row.draft.origin)
+  let plan = try app.planXLSXImport(reexport)
+  #expect(plan.conflicts.count == 1)
+  #expect(plan.transactions.isEmpty)
+  #expect(plan.summary["Transactions"]?.added == 0)
+  #expect(throws: LedgerStore.Error.importPlanNotApplicable) {
+    try app.applyXLSXImport(plan, createdAt: createdAt)
+  }
+  #expect(try app.checksum() == checksum)
+  #expect(try app.snapshot().transactions.count == 3)
+}

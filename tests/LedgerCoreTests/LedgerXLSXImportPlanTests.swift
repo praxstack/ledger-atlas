@@ -125,26 +125,32 @@ private struct Fixture {
   #expect(second.canApply)
 }
 
-@Test func editedRowsGetNewKeysAndNeverOverwrite() throws {
+private func edited(_ transaction: LedgerXLSXExchange.Transaction, note: String) throws
+  -> LedgerXLSXExchange.Transaction
+{
+  var copy = transaction
+  copy.draft = try LedgerTransactionDraft(
+    effects: transaction.draft.effects, categoryID: transaction.draft.categoryID,
+    kind: transaction.draft.kind, occurredAt: transaction.draft.occurredAt, note: note,
+    origin: transaction.draft.origin)
+  return copy
+}
+
+@Test func theKeyFollowsTheExportedIdNotTheContent() throws {
   let fixture = try Fixture()
   let original = fixture.content.transactions[0]
-  let editedDraft = try LedgerTransactionDraft(
-    effects: original.draft.effects, categoryID: original.draft.categoryID,
-    kind: original.draft.kind, occurredAt: original.draft.occurredAt, note: "crisps",
-    origin: original.draft.origin)
-  var edited = original
-  edited.draft = editedDraft
-  #expect(
-    LedgerXLSXImportPlan.idempotencyKey(for: original)
-      == LedgerXLSXImportPlan.idempotencyKey(for: original))
-  #expect(
-    LedgerXLSXImportPlan.idempotencyKey(for: original)
-      != LedgerXLSXImportPlan.idempotencyKey(for: edited))
+  let changed = try edited(original, note: "crisps")
   #expect(LedgerXLSXImportPlan.idempotencyKey(for: original).count == 64)
+  #expect(
+    LedgerXLSXImportPlan.idempotencyKey(for: original)
+      == LedgerXLSXImportPlan.idempotencyKey(for: changed))
+  #expect(
+    LedgerXLSXImportPlan.idempotencyKey(for: original)
+      != LedgerXLSXImportPlan.idempotencyKey(for: fixture.content.transactions[1]))
 
   // The same id edited in the spreadsheet is a conflict against the ledger it came from.
   var content = fixture.content
-  content.transactions[0] = edited
+  content.transactions[0] = changed
   let plan = LedgerXLSXImportPlan(
     content: content,
     existing: .init(
@@ -152,6 +158,29 @@ private struct Fixture {
       tags: fixture.content.tags, transactions: fixture.content.transactions))
   #expect(!plan.canApply)
   #expect(plan.conflicts.contains { $0.sheet == "Transactions" })
+}
+
+@Test func aRowEditedAndExportedAgainIsAConflictNotASecondCopy() throws {
+  // Export W from ledger B, import into A; fix a row in B, export again, import into A.
+  let fixture = try Fixture()
+  let first = LedgerXLSXImportPlan(content: fixture.content, existing: .init())
+  let ledgerA = try first.transactions.map { new in
+    LedgerXLSXExchange.Transaction(
+      id: try StableLedgerID.transaction(origin: new.draft.origin, localKey: new.idempotencyKey),
+      draft: new.draft, tags: new.tags)
+  }
+  var reexport = fixture.content
+  reexport.transactions[0] = try edited(reexport.transactions[0], note: "chips, corrected")
+  let second = LedgerXLSXImportPlan(
+    content: reexport,
+    existing: .init(
+      accounts: first.accounts, categories: first.categories, tags: first.tags,
+      transactions: ledgerA))
+  #expect(!second.canApply)
+  #expect(second.conflicts.count == 1)
+  #expect(second.conflicts[0].message.contains("already imported with different details"))
+  #expect(second.transactions.isEmpty)
+  #expect(second.summary["Transactions"] == .init(added: 0, unchanged: 1))
 }
 
 @Test func recordsThatDifferFromTheLedgerBlockTheImport() throws {

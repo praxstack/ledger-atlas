@@ -7,8 +7,8 @@ import Foundation
 /// Import only adds. A record whose id the ledger already has is left as it is: when it
 /// matches it is skipped, and when it differs the plan reports a conflict and cannot be
 /// applied. Imported transactions take the XLSX import origin and an idempotency key derived
-/// from their exported id and content: importing the same rows twice adds nothing the second
-/// time, while a row edited in the spreadsheet is a new transaction rather than a clash.
+/// from their exported id: importing the same rows twice adds nothing the second time, and a
+/// row whose content changed since it was imported is a conflict, never a second copy.
 public struct LedgerXLSXImportPlan: Equatable, Sendable {
   public struct NewTransaction: Equatable, Sendable {
     /// The id in the workbook. The ledger stores the transaction under the id that
@@ -145,8 +145,18 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
       }
       let key = Self.idempotencyKey(for: transaction)
       let derived = try? StableLedgerID.transaction(origin: draft.origin, localKey: key)
-      if let derived, existing.transactions[derived] != nil {
-        counts.unchanged += 1
+      if let derived, let imported = existing.transactions[derived] {
+        // Imported before. The same content is skipped; anything else would change it.
+        if imported.draft == draft, imported.tags == transaction.tags,
+          imported.lifecycle == .active
+        {
+          counts.unchanged += 1
+        } else {
+          conflicts.append(
+            LedgerXLSXExchange.Issue(
+              sheet: LedgerXLSXExchange.Sheet.transactions, column: "id",
+              message: "Transaction \(transaction.id.prefix(8))… was already imported with different details. Import never changes existing records; edit it in the app instead."))
+        }
         continue
       }
       // Checked after the already-imported case: a row imported earlier may use a record
@@ -205,28 +215,10 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
       sourceLiterals: draft.sourceLiterals, origin: origin())
   }
 
-  /// Hash of the exported id and everything the row says, so the same row always gets the
-  /// same key and an edited row gets a new one.
+  /// Hash of the exported id alone. The same exported row always maps to the same stored
+  /// transaction, so a row edited and exported again is a conflict, never a second copy.
   public static func idempotencyKey(for transaction: LedgerXLSXExchange.Transaction) -> String {
-    let draft = transaction.draft
-    let when = draft.occurredAt
-    var fields = [
-      "ledger-atlas-xlsx-import/1", transaction.id, draft.kind.rawValue,
-      LedgerXLSXExchange.localDateTime(when.localDateTime), when.timeZone.ianaIdentifier ?? "",
-      String(when.resolvedOffsetSeconds), when.precision.rawValue,
-      String(when.instant.epochMilliseconds), draft.categoryID ?? "", draft.note ?? "",
-      draft.roundingPolicy?.rawValue ?? "", transaction.tags.tagIDs.joined(separator: " "),
-      draft.origin.id,
-    ]
-    for effect in draft.effects {
-      fields += [
-        effect.accountID, effect.direction.rawValue, effect.amount.amount.rawLiteral,
-        effect.amount.unitCode,
-      ]
-    }
-    for literal in draft.sourceLiterals {
-      fields += [literal.field, literal.literal, literal.provenanceID ?? ""]
-    }
+    let fields = ["ledger-atlas-xlsx-import/1", transaction.id]
     // Length-prefixed, so no two different field lists hash the same text.
     let text = fields.map { "\($0.utf8.count):\($0)" }.joined()
     return hex(Data(text.utf8))
