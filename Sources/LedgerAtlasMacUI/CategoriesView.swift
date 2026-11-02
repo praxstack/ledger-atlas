@@ -9,6 +9,7 @@ struct CategoriesView: View {
   let state: LedgerSession.State
   let rows: [LedgerJourney.SurfaceRow]
   let categories: [LedgerCategory]
+  var transactions: [LedgerTransactionSnapshot] = []
   let isEditing: Bool
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -17,15 +18,30 @@ struct CategoriesView: View {
   let open: () -> Void
   @State private var showingCategoryForm = false
   @State private var editingCategory: LedgerCategory?
+  /// The category being drilled into; nil shows the top level.
+  @State private var focusID: String?
+
+  private var tree: CategoryTree { CategoryTree(categories) }
 
   var body: some View {
+    let tree = self.tree
+    let usage = CategoryUsage.counts(transactions, in: tree)
+    let focus = focusID.flatMap { tree[$0] }
     VStack(alignment: .leading, spacing: 12) {
       if !categories.isEmpty {
-        List {
-          ForEach(categories.filter { $0.parentID == nil }.sorted(by: Self.categoryOrder), id: \.id) { category in
+        CategoryBreadcrumbs(path: focus.map { tree.path(to: $0.id) } ?? [], select: { focusID = $0 })
+          .padding(.horizontal, 16)
+        let visible = tree.children(of: focus?.id)
+        if visible.isEmpty {
+          ContentUnavailableView(
+            "No subcategories", systemImage: "tag",
+            description: Text(isEditing ? "Create one to split this category further." : "This category has no subcategories."))
+        } else {
+          List(visible, id: \.id) { category in
             CategoryTreeRow(
-              category: category, allCategories: categories, isEditing: isEditing, save: saveCategory,
-              edit: { editingCategory = $0 })
+              category: category, tree: tree, usage: usage[category.id] ?? CategoryUsage(),
+              isEditing: isEditing, save: saveCategory, edit: { editingCategory = $0 },
+              drillIn: { focusID = $0 })
           }
         }
       } else if !rows.isEmpty {
@@ -54,7 +70,12 @@ struct CategoriesView: View {
       }
       HStack {
         if isEditing {
-          Button("New category") { showingCategoryForm = true }.accessibilityLabel("New category")
+          // Only an open, visible category can take new subcategories (the store rule).
+          let canAddChild = focus.map { $0.lifecycle == .active && !$0.hidden } ?? true
+          Button(focus == nil ? "New category" : "New subcategory") { showingCategoryForm = true }
+            .disabled(!canAddChild)
+            .help(canAddChild ? "" : "Restore or show this category before adding subcategories.")
+            .accessibilityLabel(focus.map { "New subcategory of \($0.name)" } ?? "New category")
         } else if !categories.isEmpty || !rows.isEmpty {
           Button("Begin editing", action: beginEditing).accessibilityLabel("Begin editing categories")
         } else {
@@ -64,9 +85,13 @@ struct CategoriesView: View {
       .padding(.horizontal, 16)
       .padding(.bottom, 12)
     }
-    .navigationTitle("Categories")
+    .navigationTitle(focus?.name ?? "Categories")
+    .onChange(of: categories) { _, updated in
+      // A reload can remove the focused category; fall back to the top level.
+      if let focusID, !updated.contains(where: { $0.id == focusID }) { self.focusID = nil }
+    }
     .sheet(isPresented: $showingCategoryForm) {
-      CategoryForm(categories: categories, onSave: { category in
+      CategoryForm(categories: categories, initialParentID: focus?.id, onSave: { category in
         createCategory(category)
         showingCategoryForm = false
       })
@@ -81,63 +106,117 @@ struct CategoriesView: View {
       }
     }
   }
+}
 
-  private static func categoryOrder(_ lhs: LedgerCategory, _ rhs: LedgerCategory) -> Bool {
-    lhs.displayOrder == rhs.displayOrder ? lhs.name < rhs.name : lhs.displayOrder < rhs.displayOrder
+struct CategoryBreadcrumbs: View {
+  let path: [LedgerCategory]
+  let select: (String?) -> Void
+
+  var body: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 4) {
+        crumb("All categories", id: nil, isCurrent: path.isEmpty)
+        ForEach(Array(path.enumerated()), id: \.element.id) { index, category in
+          Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+          crumb(category.name, id: category.id, isCurrent: index == path.count - 1)
+        }
+      }
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Category path")
+  }
+
+  @ViewBuilder private func crumb(_ title: String, id: String?, isCurrent: Bool) -> some View {
+    if isCurrent {
+      Text(title).fontWeight(.semibold).accessibilityAddTraits(.isHeader)
+    } else {
+      Button(title) { select(id) }.buttonStyle(.link)
+    }
   }
 }
 
 struct CategoryTreeRow: View {
   let category: LedgerCategory
-  let allCategories: [LedgerCategory]
+  let tree: CategoryTree
+  let usage: CategoryUsage
   let isEditing: Bool
   let save: (LedgerCategory) -> Void
   let edit: (LedgerCategory) -> Void
-  @State private var expanded = true
+  let drillIn: (String) -> Void
 
-  private var children: [LedgerCategory] {
-    allCategories.filter { $0.parentID == category.id }.sorted {
-      $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder
+  private var childCount: Int { tree.children(of: category.id).count }
+  private var siblings: [LedgerCategory] { tree.children(of: tree.parent(of: category.id)?.id) }
+
+  private var summary: String {
+    var parts = [category.kind.rawValue.capitalized]
+    if category.lifecycle == .tombstoned { parts.append("closed") }
+    parts.append(usage.total == 1 ? "1 transaction" : "\(usage.total) transactions")
+    if childCount > 0 {
+      parts.append("\(usage.direct) here")
+      parts.append(childCount == 1 ? "1 subcategory" : "\(childCount) subcategories")
     }
+    return parts.joined(separator: " · ")
   }
 
   var body: some View {
-    DisclosureGroup(isExpanded: $expanded) {
-      ForEach(children, id: \.id) { child in
-        CategoryTreeRow(
-          category: child, allCategories: allCategories, isEditing: isEditing, save: save, edit: edit)
+    HStack {
+      VStack(alignment: .leading, spacing: 3) {
+        Text(category.name)
+          .foregroundStyle(category.lifecycle == .active ? .primary : .secondary)
+        Text(summary).font(.caption).foregroundStyle(.secondary)
       }
-    } label: {
-      HStack {
-        VStack(alignment: .leading, spacing: 3) {
-          Text(CategoryPresentation.label(category, in: allCategories))
-          Text("\(category.kind.rawValue) · \(category.lifecycle.rawValue)")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-        if category.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
-        Menu("Actions") {
-          Button("Edit category") { edit(category) }
-          Button(category.hidden ? "Show category" : "Hide category") { update(hidden: !category.hidden) }
-          Button(category.lifecycle == .active ? "Close category" : "Restore category") {
-            update(lifecycle: category.lifecycle == .active ? .tombstoned : .active)
-          }
-        }
-        .disabled(!isEditing)
-        .accessibilityLabel("Actions for \(category.name)")
+      Spacer()
+      if category.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
+      if isEditing { actions }
+      if childCount > 0 {
+        Button { drillIn(category.id) } label: { Image(systemName: "chevron.right") }
+          .buttonStyle(.borderless)
+          .accessibilityLabel("Open subcategories of \(category.name)")
       }
-      .accessibilityElement(children: .combine)
-      .accessibilityLabel("\(category.name), \(category.kind.rawValue), \(category.lifecycle.rawValue)")
     }
+    .contentShape(Rectangle())
+    .onTapGesture(count: 2) { if childCount > 0 { drillIn(category.id) } }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("\(category.name), \(summary)\(category.hidden ? ", hidden" : "")")
   }
 
-  private func update(lifecycle: LedgerLifecycleState? = nil, hidden: Bool? = nil) {
-    guard let revised = try? LedgerCategory(
-      id: category.id, name: category.name, kind: category.kind, origin: category.origin,
-      lifecycle: lifecycle ?? category.lifecycle, parentID: category.parentID,
-      displayOrder: category.displayOrder, hidden: hidden ?? category.hidden)
-    else { return }
+  private var actions: some View {
+    let index = siblings.firstIndex(where: { $0.id == category.id }) ?? 0
+    let closeBlocker = tree.closeBlocker(for: category.id)
+    let restoreBlocker = tree.restoreBlocker(for: category.id)
+    return Menu("Actions") {
+      Button("Edit category…") { edit(category) }
+      Button("Move up") { move(by: -1) }.disabled(index == 0)
+      Button("Move down") { move(by: 1) }.disabled(index >= siblings.count - 1)
+      Divider()
+      if category.hidden {
+        Button("Show category") { update { try $0.with(hidden: false) } }
+      } else {
+        Button("Hide category") { update { try $0.with(hidden: true) } }
+          .disabled(closeBlocker != nil)
+          .help(closeBlocker ?? "Hide it from pickers without changing past transactions.")
+      }
+      if category.lifecycle == .active {
+        Button("Close category") { update { try $0.with(lifecycle: .tombstoned) } }
+          .disabled(closeBlocker != nil)
+          .help(closeBlocker ?? "Past transactions keep this category.")
+      } else {
+        Button("Restore category") { update { try $0.with(lifecycle: .active) } }
+          .disabled(restoreBlocker != nil)
+          .help(restoreBlocker ?? "Make it available again.")
+      }
+    }
+    .fixedSize()
+    .accessibilityLabel("Actions for \(category.name)")
+  }
+
+  private func move(by offset: Int) {
+    for revised in tree.reordered(category.id, by: offset) { save(revised) }
+  }
+
+  private func update(_ change: (LedgerCategory) throws -> LedgerCategory) {
+    guard let revised = try? change(category) else { return }
     save(revised)
   }
 }
@@ -149,7 +228,6 @@ struct CategoryEditForm: View {
   @Environment(\.dismiss) private var dismiss
   @State private var name: String
   @State private var parentID: String?
-  @State private var displayOrder: String
   @State private var hidden: Bool
 
   init(category: LedgerCategory, categories: [LedgerCategory], onSave: @escaping (LedgerCategory) -> Void) {
@@ -158,55 +236,52 @@ struct CategoryEditForm: View {
     self.onSave = onSave
     _name = State(initialValue: category.name)
     _parentID = State(initialValue: category.parentID)
-    _displayOrder = State(initialValue: String(category.displayOrder))
     _hidden = State(initialValue: category.hidden)
   }
 
+  private var tree: CategoryTree { CategoryTree(categories) }
+
   var body: some View {
+    let tree = self.tree
+    let parents = tree.validParents(for: category.kind, movingID: category.id)
+    let hideBlocker = category.hidden ? nil : tree.closeBlocker(for: category.id)
     Form {
       TextField("Category name", text: $name)
       Picker("Parent", selection: $parentID) {
         Text("Top level").tag(String?.none)
-        ForEach(availableParents, id: \.id) {
-          Text(CategoryPresentation.label($0, in: categories)).tag(Optional($0.id))
+        if let current = category.parentID, !parents.contains(where: { $0.id == current }) {
+          // Keep the current parent selectable even if it is now hidden or closed.
+          Text(tree.label(for: current) ?? "Current parent").tag(Optional(current))
+        }
+        ForEach(parents, id: \.id) {
+          Text(tree.label(for: $0.id) ?? $0.name).tag(Optional($0.id))
         }
       }
-      TextField("Display order", text: $displayOrder)
-      Toggle("Hidden", isOn: $hidden)
+      Toggle("Hidden", isOn: $hidden).disabled(hideBlocker != nil)
+      if let hideBlocker, !hidden {
+        Text(hideBlocker).font(.caption).foregroundStyle(.secondary)
+      }
+      Text("Past transactions keep this category when you rename or move it.")
+        .font(.caption).foregroundStyle(.secondary)
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()
         Button("Save") { save() }
-          .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Int(displayOrder) == nil)
+          .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
     }
     .padding(20).frame(width: 420)
   }
 
-  private var availableParents: [LedgerCategory] {
-    let excluded = descendantIDs(of: category.id).union([category.id])
-    return categories.filter {
-      $0.lifecycle == .active && !$0.hidden && !excluded.contains($0.id)
-    }.sorted { ($0.displayOrder, $0.name) < ($1.displayOrder, $1.name) }
-  }
-
-  private func descendantIDs(of id: String) -> Set<String> {
-    var result: Set<String> = []
-    var pending = [id]
-    while let current = pending.popLast() {
-      for child in categories where child.parentID == current && result.insert(child.id).inserted {
-        pending.append(child.id)
-      }
-    }
-    return result
-  }
-
   private func save() {
-    guard let order = Int(displayOrder), order >= 0,
-      let revised = try? LedgerCategory(
-        id: category.id, name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: category.kind,
-        origin: category.origin, lifecycle: category.lifecycle, parentID: parentID,
-        displayOrder: order, hidden: hidden)
+    let movedParent = parentID != category.parentID
+    // A moved category goes to the end of its new siblings.
+    let order = movedParent
+      ? (tree.children(of: parentID).filter { $0.id != category.id }.map(\.displayOrder).max() ?? -1) + 1
+      : category.displayOrder
+    guard let revised = try? category.with(
+      name: name.trimmingCharacters(in: .whitespacesAndNewlines), parentID: .some(parentID),
+      displayOrder: order, hidden: hidden)
     else { return }
     onSave(revised)
     dismiss()
@@ -218,10 +293,26 @@ struct CategoryForm: View {
   let onSave: (LedgerCategory) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var name = ""
-  @State private var kind: LedgerCategoryKind = .expense
+  @State private var kind: LedgerCategoryKind
   @State private var parentID: String?
 
+  init(
+    categories: [LedgerCategory], initialParentID: String? = nil,
+    onSave: @escaping (LedgerCategory) -> Void
+  ) {
+    self.categories = categories
+    self.onSave = onSave
+    let parent = initialParentID.flatMap { id in
+      categories.first { $0.id == id && $0.lifecycle == .active && !$0.hidden }
+    }
+    _kind = State(initialValue: parent?.kind ?? .expense)
+    _parentID = State(initialValue: parent?.id)
+  }
+
+  private var tree: CategoryTree { CategoryTree(categories) }
+
   var body: some View {
+    let tree = self.tree
     Form {
       TextField("Category name", text: $name)
       Picker("Kind", selection: $kind) {
@@ -229,8 +320,8 @@ struct CategoryForm: View {
       }
       Picker("Parent", selection: $parentID) {
         Text("Top level").tag(String?.none)
-        ForEach(categories.filter { $0.lifecycle == .active && !$0.hidden }.sorted { $0.name < $1.name }, id: \.id) { category in
-          Text(CategoryPresentation.label(category, in: categories)).tag(Optional(category.id))
+        ForEach(tree.validParents(for: kind), id: \.id) { category in
+          Text(tree.label(for: category.id) ?? category.name).tag(Optional(category.id))
         }
       }
       HStack {
@@ -242,13 +333,19 @@ struct CategoryForm: View {
     }
     .padding(20)
     .frame(width: 420)
+    .onChange(of: kind) { _, newKind in
+      // A subcategory must have its parent's kind.
+      if let parentID, tree[parentID]?.kind != newKind { self.parentID = nil }
+    }
   }
 
   private func create() {
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let origin = try? LedgerOrigin.macNative(),
       let id = try? StableLedgerID.category(origin: origin, localKey: Self.generatedID()),
-      let category = try? LedgerCategory(id: id, name: trimmedName, kind: kind, origin: origin, parentID: parentID)
+      let category = try? LedgerCategory(
+        id: id, name: trimmedName, kind: kind, origin: origin, parentID: parentID,
+        displayOrder: (tree.children(of: parentID).map(\.displayOrder).max() ?? -1) + 1)
     else { return }
     onSave(category)
     dismiss()
