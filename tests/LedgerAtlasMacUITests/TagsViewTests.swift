@@ -99,7 +99,7 @@ private func tag(_ character: Character, _ name: String, retired: Bool = false) 
   // A template carrying both tags. After one tag retires, using the template records today's
   // expense with the active tag only.
   let template = try LedgerTransactionTemplate(
-    id: try StableLedgerID.transactionTemplate(origin: origin, localKey: key("t")),
+    id: try StableLedgerID.transactionTemplate(origin: origin, localKey: key("e")),
     name: "Tea", kind: .expense, categoryID: nil,
     amount: try CurrencyAmount(unitCode: "INR", amount: ExactDecimal("20")), note: "Synthetic",
     accountID: wallet.id, tags: try LedgerTagLinks([trip.id, shared.id]), origin: origin)
@@ -116,7 +116,7 @@ private func tag(_ character: Character, _ name: String, retired: Bool = false) 
   #expect(first.draft.effects.first?.amount.amount == twenty)
 
   let memo = try LedgerMemo(
-    id: try StableLedgerID.memo(origin: origin, localKey: key("m")), body: "Synthetic note",
+    id: try StableLedgerID.memo(origin: origin, localKey: key("f")), body: "Synthetic note",
     date: try SourceLocalDate(year: 2026, month: 11, day: 2), origin: origin)
   try journey.saveMemo(memo)
   try journey.saveMemo(try memo.edited(body: "Synthetic note, edited"))
