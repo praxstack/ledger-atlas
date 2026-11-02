@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import ImageIO
 import LedgerCore
@@ -56,34 +57,33 @@ public enum ReceiptFiles {
   /// Largest image area text recognition will decode, to bound memory on hostile files.
   public static let maximumPixels = 100_000_000
 
-  /// Reads a picked file. Only a regular file within the receipt limit is read; its type is
+  /// Reads a picked file once, without following a symlink. Only a regular file within the
+  /// receipt limit is read, and the limit applies to the bytes actually read. Its type is
   /// decided later from the bytes, never from the name.
   public static func read(_ source: URL) throws -> Data {
     guard source.isFileURL else { throw ReceiptAttachmentError.unreadableSource }
-    let values: URLResourceValues
-    do {
-      values = try source.resourceValues(
-        forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-    } catch {
-      throw ReceiptAttachmentError.unreadableSource
+    let descriptor = Darwin.open(source.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+    guard descriptor >= 0 else {
+      throw errno == ELOOP
+        ? ReceiptAttachmentError.sourceIsNotRegularFile : ReceiptAttachmentError.unreadableSource
     }
-    guard values.isRegularFile == true, values.isSymbolicLink != true else {
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    var info = Darwin.stat()
+    guard fstat(descriptor, &info) == 0 else { throw ReceiptAttachmentError.unreadableSource }
+    guard (info.st_mode & S_IFMT) == S_IFREG else {
       throw ReceiptAttachmentError.sourceIsNotRegularFile
     }
-    guard let size = values.fileSize, size <= LedgerReceiptAttachment.maximumBytes else {
-      throw ReceiptAttachmentError.sourceIsTooLarge
-    }
-    guard size > 0 else { throw ReceiptAttachmentError.unsupportedImage }
     let data: Data
     do {
-      data = try Data(contentsOf: source, options: .mappedIfSafe)
+      data = try handle.read(upToCount: LedgerReceiptAttachment.maximumBytes + 1) ?? Data()
     } catch {
       throw ReceiptAttachmentError.unreadableSource
     }
     guard data.count <= LedgerReceiptAttachment.maximumBytes else {
       throw ReceiptAttachmentError.sourceIsTooLarge
     }
-    return Data(data)
+    guard !data.isEmpty else { throw ReceiptAttachmentError.unsupportedImage }
+    return data
   }
 
   /// Recognizes text in a receipt image. PDFs and anything ImageIO cannot decode within the
