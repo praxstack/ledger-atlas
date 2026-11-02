@@ -3329,24 +3329,41 @@ extension LedgerStore {
     return upgraded
   }
 
-  /// A lower bound on the graph's package size: its row count against the row cap, and its
-  /// preserved payload bytes, which a package carries as base64 (4 bytes per 3).
-  private static func importGraphFits(maximumPayloadBytes: Int, on database: OpaquePointer)
-    throws -> Bool
-  {
+  /// A lower bound on the graph's size in a package: every cell costs at least 6 JSON bytes
+  /// (`["n"],`), and preserved payload bytes travel as base64 (4 per 3). Nil when the graph
+  /// has more rows than a package may carry.
+  private static func importGraphMinimumPackageBytes(on database: OpaquePointer) throws -> Int? {
     var rows = 0
+    var cells = 0
     for name in LedgerImportGraph.tableNames {
       guard let count = scalarInt("SELECT count(*) FROM main.\(name)", on: database) else {
         throw Error.incompatibleCanonicalStore
       }
       rows += count
+      cells += count * (try tableColumns(name, on: database)).count
     }
+    guard rows <= maximumImportGraphRows else { return nil }
+    // CAST counts bytes even if a payload was ever stored as TEXT.
     guard
       let payloadBytes = scalarInt(
-        "SELECT (SELECT coalesce(sum(length(payload)), 0) FROM main.sidecar_reference) + (SELECT coalesce(sum(length(payload)), 0) FROM main.receipt_preservation_payload)",
+        "SELECT (SELECT coalesce(sum(length(CAST(payload AS BLOB))), 0) FROM main.sidecar_reference) + (SELECT coalesce(sum(length(CAST(payload AS BLOB))), 0) FROM main.receipt_preservation_payload)",
         on: database)
     else { throw Error.incompatibleCanonicalStore }
-    return rows <= maximumImportGraphRows && payloadBytes / 3 * 4 <= maximumPayloadBytes
+    return cells * 6 + payloadBytes / 3 * 4
+  }
+
+  private static func importGraphFits(maximumPayloadBytes: Int, on database: OpaquePointer)
+    throws -> Bool
+  {
+    guard let bytes = try importGraphMinimumPackageBytes(on: database) else { return false }
+    return bytes <= maximumPayloadBytes
+  }
+
+  /// Tests only: the lower bound export compares against the package cap.
+  package func importGraphMinimumPackageBytes() throws -> Int? {
+    try Self.execute("BEGIN", on: database)
+    defer { _ = try? Self.execute("COMMIT", on: database) }
+    return try Self.importGraphMinimumPackageBytes(on: database)
   }
 
   /// Reads every import-graph table in rowid order, so the first receipt stays first and keeps

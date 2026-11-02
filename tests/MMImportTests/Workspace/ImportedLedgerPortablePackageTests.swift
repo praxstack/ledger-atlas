@@ -195,10 +195,15 @@ struct ImportedLedgerPortablePackageTests {
       let fits = try store.portablePackageExportSnapshot()
       #expect(!fits.importGraphTooLarge)
       #expect(fits.importGraph != nil)
-      // This ledger's preserved payloads are larger than one byte, so a one-byte cap refuses.
-      let tooLarge = try store.portablePackageExportSnapshot(maximumPayloadBytes: 1)
+      // At the boundary: exactly the lower bound fits, one byte less is refused unread.
+      let bound = try #require(try store.importGraphMinimumPackageBytes())
+      #expect(bound > 0)
+      #expect(!(try store.portablePackageExportSnapshot(maximumPayloadBytes: bound).importGraphTooLarge))
+      let tooLarge = try store.portablePackageExportSnapshot(maximumPayloadBytes: bound - 1)
       #expect(tooLarge.importGraphTooLarge)
       #expect(tooLarge.importGraph == nil)
+      // The bound really is a lower bound on the encoded package.
+      #expect(try LedgerApplication(store: store).exportPackage().payload.count > bound)
     }
   }
 
