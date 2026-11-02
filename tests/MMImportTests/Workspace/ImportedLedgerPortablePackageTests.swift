@@ -188,6 +188,25 @@ struct ImportedLedgerPortablePackageTests {
     }
   }
 
+  @Test("an import graph too large for a package is sized, not read")
+  func oversizedGraphIsNotRead() throws {
+    try withPackageDirectory { directory in
+      let store = try importedLedger(in: directory)
+      let fits = try store.portablePackageExportSnapshot()
+      #expect(!fits.importGraphTooLarge)
+      #expect(fits.importGraph != nil)
+      // At the boundary: exactly the lower bound fits, one byte less is refused unread.
+      let bound = try #require(try store.importGraphMinimumPackageBytes())
+      #expect(bound > 0)
+      #expect(!(try store.portablePackageExportSnapshot(maximumPayloadBytes: bound).importGraphTooLarge))
+      let tooLarge = try store.portablePackageExportSnapshot(maximumPayloadBytes: bound - 1)
+      #expect(tooLarge.importGraphTooLarge)
+      #expect(tooLarge.importGraph == nil)
+      // The bound really is a lower bound on the encoded package.
+      #expect(try LedgerApplication(store: store).exportPackage().payload.count > bound)
+    }
+  }
+
   @Test("a malformed import graph is refused before anything is written")
   func malformedGraphIsRefused() throws {
     try withPackageDirectory { directory in

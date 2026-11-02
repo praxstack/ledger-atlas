@@ -518,7 +518,7 @@ public struct LedgerAtlasRootView: View {
       lifecycleMessage = LedgerJourney.packageExportSuccessMessage(
         includesImportHistory: includesImportHistory)
     } catch {
-      journey.recordFailure("Portable package export failed.")
+      journey.recordFailure(LedgerJourney.packageExportFailureMessage(for: error))
     }
   }
 

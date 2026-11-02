@@ -527,6 +527,16 @@ public final class LedgerJourney {
     return object?["importGraph"].map { !($0 is NSNull) } ?? false
   }
 
+  package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
+    switch error as? LedgerApplication.Error {
+    case .packageTooLarge:
+      return
+        "This ledger's imported Money Manager history is too large for a portable package. Use Save 1:1 backup instead; it keeps everything. Nothing was exported."
+    default:
+      return "Portable package export failed."
+    }
+  }
+
   package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
     guard includesImportHistory else { return "Portable package exported." }
     return

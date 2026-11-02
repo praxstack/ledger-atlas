@@ -63,6 +63,8 @@ public final class LedgerStore {
     package let importGraph: LedgerImportGraph?
     /// Imported events with no transaction yet. A package can only carry a fully shown ledger.
     package let unmaterializedEventCount: Int
+    /// True when the import graph is too large for a package, so it was not read at all.
+    package let importGraphTooLarge: Bool
   }
   public struct SchemaIdentity: Equatable, Sendable {
     public let version: Int
@@ -413,7 +415,13 @@ public final class LedgerStore {
 
   /// The package encoder consumes this one coherent SQLite read view; no export decision may
   /// inspect a later database state.
-  package func portablePackageExportSnapshot() throws -> PortablePackageExportSnapshot {
+  ///
+  /// The import graph is sized with SQL first and only read when it can fit in a package of
+  /// `maximumPayloadBytes`: a real imported ledger can hold a million graph rows and hundreds of
+  /// megabytes of preserved payloads, which must not be loaded just to be refused.
+  package func portablePackageExportSnapshot(maximumPayloadBytes: Int = .max) throws
+    -> PortablePackageExportSnapshot
+  {
     do {
       try Self.execute("BEGIN", on: database)
       let snapshot = try readSnapshotContents(forPortableExport: true)
@@ -429,7 +437,12 @@ public final class LedgerStore {
       else { throw Error.incompatibleCanonicalStore }
       let representable =
         try Self.portablePackageExportIsRepresentable(on: database) && legacyPreservation == 0
-      let importGraph = importReceiptCount > 0 ? try Self.readImportGraph(on: database) : nil
+      let importGraphTooLarge =
+        try importReceiptCount > 0
+        && !Self.importGraphFits(maximumPayloadBytes: maximumPayloadBytes, on: database)
+      let importGraph =
+        importReceiptCount > 0 && !importGraphTooLarge
+        ? try Self.readImportGraph(on: database) : nil
       guard
         let unmaterialized = Self.scalarInt(
           "SELECT count(*) FROM main.economic_event e WHERE NOT EXISTS (SELECT 1 FROM main.ledger_transaction_source_literal l WHERE l.field IN ('import.eventID', 'import.eventID.debit', 'import.eventID.credit') AND l.literal=e.event_id)",
@@ -447,7 +460,7 @@ public final class LedgerStore {
       return .init(
         ledger: snapshot, isRepresentable: representable,
         hasImportHistory: importReceiptCount > 0, importGraph: importGraph,
-        unmaterializedEventCount: unmaterialized)
+        unmaterializedEventCount: unmaterialized, importGraphTooLarge: importGraphTooLarge)
     } catch {
       _ = try? Self.execute("ROLLBACK", on: database)
       throw Error.incompatibleCanonicalStore
@@ -3314,6 +3327,43 @@ extension LedgerStore {
     let upgraded = try readImportGraph(on: scratch)
     try execute("COMMIT", on: scratch)
     return upgraded
+  }
+
+  /// A lower bound on the graph's size in a package: every cell costs at least 6 JSON bytes
+  /// (`["n"],`), and preserved payload bytes travel as base64 (4 per 3). Nil when the graph
+  /// has more rows than a package may carry.
+  private static func importGraphMinimumPackageBytes(on database: OpaquePointer) throws -> Int? {
+    var rows = 0
+    var cells = 0
+    for name in LedgerImportGraph.tableNames {
+      guard let count = scalarInt("SELECT count(*) FROM main.\(name)", on: database) else {
+        throw Error.incompatibleCanonicalStore
+      }
+      rows += count
+      cells += count * (try tableColumns(name, on: database)).count
+    }
+    guard rows <= maximumImportGraphRows else { return nil }
+    // CAST counts bytes even if a payload was ever stored as TEXT.
+    guard
+      let payloadBytes = scalarInt(
+        "SELECT (SELECT coalesce(sum(length(CAST(payload AS BLOB))), 0) FROM main.sidecar_reference) + (SELECT coalesce(sum(length(CAST(payload AS BLOB))), 0) FROM main.receipt_preservation_payload)",
+        on: database)
+    else { throw Error.incompatibleCanonicalStore }
+    return cells * 6 + payloadBytes / 3 * 4
+  }
+
+  private static func importGraphFits(maximumPayloadBytes: Int, on database: OpaquePointer)
+    throws -> Bool
+  {
+    guard let bytes = try importGraphMinimumPackageBytes(on: database) else { return false }
+    return bytes <= maximumPayloadBytes
+  }
+
+  /// Tests only: the lower bound export compares against the package cap.
+  package func importGraphMinimumPackageBytes() throws -> Int? {
+    try Self.execute("BEGIN", on: database)
+    defer { _ = try? Self.execute("COMMIT", on: database) }
+    return try Self.importGraphMinimumPackageBytes(on: database)
   }
 
   /// Reads every import-graph table in rowid order, so the first receipt stays first and keeps

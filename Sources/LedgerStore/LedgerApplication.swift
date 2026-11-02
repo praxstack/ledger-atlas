@@ -20,6 +20,9 @@ public struct LedgerApplication: LedgerClient {
     case packageSchemaMismatch
     /// The package's imported history does not rebuild the ledger it was exported from.
     case packageTampered
+    /// The ledger's imported history is too large for a portable package. Nothing was written;
+    /// the exact SQLite backup carries it.
+    case packageTooLarge
   }
 
   private let store: LedgerStore
@@ -832,9 +835,11 @@ public struct LedgerApplication: LedgerClient {
   }
 
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {
-    let export = try store.portablePackageExportSnapshot()
+    let export = try store.portablePackageExportSnapshot(
+      maximumPayloadBytes: maximumPortablePackageBytes)
     let snapshot = export.ledger
     guard export.isRepresentable else { throw Error.invalidCommand }
+    guard !export.importGraphTooLarge else { throw Error.packageTooLarge }
     if export.hasImportHistory {
       // The import graph travels verbatim, preserved source included, so every imported event
       // must already be shown.
@@ -862,7 +867,9 @@ public struct LedgerApplication: LedgerClient {
       memos: snapshot.memos, revisionTags: snapshot.revisionTags,
       importGraph: export.hasImportHistory ? export.importGraph : nil)
     let payload = try encode(package)
-    guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
+    guard payload.count <= maximumPortablePackageBytes else {
+      throw export.hasImportHistory ? Error.packageTooLarge : Error.invalidCommand
+    }
     let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
     let manifest = LedgerExportManifest(
       formatVersion: LedgerPortablePackageFormat.version,
