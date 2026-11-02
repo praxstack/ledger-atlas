@@ -106,6 +106,18 @@ public struct LedgerApplication: LedgerClient {
     ).revision
   }
 
+  /// Corrects a transaction and sets the new revision's tags. Nil tags keep the current ones.
+  public func correctTransaction(
+    transactionID: String, expectedCurrentRevisionID: String, draft: LedgerTransactionDraft,
+    createdAt: UTCInstant, tags: LedgerTagLinks?
+  ) throws -> LedgerTransactionRevision {
+    try store.correctTransaction(
+      .init(
+        transactionID: transactionID, expectedCurrentRevisionID: expectedCurrentRevisionID,
+        draft: draft, createdAt: createdAt, tags: tags)
+    ).revision
+  }
+
   public func tombstoneTransaction(
     transactionID: String, expectedCurrentRevisionID: String, createdAt: UTCInstant
   ) throws -> LedgerTransactionRevision {

@@ -355,12 +355,20 @@ struct TagsView: View {
 
 struct TagNameForm: View {
   let title: String
+  let fieldLabel: String
+  let isValid: (String) -> Bool
   let onSave: (String) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var name: String
 
-  init(title: String, initialName: String, onSave: @escaping (String) -> Void) {
+  init(
+    title: String, initialName: String, fieldLabel: String = "Tag name",
+    isValid: @escaping (String) -> Bool = LedgerTag.isValidName,
+    onSave: @escaping (String) -> Void
+  ) {
     self.title = title
+    self.fieldLabel = fieldLabel
+    self.isValid = isValid
     self.onSave = onSave
     _name = State(initialValue: initialName)
   }
@@ -370,7 +378,7 @@ struct TagNameForm: View {
   var body: some View {
     Form {
       Text(title).font(.headline)
-      TextField("Tag name", text: $name)
+      TextField(fieldLabel, text: $name)
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()
@@ -378,7 +386,54 @@ struct TagNameForm: View {
           onSave(trimmed)
           dismiss()
         }
-        .disabled(!LedgerTag.isValidName(trimmed))
+        .disabled(!isValid(trimmed))
+        .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(20)
+    .frame(width: 360)
+  }
+}
+
+/// Ticks tags on or off for one transaction. Retired tags it already carries stay listed so
+/// they can be removed; new links go to active tags only.
+struct TagPickerForm: View {
+  let tags: [LedgerTag]
+  let onSave: (LedgerTagLinks) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var selected: Set<String>
+  private let original: Set<String>
+
+  init(tags: [LedgerTag], selected: LedgerTagLinks, onSave: @escaping (LedgerTagLinks) -> Void) {
+    self.tags = tags
+    self.onSave = onSave
+    original = Set(selected.tagIDs)
+    _selected = State(initialValue: Set(selected.tagIDs))
+  }
+
+  var body: some View {
+    Form {
+      Text("Tags").font(.headline)
+      let choices = AnnotationPresentation.selectableTags(tags, keeping: original)
+      if choices.isEmpty {
+        Text("No tags yet. Create tags under Tags & Memos.").foregroundStyle(.secondary)
+      }
+      ForEach(choices, id: \.id) { tag in
+        Toggle(
+          tag.lifecycle == .active ? tag.name : "\(tag.name) (retired)",
+          isOn: Binding(
+            get: { selected.contains(tag.id) },
+            set: { if $0 { selected.insert(tag.id) } else { selected.remove(tag.id) } }))
+      }
+      HStack {
+        Button("Cancel", role: .cancel) { dismiss() }
+        Spacer()
+        Button("Save") {
+          guard let links = try? LedgerTagLinks(Array(selected)) else { return }
+          onSave(links)
+          dismiss()
+        }
+        .disabled(selected == original)
         .keyboardShortcut(.defaultAction)
       }
     }

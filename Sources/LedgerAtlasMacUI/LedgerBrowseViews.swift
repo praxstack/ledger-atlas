@@ -13,6 +13,11 @@ struct LedgerBrowseList: View {
   @Binding var selectedID: String?
   let copy: (String) -> Void
   let tombstone: (String) -> Void
+  var tags: [LedgerTag] = []
+  /// Tag links by revision ID, from the snapshot.
+  var revisionTags: [String: LedgerTagLinks] = [:]
+  var editTags: ((String) -> Void)?
+  var saveAsTemplate: ((String) -> Void)?
 
   @State private var browser = LedgerBrowser(transactions: [])
   @State private var mode: LedgerBrowseMode = .daily
@@ -29,6 +34,10 @@ struct LedgerBrowseList: View {
 
   private var categoryNames: [String: String] {
     Dictionary(categories.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  private var tagNames: [String: String] {
+    Dictionary(tags.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
   }
 
   var body: some View {
@@ -50,6 +59,8 @@ struct LedgerBrowseList: View {
     .onAppear { rebuild() }
     .onChange(of: transactions) { _, _ in rebuild() }
     .onChange(of: hiddenIDs) { _, _ in rebuild() }
+    .onChange(of: revisionTags) { _, _ in rebuild() }
+    .onChange(of: tags) { _, _ in rebuild() }
     .onChange(of: mode) { _, _ in
       if mode != .calendar { filter.day = nil }
       refresh(keepingSelection: true)
@@ -81,6 +92,16 @@ struct LedgerBrowseList: View {
       }
       .accessibilityLabel("Filter by category")
       .frame(maxWidth: 180)
+      if !tags.isEmpty {
+        Picker("Tag", selection: $filter.tagID) {
+          Text("All tags").tag(String?.none)
+          ForEach(AnnotationPresentation.sortedTags(tags), id: \.id) { tag in
+            Text(tag.name).tag(Optional(tag.id))
+          }
+        }
+        .accessibilityLabel("Filter by tag")
+        .frame(maxWidth: 160)
+      }
       Menu("Kinds") {
         ForEach(LedgerTransactionKind.allCases, id: \.self) { kind in
           Toggle(kind.rawValue.capitalized, isOn: kindBinding(kind))
@@ -206,6 +227,12 @@ struct LedgerBrowseList: View {
                   .id(entry.id)
                   .contextMenu {
                     Button("Copy transaction") { copy(entry.id) }
+                    if let editTags, entry.lifecycle == .active {
+                      Button("Edit tags…") { editTags(entry.id) }
+                    }
+                    if let saveAsTemplate, entry.lifecycle == .active {
+                      Button("Save as template…") { saveAsTemplate(entry.id) }
+                    }
                     Button("Close transaction", role: .destructive) { tombstone(entry.id) }
                   }
               }
@@ -251,12 +278,18 @@ struct LedgerBrowseList: View {
     let detail = [amount, account.isEmpty ? nil : account, time].compactMap { $0 }
       .joined(separator: " · ")
     let markers = entry.indicators.map(Self.indicatorLabel).joined(separator: ", ")
+    let tagLine = entry.tagIDs.compactMap { tagNames[$0] }.sorted {
+      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    }.map { "#\($0)" }.joined(separator: " ")
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
       VStack(alignment: .leading, spacing: 2) {
         Text(title).strikethrough(entry.lifecycle == .tombstoned)
         Text(detail).font(.caption).foregroundStyle(.secondary)
         if let note = entry.note {
           Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        if !tagLine.isEmpty {
+          Text(tagLine).font(.caption).foregroundStyle(.tint).lineLimit(1)
         }
       }
       Spacer()
@@ -271,7 +304,10 @@ struct LedgerBrowseList: View {
     }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      [title, detail, entry.note, markers.isEmpty ? nil : markers].compactMap { $0 }
+      [
+        title, detail, entry.note, tagLine.isEmpty ? nil : "tags \(tagLine)",
+        markers.isEmpty ? nil : markers,
+      ].compactMap { $0 }
         .joined(separator: ", "))
   }
 
@@ -315,7 +351,7 @@ struct LedgerBrowseList: View {
   private func rebuild() {
     browser = LedgerBrowser(
       transactions: transactions, hiding: hiddenIDs, accountNames: accountNames,
-      categoryNames: categoryNames)
+      categoryNames: categoryNames, revisionTags: revisionTags, tagNames: tagNames)
     if calendarMonth == nil, let newest = browser.entries.first?.occurredAt.date {
       calendarMonth = (newest.year, newest.month)
     }

@@ -142,3 +142,78 @@ private func tag(_ character: Character, _ name: String, retired: Bool = false) 
   #expect(AnnotationPresentation.activeTemplates(restored.transactionTemplates).map(\.name) == ["Tea"])
   #expect(AnnotationPresentation.activeMemos(restored.memos).map(\.body) == ["Synthetic note, edited"])
 }
+
+@MainActor
+@Test func ledgerTransactionsCanBeTaggedRetaggedAndSavedAsTemplates() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let destination = directory.appendingPathComponent("tagging.sqlite")
+  let suite = "LedgerAtlasMacUITests.tagging.\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let bookmarks = SecurityScopedBookmarkStore(
+    defaults: defaults, makeBookmark: { Data($0.path.utf8) },
+    resolveBookmark: { URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)) })
+
+  let journey = LedgerJourney()
+  let created = await LedgerAtlasRootView.performLedgerLifecycle(
+    .create, at: destination, bookmarkStore: bookmarks, widgetPublisher: .init(write: { _ in }),
+    journey: journey, session: LedgerSession(testingScopeStarter: { _ in true }),
+    scopeStarter: { _ in true }, scopeStopper: { _ in })
+  #expect(created.kind == .created)
+  try journey.performBeginEditing()
+  let origin = try LedgerOrigin.macNative()
+  let wallet = try LedgerAccount(
+    id: try StableLedgerID.account(origin: origin, localKey: key("a")), name: "Wallet",
+    currencyUnit: "INR", origin: origin)
+  try journey.createAccount(wallet)
+  let trip = try tag("1", "Trip")
+  let food = try tag("2", "Food")
+  try journey.createTag(trip)
+  try journey.createTag(food)
+
+  // The new-transaction form passes its ticked tags straight to the first revision.
+  let now = UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds())
+  let created1 = try journey.createNativeTransaction(
+    amountLiteral: "250", kind: .expense, accountID: wallet.id, categoryID: nil,
+    note: "Synthetic lunch", createdAt: now, submissionID: "form-1",
+    tags: try LedgerTagLinks([trip.id]))
+  #expect(try #require(journey.snapshot).tags(forRevision: created1.id).tagIDs == [trip.id])
+
+  // Editing tags records a correction with the same money and the new tags.
+  try journey.setTags(
+    try LedgerTagLinks([trip.id, food.id]), onTransaction: created1.transactionID,
+    createdAt: UTCInstant(epochMilliseconds: now.epochMilliseconds + 1))
+  var snapshot = try #require(journey.snapshot)
+  let current = try #require(snapshot.transactions.first).currentRevision
+  #expect(current.revision == 2)
+  #expect(current.draft.effects == created1.draft.effects)
+  #expect(current.draft.note == "Synthetic lunch")
+  #expect(Set(snapshot.tags(forRevision: current.id).tagIDs) == [trip.id, food.id])
+  #expect(snapshot.tags(forRevision: created1.id).tagIDs == [trip.id])
+
+  // Saving the same tags again writes nothing.
+  try journey.setTags(
+    try LedgerTagLinks([trip.id, food.id]), onTransaction: created1.transactionID,
+    createdAt: UTCInstant(epochMilliseconds: now.epochMilliseconds + 2))
+  #expect(try #require(journey.snapshot).transactions.first?.currentRevision.id == current.id)
+
+  // Save as template keeps only the tags that are still active.
+  try journey.updateTag(try food.tombstoned())
+  try journey.saveTemplate(fromTransaction: created1.transactionID, name: "Lunch")
+  snapshot = try #require(journey.snapshot)
+  let template = try #require(snapshot.transactionTemplates.first)
+  #expect(template.name == "Lunch")
+  #expect(template.kind == .expense)
+  #expect(template.accountID == wallet.id)
+  #expect(template.amount == created1.draft.effects[0].amount)
+  #expect(template.tags.tagIDs == [trip.id])
+
+  // The ledger browser filters by tag and finds tag names in search.
+  let browser = LedgerBrowser(
+    transactions: snapshot.transactions, revisionTags: snapshot.revisionTags,
+    tagNames: Dictionary(uniqueKeysWithValues: snapshot.tags.map { ($0.id, $0.name) }))
+  #expect(browser.page(mode: .total, filter: .init(tagID: food.id), pageIndex: 0).matchCount == 1)
+  #expect(browser.page(mode: .total, filter: .init(text: "trip"), pageIndex: 0).matchCount == 1)
+}
