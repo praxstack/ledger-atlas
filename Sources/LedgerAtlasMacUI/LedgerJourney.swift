@@ -441,7 +441,7 @@ public final class LedgerJourney {
   }
 
   /// "1 USD = 83.25 INR" for the transfer form, from the two typed amounts; nil until both parse.
-  package static func conversionPreview(
+  nonisolated package static func conversionPreview(
     sourceLiteral: String, sourceUnit: String, destinationLiteral: String, destinationUnit: String
   ) -> String? {
     guard
