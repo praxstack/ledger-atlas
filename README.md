@@ -61,3 +61,8 @@ Repository-managed environment configuration lives in `.cursor/environment.json`
 Native development also follows `AGENTS.md`, `CONTEXT.md`, `SPEC.md`, and
 `docs/orchestration/RUNBOOK.md`. Real financial evidence stays in the separate
 read-only research repository described by `EVIDENCE.md`.
+
+## License
+
+GPL-3.0-only. See [LICENSE](LICENSE). Anyone who distributes a modified version must also release its source under GPL-3.0. The app icon source is `Assets/Brand/ledger-atlas-app-icon.svg`;
+`Assets/AppIcon.xcassets` holds the rendered macOS sizes.

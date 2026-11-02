@@ -13,6 +13,7 @@
 		49921E2A145BF6413F4ACE49 /* LedgerAtlasMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = F54C1341B767FDABE89BB321 /* LedgerAtlasMacUI */; };
 		793118580FC787BF9CCCE2F6 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070F3A60D31441FDBFE96E80 /* AppIntents.swift */; };
 		8275EE13370A16F2216FF01D /* RedactedWidgetProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 262C47510ED019B07D0F5DE4 /* RedactedWidgetProjection.swift */; };
+		5A1C0F3E8B2D4E6F7A8B9C0D /* AppIcon.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6B2D1A4F9C3E5F7A8B9C0D1E /* AppIcon.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,6 +48,7 @@
 		978BCD5A985F3565FCA9ECEE /* LedgerAtlasWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LedgerAtlasWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerAtlasMacApp.swift; sourceTree = "<group>"; };
 		C9A18D20504B0D55CCEFDF6F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6B2D1A4F9C3E5F7A8B9C0D1E /* AppIcon.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = AppIcon.xcassets; path = Assets/AppIcon.xcassets; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +85,7 @@
 			isa = PBXGroup;
 			children = (
 				070F3A60D31441FDBFE96E80 /* AppIntents.swift */,
+				6B2D1A4F9C3E5F7A8B9C0D1E /* AppIcon.xcassets */,
 				B5C8C05C1F5554EDCCE41449 /* LedgerAtlasMacApp.swift */,
 			);
 			name = LedgerAtlasMac;
@@ -117,6 +120,7 @@
 			buildConfigurationList = 7D8A5D02261D97CE38E553E1 /* Build configuration list for PBXNativeTarget "LedgerAtlas" */;
 			buildPhases = (
 				DB461EA88E3E8F9230E2FF62 /* Sources */,
+				7C3E2B5A0D4F6A8B9C0D1E2F /* Resources */,
 				1AD3E0DD79584511CF93503D /* Frameworks */,
 				8E8DFF3F1FCA47915BF9EF8B /* Embed Foundation Extensions */,
 			);
@@ -192,6 +196,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		7C3E2B5A0D4F6A8B9C0D1E2F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A1C0F3E8B2D4E6F7A8B9C0D /* AppIcon.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		1991EDF8BD48CB4794CD2E9C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -232,6 +247,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 57GGJTRSFG;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 praxstack. Licensed under GPL-3.0.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -334,6 +351,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 57GGJTRSFG;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 praxstack. Licensed under GPL-3.0.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
