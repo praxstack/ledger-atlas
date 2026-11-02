@@ -829,7 +829,9 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(try destination.snapshot().accounts.map(\.id) == [String(repeating: "a", count: 64)])
 
   var legacyV1Object = currentObject
-  legacyV1Object.removeValue(forKey: "accountGroups")
+  for key in ["accountGroups", "tags", "transactionTemplates", "memos", "revisionTags"] {
+    legacyV1Object.removeValue(forKey: key)
+  }
   if var rows = legacyV1Object["accounts"] as? [[String: Any]] {
     rows = rows.map { row in
       var row = row
