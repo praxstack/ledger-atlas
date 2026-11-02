@@ -925,6 +925,46 @@ public struct LedgerAtlasRootView: View {
         },
         open: openLedger)
       .id(selection)
+    } else if selection == .tags {
+      TagsView(
+        state: session.state, tags: journey.snapshot?.tags ?? [],
+        templates: journey.snapshot?.transactionTemplates ?? [],
+        memos: journey.snapshot?.memos ?? [],
+        transactions: journey.snapshot?.transactions ?? [],
+        revisionTags: journey.snapshot?.revisionTags ?? [:],
+        accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
+        isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
+        beginEditing: { try? journey.performBeginEditing() },
+        createTag: { tag in
+          do { try journey.createTag(tag) } catch {
+            journey.recordFailure(
+              LedgerJourney.annotationFailureMessage(for: error, otherwise: "Tag could not be created."))
+          }
+        },
+        updateTag: { tag in
+          do { try journey.updateTag(tag) } catch {
+            journey.recordFailure(
+              LedgerJourney.annotationFailureMessage(for: error, otherwise: "Tag could not be saved."))
+          }
+        },
+        saveTemplate: { template in
+          do { try journey.saveTransactionTemplate(template) }
+          catch { journey.recordFailure("Template could not be saved.") }
+        },
+        useTemplate: { templateID, submissionID in
+          do {
+            _ = try journey.createTransaction(
+              fromTemplate: templateID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+              submissionID: submissionID)
+          } catch { journey.recordFailure("Transaction could not be recorded from the template.") }
+        },
+        saveMemo: { memo in
+          do { try journey.saveMemo(memo) }
+          catch { journey.recordFailure("Memo could not be saved.") }
+        },
+        open: openLedger)
+      .id(selection)
     } else if selection == .recurrence {
       RecurrenceView(
         state: session.state, rules: journey.snapshot?.recurrenceRules ?? [],

@@ -6,6 +6,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
   case receipts
   case localAccess
   case categories
+  case tags
   case transfers
   case recurrence
   case installments
@@ -35,6 +36,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Local Access"
     case .categories:
       "Categories"
+    case .tags:
+      "Tags & Memos"
     case .transfers:
       "Transfers"
     case .recurrence:
@@ -72,6 +75,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Start a temporary read-only loopback status view for this Mac."
     case .categories:
       "Show canonical categories."
+    case .tags:
+      "Manage tags, transaction templates and day memos."
     case .transfers:
       "Show linked transfers."
     case .recurrence:
@@ -107,6 +112,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "network"
     case .categories:
       "tag"
+    case .tags:
+      "number"
     case .transfers:
       "arrow.left.arrow.right"
     case .recurrence:
@@ -142,6 +149,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "The portal is loopback-only, token-protected, and contains no mutation endpoint."
     case .categories:
       "Canonical categories are listed from the opened ledger."
+    case .tags:
+      "Tags, templates and memos are listed from the opened ledger."
     case .transfers:
       "Linked transfers are listed from the opened ledger."
     case .recurrence:

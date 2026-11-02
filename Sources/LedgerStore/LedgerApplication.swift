@@ -65,9 +65,34 @@ public struct LedgerApplication: LedgerClient {
   public func createTransaction(
     idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant
   ) throws -> LedgerTransactionRevision {
+    try createTransaction(
+      idempotencyKey: idempotencyKey, draft: draft, createdAt: createdAt, tags: .empty)
+  }
+
+  public func createTransaction(
+    idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant,
+    tags: LedgerTagLinks
+  ) throws -> LedgerTransactionRevision {
     try store.createTransaction(
-      .init(idempotencyKey: idempotencyKey, draft: draft, createdAt: createdAt)
+      .init(idempotencyKey: idempotencyKey, draft: draft, createdAt: createdAt, tags: tags)
     ).revision
+  }
+
+  public func createTag(_ tag: LedgerTag) throws {
+    try store.createTag(tag)
+  }
+
+  /// Renames or retires a tag. Stored links keep pointing at the same ID.
+  public func updateTag(_ tag: LedgerTag) throws {
+    try store.updateTag(tag)
+  }
+
+  public func saveTransactionTemplate(_ template: LedgerTransactionTemplate) throws {
+    try store.saveTransactionTemplate(template)
+  }
+
+  public func saveMemo(_ memo: LedgerMemo) throws {
+    try store.saveMemo(memo)
   }
 
   public func correctTransaction(
