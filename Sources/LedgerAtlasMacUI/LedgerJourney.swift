@@ -372,7 +372,8 @@ public final class LedgerJourney {
   public func createNativeTransfer(
     sourceAccountID: String, destinationAccountID: String,
     sourceAmountLiteral: String, destinationAmountLiteral: String?, rateLiteral: String?,
-    rateScale: Int = 6, feeAmountLiteral: String?, feeAccountID: String?, createdAt: UTCInstant
+    rateScale: Int = 10, feeAmountLiteral: String?, feeAccountID: String?, createdAt: UTCInstant,
+    submissionID: String? = nil
   ) throws -> (transfer: LedgerTransactionRevision, fee: LedgerTransactionRevision?) {
     guard application != nil, let snapshot,
       sourceAccountID != destinationAccountID,
@@ -393,14 +394,21 @@ public final class LedgerJourney {
       conversion = nil
     } else {
       guard let destinationLiteral = destinationAmountLiteral,
-        !destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-        let rateLiteral, !rateLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else { throw LedgerApplication.Error.invalidCommand }
       destinationAmount = try CurrencyAmount(
         unitCode: destination.currencyUnit, amount: ExactDecimal(destinationLiteral))
+      // The two amounts are the truth (what left, what arrived); the rate is derived from them
+      // unless a caller supplies one explicitly.
+      let trimmedRate = rateLiteral?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let rate =
+        trimmedRate.isEmpty
+        ? try LedgerConversion.impliedRate(
+          sourceAmount: sourceAmount, convertedAmount: destinationAmount, scale: rateScale)
+        : try ExactDecimal(trimmedRate)
       conversion = try LedgerConversion(
         sourceAmount: sourceAmount, convertedAmount: destinationAmount,
-        rate: ExactDecimal(rateLiteral), rateScale: rateScale, rounding: .halfEven)
+        rate: rate, rateScale: rateScale, rounding: .halfEven)
     }
     let fee: CurrencyAmount?
     if let feeLiteral = feeAmountLiteral,
@@ -418,10 +426,11 @@ public final class LedgerJourney {
       }
       fee = nil
     }
-    let key = SHA256.hash(
-      data: Data(
-        "mac-native-transfer:\(createdAt.epochMilliseconds):\(sourceAccountID):\(destinationAccountID):\(sourceAmountLiteral):\(destinationAmountLiteral ?? ""):\(rateLiteral ?? ""):\(feeAmountLiteral ?? ""):\(feeAccountID ?? "")".utf8)
-    ).map { String(format: "%02x", $0) }.joined()
+    let keyMaterial =
+      submissionID.map { "mac-native-transfer-submission:\($0)" }
+      ?? "mac-native-transfer:\(createdAt.epochMilliseconds):\(sourceAccountID):\(destinationAccountID):\(sourceAmountLiteral):\(destinationAmountLiteral ?? ""):\(rateLiteral ?? ""):\(feeAmountLiteral ?? ""):\(feeAccountID ?? "")"
+    let key = SHA256.hash(data: Data(keyMaterial.utf8)).map { String(format: "%02x", $0) }
+      .joined()
     return try createTransfer(
       idempotencyKey: key, sourceAccountID: sourceAccountID,
       destinationAccountID: destinationAccountID, sourceAmount: sourceAmount,
@@ -429,6 +438,20 @@ public final class LedgerJourney {
       feeAccountID: fee == nil ? nil : feeAccountID,
       occurredAt: try Self.nativeTemporal(for: createdAt), origin: try LedgerOrigin.macNative(),
       createdAt: createdAt)
+  }
+
+  /// "1 USD = 83.25 INR" for the transfer form, from the two typed amounts; nil until both parse.
+  package static func conversionPreview(
+    sourceLiteral: String, sourceUnit: String, destinationLiteral: String, destinationUnit: String
+  ) -> String? {
+    guard
+      let source = try? ExactDecimal(sourceLiteral.trimmingCharacters(in: .whitespacesAndNewlines)),
+      let destination = try? ExactDecimal(
+        destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines)),
+      source.isPositive, destination.isPositive,
+      let perUnit = try? destination.divided(by: source, scale: 6, rounding: .halfEven)
+    else { return nil }
+    return "1 \(sourceUnit) = \(perUnit.rawLiteral) \(destinationUnit)"
   }
 
   package static func localDate(for instant: UTCInstant, in timeZone: TimeZone) throws

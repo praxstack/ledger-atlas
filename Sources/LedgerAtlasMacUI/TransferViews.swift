@@ -13,7 +13,8 @@ struct TransferSurface: View {
   let isEditing: Bool
   let lastFailure: String?
   let beginEditing: () -> Void
-  let createTransfer: (String, String, String, String?, String?, String?, String?) -> Void
+  /// (submission ID, from, to, amount sent, amount received, fee, fee account).
+  let createTransfer: (String, String, String, String, String?, String?, String?) -> Void
   @State private var showingForm = false
 
   var body: some View {
@@ -54,9 +55,11 @@ struct TransferSurface: View {
     .sheet(isPresented: $showingForm) {
       NativeTransferForm(
         accounts: accounts, intent: intentRequest,
-        onSave: { sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID in
+        onSave: { submissionID, sourceID, destinationID, sourceAmount, destinationAmount, feeAmount,
+          feeAccountID in
           createTransfer(
-            sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID)
+            submissionID, sourceID, destinationID, sourceAmount, destinationAmount, feeAmount,
+            feeAccountID)
           if intentRequest?.kind == .addTransfer { consumeIntent() }
         })
     }
@@ -73,19 +76,20 @@ struct TransferSurface: View {
 struct NativeTransferForm: View {
   let accounts: [LedgerAccount]
   let intent: LedgerIntentRequest?
-  let onSave: (String, String, String, String?, String?, String?, String?) -> Void
+  let onSave: (String, String, String, String, String?, String?, String?) -> Void
   @Environment(\.dismiss) private var dismiss
+  @State private var submissionID = UUID().uuidString
+  @State private var isSaving = false
   @State private var sourceAccountID = ""
   @State private var destinationAccountID = ""
   @State private var sourceAmount = ""
   @State private var destinationAmount = ""
-  @State private var rate = ""
   @State private var feeAmount = ""
   @State private var feeAccountID: String?
 
   init(
     accounts: [LedgerAccount], intent: LedgerIntentRequest? = nil,
-    onSave: @escaping (String, String, String, String?, String?, String?, String?) -> Void
+    onSave: @escaping (String, String, String, String, String?, String?, String?) -> Void
   ) {
     self.accounts = accounts
     self.intent = intent
@@ -131,8 +135,20 @@ struct NativeTransferForm: View {
         if needsConversion {
           TextField("Amount received", text: $destinationAmount)
             .accessibilityLabel("Transfer amount received")
-          TextField("Exchange rate", text: $rate)
-            .accessibilityHint("Required when the account currencies differ.")
+          if let sourceUnit, let destinationUnit,
+            let preview = LedgerJourney.conversionPreview(
+              sourceLiteral: sourceAmount, sourceUnit: sourceUnit,
+              destinationLiteral: destinationAmount, destinationUnit: destinationUnit)
+          {
+            Text("Rate: \(preview)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .accessibilityLabel("Exchange rate \(preview)")
+          } else {
+            Text("The exchange rate is worked out from the two amounts.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         } else {
           Text("Destination amount equals the amount sent.")
             .font(.caption)
@@ -151,9 +167,9 @@ struct NativeTransferForm: View {
           Spacer()
           Button("Save") { save() }
             .disabled(
-              sourceAccountID.isEmpty || destinationAccountID.isEmpty
+              isSaving || sourceAccountID.isEmpty || destinationAccountID.isEmpty
                 || sourceAccountID == destinationAccountID || sourceAmount.isEmpty
-                || (needsConversion && (destinationAmount.isEmpty || rate.isEmpty))
+                || (needsConversion && destinationAmount.isEmpty)
                 || (!feeAmount.isEmpty && feeAccountID == nil))
         }
       }
@@ -174,13 +190,14 @@ struct NativeTransferForm: View {
   private func clearConversionIfSameUnit() {
     guard !needsConversion else { return }
     destinationAmount = ""
-    rate = ""
   }
 
   private func save() {
+    guard !isSaving else { return }
+    isSaving = true
     onSave(
-      sourceAccountID, destinationAccountID, sourceAmount,
-      needsConversion ? destinationAmount : nil, needsConversion ? rate : nil,
+      submissionID, sourceAccountID, destinationAccountID, sourceAmount,
+      needsConversion ? destinationAmount : nil,
       feeAmount.isEmpty ? nil : feeAmount, feeAmount.isEmpty ? nil : feeAccountID)
     dismiss()
   }

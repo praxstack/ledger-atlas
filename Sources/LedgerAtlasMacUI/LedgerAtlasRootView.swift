@@ -868,13 +868,16 @@ public struct LedgerAtlasRootView: View {
         consumeIntent: { pendingIntent = nil }, isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
-        createTransfer: { sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID in
+        createTransfer: {
+          submissionID, sourceID, destinationID, sourceAmount, destinationAmount, feeAmount,
+          feeAccountID in
           do {
             _ = try journey.createNativeTransfer(
               sourceAccountID: sourceID, destinationAccountID: destinationID,
               sourceAmountLiteral: sourceAmount, destinationAmountLiteral: destinationAmount,
-              rateLiteral: rate, feeAmountLiteral: feeAmount, feeAccountID: feeAccountID,
-              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+              rateLiteral: nil, feeAmountLiteral: feeAmount, feeAccountID: feeAccountID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+              submissionID: submissionID)
           } catch {
             journey.recordFailure("Transfer could not be saved.")
           }
