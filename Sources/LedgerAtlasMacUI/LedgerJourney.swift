@@ -515,6 +515,7 @@ public final class LedgerJourney {
     guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
       throw LedgerApplication.Error.invalidCommand
     }
+    try refuseWhenReceiptsArePresent()
     let exported = try exportPackage()
     let data = try LedgerPortablePackageFile.encode(
       manifest: exported.manifest, payload: exported.payload)
@@ -528,6 +529,10 @@ public final class LedgerJourney {
   }
 
   package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
+    if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
+      return
+        "Portable packages can't carry receipts yet, so this ledger wasn't exported. Use Save 1:1 backup to keep a full copy with its receipts."
+    }
     switch error as? LedgerApplication.Error {
     case .packageTooLarge:
       return
@@ -716,6 +721,9 @@ public final class LedgerJourney {
     -> (manifest: LedgerExportManifest, payload: Data)
   {
     if let store = try? LedgerStore.openReadOnly(at: source) {
+      guard try store.receiptAttachments().isEmpty else {
+        throw ReceiptAttachmentError.receiptsCannotTravelInPackages
+      }
       return try LedgerApplication(store: store).exportPackage()
     }
     let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
@@ -734,7 +742,17 @@ public final class LedgerJourney {
   public func previewMerge(
     _ incoming: (manifest: LedgerExportManifest, payload: Data)
   ) throws -> LedgerMergeSummary {
-    try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming).summary
+    try refuseWhenReceiptsArePresent()
+    return try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming)
+      .summary
+  }
+
+  /// Receipts don't travel in portable packages yet, so a ledger holding any can't be
+  /// exported as a package or merged.
+  private func refuseWhenReceiptsArePresent() throws {
+    if let store = mutableStore ?? openedStore, try !store.receiptAttachments().isEmpty {
+      throw ReceiptAttachmentError.receiptsCannotTravelInPackages
+    }
   }
 
   /// Merges `incoming` into a copy of the open ledger at `destination` and switches to it.
@@ -743,6 +761,7 @@ public final class LedgerJourney {
   public func mergeIntoNewLedger(
     _ incoming: (manifest: LedgerExportManifest, payload: Data), at destination: URL
   ) throws -> LedgerMergeSummary {
+    try refuseWhenReceiptsArePresent()
     let merged = try LedgerApplication.mergedPackage(
       current: try exportPackage(), incoming: incoming)
     try createLedger(from: (merged.manifest, merged.payload), at: destination)
@@ -777,6 +796,10 @@ public final class LedgerJourney {
     if case LedgerMergeError.conflictingHistory(let revisions) = error {
       return
         "The backup and the open ledger edited \(revisions) of the same transactions in different ways, so nothing was merged. Restore the backup as a separate ledger instead."
+    }
+    if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
+      return
+        "One of these ledgers holds receipts, which can be restored but not merged for now. Restore the backup as a separate ledger instead. Nothing was changed."
     }
     if case LedgerMergeError.importedHistory = error {
       return
@@ -871,6 +894,82 @@ public final class LedgerJourney {
     try application.saveMemo(memo)
     snapshot = try application.snapshot()
     lastFailure = nil
+  }
+
+  // MARK: Receipts
+
+  /// The open ledger's receipts, newest first. Metadata only; bytes load on demand.
+  public func receiptAttachments() throws -> [LedgerReceiptAttachment] {
+    guard let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try store.receiptAttachments().sorted {
+      ($0.createdAt.epochMilliseconds, $0.id) > ($1.createdAt.epochMilliseconds, $1.id)
+    }
+  }
+
+  /// One receipt's bytes, checked against its stored digest.
+  public func receiptBytes(_ receiptID: String) throws -> Data {
+    guard let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try store.receiptBytes(receiptID)
+  }
+
+  /// Copies a picked file into the ledger. The same image added twice is one receipt.
+  @discardableResult
+  public func addReceipt(
+    from source: URL, linkedTo transactionID: String? = nil, createdAt: UTCInstant
+  ) throws -> LedgerReceiptAttachment {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data = try ReceiptFiles.read(source)
+    return try store.addReceipt(
+      data, origin: LedgerOrigin.macNative(), linkedTo: transactionID, createdAt: createdAt)
+  }
+
+  /// Links a receipt to a transaction, or unlinks it with nil.
+  public func linkReceipt(_ receiptID: String, to transactionID: String?) throws {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    try store.linkReceipt(receiptID, to: transactionID)
+  }
+
+  /// Removes a receipt from the app. Its bytes stay in the ledger, so older backups and this
+  /// ledger's history still match; deleting forever is not part of v1.
+  public func removeReceipt(_ receiptID: String) throws {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    try store.tombstoneReceipt(receiptID)
+  }
+
+  /// The only path from a receipt to ledger data. The person reviews the amount, account and
+  /// category (text recognition may have suggested the amount) and confirms. This records one
+  /// expense and links the receipt to it. The submission ID keys the write, so confirming
+  /// twice records one expense.
+  public func createExpense(
+    fromReceipt receiptID: String, amountLiteral: String, accountID: String,
+    categoryID: String?, createdAt: UTCInstant, submissionID: String
+  ) throws -> LedgerTransactionRevision {
+    guard application != nil, let store = mutableStore,
+      try store.receiptAttachments().contains(where: {
+        $0.id == receiptID && $0.lifecycle == .active
+      })
+    else { throw LedgerApplication.Error.invalidCommand }
+    let revision = try createNativeTransaction(
+      amountLiteral: amountLiteral.trimmingCharacters(in: .whitespacesAndNewlines),
+      kind: .expense, accountID: accountID, categoryID: categoryID, note: nil,
+      createdAt: createdAt, submissionID: "receipt:\(submissionID)")
+    do {
+      try store.linkReceipt(receiptID, to: revision.transactionID)
+    } catch {
+      throw ReceiptAttachmentError.expenseRecordedButNotLinked
+    }
+    lastFailure = nil
+    return revision
   }
 
   /// Records one transaction from a template, dated today, carrying the template's tags.

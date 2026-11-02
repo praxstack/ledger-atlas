@@ -16,7 +16,7 @@ public struct CanonicalSchemaObject: Equatable, Sendable {
 }
 
 public enum CanonicalLedgerSchema {
-  public static let version = 12
+  public static let version = 13
   public static let applicationID: Int32 = 0x4C_41_54_31
 
   /// Exact v10 schema objects. Keep this array byte-for-byte stable: lifecycle authentication
@@ -525,12 +525,64 @@ public enum CanonicalLedgerSchema {
       """),
   ]
 
+  /// v13: receipt images kept inside the ledger, so a backup carries them exactly. Additive
+  /// only. A receipt may be unlinked (transaction_id NULL) or point at a ledger transaction,
+  /// an imported event or an imported transfer; the health check validates that, since one
+  /// foreign key cannot cover all three. sha256 and byte_count must match the bytes, which the
+  /// health check verifies when a ledger is opened. Only the link and the lifecycle can change,
+  /// and tombstoned is terminal. A tombstoned receipt keeps its bytes so a restore is exact.
+  /// No file name and no OCR text are stored.
+  private static let v13Objects: [CanonicalSchemaObject] = [
+    table(
+      "ledger_receipt_attachment",
+      """
+      CREATE TABLE ledger_receipt_attachment(
+        attachment_id TEXT PRIMARY KEY CHECK(length(attachment_id) = 64),
+        transaction_id TEXT CHECK(transaction_id IS NULL OR length(transaction_id) = 64),
+        sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+        byte_count INTEGER NOT NULL CHECK(byte_count BETWEEN 1 AND 26214400),
+        media_type TEXT NOT NULL CHECK(media_type IN ('image/jpeg', 'image/png', 'image/heic', 'application/pdf')),
+        bytes BLOB NOT NULL,
+        origin_id TEXT NOT NULL REFERENCES ledger_origin(origin_id),
+        created_at_milliseconds INTEGER NOT NULL,
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned'))
+      ) STRICT
+      """),
+    // The image and its digest never change once stored; only the link and lifecycle do.
+    trigger(
+      "ledger_receipt_attachment_content_immutable", on: "ledger_receipt_attachment",
+      """
+      CREATE TRIGGER ledger_receipt_attachment_content_immutable
+      BEFORE UPDATE OF attachment_id, sha256, byte_count, media_type, bytes, origin_id, created_at_milliseconds ON ledger_receipt_attachment
+      BEGIN
+        SELECT RAISE(ABORT, 'immutable receipt content');
+      END
+      """),
+    // Tombstoned is terminal: a removed receipt never changes again.
+    trigger(
+      "ledger_receipt_attachment_tombstone_terminal", on: "ledger_receipt_attachment",
+      """
+      CREATE TRIGGER ledger_receipt_attachment_tombstone_terminal
+      BEFORE UPDATE ON ledger_receipt_attachment
+      WHEN OLD.lifecycle = 'tombstoned'
+      BEGIN
+        SELECT RAISE(ABORT, 'tombstoned receipt');
+      END
+      """),
+    immutableDeleteTrigger("ledger_receipt_attachment"),
+  ]
+
+  /// Exact v12 schema objects, frozen when v13 was added. Do not derive new objects into this.
+  public static let legacyV12Objects = (legacyV11Objects + v12Objects).sorted {
+    ($0.type, $0.name) < ($1.type, $1.name)
+  }
+
   /// Exact v11 schema objects, frozen when v12 was added. Do not derive new objects into this.
   public static let legacyV11Objects = (legacyV10Objects + v11Objects).sorted {
     ($0.type, $0.name) < ($1.type, $1.name)
   }
 
-  public static let expectedObjects = (legacyV11Objects + v12Objects).sorted {
+  public static let expectedObjects = (legacyV12Objects + v13Objects).sorted {
     ($0.type, $0.name) < ($1.type, $1.name)
   }
 
@@ -582,13 +634,19 @@ public enum CanonicalLedgerSchema {
     v12Objects.filter { $0.type == "table" }.map(\.ddl)
     + v12Objects.filter { $0.type != "table" }.map(\.ddl)
 
+  /// Tables before the triggers that guard them.
+  public static let v12ToV13MigrationStatements =
+    v13Objects.filter { $0.type == "table" }.map(\.ddl)
+    + v13Objects.filter { $0.type != "table" }.map(\.ddl)
+
   public static func additiveMigrationStatements(fromVersion: Int) -> [String]? {
     switch fromVersion {
     case 8: v8ToV9MigrationStatements
     case 9: v9ToV10MigrationStatements
     case 10: v10ToV11MigrationStatements
     case 11: v11ToV12MigrationStatements
-    case 12: []
+    case 12: v12ToV13MigrationStatements
+    case 13: []
     default: nil
     }
   }
@@ -657,6 +715,26 @@ public enum CanonicalLedgerSchema {
     authenticatesImportedEvents: true, checksumQueries: legacyV11ChecksumQueries,
     metaRows: v12MetaRows(version: 11, fingerprint: legacyV11Fingerprint))
 
+  /// Released v12 identity. A literal, not derived, so a later schema edit cannot move it.
+  public static let legacyV12Fingerprint =
+    "c6b67526e3c6d26c430e9dbfbdcdb39bd0517172a0a50369e86ea94eb13b5355"
+
+  /// Released v12 checksum queries, frozen like its fingerprint.
+  public static let legacyV12ChecksumQueries =
+    legacyV11ChecksumQueries + [
+      "SELECT tag_id, name, origin_id, lifecycle FROM ledger_tag ORDER BY tag_id",
+      "SELECT revision_id, tag_id FROM ledger_revision_tag ORDER BY revision_id, tag_id",
+      "SELECT template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id, counter_account_id, origin_id, lifecycle FROM ledger_transaction_template ORDER BY template_id",
+      "SELECT template_id, tag_id FROM ledger_template_tag ORDER BY template_id, tag_id",
+      "SELECT memo_id, body, local_year, local_month, local_day, origin_id, lifecycle FROM ledger_memo ORDER BY memo_id",
+      "SELECT transfer_id, debit_event_id, credit_event_id FROM economic_event_transfer ORDER BY transfer_id",
+    ]
+
+  public static let legacyV12Release = SchemaRelease(
+    version: 12, fingerprint: legacyV12Fingerprint, objects: legacyV12Objects,
+    authenticatesImportedEvents: true, checksumQueries: legacyV12ChecksumQueries,
+    metaRows: v12MetaRows(version: 12, fingerprint: legacyV12Fingerprint))
+
   /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
   /// next step's `from`, and the last step ends at `currentRelease`.
   ///
@@ -672,7 +750,9 @@ public enum CanonicalLedgerSchema {
     LifecycleUpgradeStep(
       from: legacyV10Release, to: legacyV11Release, statements: v10ToV11MigrationStatements),
     LifecycleUpgradeStep(
-      from: legacyV11Release, to: currentRelease, statements: v11ToV12MigrationStatements),
+      from: legacyV11Release, to: legacyV12Release, statements: v11ToV12MigrationStatements),
+    LifecycleUpgradeStep(
+      from: legacyV12Release, to: currentRelease, statements: v12ToV13MigrationStatements),
   ]
 
   /// The released schema with this exact version and fingerprint that the lifecycle can upgrade,
@@ -736,17 +816,10 @@ public enum CanonicalLedgerSchema {
   ]
 
   public static let checksumQueries =
-    legacyV10ChecksumQueries + [
-      "SELECT idempotency_key, algorithm, signature FROM ledger_receipt_trust_anchor ORDER BY idempotency_key",
-      "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
-      "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
-      "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
-      "SELECT tag_id, name, origin_id, lifecycle FROM ledger_tag ORDER BY tag_id",
-      "SELECT revision_id, tag_id FROM ledger_revision_tag ORDER BY revision_id, tag_id",
-      "SELECT template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id, counter_account_id, origin_id, lifecycle FROM ledger_transaction_template ORDER BY template_id",
-      "SELECT template_id, tag_id FROM ledger_template_tag ORDER BY template_id, tag_id",
-      "SELECT memo_id, body, local_year, local_month, local_day, origin_id, lifecycle FROM ledger_memo ORDER BY memo_id",
-      "SELECT transfer_id, debit_event_id, credit_event_id FROM economic_event_transfer ORDER BY transfer_id",
+    legacyV12ChecksumQueries + [
+      // The image is covered by its sha256, which the health check verifies on open, so the
+      // checksum stays fast for large ledgers.
+      "SELECT attachment_id, transaction_id, sha256, byte_count, media_type, origin_id, created_at_milliseconds, lifecycle FROM ledger_receipt_attachment ORDER BY attachment_id",
     ]
 
   public static func normalizedDDL(_ ddl: String) -> String {

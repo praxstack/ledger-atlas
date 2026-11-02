@@ -5,8 +5,10 @@ import Testing
 
 @testable import MMImport
 
-/// v12 tables, children first, so tests can rebuild an older store shape.
-private let v12AnnotationTables = [
+/// Tables added after v11 (v13 first, then v12, children first), so tests can rebuild an
+/// older store shape. Dropping a table drops its triggers too.
+private let tablesAddedAfterV11 = [
+  "ledger_receipt_attachment",
   "ledger_revision_tag", "ledger_template_tag", "ledger_transaction_template", "ledger_memo",
   "ledger_tag", "economic_event_transfer",
 ]
@@ -50,7 +52,7 @@ struct AtomicCanonicalCommitTests {
         ] {
           try executeTestSQL(database, "DROP TRIGGER \(trigger)")
         }
-        for table in v12AnnotationTables + [
+        for table in tablesAddedAfterV11 + [
           "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
           "ledger_receipt_trust_anchor",
           "ledger_transaction_link", "ledger_transaction_source_literal",
@@ -87,7 +89,7 @@ struct AtomicCanonicalCommitTests {
       let committer = SQLiteCanonicalCommitter()
       _ = try committer.commit(fixture.request)
       try withDatabase(fixture.request.canonicalDatabaseURL) { database in
-        for table in v12AnnotationTables + [
+        for table in tablesAddedAfterV11 + [
           "ledger_account_preferences", "ledger_account_group", "ledger_category_tree",
           "ledger_receipt_trust_anchor",
         ] {
@@ -124,7 +126,7 @@ struct AtomicCanonicalCommitTests {
       let committer = SQLiteCanonicalCommitter()
       _ = try committer.commit(fixture.request)
       try withDatabase(fixture.request.canonicalDatabaseURL) { database in
-        for table in v12AnnotationTables {
+        for table in tablesAddedAfterV11 {
           try executeTestSQL(database, "DROP TABLE \(table)")
         }
         try executeTestSQL(
@@ -143,7 +145,7 @@ struct AtomicCanonicalCommitTests {
           database,
           "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_tag','ledger_revision_tag','ledger_transaction_template','ledger_template_tag','ledger_memo','economic_event_transfer')"
         )
-        #expect(version == "12")
+        #expect(version == String(CanonicalLedgerSchema.version))
         #expect(annotationCount == "6")
       }
     }

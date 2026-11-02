@@ -394,6 +394,7 @@ public struct LedgerAtlasRootView: View {
     panel.prompt = "Export"
     panel.allowedContentTypes = [Self.xlsxType]
     panel.nameFieldStringValue = "ledger-atlas.xlsx"
+    panel.message = "Receipt images aren't included in the workbook. Save 1:1 backup keeps them."
     guard panel.runModal() == .OK, let url = panel.url else { return }
     do {
       try journey.exportXLSX(to: url)
@@ -666,7 +667,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   package static let resetExplanation =
-    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans and memos. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
+    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans, memos and receipts. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
 
   package static func currentLedgerName(_ journey: LedgerJourney) -> String {
     journey.ledgerURL?.deletingPathExtension().lastPathComponent ?? "Ledger"
@@ -1186,7 +1187,7 @@ public struct LedgerAtlasRootView: View {
       )
       .id(selection)
     } else if selection == .receipts {
-      ReceiptSurface()
+      ReceiptSurface(journey: journey)
         .id(selection)
     } else if selection == .localAccess {
       LocalAccessSurface(
