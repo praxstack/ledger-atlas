@@ -45,8 +45,11 @@ public enum MoneyManagerV19Semantics {
   /// category row. Owner-described and data-backed on 2026-11-01; see
   /// docs/compatibility/money-manager-v19-schema-contract.md.
   public static let balanceEditCategoryUID = "-4"
-  /// The decrease side of a balance edit. Admitted only together with `balanceEditCategoryUID`.
-  public static let balanceDecreaseType = "7"
+  /// A balance increase the user chose not to record as income ("No" on the app's prompt).
+  /// It moves the balance but is left out of income totals, so it maps to an adjustment.
+  /// Admitted only together with `balanceEditCategoryUID`. Proven on the 2026-11-02 test backup:
+  /// account balances only reconcile when type 7 adds money.
+  public static let balanceIncreaseType = "7"
 
   public struct RetainedField: Sendable {
     public let semantic: CanonicalEventSourceSemantic
@@ -182,7 +185,8 @@ public enum MoneyManagerV19Semantics {
       event.accountID
         == (try? StableCanonicalID.account(profileID: profileID, sourceAccountID: accountLiteral)),
       (kindLiteral == "0" && event.kind == .income)
-        || ((kindLiteral == "1" || kindLiteral == balanceDecreaseType) && event.kind == .expense),
+        || (kindLiteral == "1" && event.kind == .expense)
+        || (kindLiteral == balanceIncreaseType && event.kind == .adjustment),
       let observedLocal = observedLocalDateTime(occurredLiteral),
       observedLocal == event.occurredAt.localDateTime,
       event.occurredAt.timeZone.fixedOffsetSeconds == nil

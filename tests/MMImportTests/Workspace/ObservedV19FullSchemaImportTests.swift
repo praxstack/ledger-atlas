@@ -31,11 +31,12 @@ struct ObservedV19FullSchemaImportTests {
       let handle = try #require(preparation.preparedHandle)
       let result = try workspace.commit(handle, approval: workspace.approve(handle))
 
-      // income, expense, balance increase (type 0, category -4), balance decrease (type 7, -4).
-      // The two transfer legs stay preserved until transfers map as one two-leg transaction.
+      // income, expense, balance edits recorded as income (0, -4) and expense (1, -4), and a
+      // balance increase left out of income (7, -4) as an adjustment. The balance decrease left
+      // out of expenses (8, -4) and the transfer legs stay preserved for now.
       #expect(result.status == .committed)
-      #expect(result.eventCount == 4)
-      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 4)
+      #expect(result.eventCount == 5)
+      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 5)
       #expect(try Data(contentsOf: source) == sourceBefore)
 
       let retry = try workspace.prepare(
@@ -46,12 +47,12 @@ struct ObservedV19FullSchemaImportTests {
       let retryHandle = try #require(retry.preparedHandle)
       let second = try workspace.commit(retryHandle, approval: workspace.approve(retryHandle))
       #expect(second.status == .unchanged)
-      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 4)
+      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 5)
     }
   }
 
-  @Test("balance decrease maps to an expense only with the built-in balance-edit category")
-  func balanceDecreaseNeedsBuiltInCategory() throws {
+  @Test("type 7 maps to an adjustment only with the built-in balance-edit category")
+  func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
     #expect(
       MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "cat-food")
@@ -61,8 +62,11 @@ struct ObservedV19FullSchemaImportTests {
     #expect(
       MoneyManagerV19Vocabulary.reason(forType: "3", categoryUID: "-4")
         == .transferDirectionUnproven)
-    #expect(MoneyManagerV19Vocabulary.isExpenseType("7"))
-    #expect(!MoneyManagerV19Vocabulary.isExpenseType("0"))
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "0") == .income)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "1") == .expense)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "7") == .adjustment)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "8") == nil)
+    #expect(MoneyManagerV19Vocabulary.reason(forType: "8", categoryUID: "-4") != nil)
     #expect(MoneyManagerV19Vocabulary.categoryResolves("-4", known: []))
     #expect(!MoneyManagerV19Vocabulary.categoryResolves("missing", known: ["cat-food"]))
   }
@@ -100,8 +104,12 @@ private func writeFullSchemaBackup(to url: URL) throws {
          '1738547260000', '2025-02-03', 'synthetic', '', '0', 'cur-main', 1738547260000),
         ('tx-balance-up', 'acct-a', '-4', NULL, NULL, '0', '3.00', '3.00', 3.0,
          '1738547320000', '2025-02-03', 'Difference', '', '0', 'cur-main', 1738547320000),
-        ('tx-balance-down', 'acct-b', '-4', NULL, NULL, '7', '2.00', '2.00', 2.0,
+        ('tx-balance-down', 'acct-b', '-4', NULL, NULL, '1', '2.00', '2.00', 2.0,
          '1738547380000', '2025-02-03', 'Difference', '', '0', 'cur-main', 1738547380000),
+        ('tx-balance-up-quiet', 'acct-b', '-4', NULL, NULL, '7', '4.00', '4.00', 4.0,
+         '1738547390000', '2025-02-03', 'Difference', '', '0', 'cur-main', 1738547390000),
+        ('tx-balance-down-quiet', 'acct-a', '-4', NULL, NULL, '8', '1.00', '1.00', 1.0,
+         '1738547395000', '2025-02-03', 'Difference', '', '0', 'cur-main', 1738547395000),
         ('tx-transfer-out', 'acct-a', NULL, 'acct-b', 'grp-1', '3', '40.00', '40.00', 40.0,
          '1738547440000', '2025-02-03', '', '', '0', 'cur-main', 1738547440000),
         ('tx-transfer-in', 'acct-b', NULL, 'acct-a', 'grp-1', '4', '40.00', '40.00', 40.0,

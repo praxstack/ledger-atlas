@@ -133,8 +133,7 @@ enum MoneyManagerV19ObservedGraph {
           event.accountID
             == (try? StableCanonicalID.account(
               profileID: request.expectedManifest.profileID, sourceAccountID: accountUID)),
-          (type == "0" && event.kind == .income)
-            || (MoneyManagerV19Vocabulary.isExpenseType(type) && event.kind == .expense),
+          MoneyManagerV19Vocabulary.eventKind(forType: type)?.canonical == event.kind,
           event.occurredAt.precision == .millisecond,
           observedLocalDateTime(zdate) == event.occurredAt.localDateTime,
           observedDay(wdate) == event.occurredAt.localDay
