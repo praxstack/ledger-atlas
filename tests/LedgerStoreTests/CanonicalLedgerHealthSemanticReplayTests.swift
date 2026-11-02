@@ -29,7 +29,7 @@ func legacyV19ReceiptWithoutCommitmentRemainsReadable() throws {
 
 @Test("an authenticated v19 backup reopens on the same Mac with its external trust key")
 func authenticatedV19BackupReopensOnSameDevice() throws {
-  try withPersistedV19Ledger(version: 11) { url, _ in
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
     let source = try LedgerStore.openReadOnly(at: url)
     let destination = url.deletingLastPathComponent().appendingPathComponent("backup.sqlite")
     try source.backupCanonicalDatabase(to: destination)
@@ -40,7 +40,7 @@ func authenticatedV19BackupReopensOnSameDevice() throws {
 
 @Test("current v11 receipt verification rejects a missing external trust key")
 func currentV11RejectsMissingExternalTrustKey() throws {
-  try withPersistedV19Ledger(version: 11) { url, _ in
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
     try withSQLite(url) { database in
       #expect(!CanonicalLedgerHealth.isHealthy(database, trustKey: nil))
     }
@@ -49,7 +49,7 @@ func currentV11RejectsMissingExternalTrustKey() throws {
 
 @Test("current v11 receipt verification rejects a replacement signer key")
 func currentV11RejectsReplacementSignerKey() throws {
-  try withPersistedV19Ledger(version: 11) { url, fixture in
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
     guard
       let originalKey = try LedgerReceiptTrust.key(
         for: url, create: false, stableIdentity: fixture.receiptID)
@@ -153,7 +153,7 @@ func legacyReceiptTrustKeyMigratesToCurrentNamespace() throws {
 
 @Test("a current v11 ledger cannot be downgraded to the legacy v19 receipt generation")
 func currentV11RejectsLegacyReceiptGenerationDowngrade() throws {
-  try withPersistedV19Ledger(version: 11) { url, fixture in
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
     try mutateAndRehash(
       at: url, fixture: fixture,
       sql: """
@@ -783,7 +783,7 @@ private func withPersistedV19Ledger(
   version: Int, includeCommitment: Bool = true,
   _ body: (URL, V19Fixture) throws -> Void
 ) throws {
-  guard version == 10 || version == 11 else { throw ReplayError.sqlite }
+  guard version == 10 || version == CanonicalLedgerSchema.version else { throw ReplayError.sqlite }
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
@@ -813,7 +813,9 @@ private func materializeCurrentV19Fixture(at url: URL, fixture: V19Fixture) thro
     sourceRecordID: sourceRecordID, fieldIDs: fieldIDs)
   try withSQLite(url) { database in
     try execute(database, "BEGIN IMMEDIATE;")
-    for statement in CanonicalLedgerSchema.v10ToV11MigrationStatements {
+    for statement in CanonicalLedgerSchema.v10ToV11MigrationStatements
+      + CanonicalLedgerSchema.v11ToV12MigrationStatements
+    {
       try execute(database, statement)
     }
     let revisionID = try StableLedgerID.revision(transactionID: fixture.eventID, revision: 1)
@@ -824,7 +826,7 @@ private func materializeCurrentV19Fixture(at url: URL, fixture: V19Fixture) thro
         '\(MoneyManagerV19Semantics.sourceSubjectSetField)', \(quote(sourceSubjectSet)), NULL);
       INSERT INTO ledger_transaction_source_literal VALUES (\(quote(revisionID)), 5,
         '\(MoneyManagerV19Semantics.sourceTimeZoneField)', 'fixed:0', NULL);
-      UPDATE ledger_meta SET value='11' WHERE key='schema_version';
+      UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.version)' WHERE key='schema_version';
       UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.fingerprint)' WHERE key='schema_fingerprint';
       """)
     let integrity = try fixture.reconciliationHash()

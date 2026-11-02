@@ -47,7 +47,12 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.lifecycleLegacyRelease(
         version: 10, fingerprint: CanonicalLedgerSchema.legacyV10Fingerprint))
     #expect(v10 == CanonicalLedgerSchema.legacyV10Release)
-    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v10)?.count == 1)
+    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v10)?.count == 2)
+    let v11 = try #require(
+      CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: 11, fingerprint: CanonicalLedgerSchema.legacyV11Fingerprint))
+    #expect(v11 == CanonicalLedgerSchema.legacyV11Release)
+    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v11)?.count == 1)
     #expect(
       CanonicalLedgerSchema.lifecycleLegacyRelease(
         version: 10, fingerprint: CanonicalLedgerSchema.legacyV8Fingerprint) == nil)
@@ -67,7 +72,7 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.legacyV8Fingerprint
         == "f5526a4621eeb0e780851c3b50444d0c387f48ea953f1c1860da3204c8db91dc")
     #expect(CanonicalLedgerSchema.legacyV8Fingerprint != CanonicalLedgerSchema.fingerprint)
-    #expect(CanonicalLedgerSchema.version == 11)
+    #expect(CanonicalLedgerSchema.version == 12)
     #expect(
       CanonicalLedgerSchema.legacyV10Fingerprint
         == "aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926")
@@ -75,8 +80,15 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV10Objects)
         == CanonicalLedgerSchema.legacyV10Fingerprint)
     #expect(CanonicalLedgerSchema.legacyV10Objects.count == 31)
-    #expect(CanonicalLedgerSchema.expectedObjects.count == 35)
-    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 35)
+    #expect(
+      CanonicalLedgerSchema.legacyV11Fingerprint
+        == "513702f73c663ad72e0af52304e9f4eabf3ba31aafae259abdbd3d0f74d73fc4")
+    #expect(
+      CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV11Objects)
+        == CanonicalLedgerSchema.legacyV11Fingerprint)
+    #expect(CanonicalLedgerSchema.legacyV11Objects.count == 35)
+    #expect(CanonicalLedgerSchema.expectedObjects.count == 42)
+    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 42)
     #expect(
       Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).isSuperset(of: [
         "receipt_preservation_anchor", "receipt_preservation_payload",
@@ -85,6 +97,8 @@ struct CanonicalPersistenceModelsTests {
         "ledger_transaction_revision", "ledger_transaction_effect",
         "ledger_transaction_source_literal", "ledger_transaction_link",
         "ledger_category_tree", "ledger_account_group", "ledger_account_preferences",
+        "ledger_tag", "ledger_revision_tag", "ledger_transaction_template",
+        "ledger_template_tag", "ledger_memo",
       ]))
     #expect(
       CanonicalLedgerSchema.creationStatements.allSatisfy {
@@ -108,7 +122,11 @@ struct CanonicalPersistenceModelsTests {
     #expect(
       CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 10)
         == CanonicalLedgerSchema.v10ToV11MigrationStatements)
-    #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 11) == [])
+    #expect(CanonicalLedgerSchema.v11ToV12MigrationStatements.count == 7)
+    #expect(
+      CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 11)
+        == CanonicalLedgerSchema.v11ToV12MigrationStatements)
+    #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 12) == [])
     #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 7) == nil)
     #expect(migration.allSatisfy { $0.localizedCaseInsensitiveContains("CREATE") })
     #expect(migration.allSatisfy { !$0.localizedCaseInsensitiveContains("ALTER TABLE") })
@@ -122,6 +140,27 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.legacyV8Objects.allSatisfy {
         !$0.name.hasPrefix("ledger_") || $0.name == "ledger_meta"
       })
+  }
+
+  @Test("v12 adds tags, templates and memos as new tables only")
+  func v12Annotations() {
+    let objects = Dictionary(
+      uniqueKeysWithValues: CanonicalLedgerSchema.expectedObjects.map { ($0.name, $0.ddl) })
+    #expect(CanonicalLedgerSchema.legacyV11Objects.allSatisfy {
+      CanonicalLedgerSchema.expectedObjects.contains($0)
+    })
+    let migration = CanonicalLedgerSchema.v11ToV12MigrationStatements
+    #expect(migration.allSatisfy { $0.hasPrefix("CREATE") })
+    #expect(migration.prefix(5).allSatisfy { $0.hasPrefix("CREATE TABLE") })
+    #expect((objects["ledger_tag"] ?? "").contains("lifecycle IN ('active', 'tombstoned')"))
+    #expect((objects["ledger_revision_tag"] ?? "").contains("PRIMARY KEY(revision_id, tag_id)"))
+    #expect(objects["ledger_revision_tag_immutable_update"] != nil)
+    #expect(objects["ledger_revision_tag_immutable_delete"] != nil)
+    let template = objects["ledger_transaction_template"] ?? ""
+    #expect(template.contains("kind IN ('income', 'expense', 'transfer')"))
+    #expect(template.contains("CHECK(kind != 'transfer' OR category_id IS NULL)"))
+    #expect((objects["ledger_template_tag"] ?? "").contains("PRIMARY KEY(template_id, tag_id)"))
+    #expect((objects["ledger_memo"] ?? "").contains("local_month BETWEEN 1 AND 12"))
   }
 
   @Test("v11 adds category-tree and account-organization storage without changing v10 objects")

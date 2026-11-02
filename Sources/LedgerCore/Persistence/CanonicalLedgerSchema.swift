@@ -16,7 +16,7 @@ public struct CanonicalSchemaObject: Equatable, Sendable {
 }
 
 public enum CanonicalLedgerSchema {
-  public static let version = 11
+  public static let version = 12
   public static let applicationID: Int32 = 0x4C_41_54_31
 
   /// Exact v10 schema objects. Keep this array byte-for-byte stable: lifecycle authentication
@@ -441,7 +441,84 @@ public enum CanonicalLedgerSchema {
       """),
   ]
 
-  public static let expectedObjects = (legacyV10Objects + v11Objects).sorted {
+  /// Tags, transaction templates and standalone memos (T1). Additive only.
+  ///
+  /// Revision tag links are immutable like every other part of a revision: a correction writes
+  /// a new revision with its own links. Template tag links are replaced when a template is
+  /// edited. Unique active tag names compare case- and composition-insensitively, which SQLite
+  /// cannot express, so the store and the health check enforce that rule.
+  private static let v12Objects: [CanonicalSchemaObject] = [
+    table(
+      "ledger_tag",
+      """
+      CREATE TABLE ledger_tag(
+        tag_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        origin_id TEXT NOT NULL REFERENCES ledger_origin(origin_id),
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned'))
+      ) STRICT
+      """),
+    table(
+      "ledger_revision_tag",
+      """
+      CREATE TABLE ledger_revision_tag(
+        revision_id TEXT NOT NULL REFERENCES ledger_transaction_revision(revision_id),
+        tag_id TEXT NOT NULL REFERENCES ledger_tag(tag_id),
+        PRIMARY KEY(revision_id, tag_id)
+      ) STRICT
+      """),
+    immutableUpdateTrigger("ledger_revision_tag"),
+    immutableDeleteTrigger("ledger_revision_tag"),
+    table(
+      "ledger_transaction_template",
+      """
+      CREATE TABLE ledger_transaction_template(
+        template_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('income', 'expense', 'transfer')),
+        category_id TEXT REFERENCES ledger_category(category_id),
+        amount_literal TEXT NOT NULL,
+        currency_unit TEXT NOT NULL,
+        note TEXT,
+        account_id TEXT NOT NULL REFERENCES ledger_account(account_id),
+        counter_account_id TEXT REFERENCES ledger_account(account_id),
+        origin_id TEXT NOT NULL REFERENCES ledger_origin(origin_id),
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned')),
+        CHECK((kind = 'transfer') = (counter_account_id IS NOT NULL)),
+        CHECK(kind != 'transfer' OR category_id IS NULL),
+        CHECK(counter_account_id IS NULL OR counter_account_id != account_id)
+      ) STRICT
+      """),
+    table(
+      "ledger_template_tag",
+      """
+      CREATE TABLE ledger_template_tag(
+        template_id TEXT NOT NULL REFERENCES ledger_transaction_template(template_id),
+        tag_id TEXT NOT NULL REFERENCES ledger_tag(tag_id),
+        PRIMARY KEY(template_id, tag_id)
+      ) STRICT
+      """),
+    table(
+      "ledger_memo",
+      """
+      CREATE TABLE ledger_memo(
+        memo_id TEXT PRIMARY KEY,
+        body TEXT NOT NULL,
+        local_year INTEGER NOT NULL,
+        local_month INTEGER NOT NULL CHECK(local_month BETWEEN 1 AND 12),
+        local_day INTEGER NOT NULL CHECK(local_day BETWEEN 1 AND 31),
+        origin_id TEXT NOT NULL REFERENCES ledger_origin(origin_id),
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned'))
+      ) STRICT
+      """),
+  ]
+
+  /// Exact v11 schema objects, frozen when v12 was added. Do not derive new objects into this.
+  public static let legacyV11Objects = (legacyV10Objects + v11Objects).sorted {
+    ($0.type, $0.name) < ($1.type, $1.name)
+  }
+
+  public static let expectedObjects = (legacyV11Objects + v12Objects).sorted {
     ($0.type, $0.name) < ($1.type, $1.name)
   }
 
@@ -488,12 +565,18 @@ public enum CanonicalLedgerSchema {
 
   public static let v10ToV11MigrationStatements = v11Objects.map(\.ddl)
 
+  /// Tables before the triggers that guard them.
+  public static let v11ToV12MigrationStatements =
+    v12Objects.filter { $0.type == "table" }.map(\.ddl)
+    + v12Objects.filter { $0.type != "table" }.map(\.ddl)
+
   public static func additiveMigrationStatements(fromVersion: Int) -> [String]? {
     switch fromVersion {
     case 8: v8ToV9MigrationStatements
     case 9: v9ToV10MigrationStatements
     case 10: v10ToV11MigrationStatements
-    case 11: []
+    case 11: v11ToV12MigrationStatements
+    case 12: []
     default: nil
     }
   }
@@ -526,6 +609,14 @@ public enum CanonicalLedgerSchema {
     version: 10, fingerprint: legacyV10Fingerprint, objects: legacyV10Objects,
     authenticatesImportedEvents: false)
 
+  /// Released v11 identity. A literal, not derived, so a later schema edit cannot move it.
+  public static let legacyV11Fingerprint =
+    "513702f73c663ad72e0af52304e9f4eabf3ba31aafae259abdbd3d0f74d73fc4"
+
+  public static let legacyV11Release = SchemaRelease(
+    version: 11, fingerprint: legacyV11Fingerprint, objects: legacyV11Objects,
+    authenticatesImportedEvents: true)
+
   /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
   /// next step's `from`, and the last step ends at `currentRelease`.
   ///
@@ -536,7 +627,9 @@ public enum CanonicalLedgerSchema {
   /// still pass that way.
   public static let lifecycleUpgradeSteps: [LifecycleUpgradeStep] = [
     LifecycleUpgradeStep(
-      from: legacyV10Release, to: currentRelease, statements: v10ToV11MigrationStatements)
+      from: legacyV10Release, to: legacyV11Release, statements: v10ToV11MigrationStatements),
+    LifecycleUpgradeStep(
+      from: legacyV11Release, to: currentRelease, statements: v11ToV12MigrationStatements),
   ]
 
   /// The released schema with this exact version and fingerprint that the lifecycle can upgrade,
@@ -605,6 +698,11 @@ public enum CanonicalLedgerSchema {
       "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
       "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
       "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
+      "SELECT tag_id, name, origin_id, lifecycle FROM ledger_tag ORDER BY tag_id",
+      "SELECT revision_id, tag_id FROM ledger_revision_tag ORDER BY revision_id, tag_id",
+      "SELECT template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id, counter_account_id, origin_id, lifecycle FROM ledger_transaction_template ORDER BY template_id",
+      "SELECT template_id, tag_id FROM ledger_template_tag ORDER BY template_id, tag_id",
+      "SELECT memo_id, body, local_year, local_month, local_day, origin_id, lifecycle FROM ledger_memo ORDER BY memo_id",
     ]
 
   public static func normalizedDDL(_ ddl: String) -> String {
