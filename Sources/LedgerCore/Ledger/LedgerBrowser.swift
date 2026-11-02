@@ -67,6 +67,10 @@ public struct LedgerBrowseEntry: Identifiable, Equatable, Sendable {
   public let indicators: [LedgerBrowseIndicator]
   /// Tags on the current revision, sorted by ID.
   public let tagIDs: [String]
+  /// For a cross-currency transfer: what arrived, the recorded rate and its rounding, read
+  /// from the stored literals (for example "received 8325.50 INR, rate 0.0120112906 USD per
+  /// INR, rounding halfEven"). Nil for everything else.
+  public let conversion: String?
   /// Lowercased text the search box matches against.
   let searchText: String
 }
@@ -141,13 +145,15 @@ public struct LedgerBrowser: Sendable {
         words.append(name)
       }
       let tagIDs = revisionTags[revision.id]?.tagIDs ?? []
+      let conversion = Self.conversionSummary(draft)
       words += tagIDs.compactMap { tagNames[$0] }
       built.append(
         LedgerBrowseEntry(
           id: transaction.id, occurredAt: draft.occurredAt.localDateTime, kind: draft.kind,
           lifecycle: revision.lifecycle, amount: first.amount, note: draft.note,
           categoryID: draft.categoryID, accountIDs: accountIDs, revision: revision.revision,
-          indicators: indicators, tagIDs: tagIDs, searchText: words.joined(separator: " ").lowercased()))
+          indicators: indicators, tagIDs: tagIDs, conversion: conversion,
+          searchText: words.joined(separator: " ").lowercased()))
     }
     built.sort { lhs, rhs in
       lhs.occurredAt != rhs.occurredAt ? lhs.occurredAt > rhs.occurredAt : lhs.id < rhs.id
@@ -157,6 +163,20 @@ public struct LedgerBrowser: Sendable {
     positions.reserveCapacity(built.count)
     for (index, entry) in built.enumerated() { positions[entry.id] = index }
     positionByID = positions
+  }
+
+  static func conversionSummary(_ draft: LedgerTransactionDraft) -> String? {
+    func literal(_ field: String) -> String? {
+      draft.sourceLiterals.first(where: { $0.field == field })?.literal
+    }
+    guard draft.kind == .transfer, let rate = literal("conversion.rate"),
+      let sourceUnit = literal("conversion.sourceUnit"),
+      let convertedUnit = literal("conversion.convertedUnit"),
+      let converted = literal("conversion.convertedAmount")
+    else { return nil }
+    var parts = ["received \(converted) \(convertedUnit)", "rate \(rate) \(sourceUnit) per \(convertedUnit)"]
+    if let rounding = literal("conversion.rounding") { parts.append("rounding \(rounding)") }
+    return parts.joined(separator: ", ")
   }
 
   public func entry(id: String) -> LedgerBrowseEntry? {
