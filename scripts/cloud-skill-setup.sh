@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# cloud-skill-setup.sh  v2.0.0
+# cloud-skill-setup.sh  v2.0.1
 # Skills and tools for Claude Code cloud sessions (claude.ai/code environments).
 #
 # Runs with no agent and no questions. Every source is pinned. Downloads run in
@@ -56,7 +56,7 @@ if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
   exit 0
 fi
 
-SETUP_VERSION="2.0.0"
+SETUP_VERSION="2.0.1"
 
 # ---------- settings ----------------------------------------------------------
 
@@ -376,6 +376,7 @@ declare -gA JOB_PID=()
 bg() {  # bg NAME FUNCTION
   local name="$1" fn="$2"
   (
+    exec 9>&-   # do not pass the run lock to jobs; a leftover daemon would hold it
     LOG="$JOBS/$name.log"; : >"$LOG"
     t0="$(date +%s)"
     "$fn"; rc=$?
