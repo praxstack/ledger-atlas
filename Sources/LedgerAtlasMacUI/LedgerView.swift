@@ -6,24 +6,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LedgerView: View {
-  private enum ViewMode: String, CaseIterable, Identifiable {
-    case daily, calendar, monthly, total, note
-
-    var id: Self { self }
-
-    var title: String {
-      switch self {
-      case .daily: "Daily"
-      case .calendar: "Calendar"
-      case .monthly: "Monthly"
-      case .total: "Total"
-      case .note: "Note"
-      }
-    }
-  }
-
   let state: LedgerSession.State
-  let rows: [LedgerJourney.SurfaceRow]
   let isEditing: Bool
   let accounts: [LedgerAccount]
   let categories: [LedgerCategory]
@@ -48,55 +31,11 @@ struct LedgerView: View {
   @State private var macAmountLiteral = ""
   @State private var showingTransactionForm = false
   @State private var showingSplitForm = false
-  @State private var viewMode: ViewMode = .daily
-  @State private var page = 0
-
-  private let pageSize = 100
-
-  private var transactionByID: [String: LedgerTransactionSnapshot] {
-    Dictionary(uniqueKeysWithValues: transactions.map { ($0.id, $0) })
-  }
-
-  private var filteredRows: [LedgerJourney.SurfaceRow] {
-    let candidates = rows.filter { !splitTransactionIDs.contains($0.id) }
-    guard viewMode == .note else { return candidates }
-    return candidates.filter { transactionByID[$0.id]?.currentRevision.draft.note != nil }
-  }
-
-  private var pagedRows: [LedgerJourney.SurfaceRow] {
-    let start = min(page * pageSize, filteredRows.count)
-    return Array(filteredRows.dropFirst(start).prefix(pageSize))
-  }
-
-  private var groupedRows: [(String, [LedgerJourney.SurfaceRow])] {
-    let grouped = Dictionary(grouping: pagedRows) { row in
-      guard let transaction = transactionByID[row.id] else { return "Undated" }
-      let date = transaction.currentRevision.draft.occurredAt.localDateTime.date
-      switch viewMode {
-      case .monthly:
-        return String(format: "%04d-%02d", date.year, date.month)
-      case .total:
-        return "All transactions"
-      case .daily, .calendar, .note:
-        return String(format: "%04d-%02d-%02d", date.year, date.month, date.day)
-      }
-    }
-    return grouped.keys.sorted(by: >).map { ($0, grouped[$0] ?? []) }
-  }
 
   var body: some View {
     Group {
-      if !rows.isEmpty {
+      if !transactions.isEmpty {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Ledger view", selection: $viewMode) {
-            ForEach(ViewMode.allCases) { mode in
-              Text(mode.title).tag(mode)
-            }
-          }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 16)
-          .accessibilityLabel("Ledger view")
-          .onChange(of: viewMode) { _, _ in page = 0 }
           if let splitNotice {
             Text(splitNotice)
               .font(.caption)
@@ -104,63 +43,10 @@ struct LedgerView: View {
               .padding(.horizontal, 16)
               .accessibilityLabel(splitNotice)
           }
-          List(selection: $selectedID) {
-            ForEach(groupedRows, id: \.0) { title, sectionRows in
-              Section(title) {
-                ForEach(sectionRows) { row in
-                  VStack(alignment: .leading, spacing: 4) {
-                    Text(row.title)
-                    Text(row.detail).font(.caption).foregroundStyle(.secondary)
-                  }
-                  .tag(row.id)
-                  .contextMenu {
-                    Button("Copy transaction") { copy(row.id) }
-                    Button("Close transaction", role: .destructive) { tombstone(row.id) }
-                  }
-                }
-              }
-            }
-            ForEach(splitPurchases, id: \.id) { purchase in
-              DisclosureGroup {
-                ForEach(purchase.lines, id: \.id) { line in
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(line.description ?? "Split line")
-                    Text("Category \(line.categoryID) · \(line.amount.amount.rawLiteral) \(line.amount.unitCode)")
-                      .font(.caption)
-                      .foregroundStyle(.secondary)
-                  }
-                  .accessibilityElement(children: .combine)
-                  .accessibilityLabel(
-                    "\(line.description ?? "Split line"), category \(line.categoryID), \(line.amount.amount.rawLiteral) \(line.amount.unitCode)"
-                  )
-                }
-              } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                  Text("Split purchase")
-                  Text("\(purchase.parentAmount.amount.rawLiteral) \(purchase.parentAmount.unitCode) · \(purchase.lines.count) categories")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-              }
-              .accessibilityLabel(
-                "Split purchase, \(purchase.parentAmount.amount.rawLiteral) \(purchase.parentAmount.unitCode), \(purchase.lines.count) categories"
-              )
-            }
-          }
-          if filteredRows.count > pageSize {
-            HStack {
-              Button("Previous page") { page = max(0, page - 1) }
-                .disabled(page == 0)
-              Text("Page \(page + 1) of \(max(1, (filteredRows.count + pageSize - 1) / pageSize))")
-                .font(.caption.monospaced())
-                .accessibilityLabel("Page \(page + 1)")
-              Button("Next page") {
-                page = min((filteredRows.count - 1) / pageSize, page + 1)
-              }
-              .disabled((page + 1) * pageSize >= filteredRows.count)
-            }
-            .padding(.horizontal, 16)
-          }
+          LedgerBrowseList(
+            transactions: transactions, hiddenIDs: splitTransactionIDs, accounts: accounts,
+            categories: categories, splitPurchases: splitPurchases, selectedID: $selectedID,
+            copy: copy, tombstone: tombstone)
         if let lifecycleMessage {
           Text(lifecycleMessage)
             .foregroundStyle(.secondary)
@@ -288,6 +174,14 @@ struct LedgerView: View {
     }
     .sheet(isPresented: $showingSplitForm) {
       SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
+    }
+    .onChange(of: selectedID) { _, id in
+      // Start an amount edit from the selected entry's current amount.
+      guard let id,
+        let amount = transactions.first(where: { $0.id == id })?.currentRevision.draft.effects
+          .first?.amount.amount.rawLiteral
+      else { return }
+      amountLiteral = amount
     }
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }

@@ -770,7 +770,7 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .ledger {
       let listing = splitListing
       LedgerView(
-        state: session.state, rows: journey.rows(for: .ledger), isEditing: journey.isEditing,
+        state: session.state, isEditing: journey.isEditing,
         accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
         transactions: journey.snapshot?.transactions ?? [],
         splitPurchases: listing?.purchases ?? [],
