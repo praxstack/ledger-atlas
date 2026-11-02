@@ -390,7 +390,7 @@ public enum StableCanonicalID {
       CanonicalIdentifier.isValid(sourceSubjectID), formatVersion == 1,
       declaredType?.utf8.count ?? 0 <= 1_024
     else { throw CanonicalPersistenceError.invalidIdentifier }
-    let payloadDigest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    let payloadDigest = CanonicalReceiptDigest.hex(SHA256.hash(data: payload))
     var components = [
       "ledger-atlas/receipt-owned-payload/v3", receiptID, anchorID, sourceSubjectID,
       String(formatVersion),
@@ -413,7 +413,7 @@ public enum StableCanonicalID {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 }
 

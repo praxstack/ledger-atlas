@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import LedgerCore
 
 public enum ReconciliationSubjectKind: String, Codable, CaseIterable, Equatable, Sendable {
   case artifact
@@ -79,7 +80,7 @@ struct TargetBoundReconciliationProof: Equatable, Sendable {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    token = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    token = CanonicalReceiptDigest.hex(hasher.finalize())
   }
 }
 
@@ -162,7 +163,7 @@ public struct ReconciliationEvidence: Equatable, Sendable {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   var targetProofToken: String { targetProof.token }
@@ -285,7 +286,7 @@ public struct ReconciliationReport: Encodable, Equatable, Sendable {
       update(&hasher, Data(entry.reasonCode.rawValue.utf8))
       update(&hasher, Data((entry.evidenceToken ?? "").utf8))
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   private static func update(_ hasher: inout SHA256, _ data: Data) {
