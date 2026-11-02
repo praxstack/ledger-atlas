@@ -535,6 +535,32 @@ public struct SourceTemporal: Codable, Hashable, Sendable {
     )
   }
 
+  /// Midnight of `date`, for day-precision values. Where the clocks jump over midnight
+  /// (Havana, Beirut), the day starts at the jump: the instant is the transition and the offset
+  /// is the one in force just before it, so every calendar day has a start.
+  public init(startOf date: SourceLocalDate, in timeZone: SourceTimeZone) throws {
+    let midnight = try SourceLocalDateTime(date: date)
+    do {
+      try self.init(resolving: midnight, in: timeZone, precision: .day, ambiguityPolicy: .earlier)
+    } catch SourceTemporalError.nonexistentLocalTime {
+      guard let foundationTimeZone = timeZone.foundationValue else {
+        throw SourceTemporalError.invalidTimeZoneIdentifier
+      }
+      let naive = try Self.naiveEpochSeconds(for: midnight)
+      let before = foundationTimeZone.secondsFromGMT(
+        for: try Self.foundationDate(unixSeconds: naive - 86_400))
+      let transition = try Self.instant(for: midnight, resolvedOffsetSeconds: before)
+      // A whole day can be skipped (Apia, 30 Dec 2011); that day has no start.
+      let after = foundationTimeZone.secondsFromGMT(for: transition.foundationDate)
+      guard try Self.localDateTime(for: transition, resolvedOffsetSeconds: after).date == date
+      else { throw SourceTemporalError.nonexistentLocalTime }
+      try self.init(
+        instant: transition,
+        localDateTime: midnight, timeZone: timeZone, precision: .day,
+        resolvedOffsetSeconds: before)
+    }
+  }
+
   private struct Candidate: Hashable {
     let instant: UTCInstant
     let offset: Int

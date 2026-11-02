@@ -2636,3 +2636,48 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
       purchases: [], unreadableTransactionIDs: [], unreadableGroupCount: 0
     ).unreadableNotice == nil)
 }
+
+// MACV2-11: editing future occurrences never rewrites what was already generated.
+@Test func recurrenceEditsApplyOnlyToOccurrencesNotYetGenerated() throws {
+  let app = LedgerApplication(store: try makeApplicationStore())
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "synthetic")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Synthetic account", currencyUnit: "USD", origin: origin)
+  try app.createAccount(account)
+  let zone = try SourceTimeZone(fixedOffsetSeconds: 0)
+  let ruleID = try StableLedgerID.recurrenceRule(
+    origin: origin, localKey: String(repeating: "2", count: 64))
+  func rule(_ amount: String) throws -> LedgerRecurrenceRule {
+    try LedgerRecurrenceRule(
+      id: ruleID, origin: origin, accountID: account.id, categoryID: nil, kind: .expense,
+      amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal(amount)), frequency: .monthly,
+      interval: 1, timeZone: zone, start: SourceLocalDate(year: 2026, month: 1, day: 31))
+  }
+  try app.createRecurrence(rule("2.00"))
+  let first = try app.generateOccurrences(
+    rule("2.00"), through: SourceLocalDate(year: 2026, month: 3, day: 31),
+    createdAt: UTCInstant(epochMilliseconds: 1))
+  #expect(first.map { $0.draft.occurredAt.localDateTime.date.day } == [31, 28, 31])
+  let historyBefore = try app.snapshot().revisionHistory
+
+  try app.updateRecurrence(rule("5.50"), scope: .thisAndFuture)
+  let all = try app.generateOccurrences(
+    rule("5.50"), through: SourceLocalDate(year: 2026, month: 5, day: 31),
+    createdAt: UTCInstant(epochMilliseconds: 2))
+  #expect(all.count == 5)
+  #expect(Array(all.prefix(3)) == first)
+  #expect(all.map { $0.draft.effects[0].amount.amount.rawLiteral }
+    == ["2.00", "2.00", "2.00", "5.50", "5.50"])
+  #expect(all.map { $0.draft.occurredAt.localDateTime.date.day } == [31, 28, 31, 30, 31])
+  let historyAfter = try app.snapshot().revisionHistory
+  #expect(historyBefore.allSatisfy { historyAfter.contains($0) })
+
+  // Catching up again adds nothing and returns what is stored.
+  let checksum = try app.checksum()
+  #expect(
+    try app.generateOccurrences(
+      rule("5.50"), through: SourceLocalDate(year: 2026, month: 5, day: 31),
+      createdAt: UTCInstant(epochMilliseconds: 3)) == all)
+  #expect(try app.checksum() == checksum)
+}

@@ -5,6 +5,8 @@ public enum LedgerCommandError: Error, Equatable, Sendable {
   case invalidSplit
   case invalidInstallment
   case invalidRecurrence
+  /// A catch-up would create more occurrences than `LedgerSchedule.maximumOccurrences`.
+  case recurrenceRangeTooLong
   case invalidBudget
   case invalidSearch
   case invalidExport
