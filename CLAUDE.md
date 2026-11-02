@@ -20,6 +20,10 @@ Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agent
 
 45 custom skills from [praxstack/skills-and-personas](https://github.com/praxstack/skills-and-personas). Install/refresh: `./scripts/install-praxstack-skills.sh`. See `docs/agents/praxstack-personas.md` and `docs/agents/high-end-operator.md`.
 
+### Cloud environment skills
+
+Cloud sessions get their skills and CLIs from `scripts/cloud-skill-setup.sh` (paste into the environment's Setup script). Report: `~/.claude/skill-setup/report.md`. See `docs/agents/cloud-skill-setup.md` and the `cloud-env-setup` skill.
+
 ### Skill routing
 
 | When | Invoke |
