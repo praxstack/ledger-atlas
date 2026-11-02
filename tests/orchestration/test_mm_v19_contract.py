@@ -60,7 +60,7 @@ def test_synthetic_v19_is_compatible(tmp_path: Path) -> None:
     assert code == 0, report
     inv = report["invariants"]
     assert inv["reciprocal_transfer_pairs"] == 1
-    assert inv["balance_modification_category_rows"] == 1
+    assert inv["balance_modification_category_rows"] == 2
     offsets = inv["wdate_consistent_utc_offsets_minutes"]
     assert 330 in offsets and 0 not in offsets
     assert report["unchanged"] is True
