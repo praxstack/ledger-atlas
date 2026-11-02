@@ -703,9 +703,20 @@ public enum CanonicalLedgerSchema {
   public static let legacyV12Fingerprint =
     "c6b67526e3c6d26c430e9dbfbdcdb39bd0517172a0a50369e86ea94eb13b5355"
 
+  /// Released v12 checksum queries, frozen like its fingerprint.
+  public static let legacyV12ChecksumQueries =
+    legacyV11ChecksumQueries + [
+      "SELECT tag_id, name, origin_id, lifecycle FROM ledger_tag ORDER BY tag_id",
+      "SELECT revision_id, tag_id FROM ledger_revision_tag ORDER BY revision_id, tag_id",
+      "SELECT template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id, counter_account_id, origin_id, lifecycle FROM ledger_transaction_template ORDER BY template_id",
+      "SELECT template_id, tag_id FROM ledger_template_tag ORDER BY template_id, tag_id",
+      "SELECT memo_id, body, local_year, local_month, local_day, origin_id, lifecycle FROM ledger_memo ORDER BY memo_id",
+      "SELECT transfer_id, debit_event_id, credit_event_id FROM economic_event_transfer ORDER BY transfer_id",
+    ]
+
   public static let legacyV12Release = SchemaRelease(
     version: 12, fingerprint: legacyV12Fingerprint, objects: legacyV12Objects,
-    authenticatesImportedEvents: true)
+    authenticatesImportedEvents: true, checksumQueries: legacyV12ChecksumQueries)
 
   /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
   /// next step's `from`, and the last step ends at `currentRelease`.
@@ -786,17 +797,7 @@ public enum CanonicalLedgerSchema {
   ]
 
   public static let checksumQueries =
-    legacyV10ChecksumQueries + [
-      "SELECT idempotency_key, algorithm, signature FROM ledger_receipt_trust_anchor ORDER BY idempotency_key",
-      "SELECT category_id, parent_category_id, display_order, hidden FROM ledger_category_tree ORDER BY category_id",
-      "SELECT group_id, name, display_order, lifecycle FROM ledger_account_group ORDER BY group_id",
-      "SELECT account_id, group_id, display_order, hidden, include_in_totals, variant FROM ledger_account_preferences ORDER BY account_id",
-      "SELECT tag_id, name, origin_id, lifecycle FROM ledger_tag ORDER BY tag_id",
-      "SELECT revision_id, tag_id FROM ledger_revision_tag ORDER BY revision_id, tag_id",
-      "SELECT template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id, counter_account_id, origin_id, lifecycle FROM ledger_transaction_template ORDER BY template_id",
-      "SELECT template_id, tag_id FROM ledger_template_tag ORDER BY template_id, tag_id",
-      "SELECT memo_id, body, local_year, local_month, local_day, origin_id, lifecycle FROM ledger_memo ORDER BY memo_id",
-      "SELECT transfer_id, debit_event_id, credit_event_id FROM economic_event_transfer ORDER BY transfer_id",
+    legacyV12ChecksumQueries + [
       // The image is covered by its sha256, which the health check verifies on open, so the
       // checksum stays fast for large ledgers.
       "SELECT attachment_id, transaction_id, sha256, byte_count, media_type, origin_id, created_at_milliseconds, lifecycle FROM ledger_receipt_attachment ORDER BY attachment_id",
