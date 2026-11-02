@@ -66,6 +66,9 @@ public final class LedgerLoopbackPortal: @unchecked Sendable {
 
   public var url: URL? { endpointURL }
 
+  /// Called after the portal stops for any reason: a request, sleep, or the idle timeout.
+  public var onStop: (@Sendable () -> Void)?
+
   @MainActor
   public func start(projection: LedgerPortalProjection) async throws -> URL {
     guard listener == nil else { throw Error.alreadyRunning }
@@ -113,12 +116,14 @@ public final class LedgerLoopbackPortal: @unchecked Sendable {
   }
 
   public func stop() {
+    let wasRunning = listener != nil
     listener?.cancel()
     listener = nil
     idleWork?.cancel()
     idleWork = nil
     endpointURL = nil
     token = ""
+    if wasRunning { onStop?() }
   }
 
   /// Pure request handling keeps the network boundary testable without exposing private data.
