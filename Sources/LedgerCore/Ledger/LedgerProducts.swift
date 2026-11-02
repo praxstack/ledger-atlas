@@ -422,8 +422,13 @@ public struct LedgerProjection: Equatable, Sendable {
 }
 
 public enum LedgerPortablePackageFormat {
-  public static let version = 2
+  /// v3 adds tags, transaction templates, memos and revision tag links.
+  public static let version = 3
   public static let fingerprint =
+    "941902734f5ddb4a7853950fc2a88ab798cf8c385a2dd08526ad1662f0703c8a"
+  /// v2: account groups and preferences, no annotations. Still decodes.
+  public static let legacyV2Version = 2
+  public static let legacyV2Fingerprint =
     "5625a6dea5c0103a7bdaf216491d0e96397887eaf2cf93b73261f242d1b8766c"
   public static let legacyV1Version = 1
   public static let legacyV1Fingerprint =
@@ -496,6 +501,11 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
   public let budgets: [LedgerBudget]
   public let installmentPlans: [LedgerInstallmentPlan]
   public let preservedSource: [LedgerPreservedSourceRecord]
+  public let tags: [LedgerTag]
+  public let transactionTemplates: [LedgerTransactionTemplate]
+  public let memos: [LedgerMemo]
+  /// Tag links by revision ID; revisions without tags are absent.
+  public let revisionTags: [String: LedgerTagLinks]
 
   public var schemaVersion: Int { formatVersion }
   public var schemaFingerprint: String { formatFingerprint }
@@ -506,7 +516,9 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
     categories: [LedgerCategory], revisions: [LedgerTransactionRevision],
     links: [LedgerTransactionLink], recurrenceRules: [LedgerRecurrenceRule],
     budgets: [LedgerBudget], installmentPlans: [LedgerInstallmentPlan],
-    preservedSource: [LedgerPreservedSourceRecord] = []
+    preservedSource: [LedgerPreservedSourceRecord] = [], tags: [LedgerTag] = [],
+    transactionTemplates: [LedgerTransactionTemplate] = [], memos: [LedgerMemo] = [],
+    revisionTags: [String: LedgerTagLinks] = [:]
   ) {
     self.formatVersion = formatVersion
     self.formatFingerprint = formatFingerprint
@@ -519,6 +531,10 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
     self.budgets = budgets
     self.installmentPlans = installmentPlans
     self.preservedSource = preservedSource
+    self.tags = tags
+    self.transactionTemplates = transactionTemplates
+    self.memos = memos
+    self.revisionTags = revisionTags.filter { !$0.value.isEmpty }
   }
 
   public init(

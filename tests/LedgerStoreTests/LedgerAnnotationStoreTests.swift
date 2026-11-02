@@ -1,4 +1,5 @@
 import CSQLite
+import CryptoKit
 import Foundation
 import LedgerCore
 import Testing
@@ -194,8 +195,97 @@ private struct AnnotationFixture {
   #expect(snapshot.memos[0].body == "Synthetic reminder, edited")
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) { try store.saveMemo(memo) }
 
-  // Annotations change the semantic checksum, and the portable package refuses them for now
-  // instead of dropping them.
   #expect(try store.semanticChecksum() != before)
-  #expect(try store.portablePackageExportIsRepresentable() == false)
+}
+
+@Test func portablePackageRoundTripsTagsTemplatesMemosAndOlderPackagesStillImport() throws {
+  let fixture = try AnnotationFixture()
+  let store = fixture.store
+  let food = try fixture.tag("c", "Food")
+  let retired = try fixture.tag("d", "Retired")
+  try store.createTag(food)
+  try store.createTag(retired)
+  let created = try store.createTransaction(
+    .init(
+      idempotencyKey: String(repeating: "b", count: 64), draft: fixture.expense("4.50"),
+      createdAt: UTCInstant(epochMilliseconds: 1),
+      tags: try LedgerTagLinks([food.id, retired.id])))
+  _ = try store.correctTransaction(
+    .init(
+      transactionID: created.revision.transactionID,
+      expectedCurrentRevisionID: created.revision.id, draft: fixture.expense("5.00"),
+      createdAt: UTCInstant(epochMilliseconds: 2), tags: try LedgerTagLinks([food.id])))
+  // History still points at a tombstoned tag; the package must carry it.
+  try store.updateTag(try retired.tombstoned())
+  try store.saveTransactionTemplate(
+    try LedgerTransactionTemplate(
+      id: StableLedgerID.transactionTemplate(
+        origin: fixture.origin, localKey: String(repeating: "7", count: 64)),
+      name: "Synthetic lunch", kind: .expense, categoryID: nil,
+      amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("12.00")),
+      note: "synthetic", accountID: fixture.account.id, tags: try LedgerTagLinks([food.id]),
+      origin: fixture.origin))
+  try store.saveMemo(
+    try LedgerMemo(
+      id: StableLedgerID.memo(
+        origin: fixture.origin, localKey: String(repeating: "8", count: 64)),
+      body: "Synthetic memo", date: SourceLocalDate(year: 2026, month: 3, day: 4),
+      origin: fixture.origin))
+
+  let source = LedgerApplication(store: store)
+  let exported = try source.exportPackage()
+  #expect(exported.manifest.formatVersion == LedgerPortablePackageFormat.version)
+
+  let destinationStore = try makeAnnotationStore()
+  try LedgerApplication(store: destinationStore).importPackage(
+    manifest: exported.manifest, payload: exported.payload)
+  let original = try store.readSnapshot()
+  let restored = try destinationStore.readSnapshot()
+  #expect(restored.tags == original.tags)
+  #expect(restored.transactionTemplates == original.transactionTemplates)
+  #expect(restored.memos == original.memos)
+  #expect(restored.revisionTags == original.revisionTags)
+  #expect(restored.revisionTags.count == 2)
+  #expect(try destinationStore.semanticChecksum() == store.semanticChecksum())
+
+  // A v2 package (no annotation keys) still imports.
+  var object = try #require(
+    JSONSerialization.jsonObject(with: exported.payload) as? [String: Any])
+  for key in ["tags", "transactionTemplates", "memos", "revisionTags"] {
+    object.removeValue(forKey: key)
+  }
+  object["formatVersion"] = LedgerPortablePackageFormat.legacyV2Version
+  object["formatFingerprint"] = LedgerPortablePackageFormat.legacyV2Fingerprint
+  let legacyPayload = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+  let legacyManifest = LedgerExportManifest(
+    formatVersion: LedgerPortablePackageFormat.legacyV2Version,
+    formatFingerprint: LedgerPortablePackageFormat.legacyV2Fingerprint,
+    payloadSHA256: SHA256.hash(data: legacyPayload).map { String(format: "%02x", $0) }.joined(),
+    createdAtMilliseconds: 0)
+  let legacyStore = try makeAnnotationStore()
+  try LedgerApplication(store: legacyStore).importPackage(
+    manifest: legacyManifest, payload: legacyPayload)
+  #expect(try legacyStore.readSnapshot().transactions.count == 1)
+  #expect(try legacyStore.readSnapshot().tags.isEmpty)
+
+  // A tampered package whose template currency no longer matches its account is refused.
+  var tampered = try #require(
+    JSONSerialization.jsonObject(with: exported.payload) as? [String: Any])
+  var templates = try #require(tampered["transactionTemplates"] as? [[String: Any]])
+  templates[0]["unit"] = "EUR"
+  tampered["transactionTemplates"] = templates
+  let tamperedPayload = try JSONSerialization.data(
+    withJSONObject: tampered, options: [.sortedKeys])
+  let tamperedManifest = LedgerExportManifest(
+    formatVersion: exported.manifest.formatVersion,
+    formatFingerprint: exported.manifest.formatFingerprint,
+    payloadSHA256: SHA256.hash(data: tamperedPayload).map { String(format: "%02x", $0) }
+      .joined(),
+    createdAtMilliseconds: 0)
+  let refusing = try makeAnnotationStore()
+  #expect(throws: LedgerApplication.Error.invalidCommand) {
+    try LedgerApplication(store: refusing).importPackage(
+      manifest: tamperedManifest, payload: tamperedPayload)
+  }
+  #expect(try refusing.readSnapshot().accounts.isEmpty)
 }

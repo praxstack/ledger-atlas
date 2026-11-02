@@ -1042,8 +1042,16 @@ public final class LedgerStore {
       package.accounts.map(\.origin) + package.categories.map(\.origin)
       + package.revisions.map(\.draft.origin) + package.recurrenceRules.map(\.origin)
       + package.budgets.map(\.origin) + package.installmentPlans.map(\.origin)
+      + package.tags.map(\.origin) + package.transactionTemplates.map(\.origin)
+      + package.memos.map(\.origin)
     let importedOriginID = String(repeating: "e", count: 64)
+    let revisionIDs = Set(package.revisions.map(\.id))
     guard package.preservedSource.isEmpty,
+      Set(package.tags.map(\.id)).count == package.tags.count,
+      Set(package.transactionTemplates.map(\.id)).count == package.transactionTemplates.count,
+      Set(package.memos.map(\.id)).count == package.memos.count,
+      package.revisionTags.keys.allSatisfy(revisionIDs.contains),
+      (try? LedgerTag.validateActiveNamesAreUnique(package.tags)) != nil,
       Set(package.accounts.map(\.id)).count == package.accounts.count,
       Set(package.accountGroups.map(\.id)).count == package.accountGroups.count,
       Set(package.categories.map(\.id)).count == package.categories.count,
@@ -1061,6 +1069,15 @@ public final class LedgerStore {
       !package.revisions.contains(where: { revision in
         revision.draft.sourceLiterals.contains {
           $0.provenanceID != nil || $0.field == "import.eventID"
+        }
+      })
+    else { throw Error.incompatibleCanonicalStore }
+    let currencyByAccount = Dictionary(
+      package.accounts.map { ($0.id, $0.currencyUnit) }, uniquingKeysWith: { first, _ in first })
+    guard
+      package.transactionTemplates.allSatisfy({ template in
+        ([template.accountID] + (template.counterAccountID.map { [$0] } ?? [])).allSatisfy {
+          currencyByAccount[$0] == template.amount.unitCode
         }
       })
     else { throw Error.incompatibleCanonicalStore }
@@ -1166,6 +1183,7 @@ public final class LedgerStore {
       for rule in package.recurrenceRules { try Self.writeRecurrence(rule, on: database) }
       for budget in package.budgets { try Self.writeBudget(budget, on: database) }
       for plan in package.installmentPlans { try Self.writeInstallment(plan, on: database) }
+      try Self.writeImportedAnnotations(package, on: database)
       return try Self.placeholderResult(
         origin: package.accounts.first?.origin
           ?? LedgerOrigin(id: String(repeating: "1", count: 64), label: "restore"))
@@ -1530,19 +1548,13 @@ public final class LedgerStore {
             AND NOT EXISTS (SELECT 1 FROM main.ledger_recurrence_rule r WHERE r.origin_id=o.origin_id)
             AND NOT EXISTS (SELECT 1 FROM main.ledger_budget b WHERE b.origin_id=o.origin_id)
             AND NOT EXISTS (SELECT 1 FROM main.ledger_installment_plan p WHERE p.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_tag t WHERE t.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_transaction_template t WHERE t.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_memo m WHERE m.origin_id=o.origin_id)
         )
         """, on: database)
     else { throw Error.incompatibleCanonicalStore }
-    // The portable package cannot carry tags, templates or memos yet. Refuse rather than drop
-    // them silently.
-    guard
-      let annotationRows = scalarInt(
-        """
-        SELECT EXISTS(SELECT 1 FROM main.ledger_tag) + EXISTS(SELECT 1 FROM main.ledger_transaction_template)
-          + EXISTS(SELECT 1 FROM main.ledger_memo)
-        """, on: database)
-    else { throw Error.incompatibleCanonicalStore }
-    return standaloneOriginCount != 1 && annotationRows == 0
+    return standaloneOriginCount != 1
   }
 
   package func isEmptyForPortablePackageImport() throws -> Bool {
@@ -2695,6 +2707,64 @@ extension LedgerStore {
           .int(memo.date.day), .text(memo.origin.id), .text(memo.lifecycle.rawValue),
         ], on: database)
       return try Self.placeholderResult(origin: memo.origin)
+    }
+  }
+
+  /// Restores annotations from a portable package into an empty ledger. Rows are written as
+  /// stored, including tombstoned tags that history still points at; foreign keys and the
+  /// post-write health check reject dangling links.
+  fileprivate static func writeImportedAnnotations(
+    _ package: LedgerCanonicalPackage, on database: OpaquePointer
+  ) throws {
+    for tag in package.tags {
+      try ensureOrigin(tag.origin, on: database)
+      try run(
+        "INSERT INTO main.ledger_tag(tag_id, name, origin_id, lifecycle) VALUES (?, ?, ?, ?)",
+        values: [
+          .text(tag.id), .text(tag.name), .text(tag.origin.id), .text(tag.lifecycle.rawValue),
+        ], on: database)
+    }
+    for (revisionID, links) in package.revisionTags {
+      for tagID in links.tagIDs {
+        try run(
+          "INSERT INTO main.ledger_revision_tag(revision_id, tag_id) VALUES (?, ?)",
+          values: [.text(revisionID), .text(tagID)], on: database)
+      }
+    }
+    for template in package.transactionTemplates {
+      try ensureOrigin(template.origin, on: database)
+      try run(
+        """
+        INSERT INTO main.ledger_transaction_template(
+          template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id,
+          counter_account_id, origin_id, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        values: [
+          .text(template.id), .text(template.name), .text(template.kind.rawValue),
+          .optionalText(template.categoryID), .text(template.amount.amount.rawLiteral),
+          .text(template.amount.unitCode), .optionalText(template.note),
+          .text(template.accountID), .optionalText(template.counterAccountID),
+          .text(template.origin.id), .text(template.lifecycle.rawValue),
+        ], on: database)
+      for tagID in template.tags.tagIDs {
+        try run(
+          "INSERT INTO main.ledger_template_tag(template_id, tag_id) VALUES (?, ?)",
+          values: [.text(template.id), .text(tagID)], on: database)
+      }
+    }
+    for memo in package.memos {
+      try ensureOrigin(memo.origin, on: database)
+      try run(
+        """
+        INSERT INTO main.ledger_memo(
+          memo_id, body, local_year, local_month, local_day, origin_id, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        values: [
+          .text(memo.id), .text(memo.body), .int(memo.date.year), .int(memo.date.month),
+          .int(memo.date.day), .text(memo.origin.id), .text(memo.lifecycle.rawValue),
+        ], on: database)
     }
   }
 
