@@ -828,7 +828,7 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   try destination.importPackage(manifest: legacyManifest, payload: legacyPayload)
   #expect(try destination.snapshot().accounts.map(\.id) == [String(repeating: "a", count: 64)])
 
-  var legacyV1Object = currentObject
+  var legacyV1Object = removingV4PackageKeys(currentObject)
   for key in ["accountGroups", "tags", "transactionTemplates", "memos", "revisionTags"] {
     legacyV1Object.removeValue(forKey: key)
   }
@@ -2802,4 +2802,22 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
   }
   let reopened = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
   #expect(Set(try reopened.snapshot().accounts.map(\.name)) == Set(names))
+}
+
+/// A current package object without the keys v4 added, the shape every older format decodes.
+func removingV4PackageKeys(_ object: [String: Any]) -> [String: Any] {
+  func strip(_ value: Any) -> Any {
+    if var row = value as? [String: Any] {
+      row.removeValue(forKey: "originProvenanceID")
+      if Set(row.keys) == ["field", "literal", "provenanceID"] {
+        row.removeValue(forKey: "provenanceID")
+      }
+      return row.mapValues(strip)
+    }
+    if let rows = value as? [Any] { return rows.map(strip) }
+    return value
+  }
+  var object = object
+  object.removeValue(forKey: "importGraph")
+  return object.mapValues(strip)
 }

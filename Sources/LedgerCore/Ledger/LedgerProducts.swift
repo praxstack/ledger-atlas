@@ -432,9 +432,14 @@ public struct LedgerProjection: Equatable, Sendable {
 }
 
 public enum LedgerPortablePackageFormat {
-  /// v3 adds tags, transaction templates, memos and revision tag links.
-  public static let version = 3
+  /// v4 adds origin and literal provenance and, for ledgers with import history, the verbatim
+  /// import graph. A package without import history differs from v3 only in the new keys.
+  public static let version = 4
   public static let fingerprint =
+    "44284656b3a3b633cca50859f06695912f6cc6e735cb89bd9dbae99b70732665"
+  /// v3: tags, transaction templates, memos and revision tag links. Still decodes.
+  public static let legacyV3Version = 3
+  public static let legacyV3Fingerprint =
     "941902734f5ddb4a7853950fc2a88ab798cf8c385a2dd08526ad1662f0703c8a"
   /// v2: account groups and preferences, no annotations. Still decodes.
   public static let legacyV2Version = 2
@@ -499,6 +504,73 @@ public struct LedgerPreservedSourceRecord: Equatable, Sendable {
   }
 }
 
+/// The rows of an imported ledger's receipt and provenance tables, copied column for column. It is
+/// only valid for the exact canonical schema it was read from, and `canonicalChecksum` is the
+/// checksum of the whole source ledger, so an import can prove it rebuilt the same ledger.
+public struct LedgerImportGraph: Equatable, Sendable {
+  public enum Value: Equatable, Sendable {
+    case null
+    case integer(Int64)
+    case real(Double)
+    case text(String)
+    case blob(Data)
+  }
+
+  public struct Table: Equatable, Sendable {
+    public let name: String
+    public let columns: [String]
+    public let rows: [[Value]]
+
+    public init(name: String, columns: [String], rows: [[Value]]) {
+      self.name = name
+      self.columns = columns
+      self.rows = rows
+    }
+  }
+
+  public let schemaVersion: Int
+  public let schemaFingerprint: String
+  public let canonicalChecksum: String
+  public let tables: [Table]
+
+  public init(
+    schemaVersion: Int, schemaFingerprint: String, canonicalChecksum: String, tables: [Table]
+  ) {
+    self.schemaVersion = schemaVersion
+    self.schemaFingerprint = schemaFingerprint
+    self.canonicalChecksum = canonicalChecksum
+    self.tables = tables
+  }
+
+  /// Tables in foreign-key order. The receipt and provenance tables reference no product table,
+  /// so they are written before the accounts, categories and transactions that point at them.
+  /// The last three hang off product rows and go in after them, verbatim: the import's literal
+  /// order and its explicit default tree and preference rows are not kept by the typed records,
+  /// and the receipt signature and ledger checksum cover them.
+  public static let tableNames = [
+    "provenance_reference", "import_receipt", "economic_event", "economic_event_transfer",
+    "event_source_binding", "sidecar_reference", "receipt_event", "receipt_binding",
+    "receipt_sidecar", "receipt_preservation_anchor", "receipt_preservation_payload",
+    "receipt_preservation_membership", "ledger_receipt_trust_anchor",
+    "ledger_transaction_source_literal", "ledger_category_tree", "ledger_account_preferences",
+  ]
+
+  /// Graph tables written after the product rows.
+  public static let productLinkedTableNames: Set<String> = [
+    "ledger_transaction_source_literal", "ledger_category_tree", "ledger_account_preferences",
+  ]
+
+  /// The receipt whose key signs every receipt in the ledger: the first one written.
+  public var trustIdentity: String? {
+    guard let table = tables.first(where: { $0.name == "import_receipt" }),
+      let column = table.columns.firstIndex(of: "idempotency_key"),
+      let first = table.rows.first, column < first.count,
+      case .text(let identity) = first[column]
+    else { return nil }
+    return identity
+  }
+}
+
 public struct LedgerCanonicalPackage: Equatable, Sendable {
   public let formatVersion: Int
   public let formatFingerprint: String
@@ -516,6 +588,8 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
   public let memos: [LedgerMemo]
   /// Tag links by revision ID; revisions without tags are absent.
   public let revisionTags: [String: LedgerTagLinks]
+  /// Present only for a ledger with import history.
+  public let importGraph: LedgerImportGraph?
 
   public var schemaVersion: Int { formatVersion }
   public var schemaFingerprint: String { formatFingerprint }
@@ -528,8 +602,9 @@ public struct LedgerCanonicalPackage: Equatable, Sendable {
     budgets: [LedgerBudget], installmentPlans: [LedgerInstallmentPlan],
     preservedSource: [LedgerPreservedSourceRecord] = [], tags: [LedgerTag] = [],
     transactionTemplates: [LedgerTransactionTemplate] = [], memos: [LedgerMemo] = [],
-    revisionTags: [String: LedgerTagLinks] = [:]
+    revisionTags: [String: LedgerTagLinks] = [:], importGraph: LedgerImportGraph? = nil
   ) {
+    self.importGraph = importGraph
     self.formatVersion = formatVersion
     self.formatFingerprint = formatFingerprint
     self.accounts = accounts
