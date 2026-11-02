@@ -22,6 +22,8 @@ targets:
     platform: macOS
     sources:
       - Sources/LedgerAtlasMac
+      - path: Assets/AppIcon.xcassets
+        group: LedgerAtlasMac
     dependencies:
       - package: LedgerAtlas
         product: LedgerAtlasMacUI
@@ -38,6 +40,9 @@ targets:
           - "-framework"
           - AppIntents
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 praxstack. Licensed under GPL-3.0."
         MARKETING_VERSION: 1.0
         CURRENT_PROJECT_VERSION: 1
   LedgerAtlasWidget:
