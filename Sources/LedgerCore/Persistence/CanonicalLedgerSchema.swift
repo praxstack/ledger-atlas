@@ -664,6 +664,19 @@ public enum CanonicalLedgerSchema {
     /// The semantic checksum queries of this release. A portable package records its ledger's
     /// checksum at export, so restoring an older package recomputes it with these.
     public let checksumQueries: [String]
+    /// The `ledger_meta` rows a new ledger of this release starts with. The checksum covers
+    /// `ledger_meta`, so an older release keeps its own rows even if a later one adds keys.
+    public let metaRows: [String: String]
+  }
+
+  public static let ledgerIdentity = "ledger-atlas-canonical"
+
+  /// The `ledger_meta` rows v10 to v12 start with.
+  private static func v12MetaRows(version: Int, fingerprint: String) -> [String: String] {
+    [
+      "schema_version": String(version), "ledger_identity": ledgerIdentity,
+      "schema_fingerprint": fingerprint,
+    ]
   }
 
   /// One additive step from a released schema to the next. Statements run inside the
@@ -676,11 +689,13 @@ public enum CanonicalLedgerSchema {
 
   public static let currentRelease = SchemaRelease(
     version: version, fingerprint: fingerprint, objects: expectedObjects,
-    authenticatesImportedEvents: true, checksumQueries: checksumQueries)
+    authenticatesImportedEvents: true, checksumQueries: checksumQueries,
+    metaRows: v12MetaRows(version: version, fingerprint: fingerprint))
 
   public static let legacyV10Release = SchemaRelease(
     version: 10, fingerprint: legacyV10Fingerprint, objects: legacyV10Objects,
-    authenticatesImportedEvents: false, checksumQueries: legacyV10ChecksumQueries)
+    authenticatesImportedEvents: false, checksumQueries: legacyV10ChecksumQueries,
+    metaRows: v12MetaRows(version: 10, fingerprint: legacyV10Fingerprint))
 
   /// Released v11 identity. A literal, not derived, so a later schema edit cannot move it.
   public static let legacyV11Fingerprint =
@@ -697,7 +712,8 @@ public enum CanonicalLedgerSchema {
 
   public static let legacyV11Release = SchemaRelease(
     version: 11, fingerprint: legacyV11Fingerprint, objects: legacyV11Objects,
-    authenticatesImportedEvents: true, checksumQueries: legacyV11ChecksumQueries)
+    authenticatesImportedEvents: true, checksumQueries: legacyV11ChecksumQueries,
+    metaRows: v12MetaRows(version: 11, fingerprint: legacyV11Fingerprint))
 
   /// Released v12 identity. A literal, not derived, so a later schema edit cannot move it.
   public static let legacyV12Fingerprint =
@@ -721,12 +737,14 @@ public enum CanonicalLedgerSchema {
   /// The upgrade chain the ledger lifecycle can apply, oldest first. Each step's `to` is the
   /// next step's `from`, and the last step ends at `currentRelease`.
   ///
-  /// To add a schema version N+1: freeze today's objects, fingerprint and checksum queries as a
-  /// `vN` release (stop deriving them from the evolving schema), point the last step's `to` at
-  /// it, and append a step from it to `currentRelease` with the new objects' DDL. Portable
-  /// packages of imported ledgers restore through this chain, so never drop a release from v12 on.  Lifecycle validates legacy
-  /// files without the receipt trust key, so check that the frozen release's health checks
-  /// still pass that way.
+  /// To add a schema version N+1: freeze today's objects, fingerprint, checksum queries and meta
+  /// rows as a `vN` release (stop deriving them from the evolving schema), point the last step's
+  /// `to` at it, and append a step from it to `currentRelease` with the new objects' DDL.
+  ///
+  /// Portable packages of imported ledgers restore through this chain, so never drop a release
+  /// from v12 on, and commit that version's package fixture (ImportedLedgerPackageFixtureTests).
+  /// Lifecycle validates legacy files without the receipt trust key, so check that the frozen
+  /// release's health checks still pass that way.
   public static let lifecycleUpgradeSteps: [LifecycleUpgradeStep] = [
     LifecycleUpgradeStep(
       from: legacyV10Release, to: legacyV11Release, statements: v10ToV11MigrationStatements),

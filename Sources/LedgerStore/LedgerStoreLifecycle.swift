@@ -1647,12 +1647,11 @@ public enum LedgerStoreLifecycle {
     for statement in CanonicalLedgerSchema.creationStatements {
       guard execute(database, statement) else { throw Error.invalidStore }
     }
-    guard
-      execute(
-        database,
-        "INSERT INTO ledger_meta(key, value) VALUES('schema_version', '\(CanonicalLedgerSchema.version)'), ('ledger_identity', 'ledger-atlas-canonical'), ('schema_fingerprint', '\(CanonicalLedgerSchema.fingerprint)')"
-      )
-    else { throw Error.invalidStore }
+    for (key, value) in CanonicalLedgerSchema.currentRelease.metaRows.sorted(by: { $0.key < $1.key })
+    {
+      guard execute(database, "INSERT INTO ledger_meta(key, value) VALUES('\(key)', '\(value)')")
+      else { throw Error.invalidStore }
+    }
     try validateDatabase(database, as: .current)
     return try serialized(database)
   }
