@@ -366,6 +366,12 @@ import Testing
   #expect(imported.contains("receipt key"))
   #expect(imported.contains(".mmbak"))
   #expect(imported.contains("XLSX"))
+  #expect(
+    LedgerJourney.packageExportFailureMessage(for: LedgerApplication.Error.packageTooLarge)
+      .contains("Save 1:1 backup"))
+  #expect(
+    LedgerJourney.packageExportFailureMessage(for: LedgerApplication.Error.invalidCommand)
+      == "Portable package export failed.")
 }
 
 @MainActor

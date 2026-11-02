@@ -533,7 +533,13 @@ public final class LedgerJourney {
       return
         "Portable packages can't carry receipts yet, so this ledger wasn't exported. Use Save 1:1 backup to keep a full copy with its receipts."
     }
-    return "Portable package export failed."
+    switch error as? LedgerApplication.Error {
+    case .packageTooLarge:
+      return
+        "This ledger's imported Money Manager history is too large for a portable package. Use Save 1:1 backup instead; it keeps everything. Nothing was exported."
+    default:
+      return "Portable package export failed."
+    }
   }
 
   package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
@@ -715,7 +721,9 @@ public final class LedgerJourney {
     -> (manifest: LedgerExportManifest, payload: Data)
   {
     if let store = try? LedgerStore.openReadOnly(at: source) {
-      guard try store.receiptAttachments().isEmpty else { throw ReceiptAttachmentError.receiptsCannotTravelInPackages }
+      guard try store.receiptAttachments().isEmpty else {
+        throw ReceiptAttachmentError.receiptsCannotTravelInPackages
+      }
       return try LedgerApplication(store: store).exportPackage()
     }
     let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
