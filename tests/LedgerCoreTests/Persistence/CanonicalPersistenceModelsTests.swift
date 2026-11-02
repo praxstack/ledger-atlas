@@ -87,8 +87,8 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV11Objects)
         == CanonicalLedgerSchema.legacyV11Fingerprint)
     #expect(CanonicalLedgerSchema.legacyV11Objects.count == 35)
-    #expect(CanonicalLedgerSchema.expectedObjects.count == 42)
-    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 42)
+    #expect(CanonicalLedgerSchema.expectedObjects.count == 43)
+    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 43)
     #expect(
       Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).isSuperset(of: [
         "receipt_preservation_anchor", "receipt_preservation_payload",
@@ -98,7 +98,7 @@ struct CanonicalPersistenceModelsTests {
         "ledger_transaction_source_literal", "ledger_transaction_link",
         "ledger_category_tree", "ledger_account_group", "ledger_account_preferences",
         "ledger_tag", "ledger_revision_tag", "ledger_transaction_template",
-        "ledger_template_tag", "ledger_memo",
+        "ledger_template_tag", "ledger_memo", "economic_event_transfer",
       ]))
     #expect(
       CanonicalLedgerSchema.creationStatements.allSatisfy {
@@ -122,7 +122,7 @@ struct CanonicalPersistenceModelsTests {
     #expect(
       CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 10)
         == CanonicalLedgerSchema.v10ToV11MigrationStatements)
-    #expect(CanonicalLedgerSchema.v11ToV12MigrationStatements.count == 7)
+    #expect(CanonicalLedgerSchema.v11ToV12MigrationStatements.count == 8)
     #expect(
       CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 11)
         == CanonicalLedgerSchema.v11ToV12MigrationStatements)
@@ -142,7 +142,7 @@ struct CanonicalPersistenceModelsTests {
       })
   }
 
-  @Test("v12 adds tags, templates and memos as new tables only")
+  @Test("v12 adds tags, templates, memos and transfer pairs as new tables only")
   func v12Annotations() {
     let objects = Dictionary(
       uniqueKeysWithValues: CanonicalLedgerSchema.expectedObjects.map { ($0.name, $0.ddl) })
@@ -151,7 +151,7 @@ struct CanonicalPersistenceModelsTests {
     })
     let migration = CanonicalLedgerSchema.v11ToV12MigrationStatements
     #expect(migration.allSatisfy { $0.hasPrefix("CREATE") })
-    #expect(migration.prefix(5).allSatisfy { $0.hasPrefix("CREATE TABLE") })
+    #expect(migration.prefix(6).allSatisfy { $0.hasPrefix("CREATE TABLE") })
     #expect((objects["ledger_tag"] ?? "").contains("lifecycle IN ('active', 'tombstoned')"))
     #expect((objects["ledger_revision_tag"] ?? "").contains("PRIMARY KEY(revision_id, tag_id)"))
     #expect(objects["ledger_revision_tag_immutable_update"] != nil)
@@ -161,6 +161,9 @@ struct CanonicalPersistenceModelsTests {
     #expect(template.contains("CHECK(kind != 'transfer' OR category_id IS NULL)"))
     #expect((objects["ledger_template_tag"] ?? "").contains("PRIMARY KEY(template_id, tag_id)"))
     #expect((objects["ledger_memo"] ?? "").contains("local_month BETWEEN 1 AND 12"))
+    let transfer = objects["economic_event_transfer"] ?? ""
+    #expect(transfer.contains("debit_event_id TEXT NOT NULL UNIQUE REFERENCES economic_event"))
+    #expect(transfer.contains("CHECK(debit_event_id <> credit_event_id)"))
   }
 
   @Test("v11 adds category-tree and account-organization storage without changing v10 objects")

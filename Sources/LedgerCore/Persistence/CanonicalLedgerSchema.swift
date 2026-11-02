@@ -441,7 +441,8 @@ public enum CanonicalLedgerSchema {
       """),
   ]
 
-  /// Tags, transaction templates and standalone memos (T1). Additive only.
+  /// v12: tags, transaction templates and standalone memos (T1), plus pairs of imported
+  /// transfer legs (economic_event_transfer). Additive only.
   ///
   /// Revision tag links are immutable like every other part of a revision: a correction writes
   /// a new revision with its own links. Template tag links are replaced when a template is
@@ -509,6 +510,17 @@ public enum CanonicalLedgerSchema {
         local_day INTEGER NOT NULL CHECK(local_day BETWEEN 1 AND 31),
         origin_id TEXT NOT NULL REFERENCES ledger_origin(origin_id),
         lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'tombstoned'))
+      ) STRICT
+      """),
+    // Pairs the two imported legs of one transfer so they can show as a single transfer.
+    table(
+      "economic_event_transfer",
+      """
+      CREATE TABLE economic_event_transfer(
+        transfer_id TEXT PRIMARY KEY,
+        debit_event_id TEXT NOT NULL UNIQUE REFERENCES economic_event(event_id),
+        credit_event_id TEXT NOT NULL UNIQUE REFERENCES economic_event(event_id),
+        CHECK(debit_event_id <> credit_event_id)
       ) STRICT
       """),
   ]
@@ -703,6 +715,7 @@ public enum CanonicalLedgerSchema {
       "SELECT template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id, counter_account_id, origin_id, lifecycle FROM ledger_transaction_template ORDER BY template_id",
       "SELECT template_id, tag_id FROM ledger_template_tag ORDER BY template_id, tag_id",
       "SELECT memo_id, body, local_year, local_month, local_day, origin_id, lifecycle FROM ledger_memo ORDER BY memo_id",
+      "SELECT transfer_id, debit_event_id, credit_event_id FROM economic_event_transfer ORDER BY transfer_id",
     ]
 
   public static func normalizedDDL(_ ddl: String) -> String {

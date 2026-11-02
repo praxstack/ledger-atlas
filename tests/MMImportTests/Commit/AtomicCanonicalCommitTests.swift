@@ -8,7 +8,7 @@ import Testing
 /// v12 tables, children first, so tests can rebuild an older store shape.
 private let v12AnnotationTables = [
   "ledger_revision_tag", "ledger_template_tag", "ledger_transaction_template", "ledger_memo",
-  "ledger_tag",
+  "ledger_tag", "economic_event_transfer",
 ]
 
 @Suite("Atomic idempotent canonical commit")
@@ -141,10 +141,10 @@ struct AtomicCanonicalCommitTests {
           database, "SELECT value FROM ledger_meta WHERE key='schema_version'")
         let annotationCount = try scalarTestText(
           database,
-          "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_tag','ledger_revision_tag','ledger_transaction_template','ledger_template_tag','ledger_memo')"
+          "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_tag','ledger_revision_tag','ledger_transaction_template','ledger_template_tag','ledger_memo','economic_event_transfer')"
         )
         #expect(version == "12")
-        #expect(annotationCount == "5")
+        #expect(annotationCount == "6")
       }
     }
   }
