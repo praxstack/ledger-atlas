@@ -1917,7 +1917,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
       ),
       queryHasNoRows(
         database,
-        "SELECT 1 FROM economic_event WHERE amount_literal IS NULL OR amount_literal='' OR amount_literal GLOB '*[^0-9.+-]*' OR amount_literal NOT GLOB '*[0-9]*' OR currency_unit IS NULL OR length(currency_unit)<1 OR length(currency_unit)>32 OR currency_unit GLOB '*[^A-Za-z0-9_-]*' OR event_kind NOT IN ('income','expense','transfer_debit','transfer_credit','adjustment')"
+        "SELECT 1 FROM economic_event WHERE amount_literal IS NULL OR amount_literal='' OR amount_literal GLOB '*[^0-9.+-]*' OR amount_literal NOT GLOB '*[0-9]*' OR currency_unit IS NULL OR length(currency_unit)<1 OR length(currency_unit)>32 OR currency_unit GLOB '*[^A-Za-z0-9_-]*' OR event_kind NOT IN ('income','expense','transfer_debit','transfer_credit','adjustment','adjustment_debit')"
       ),
       queryHasNoRows(
         database,

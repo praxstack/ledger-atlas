@@ -40,6 +40,9 @@ public enum CanonicalEventKind: String, Codable, CaseIterable, Sendable {
   case transferDebit = "transfer_debit"
   case transferCredit = "transfer_credit"
   case adjustment
+  /// A balance adjustment that removes money (for example a Money Manager balance decrease).
+  /// Plain `adjustment` adds money.
+  case adjustmentDebit = "adjustment_debit"
 }
 
 public enum CanonicalFieldStorageClass: String, Codable, CaseIterable, Sendable {

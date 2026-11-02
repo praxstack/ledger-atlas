@@ -948,6 +948,23 @@ import Testing
   #expect(snapshot.transactions[0].currentRevision.draft.kind == .adjustment)
 }
 
+@Test func importedDebitAdjustmentsRemoveMoney() throws {
+  let store = try makeStoreWithImportedEvent(kind: "adjustment_debit")
+  try store.materializeImportedEvents()
+  let snapshot = try store.readSnapshot()
+  #expect(snapshot.transactions.count == 1)
+  let draft = snapshot.transactions[0].currentRevision.draft
+  #expect(draft.kind == .adjustment)
+  #expect(draft.effects.map(\.direction) == [.decrease])
+}
+
+@Test func importedCreditAdjustmentsStillAddMoney() throws {
+  let store = try makeStoreWithImportedEvent(kind: "adjustment")
+  try store.materializeImportedEvents()
+  let draft = try store.readSnapshot().transactions[0].currentRevision.draft
+  #expect(draft.effects.map(\.direction) == [.increase])
+}
+
 private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throws -> LedgerStore {
   let database = try makeCanonicalDatabase()
   let accountID = String(repeating: "d", count: 64)
