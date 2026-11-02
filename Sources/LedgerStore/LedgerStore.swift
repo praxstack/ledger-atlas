@@ -205,6 +205,11 @@ public final class LedgerStore {
   private let isMutable: Bool
   private let pinnedWriterRegistration: UnsafeMutableRawPointer?
   private let mutationTestHook: MutationTestHook?
+  /// The tables this connection has written since its last verified save.
+  private let writeWatch: TableWriteWatch?
+  /// When the import graph was last fully replayed on this connection. A write that leaves it
+  /// unchanged skips the replay, which on a large import is most of a save's time.
+  private var importGraphVerifiedAt: CanonicalLedgerHealth.ImportGraphMark?
 
   /// Internal seam for the future pinned canonical opener and typed mutation implementation.
   init(takingOwnershipOfValidatedCanonicalDatabase database: OpaquePointer?) throws {
@@ -215,13 +220,14 @@ public final class LedgerStore {
         throw Error.incompatibleCanonicalStore
       }
       try Self.validateCanonicalSchema(on: database)
-      try CanonicalLedgerHealth.validate(database)
+      importGraphVerifiedAt = try CanonicalLedgerHealth.validate(database)
       self.database = database
       pinnedIdentity = nil
       url = nil
       isMutable = true
       pinnedWriterRegistration = nil
       mutationTestHook = nil
+      writeWatch = TableWriteWatch(watching: database)
     } catch {
       sqlite3_close(database)
       throw Error.incompatibleCanonicalStore
@@ -229,6 +235,7 @@ public final class LedgerStore {
   }
 
   deinit {
+    if writeWatch != nil { sqlite3_update_hook(database, nil, nil) }
     if let pinnedWriterRegistration {
       _ = csqlite_close_pinned(database, pinnedWriterRegistration)
     } else {
@@ -373,13 +380,14 @@ public final class LedgerStore {
       }
       try validateCanonicalJournalMode(on: database)
       try validateCanonicalSchema(on: database)
-      try CanonicalLedgerHealth.validate(
+      let importGraphVerifiedAt = try CanonicalLedgerHealth.validate(
         database, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(
         mutableDatabase: database, identity: identity, url: url,
-        registration: registration, mutationTestHook: mutationTestHook)
+        registration: registration, mutationTestHook: mutationTestHook,
+        importGraphVerifiedAt: importGraphVerifiedAt)
     } catch {
       _ = csqlite_close_pinned(database, registration)
       throw Error.incompatibleCanonicalStore
@@ -2263,11 +2271,14 @@ public final class LedgerStore {
     isMutable = false
     pinnedWriterRegistration = nil
     mutationTestHook = nil
+    writeWatch = nil
+    importGraphVerifiedAt = nil
   }
 
   private init(
     mutableDatabase database: OpaquePointer, identity: stat, url: URL,
-    registration: UnsafeMutableRawPointer, mutationTestHook: MutationTestHook?
+    registration: UnsafeMutableRawPointer, mutationTestHook: MutationTestHook?,
+    importGraphVerifiedAt: CanonicalLedgerHealth.ImportGraphMark
   ) {
     self.database = database
     pinnedIdentity = identity
@@ -2275,6 +2286,8 @@ public final class LedgerStore {
     isMutable = true
     pinnedWriterRegistration = registration
     self.mutationTestHook = mutationTestHook
+    self.importGraphVerifiedAt = importGraphVerifiedAt
+    writeWatch = TableWriteWatch(watching: database)
   }
 
   /// `trustIdentity` names the receipt key for a write that adds the ledger's first receipt,
@@ -2283,26 +2296,49 @@ public final class LedgerStore {
     trustIdentity: String? = nil, _ body: (LedgerReadSnapshot) throws -> MutationResult
   ) throws -> MutationResult {
     try validateMutationIdentity(requiringNoCompanions: true)
+    let writtenBefore = writeWatch?.writtenTables ?? []
     try Self.execute("BEGIN IMMEDIATE", on: database)
     do {
       try mutationTestHook?(.afterBeginImmediate)
-      try Self.validateCanonicalSchema(on: database)
+      // `data_version` moves only when another connection commits. If it hasn't since this
+      // connection last verified the file, every row since then went in through a checked save
+      // with foreign keys enforced, so the whole-file key check need not run again.
+      let fileUnchanged =
+        writeWatch?.writtenTables.isEmpty == true
+        && importGraphVerifiedAt.map { $0.dataVersion == Self.dataVersion(of: database) } == true
+      try Self.validateCanonicalSchema(on: database, checkingForeignKeys: !fileUnchanged)
       let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
       let result = try body(snapshot)
       try mutationTestHook?(.afterMutationWrite)
-      try CanonicalLedgerHealth.validate(
+      let mark = try CanonicalLedgerHealth.validate(
         database,
         trustKey: try self.url.flatMap {
           try LedgerReceiptTrust.key(for: $0, create: false, stableIdentity: trustIdentity)
-        }, verifyingReceiptImages: false)
-      guard Self.hasNoRows("PRAGMA foreign_key_check", on: database) else {
+        }, verifyingReceiptImages: false,
+        importGraphVerifiedAt: fileUnchanged && writeWatch?.wroteImportGraph == false
+          ? importGraphVerifiedAt : nil)
+      // Foreign keys are enforced on this connection (checked at open, and the setting can't
+      // change inside a transaction), so a key check of the tables this save wrote is enough.
+      let foreignKeyChecks =
+        fileUnchanged
+        ? (writeWatch?.writtenTables ?? []).sorted().map {
+          "PRAGMA main.foreign_key_check(\"\($0)\")"
+        }
+        : ["PRAGMA foreign_key_check"]
+      for check in foreignKeyChecks where !Self.hasNoRows(check, on: database) {
         throw Error.incompatibleCanonicalStore
       }
       try validateMutationIdentity(requiringNoCompanions: false)
       try Self.execute("COMMIT", on: database)
+      importGraphVerifiedAt = mark
+      writeWatch?.reset()
       return result
     } catch {
-      _ = try? Self.execute("ROLLBACK", on: database)
+      // A rolled-back save leaves nothing behind, so forget the tables it wrote; otherwise one
+      // refused save would send the next save down the full check.
+      if (try? Self.execute("ROLLBACK", on: database)) != nil {
+        writeWatch?.restore(writtenBefore)
+      }
       if let error = error as? Error, error.preservesMutationError { throw error }
       throw Error.incompatibleCanonicalStore
     }
@@ -2440,7 +2476,13 @@ public final class LedgerStore {
     }
   }
 
-  private static func validateCanonicalSchema(on database: OpaquePointer) throws {
+  private static func dataVersion(of database: OpaquePointer) -> Int64? {
+    scalarInt("PRAGMA data_version", on: database).map(Int64.init)
+  }
+
+  private static func validateCanonicalSchema(
+    on database: OpaquePointer, checkingForeignKeys: Bool = true
+  ) throws {
     guard
       scalarInt("PRAGMA application_id", on: database) == Int(CanonicalLedgerSchema.applicationID),
       scalarText("SELECT value FROM ledger_meta WHERE key='schema_version'", on: database)
@@ -2451,7 +2493,7 @@ public final class LedgerStore {
         == CanonicalLedgerSchema.fingerprint,
       schemaObjects(on: database) == CanonicalLedgerSchema.expectedObjects,
       scalarText("PRAGMA quick_check", on: database) == "ok",
-      hasNoRows("PRAGMA foreign_key_check", on: database)
+      !checkingForeignKeys || hasNoRows("PRAGMA foreign_key_check", on: database)
     else { throw Error.incompatibleCanonicalStore }
   }
 
@@ -3693,5 +3735,28 @@ extension LedgerStore {
           transient) == SQLITE_OK
       }
     }
+  }
+}
+
+
+/// Records which tables this connection writes rows to, through SQLite's update hook. The hook
+/// misses a whole-table delete, which the import-graph mark's row counts catch.
+final class TableWriteWatch {
+  private static let importOnlyTables = Set(CanonicalLedgerHealth.importOnlyTables)
+  private(set) var writtenTables: Set<String> = []
+
+  var wroteImportGraph: Bool { !writtenTables.isDisjoint(with: Self.importOnlyTables) }
+
+  func reset() { writtenTables.removeAll(keepingCapacity: true) }
+  func restore(_ tables: Set<String>) { writtenTables = tables }
+
+  init(watching database: OpaquePointer) {
+    sqlite3_update_hook(
+      database,
+      { context, _, _, table, _ in
+        guard let context, let table else { return }
+        let watch = Unmanaged<TableWriteWatch>.fromOpaque(context).takeUnretainedValue()
+        watch.writtenTables.insert(String(cString: table))
+      }, Unmanaged.passUnretained(self).toOpaque())
   }
 }

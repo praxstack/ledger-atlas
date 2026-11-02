@@ -10,12 +10,67 @@ package enum CanonicalLedgerHealth {
     (try? validate(database, trustKey: trustKey)) != nil
   }
 
+  /// Tables that only an import writes. Besides these, the import-graph replay reads only
+  /// `ledger_meta` and the v19 marker literals (`import.v19*`) on transaction revisions.
+  package static let importOnlyTables = [
+    "provenance_reference", "import_receipt", "economic_event", "economic_event_transfer",
+    "event_source_binding", "sidecar_reference", "receipt_event", "receipt_binding",
+    "receipt_sidecar", "receipt_preservation_anchor", "receipt_preservation_payload",
+    "receipt_preservation_membership", "ledger_receipt_trust_anchor",
+  ]
+
+  /// Everything the import-graph replay depends on that a later write could change, read in
+  /// one transaction. If two marks are equal and no row of an import-only table was written in
+  /// between, the replay's earlier result still holds.
+  ///
+  /// - `data_version` changes when any other connection commits to the file.
+  /// - Row counts catch inserts and deletes on this connection, including a whole-table delete
+  ///   that SQLite's update hook does not report.
+  /// - Transaction revisions and source literals can't be updated or deleted (schema triggers),
+  ///   so the count of marker literals changes if a write adds one.
+  ///
+  /// The receipt trust key is not part of the mark: it lives in the Keychain, is fixed per
+  /// ledger, and the one save that can name a new key (a package restore) writes import rows,
+  /// so it always gets the full replay.
+  package struct ImportGraphMark: Equatable, Sendable {
+    let dataVersion: Int64
+    let tableCounts: [Int64]
+    let markerLiterals: Int64
+    let meta: [String]
+  }
+
+  static func importGraphMark(_ database: OpaquePointer) throws -> ImportGraphMark {
+    let present = Set(
+      try rows(database, "SELECT name FROM main.sqlite_schema WHERE type='table'", { $0.text(0) }))
+    return ImportGraphMark(
+      dataVersion: try require(rows(database, "PRAGMA data_version", { $0.int64(0) }).first),
+      tableCounts: try importOnlyTables.map { table in
+        guard present.contains(table) else { return -1 }
+        return try require(rows(database, "SELECT count(*) FROM main.\(table)", { $0.int64(0) }).first)
+      },
+      markerLiterals: try require(
+        rows(
+          database,
+          "SELECT count(*) FROM main.ledger_transaction_source_literal WHERE field GLOB 'import.v19*'",
+          { $0.int64(0) }
+        ).first),
+      meta: try rows(
+        database, "SELECT key || '=' || value FROM main.ledger_meta ORDER BY key", { $0.text(0) }))
+  }
+
   /// `verifyingReceiptImages` re-hashes every stored receipt image. Opening, restoring and
   /// backing up do that; a write skips it, since receipt bytes can't change after insert and
   /// the store hashes them when they go in.
+  ///
+  /// `importGraphVerifiedAt` is the mark from an earlier full check on this connection. When
+  /// the file still has that mark, and the caller knows no import-only row was written since,
+  /// the import-graph replay (most of the check's time on a large import) is not repeated.
+  /// Returns the mark the import graph was verified at.
+  @discardableResult
   static func validate(
-    _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true
-  ) throws {
+    _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true,
+    importGraphVerifiedAt: ImportGraphMark? = nil
+  ) throws -> ImportGraphMark {
     // Run the whole check in one read transaction with a larger page cache. Otherwise SQLite
     // re-takes its file lock for each of the many small queries below, and a ~900 MB imported
     // ledger keeps evicting the pages the next query needs. A caller already inside a
@@ -32,9 +87,13 @@ package enum CanonicalLedgerHealth {
       }
     }
     defer { if ownsTransaction { sqlite3_exec(database, "COMMIT", nil, nil, nil) } }
-    try validateImportGraph(database, trustKey: trustKey)
+    let mark = try importGraphMark(database)
+    if mark != importGraphVerifiedAt {
+      try validateImportGraph(database, trustKey: trustKey)
+    }
     try validateReceiptAttachments(database, verifyingImages: verifyingReceiptImages)
     _ = try readSnapshot(database)
+    return mark
   }
 
   /// Receipt attachments (schema v13). Absent before v13.

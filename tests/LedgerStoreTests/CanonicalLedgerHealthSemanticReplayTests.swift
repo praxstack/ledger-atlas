@@ -53,6 +53,52 @@ func importedV19TransactionCorrectionReopens() throws {
   }
 }
 
+/// A save skips the import-graph replay only while the import graph is provably untouched; a
+/// save that adds an import marker, or one after another connection changed imported rows,
+/// gets the full replay and is refused.
+@Test("a save re-checks the import graph whenever it could have changed")
+func saveRechecksImportGraphWhenItCouldHaveChanged() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let app = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
+    var createdAt: Int64 = 1_793_000_000_000
+    func correct(addingImportMarker: Bool = false) throws {
+      let target = try #require(
+        try app.snapshot().transactions.first { $0.currentRevision.lifecycle == .active })
+      let draft = target.currentRevision.draft
+      let kept = draft.sourceLiterals.filter {
+        !$0.field.hasPrefix("import.") && !$0.field.hasPrefix("conversion.")
+      }
+      let marker = try LedgerSourceLiteral(
+        field: MoneyManagerV19Semantics.receiptGenerationField,
+        literal: MoneyManagerV19Semantics.currentReceiptGenerationLiteral)
+      createdAt += 1_000
+      _ = try app.correctTransaction(
+        transactionID: target.id, expectedCurrentRevisionID: target.currentRevision.id,
+        draft: try LedgerTransactionDraft(
+          effects: draft.effects, categoryID: draft.categoryID, kind: draft.kind,
+          occurredAt: draft.occurredAt, note: (draft.note ?? "") + " (edited)",
+          roundingPolicy: draft.roundingPolicy,
+          sourceLiterals: addingImportMarker ? kept + [marker] : kept,
+          origin: draft.origin),
+        createdAt: UTCInstant(epochMilliseconds: createdAt))
+    }
+
+    try correct()
+    // A second v19 marker on an imported transaction breaks the import proof.
+    #expect(throws: (any Error).self) { try correct(addingImportMarker: true) }
+    try correct()
+
+    // Another connection changes an imported amount between two saves.
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        "UPDATE economic_event SET amount_literal='987654321' WHERE rowid=(SELECT min(rowid) FROM economic_event);"
+      )
+    }
+    #expect(throws: (any Error).self) { try correct() }
+  }
+}
+
 @Test("an authenticated v19 backup reopens on the same Mac with its external trust key")
 func authenticatedV19BackupReopensOnSameDevice() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
