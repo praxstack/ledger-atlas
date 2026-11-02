@@ -210,6 +210,21 @@ get `ZDATE` = local midnight of the due day. `NEXT_DATE` is epoch ms; `END_DATE 
 Generated transactions use the rule `uid` as the prefix of their own `uid`. Some
 generated rows point at rules that no longer exist: keep them as plain transactions.
 
+Import mapping: a live or deleted rule becomes a Ledger Atlas recurring rule only when it can
+be expressed exactly, meaning all of the following hold:
+- the code is 1, 5, 7 or 17
+- `DO_TYPE` is 0 or 1
+- there is no `toAssetUid`
+- `END_DATE = 0`
+- the account resolves
+- the currency matches the account
+- `AMOUNT_SUB` is the nearest binary64 to a two-decimal literal
+
+The rule starts on the local day of `NEXT_DATE`, so rows Money Manager already generated
+are not generated again. Any other rule, including Weekend (10), stays byte-preserved and
+never blocks the import. Observed real backup: 10 rules (8 monthly, 2 annual, all expense,
+clean two-decimal amounts), so all 10 map.
+
 ### PHOTO: receipt attachments
 
 Rows hold metadata only (`FILE_PATH`, `FILE_NAME`, `ORG_FILE_*`, `FILE_SIZE`); the image

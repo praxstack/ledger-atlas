@@ -64,6 +64,65 @@ extension MoneyManagerV19Semantics {
     }
   }
 
+  // MARK: Recurring rules (REPEATTRANSACTION)
+
+  static let recurrenceTables: Set<String> = ["REPEATTRANSACTION", "ZREPEATTRANSACTION"]
+  static let repeatTypeAliases = ["REPEAT_TYPE", "ZREPEATTYPE"]
+  static let nextDateAliases = ["NEXT_DATE", "ZNEXTDATE"]
+  static let endDateAliases = ["END_DATE", "ZENDDATE"]
+  static let recurrenceAmountAliases = ["AMOUNT_SUB", "ZAMOUNTSUB"]
+  static let deletedAliases = ["IS_DEL", "ZISDEL"]
+  static let toAssetAliases = ["toAssetUid", "TO_ASSET_UID", "ZTOASSETUID"]
+
+  /// Observed REPEAT_TYPE codes that a Ledger Atlas rule can express exactly. Weekend (10) has
+  /// no Ledger Atlas frequency, and unseen codes are never guessed: those rules stay preserved.
+  static func recurrence(forRepeatType code: String) -> (
+    frequency: LedgerRecurrenceFrequency, interval: Int
+  )? {
+    switch code {
+    case "1": (.monthly, 1)
+    case "5": (.daily, 1)
+    case "7": (.weekly, 2)
+    case "17": (.yearly, 1)
+    default: nil
+    }
+  }
+
+  /// A rule amount exists only as REAL `AMOUNT_SUB`. It is admitted when the binary64 value is
+  /// positive and is exactly the nearest double to a two-decimal literal; anything else stays
+  /// preserved raw rather than rounded.
+  static func recurrenceAmountLiteral(realPayload: Data) -> String? {
+    guard realPayload.count == 8 else { return nil }
+    let bits = realPayload.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    let value = Double(bitPattern: bits)
+    guard value.isFinite, value > 0, value < 1e13 else { return nil }
+    let literal = String(format: "%.2f", value)
+    guard Double(literal) == value, (try? ExactDecimal(literal)) != nil else { return nil }
+    return literal
+  }
+
+  /// Ledger Atlas rule id for a source rule uid: stable across re-imports of the same backup.
+  static func recurrenceRuleID(profileID: String, sourceRuleUID: String) -> String {
+    CanonicalReceiptDigest.hash(["ledger-atlas/mm-recurrence/v1", profileID, sourceRuleUID])
+  }
+
+  /// Local calendar day of an epoch-millisecond instant in the source time zone.
+  static func localDate(epochMilliseconds: Int64, in zone: SourceTimeZone) -> SourceLocalDate? {
+    let offset: Int
+    if let fixed = zone.fixedOffsetSeconds {
+      offset = fixed
+    } else if let identifier = zone.ianaIdentifier, let foundation = TimeZone(identifier: identifier) {
+      offset = foundation.secondsFromGMT(
+        for: Date(timeIntervalSince1970: Double(epochMilliseconds) / 1_000))
+    } else {
+      return nil
+    }
+    let (shifted, overflow) = epochMilliseconds.addingReportingOverflow(Int64(offset) * 1_000)
+    guard !overflow else { return nil }
+    let civil = GregorianCivil.components(epochMilliseconds: shifted)
+    return try? SourceLocalDate(year: civil.year, month: civil.month, day: civil.day)
+  }
+
   static func blocksLosslessCertification(_ reason: MoneyManagerV19BlockReason) -> Bool {
     switch reason {
     case .unknownTransactionType, .unsupportedTransactionType, .transferDirectionUnproven:

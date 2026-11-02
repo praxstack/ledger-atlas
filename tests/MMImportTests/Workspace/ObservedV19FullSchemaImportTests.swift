@@ -44,6 +44,15 @@ struct ObservedV19FullSchemaImportTests {
           at: canonical,
           "SELECT count(*) FROM economic_event_transfer t JOIN economic_event d ON d.event_id=t.debit_event_id JOIN economic_event c ON c.event_id=t.credit_event_id WHERE d.event_kind='transfer_debit' AND c.event_kind='transfer_credit' AND d.amount_literal='40.00' AND c.amount_literal='40.00'"
         ) == 1)
+      // Only the monthly rule maps: weekend has no Ledger Atlas frequency and 1.005 is not an
+      // exact two-decimal amount, so those two stay preserved raw. The rule starts on NEXT_DATE
+      // (2025-03-03 at +05:30) so already generated rows are not generated again.
+      #expect(try scalar(at: canonical, "SELECT count(*) FROM ledger_recurrence_rule") == 1)
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM ledger_recurrence_rule WHERE kind='expense' AND amount_literal='9.99' AND currency_unit='USD' AND frequency='monthly' AND interval=1 AND day_of_month=3 AND start_year=2025 AND start_month=3 AND start_day=3 AND until_year IS NULL AND paused=0 AND lifecycle='active' AND timezone_kind='fixed' AND timezone_value='19800'"
+        ) == 1)
       #expect(try Data(contentsOf: source) == sourceBefore)
 
       let retry = try workspace.prepare(
@@ -54,6 +63,7 @@ struct ObservedV19FullSchemaImportTests {
       let retryHandle = try #require(retry.preparedHandle)
       let second = try workspace.commit(retryHandle, approval: workspace.approve(retryHandle))
       #expect(second.status == .unchanged)
+      #expect(try scalar(at: canonical, "SELECT count(*) FROM ledger_recurrence_rule") == 1)
       #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 8)
       #expect(try scalar(at: canonical, "SELECT count(*) FROM economic_event_transfer") == 1)
     }
@@ -123,12 +133,12 @@ struct ObservedV19FullSchemaImportTests {
           at: canonical,
           "SELECT count(*) FROM receipt_preservation_payload x JOIN provenance_reference p ON p.provenance_id=x.provenance_id WHERE p.source_table='PHOTO' AND p.source_column_name='FILE_PATH' AND CAST(x.payload AS TEXT) IN ('/synthetic/photo.jpg','/synthetic/gone.jpg')"
         ) == 2)
-      // The recurring rule keeps its schedule code.
+      // Every recurring rule keeps its schedule code, mapped or not.
       #expect(
         try scalar(
           at: canonical,
           "SELECT count(*) FROM receipt_preservation_payload x JOIN provenance_reference p ON p.provenance_id=x.provenance_id WHERE p.source_table='REPEATTRANSACTION' AND p.source_column_name='REPEAT_TYPE'"
-        ) == 1)
+        ) == 3)
       // The unknown table is preserved too.
       #expect(
         try scalar(
@@ -173,6 +183,27 @@ struct ObservedV19FullSchemaImportTests {
         != MoneyManagerV19Vocabulary.transferID(debitEventID: "c", creditEventID: "d"))
     #expect(MoneyManagerV19Vocabulary.categoryResolves("-4", known: []))
     #expect(!MoneyManagerV19Vocabulary.categoryResolves("missing", known: ["cat-food"]))
+    #expect(MoneyManagerV19Vocabulary.recurrence(forRepeatType: "1")?.frequency == .monthly)
+    #expect(MoneyManagerV19Vocabulary.recurrence(forRepeatType: "7")?.interval == 2)
+    #expect(MoneyManagerV19Vocabulary.recurrence(forRepeatType: "17")?.frequency == .yearly)
+    #expect(MoneyManagerV19Vocabulary.recurrence(forRepeatType: "10") == nil)
+    #expect(MoneyManagerV19Vocabulary.recurrence(forRepeatType: "2") == nil)
+    func real(_ value: Double) -> Data {
+      withUnsafeBytes(of: value.bitPattern.bigEndian) { Data($0) }
+    }
+    #expect(MoneyManagerV19Vocabulary.recurrenceAmountLiteral(realPayload: real(9.99)) == "9.99")
+    #expect(MoneyManagerV19Vocabulary.recurrenceAmountLiteral(realPayload: real(1500)) == "1500.00")
+    #expect(MoneyManagerV19Vocabulary.recurrenceAmountLiteral(realPayload: real(1.005)) == nil)
+    #expect(MoneyManagerV19Vocabulary.recurrenceAmountLiteral(realPayload: real(0)) == nil)
+    #expect(MoneyManagerV19Vocabulary.recurrenceAmountLiteral(realPayload: real(-5)) == nil)
+    let ist = try SourceTimeZone(fixedOffsetSeconds: 19_800)
+    // 2025-03-02T18:30:00Z is local midnight of 3 March at +05:30.
+    #expect(
+      MoneyManagerV19Vocabulary.localDate(epochMilliseconds: 1_740_940_200_000, in: ist)
+        == (try SourceLocalDate(year: 2025, month: 3, day: 3)))
+    #expect(
+      MoneyManagerV19Vocabulary.localDate(epochMilliseconds: 1_740_940_199_999, in: ist)
+        == (try SourceLocalDate(year: 2025, month: 3, day: 2)))
   }
 }
 
@@ -229,6 +260,10 @@ private func writeFullSchemaBackup(to url: URL) throws {
       INSERT INTO REPEATTRANSACTION (uid, IS_DEL, END_DATE, NEXT_DATE, DO_TYPE, REPEAT_TYPE,
         assetUid, ctgUid, currencyUid, AMOUNT_SUB, MEMO, PAYEE)
         VALUES ('rule-1', 0, 0, 1741000000000, 1, 1, 'acct-a', 'cat-food', 'cur-main', 9.99, '',
+          'synthetic'),
+          ('rule-weekend', 0, 0, 1741000000000, 1, 10, 'acct-a', 'cat-food', 'cur-main', 5.0, '',
+          'synthetic'),
+          ('rule-inexact', 0, 0, 1741000000000, 1, 5, 'acct-a', 'cat-food', 'cur-main', 1.005, '',
           'synthetic');
       INSERT INTO TAG (uid, name, isDel) VALUES ('tag-1', 'synthetic', 0);
       INSERT INTO ZETC (uid, ZDATATYPE, ZDATA) VALUES ('etc-1', 100, 'en');
