@@ -747,13 +747,14 @@ public struct MoneyManagerV19ObservedEntity: Equatable, Sendable {
   public let fields: [MoneyManagerV19SourceField]
 }
 public enum MoneyManagerV19EventKind: String, Equatable, Sendable {
-  case income, expense, adjustment
+  case income, expense, adjustment, adjustmentDebit
 
   var canonical: CanonicalEventKind {
     switch self {
     case .income: .income
     case .expense: .expense
     case .adjustment: .adjustment
+    case .adjustmentDebit: .adjustmentDebit
     }
   }
 }

@@ -50,6 +50,11 @@ public enum MoneyManagerV19Semantics {
   /// Admitted only together with `balanceEditCategoryUID`. Proven on the 2026-11-02 test backup:
   /// account balances only reconcile when type 7 adds money.
   public static let balanceIncreaseType = "7"
+  /// A balance decrease the user chose not to record as expense ("No" on the app's prompt).
+  /// It takes money out of the account but is left out of expense totals, so it maps to a
+  /// decreasing adjustment. Admitted only together with `balanceEditCategoryUID`. Proven on the
+  /// 2026-11-02 test backup: account balances only reconcile when type 8 removes money.
+  public static let balanceDecreaseType = "8"
 
   public struct RetainedField: Sendable {
     public let semantic: CanonicalEventSourceSemantic
@@ -186,7 +191,8 @@ public enum MoneyManagerV19Semantics {
         == (try? StableCanonicalID.account(profileID: profileID, sourceAccountID: accountLiteral)),
       (kindLiteral == "0" && event.kind == .income)
         || (kindLiteral == "1" && event.kind == .expense)
-        || (kindLiteral == balanceIncreaseType && event.kind == .adjustment),
+        || (kindLiteral == balanceIncreaseType && event.kind == .adjustment)
+        || (kindLiteral == balanceDecreaseType && event.kind == .adjustmentDebit),
       let observedLocal = observedLocalDateTime(occurredLiteral),
       observedLocal == event.occurredAt.localDateTime,
       event.occurredAt.timeZone.fixedOffsetSeconds == nil
