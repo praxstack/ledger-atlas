@@ -70,7 +70,11 @@ struct CategoriesView: View {
       }
       HStack {
         if isEditing {
+          // Only an open, visible category can take new subcategories (the store rule).
+          let canAddChild = focus.map { $0.lifecycle == .active && !$0.hidden } ?? true
           Button(focus == nil ? "New category" : "New subcategory") { showingCategoryForm = true }
+            .disabled(!canAddChild)
+            .help(canAddChild ? "" : "Restore or show this category before adding subcategories.")
             .accessibilityLabel(focus.map { "New subcategory of \($0.name)" } ?? "New category")
         } else if !categories.isEmpty || !rows.isEmpty {
           Button("Begin editing", action: beginEditing).accessibilityLabel("Begin editing categories")
@@ -173,7 +177,7 @@ struct CategoryTreeRow: View {
     }
     .contentShape(Rectangle())
     .onTapGesture(count: 2) { if childCount > 0 { drillIn(category.id) } }
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .contain)
     .accessibilityLabel("\(category.name), \(summary)\(category.hidden ? ", hidden" : "")")
   }
 
