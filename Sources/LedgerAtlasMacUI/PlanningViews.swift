@@ -342,6 +342,9 @@ struct BudgetsView: View {
   let budgets: [LedgerBudget]
   let categories: [LedgerCategory]
   let accounts: [LedgerAccount]
+  let transactions: [LedgerTransactionSnapshot]
+  /// Today in the person's time zone; budgets are evaluated for the period containing it.
+  let today: SourceLocalDate?
   let isEditing: Bool
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -365,6 +368,11 @@ struct BudgetsView: View {
                 .font(.caption).foregroundStyle(.secondary)
               Text(categories.first(where: { $0.id == budget.categoryID })?.name ?? "Unknown category")
                 .font(.caption).foregroundStyle(.secondary)
+              if let status = status(of: budget) {
+                Text(Self.describe(status, unit: budget.amount.unitCode))
+                  .font(.caption.monospacedDigit())
+                  .foregroundStyle(status.isOverBudget ? .red : .primary)
+              }
             }
             Spacer()
             if budget.rollover { Text("Rollover").font(.caption) }
@@ -381,7 +389,10 @@ struct BudgetsView: View {
             }
           }
           .accessibilityElement(children: .combine)
-          .accessibilityLabel("Budget \(budget.name), \(budget.amount.amount.rawLiteral) \(budget.amount.unitCode)")
+          .accessibilityLabel(
+            "Budget \(budget.name), \(budget.amount.amount.rawLiteral) \(budget.amount.unitCode)"
+              + (status(of: budget).map { ". " + Self.describe($0, unit: budget.amount.unitCode) }
+                ?? ""))
         }
       }
       if let lastFailure { Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure) }
@@ -396,6 +407,23 @@ struct BudgetsView: View {
     .sheet(isPresented: $showingForm) {
       BudgetForm(accounts: accounts, categories: categories, onSave: onCreate)
     }
+  }
+
+  private func status(of budget: LedgerBudget) -> LedgerBudgetStatus? {
+    guard let today else { return nil }
+    return try? budget.status(on: today, transactions: transactions)
+  }
+
+  static func describe(_ status: LedgerBudgetStatus, unit: String) -> String {
+    let left =
+      status.overspent.map { "over by \($0.rawLiteral)" } ?? "\(status.remaining.rawLiteral) left"
+    let carried =
+      status.carried.isPositive ? " (includes \(status.carried.rawLiteral) rolled over)" : ""
+    let end = String(
+      format: "%04d-%02d-%02d", status.periodEnd.year, status.periodEnd.month,
+      status.periodEnd.day)
+    return
+      "Spent \(status.spent.rawLiteral) of \(status.available.rawLiteral) \(unit), \(left)\(carried), period ends \(end)"
   }
 }
 

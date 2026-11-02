@@ -1042,8 +1042,16 @@ public final class LedgerStore {
       package.accounts.map(\.origin) + package.categories.map(\.origin)
       + package.revisions.map(\.draft.origin) + package.recurrenceRules.map(\.origin)
       + package.budgets.map(\.origin) + package.installmentPlans.map(\.origin)
+      + package.tags.map(\.origin) + package.transactionTemplates.map(\.origin)
+      + package.memos.map(\.origin)
     let importedOriginID = String(repeating: "e", count: 64)
+    let revisionIDs = Set(package.revisions.map(\.id))
     guard package.preservedSource.isEmpty,
+      Set(package.tags.map(\.id)).count == package.tags.count,
+      Set(package.transactionTemplates.map(\.id)).count == package.transactionTemplates.count,
+      Set(package.memos.map(\.id)).count == package.memos.count,
+      package.revisionTags.keys.allSatisfy(revisionIDs.contains),
+      (try? LedgerTag.validateActiveNamesAreUnique(package.tags)) != nil,
       Set(package.accounts.map(\.id)).count == package.accounts.count,
       Set(package.accountGroups.map(\.id)).count == package.accountGroups.count,
       Set(package.categories.map(\.id)).count == package.categories.count,
@@ -1060,7 +1068,16 @@ public final class LedgerStore {
       }),
       !package.revisions.contains(where: { revision in
         revision.draft.sourceLiterals.contains {
-          $0.provenanceID != nil || $0.field == "import.eventID"
+          $0.provenanceID != nil || $0.field.hasPrefix("import.")
+        }
+      })
+    else { throw Error.incompatibleCanonicalStore }
+    let currencyByAccount = Dictionary(
+      package.accounts.map { ($0.id, $0.currencyUnit) }, uniquingKeysWith: { first, _ in first })
+    guard
+      package.transactionTemplates.allSatisfy({ template in
+        ([template.accountID] + (template.counterAccountID.map { [$0] } ?? [])).allSatisfy {
+          currencyByAccount[$0] == template.amount.unitCode
         }
       })
     else { throw Error.incompatibleCanonicalStore }
@@ -1166,6 +1183,7 @@ public final class LedgerStore {
       for rule in package.recurrenceRules { try Self.writeRecurrence(rule, on: database) }
       for budget in package.budgets { try Self.writeBudget(budget, on: database) }
       for plan in package.installmentPlans { try Self.writeInstallment(plan, on: database) }
+      try Self.writeImportedAnnotations(package, on: database)
       return try Self.placeholderResult(
         origin: package.accounts.first?.origin
           ?? LedgerOrigin(id: String(repeating: "1", count: 64), label: "restore"))
@@ -1199,18 +1217,49 @@ public final class LedgerStore {
           sql: "SELECT transaction_id FROM main.ledger_transaction", on: database, map: { $0[0] }))
     }
     let events = try loadEconomicEvents(on: database)
-    for event in events where !existingTransactions.contains(event.id) {
-      if !knownAccounts.contains(event.accountID) {
-        try run(
-          "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
-          values: [
-            .text(event.accountID),
-            .text((try? sourceAccountUID(eventID: event.id, on: database)) ?? event.accountID),
-            .text(event.unitCode),
-            .text(origin.id), .text(LedgerLifecycleState.active.rawValue),
-          ], on: database)
-        knownAccounts.insert(event.accountID)
-      }
+    let pairs = try importedTransferPairs(events: events, on: database)
+    func ensureAccount(for event: ImportedEconomicEvent) throws {
+      guard !knownAccounts.contains(event.accountID) else { return }
+      try run(
+        "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+        values: [
+          .text(event.accountID),
+          .text((try? sourceAccountUID(eventID: event.id, on: database)) ?? event.accountID),
+          .text(event.unitCode),
+          .text(origin.id), .text(LedgerLifecycleState.active.rawValue),
+        ], on: database)
+      knownAccounts.insert(event.accountID)
+    }
+    // Each paired transfer shows as one transaction named by its transfer ID.
+    for pair in pairs where !existingTransactions.contains(pair.id) {
+      guard !existingTransactions.contains(pair.debit.id),
+        !existingTransactions.contains(pair.credit.id)
+      else { throw Error.incompatibleCanonicalStore }
+      try ensureAccount(for: pair.debit)
+      try ensureAccount(for: pair.credit)
+      let revision = try LedgerTransactionRevision(
+        id: StableLedgerID.revision(transactionID: pair.id, revision: 1),
+        transactionID: pair.id, revision: 1, predecessorID: nil,
+        draft: LedgerTransactionDraft(
+          effects: [
+            try LedgerTransactionEffect(
+              accountID: pair.debit.accountID, direction: .decrease, amount: pair.debit.amount),
+            try LedgerTransactionEffect(
+              accountID: pair.credit.accountID, direction: .increase, amount: pair.credit.amount),
+          ], categoryID: nil, kind: .transfer, occurredAt: pair.debit.occurredAt,
+          sourceLiterals: [
+            try LedgerSourceLiteral(field: "import.eventID.debit", literal: pair.debit.id),
+            try LedgerSourceLiteral(field: "import.eventID.credit", literal: pair.credit.id),
+          ], origin: origin),
+        createdAt: UTCInstant(epochMilliseconds: pair.debit.occurredAt.instant.epochMilliseconds))
+      try run(
+        "INSERT INTO main.ledger_transaction(transaction_id, current_revision_id) VALUES (?, ?)",
+        values: [.text(pair.id), .text(revision.id)], on: database)
+      try insert(revision, on: database)
+    }
+    for event in events
+    where event.kind != .transfer && !existingTransactions.contains(event.id) {
+      try ensureAccount(for: event)
       let categoryID = categoryIDsByTransactionID[event.id]
       if let categoryID {
         guard Self.categoryIsActive(
@@ -1350,6 +1399,38 @@ public final class LedgerStore {
         occurrenceCount: try requireInt(row[6]), completedCount: try requireInt(row[7]),
         lifecycle: try requireRaw(LedgerInstallmentPlan.Lifecycle.self, row[8]))
     }
+  }
+
+  private struct ImportedTransferPair {
+    let id: String
+    let debit: ImportedEconomicEvent
+    let credit: ImportedEconomicEvent
+  }
+
+  /// Every imported transfer leg must belong to exactly one pair: a debit leg and a credit leg
+  /// in two different accounts. A leg without its partner, or a pair inside one account,
+  /// cannot be shown as a transfer honestly, so the store refuses it.
+  private static func importedTransferPairs(
+    events: [ImportedEconomicEvent], on database: OpaquePointer
+  ) throws -> [ImportedTransferPair] {
+    let eventsByID = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
+    let pairs = try load(
+      sql:
+        "SELECT transfer_id, debit_event_id, credit_event_id FROM main.economic_event_transfer ORDER BY transfer_id",
+      on: database
+    ) { row -> ImportedTransferPair in
+      guard CanonicalIdentifier.isValid(row[0]),
+        let debit = eventsByID[row[1]], debit.kind == .transfer, debit.direction == .decrease,
+        let credit = eventsByID[row[2]], credit.kind == .transfer,
+        credit.direction == .increase, debit.accountID != credit.accountID
+      else { throw Error.incompatibleCanonicalStore }
+      return ImportedTransferPair(id: row[0], debit: debit, credit: credit)
+    }
+    let pairedEventIDs = Set(pairs.flatMap { [$0.debit.id, $0.credit.id] })
+    guard events.allSatisfy({ $0.kind != .transfer || pairedEventIDs.contains($0.id) }),
+      !pairs.contains(where: { eventsByID[$0.id] != nil })
+    else { throw Error.incompatibleCanonicalStore }
+    return pairs
   }
 
   private struct ImportedEconomicEvent {
@@ -1530,19 +1611,13 @@ public final class LedgerStore {
             AND NOT EXISTS (SELECT 1 FROM main.ledger_recurrence_rule r WHERE r.origin_id=o.origin_id)
             AND NOT EXISTS (SELECT 1 FROM main.ledger_budget b WHERE b.origin_id=o.origin_id)
             AND NOT EXISTS (SELECT 1 FROM main.ledger_installment_plan p WHERE p.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_tag t WHERE t.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_transaction_template t WHERE t.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_memo m WHERE m.origin_id=o.origin_id)
         )
         """, on: database)
     else { throw Error.incompatibleCanonicalStore }
-    // The portable package cannot carry tags, templates or memos yet. Refuse rather than drop
-    // them silently.
-    guard
-      let annotationRows = scalarInt(
-        """
-        SELECT EXISTS(SELECT 1 FROM main.ledger_tag) + EXISTS(SELECT 1 FROM main.ledger_transaction_template)
-          + EXISTS(SELECT 1 FROM main.ledger_memo)
-        """, on: database)
-    else { throw Error.incompatibleCanonicalStore }
-    return standaloneOriginCount != 1 && annotationRows == 0
+    return standaloneOriginCount != 1
   }
 
   package func isEmptyForPortablePackageImport() throws -> Bool {
@@ -2695,6 +2770,64 @@ extension LedgerStore {
           .int(memo.date.day), .text(memo.origin.id), .text(memo.lifecycle.rawValue),
         ], on: database)
       return try Self.placeholderResult(origin: memo.origin)
+    }
+  }
+
+  /// Restores annotations from a portable package into an empty ledger. Rows are written as
+  /// stored, including tombstoned tags that history still points at; foreign keys and the
+  /// post-write health check reject dangling links.
+  fileprivate static func writeImportedAnnotations(
+    _ package: LedgerCanonicalPackage, on database: OpaquePointer
+  ) throws {
+    for tag in package.tags {
+      try ensureOrigin(tag.origin, on: database)
+      try run(
+        "INSERT INTO main.ledger_tag(tag_id, name, origin_id, lifecycle) VALUES (?, ?, ?, ?)",
+        values: [
+          .text(tag.id), .text(tag.name), .text(tag.origin.id), .text(tag.lifecycle.rawValue),
+        ], on: database)
+    }
+    for (revisionID, links) in package.revisionTags {
+      for tagID in links.tagIDs {
+        try run(
+          "INSERT INTO main.ledger_revision_tag(revision_id, tag_id) VALUES (?, ?)",
+          values: [.text(revisionID), .text(tagID)], on: database)
+      }
+    }
+    for template in package.transactionTemplates {
+      try ensureOrigin(template.origin, on: database)
+      try run(
+        """
+        INSERT INTO main.ledger_transaction_template(
+          template_id, name, kind, category_id, amount_literal, currency_unit, note, account_id,
+          counter_account_id, origin_id, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        values: [
+          .text(template.id), .text(template.name), .text(template.kind.rawValue),
+          .optionalText(template.categoryID), .text(template.amount.amount.rawLiteral),
+          .text(template.amount.unitCode), .optionalText(template.note),
+          .text(template.accountID), .optionalText(template.counterAccountID),
+          .text(template.origin.id), .text(template.lifecycle.rawValue),
+        ], on: database)
+      for tagID in template.tags.tagIDs {
+        try run(
+          "INSERT INTO main.ledger_template_tag(template_id, tag_id) VALUES (?, ?)",
+          values: [.text(template.id), .text(tagID)], on: database)
+      }
+    }
+    for memo in package.memos {
+      try ensureOrigin(memo.origin, on: database)
+      try run(
+        """
+        INSERT INTO main.ledger_memo(
+          memo_id, body, local_year, local_month, local_day, origin_id, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        values: [
+          .text(memo.id), .text(memo.body), .int(memo.date.year), .int(memo.date.month),
+          .int(memo.date.day), .text(memo.origin.id), .text(memo.lifecycle.rawValue),
+        ], on: database)
     }
   }
 
