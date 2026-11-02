@@ -1023,6 +1023,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
     let accountRecords = graph.records.values.filter {
       MoneyManagerV19Vocabulary.accountTables.contains(graph.tables[$0.tableID]?.name ?? "")
     }
+    var importedAccountsByUID: [String: (id: String, currency: String)] = [:]
     for record in accountRecords.sorted(by: { $0.recordKey < $1.recordKey }) {
       let sourceRecordID = recordID(for: record, graph: graph)
       let sourceFields = fields(for: sourceRecordID)
@@ -1055,6 +1056,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
       else { throw CanonicalCommitError.unsafeMapping }
       try insertImportedAccount(
         id: accountID, name: name, currency: currency, origin: origin, database: database)
+      importedAccountsByUID[uid] = (accountID, currency)
     }
 
     let categoryRecords = graph.records.values.filter {
@@ -1131,6 +1133,11 @@ public struct SQLiteCanonicalCommitter: Sendable {
       pending.removeAll { insertedUIDs.contains($0.uid) }
     }
 
+    try materializeMoneyManagerV19Recurrences(
+      graph: graph, request: request, origin: origin, accountsByUID: importedAccountsByUID,
+      categoriesByUID: Dictionary(uniqueKeysWithValues: categoryRows.map { ($0.uid, $0) }),
+      currenciesByUID: currenciesByUID, database: database)
+
     var eventCategoryIDs: [String: String] = [:]
     for event in request.events {
       // The first pass throws for every event except balance edits and transfer legs, which
@@ -1143,6 +1150,108 @@ public struct SQLiteCanonicalCommitter: Sendable {
       if compatible { eventCategoryIDs[event.eventID] = row.id }
     }
     return eventCategoryIDs
+  }
+
+  /// Maps REPEATTRANSACTION rows that Ledger Atlas can express exactly into recurring rules.
+  /// A rule starts on its NEXT_DATE, so occurrences Money Manager already generated (imported
+  /// as plain transactions) are never generated twice. A rule that cannot be mapped exactly
+  /// (unknown schedule, transfer, inexact REAL amount, unresolved account) is skipped and
+  /// stays byte-preserved in the receipt; it never blocks the import.
+  private func materializeMoneyManagerV19Recurrences(
+    graph: StagingGraph, request: CanonicalCommitRequest, origin: LedgerOrigin,
+    accountsByUID: [String: (id: String, currency: String)],
+    categoriesByUID: [String: ImportedCategoryRow], currenciesByUID: [String: String],
+    database: OpaquePointer
+  ) throws {
+    guard let zone = request.observedV19SourceTimeZone else { return }
+    let zoneColumns: (String, String)
+    if let identifier = zone.ianaIdentifier {
+      zoneColumns = ("iana", identifier)
+    } else if let offset = zone.fixedOffsetSeconds {
+      zoneColumns = ("fixed", String(offset))
+    } else {
+      return
+    }
+    let fieldsByRecord = Dictionary(grouping: graph.fields.values, by: \.recordID)
+    for (recordID, record) in graph.records.sorted(by: { $0.key < $1.key }) {
+      guard let table = graph.tables[record.tableID],
+        MoneyManagerV19Vocabulary.recurrenceTables.contains(table.name)
+      else { continue }
+      let fields = fieldsByRecord[recordID] ?? []
+      func field(_ aliases: [String]) -> StagedFieldTarget? {
+        for alias in aliases {
+          if let match = fields.first(where: {
+            $0.columnName.caseInsensitiveCompare(alias) == .orderedSame
+          }) { return match }
+        }
+        return nil
+      }
+      func text(_ aliases: [String]) -> String? {
+        guard let match = field(aliases),
+          let value = MoneyManagerV19Vocabulary.mappingLiteral(
+            storageClass: match.storageClass, payload: match.payload),
+          !value.isEmpty, value != "NULL", value != "null"
+        else { return nil }
+        return value
+      }
+      guard let uid = text(MoneyManagerV19Vocabulary.uidAliases),
+        let code = text(MoneyManagerV19Vocabulary.repeatTypeAliases),
+        let schedule = MoneyManagerV19Vocabulary.recurrence(forRepeatType: code),
+        let doType = text(MoneyManagerV19Vocabulary.doTypeAliases),
+        doType == "0" || doType == "1",
+        text(MoneyManagerV19Vocabulary.toAssetAliases) == nil,
+        let accountUID = text(MoneyManagerV19Vocabulary.assetAliases),
+        let account = accountsByUID[accountUID],
+        let amountField = field(MoneyManagerV19Vocabulary.recurrenceAmountAliases),
+        amountField.storageClass == CanonicalFieldStorageClass.real.rawValue,
+        let amount = MoneyManagerV19Vocabulary.recurrenceAmountLiteral(
+          realPayload: amountField.payload),
+        let nextLiteral = text(MoneyManagerV19Vocabulary.nextDateAliases),
+        let nextMilliseconds = Int64(nextLiteral),
+        let start = MoneyManagerV19Vocabulary.localDate(
+          epochMilliseconds: nextMilliseconds, in: zone)
+      else { continue }
+      let endLiteral = text(MoneyManagerV19Vocabulary.endDateAliases) ?? "0"
+      guard endLiteral == "0" else { continue }
+      let currency: String
+      if let currencyUID = text(MoneyManagerV19Vocabulary.currencyUIDAliases) {
+        guard let iso = currenciesByUID[currencyUID] else { continue }
+        currency = iso
+      } else {
+        currency = account.currency
+      }
+      guard currency == account.currency else { continue }
+      let kind: LedgerTransactionKind = doType == "0" ? .income : .expense
+      let categoryID = text(MoneyManagerV19Vocabulary.categoryAliases)
+        .flatMap { categoriesByUID[$0] }
+        .flatMap { row -> String? in
+          (row.kind == .income && kind == .income) || (row.kind == .expense && kind == .expense)
+            ? row.id : nil
+        }
+      let deleted = (text(MoneyManagerV19Vocabulary.deletedAliases) ?? "0") != "0"
+      let ruleID = MoneyManagerV19Vocabulary.recurrenceRuleID(
+        profileID: request.expectedManifest.profileID, sourceRuleUID: uid)
+      try run(
+        database,
+        sql: """
+          INSERT INTO main.ledger_recurrence_rule(
+            rule_id, origin_id, account_id, category_id, kind, amount_literal, currency_unit,
+            frequency, interval, day_of_month, timezone_kind, timezone_value, start_year,
+            start_month, start_day, until_year, until_month, until_day, paused, skipped, lifecycle
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, '', ?)
+          ON CONFLICT(rule_id) DO NOTHING
+          """,
+        values: [
+          .text(ruleID), .text(origin.id), .text(account.id), .optionalText(categoryID),
+          .text(kind.rawValue), .text(amount), .text(currency),
+          .text(schedule.frequency.rawValue), .int(schedule.interval),
+          .optionalInt(schedule.frequency == .monthly ? start.day : nil),
+          .text(zoneColumns.0), .text(zoneColumns.1),
+          .int(start.year), .int(start.month), .int(start.day),
+          .text(deleted ? LedgerLifecycleState.tombstoned.rawValue
+            : LedgerLifecycleState.active.rawValue),
+        ])
+    }
   }
 
   private func recordID(for record: StagedRecordTarget, graph: StagingGraph) -> String {
