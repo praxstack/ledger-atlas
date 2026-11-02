@@ -18,6 +18,8 @@ struct LedgerBrowseList: View {
   var revisionTags: [String: LedgerTagLinks] = [:]
   var editTags: ((String) -> Void)?
   var saveAsTemplate: ((String) -> Void)?
+  var editSplit: ((LedgerSplitPurchase) -> Void)?
+  var closeSplit: ((LedgerSplitPurchase) -> Void)?
 
   @State private var browser = LedgerBrowser(transactions: [])
   @State private var mode: LedgerBrowseMode = .daily
@@ -244,6 +246,14 @@ struct LedgerBrowseList: View {
             Section("Split purchases") {
               ForEach(splitPurchases, id: \.id) { purchase in
                 splitRow(purchase)
+                  .contextMenu {
+                    if let editSplit {
+                      Button("Edit split…") { editSplit(purchase) }
+                    }
+                    if let closeSplit {
+                      Button("Close purchase", role: .destructive) { closeSplit(purchase) }
+                    }
+                  }
               }
             }
           }

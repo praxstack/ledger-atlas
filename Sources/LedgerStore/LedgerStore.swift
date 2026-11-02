@@ -563,82 +563,121 @@ public final class LedgerStore {
   }
 
   public func correctTransaction(_ request: CorrectTransactionRequest) throws -> MutationResult {
-    try mutate { snapshot in
-      let predecessor = try Self.predecessor(
-        transactionID: request.transactionID, revisionID: request.expectedCurrentRevisionID,
-        in: snapshot)
-      guard predecessor.lifecycle == .active, request.createdAt >= predecessor.createdAt else {
-        throw Error.incompatibleCanonicalStore
-      }
-      guard request.draft.origin == predecessor.draft.origin else {
-        throw Error.incompatibleCanonicalStore
-      }
-      let revision = try makeRevision(
-        transactionID: request.transactionID, number: predecessor.revision + 1,
-        predecessorID: predecessor.id,
-        draft: request.draft, lifecycle: .active, createdAt: request.createdAt)
-      let storedTags = try Self.loadRevisionTags(on: database)
-      let previousTags = storedTags[predecessor.id] ?? .empty
-      let tags = previousTags.carriedForward(replacing: request.tags)
-      if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-        guard Self.sameSubmission(existing, revision), storedTags[existing.id] ?? .empty == tags
-        else { throw Error.revisionConflict }
-        return .init(status: .unchanged, revision: existing)
-      }
-      guard
-        snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
-          == predecessor.id
-      else {
-        throw Error.revisionConflict
-      }
-      try Self.validateReferences(revision, in: snapshot, on: database)
-      try Self.insert(revision, on: database)
-      try Self.writeRevisionTags(
-        tags, revisionID: revision.id, previous: previousTags, on: database)
-      try Self.run(
-        "UPDATE main.ledger_transaction SET current_revision_id=? WHERE transaction_id=? AND current_revision_id=?",
-        values: [.text(revision.id), .text(request.transactionID), .text(predecessor.id)],
-        on: database)
-      guard sqlite3_changes(database) == 1 else { throw Error.incompatibleCanonicalStore }
-      return .init(status: .committed, revision: revision)
+    try mutate { snapshot in try applyCorrection(request, in: snapshot) }
+  }
+
+  /// Corrects several transactions in one database transaction: all are written or none is.
+  /// Used for groups such as a split purchase, whose lines must stay consistent.
+  public func correctLinkedTransactions(_ requests: [CorrectTransactionRequest]) throws
+    -> [MutationResult]
+  {
+    guard !requests.isEmpty,
+      Set(requests.map(\.transactionID)).count == requests.count
+    else { throw Error.incompatibleCanonicalStore }
+    var results: [MutationResult] = []
+    _ = try mutate { snapshot in
+      results = try requests.map { try applyCorrection($0, in: snapshot) }
+      return results[0]
     }
+    return results
+  }
+
+  private func applyCorrection(
+    _ request: CorrectTransactionRequest, in snapshot: LedgerReadSnapshot
+  ) throws -> MutationResult {
+    let predecessor = try Self.predecessor(
+      transactionID: request.transactionID, revisionID: request.expectedCurrentRevisionID,
+      in: snapshot)
+    guard predecessor.lifecycle == .active, request.createdAt >= predecessor.createdAt else {
+      throw Error.incompatibleCanonicalStore
+    }
+    guard request.draft.origin == predecessor.draft.origin else {
+      throw Error.incompatibleCanonicalStore
+    }
+    let revision = try makeRevision(
+      transactionID: request.transactionID, number: predecessor.revision + 1,
+      predecessorID: predecessor.id,
+      draft: request.draft, lifecycle: .active, createdAt: request.createdAt)
+    let storedTags = try Self.loadRevisionTags(on: database)
+    let previousTags = storedTags[predecessor.id] ?? .empty
+    let tags = previousTags.carriedForward(replacing: request.tags)
+    if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
+      guard Self.sameSubmission(existing, revision), storedTags[existing.id] ?? .empty == tags
+      else { throw Error.revisionConflict }
+      return .init(status: .unchanged, revision: existing)
+    }
+    guard
+      snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
+        == predecessor.id
+    else {
+      throw Error.revisionConflict
+    }
+    try Self.validateReferences(revision, in: snapshot, on: database)
+    try Self.insert(revision, on: database)
+    try Self.writeRevisionTags(
+      tags, revisionID: revision.id, previous: previousTags, on: database)
+    try Self.run(
+      "UPDATE main.ledger_transaction SET current_revision_id=? WHERE transaction_id=? AND current_revision_id=?",
+      values: [.text(revision.id), .text(request.transactionID), .text(predecessor.id)],
+      on: database)
+    guard sqlite3_changes(database) == 1 else { throw Error.incompatibleCanonicalStore }
+    return .init(status: .committed, revision: revision)
   }
 
   public func tombstoneTransaction(_ request: TombstoneTransactionRequest) throws -> MutationResult
   {
-    try mutate { snapshot in
-      let predecessor = try Self.predecessor(
-        transactionID: request.transactionID, revisionID: request.expectedCurrentRevisionID,
-        in: snapshot)
-      guard predecessor.lifecycle == .active, request.createdAt >= predecessor.createdAt else {
-        throw Error.incompatibleCanonicalStore
-      }
-      let revision = try makeRevision(
-        transactionID: request.transactionID, number: predecessor.revision + 1,
-        predecessorID: predecessor.id,
-        draft: predecessor.draft, lifecycle: .tombstoned, createdAt: request.createdAt)
-      let previousTags = try Self.loadRevisionTags(on: database)[predecessor.id] ?? .empty
-      if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
-        guard Self.sameSubmission(existing, revision) else { throw Error.revisionConflict }
-        return .init(status: .unchanged, revision: existing)
-      }
-      guard
-        snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
-          == predecessor.id
-      else {
-        throw Error.revisionConflict
-      }
-      try Self.insert(revision, on: database)
-      // A tombstone keeps the labels it had, so history reads the same either way.
-      try Self.writeRevisionTags(
-        previousTags, revisionID: revision.id, previous: previousTags, on: database)
-      try Self.run(
-        "UPDATE main.ledger_transaction SET current_revision_id=? WHERE transaction_id=? AND current_revision_id=?",
-        values: [.text(revision.id), .text(request.transactionID), .text(predecessor.id)],
-        on: database)
-      guard sqlite3_changes(database) == 1 else { throw Error.incompatibleCanonicalStore }
-      return .init(status: .committed, revision: revision)
+    try mutate { snapshot in try applyTombstone(request, in: snapshot) }
+  }
+
+  /// Closes several transactions in one database transaction: all are closed or none is.
+  public func tombstoneLinkedTransactions(_ requests: [TombstoneTransactionRequest]) throws
+    -> [MutationResult]
+  {
+    guard !requests.isEmpty,
+      Set(requests.map(\.transactionID)).count == requests.count
+    else { throw Error.incompatibleCanonicalStore }
+    var results: [MutationResult] = []
+    _ = try mutate { snapshot in
+      results = try requests.map { try applyTombstone($0, in: snapshot) }
+      return results[0]
     }
+    return results
+  }
+
+  private func applyTombstone(
+    _ request: TombstoneTransactionRequest, in snapshot: LedgerReadSnapshot
+  ) throws -> MutationResult {
+    let predecessor = try Self.predecessor(
+      transactionID: request.transactionID, revisionID: request.expectedCurrentRevisionID,
+      in: snapshot)
+    guard predecessor.lifecycle == .active, request.createdAt >= predecessor.createdAt else {
+      throw Error.incompatibleCanonicalStore
+    }
+    let revision = try makeRevision(
+      transactionID: request.transactionID, number: predecessor.revision + 1,
+      predecessorID: predecessor.id,
+      draft: predecessor.draft, lifecycle: .tombstoned, createdAt: request.createdAt)
+    let previousTags = try Self.loadRevisionTags(on: database)[predecessor.id] ?? .empty
+    if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
+      guard Self.sameSubmission(existing, revision) else { throw Error.revisionConflict }
+      return .init(status: .unchanged, revision: existing)
+    }
+    guard
+      snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
+        == predecessor.id
+    else {
+      throw Error.revisionConflict
+    }
+    try Self.insert(revision, on: database)
+    // A tombstone keeps the labels it had, so history reads the same either way.
+    try Self.writeRevisionTags(
+      previousTags, revisionID: revision.id, previous: previousTags, on: database)
+    try Self.run(
+      "UPDATE main.ledger_transaction SET current_revision_id=? WHERE transaction_id=? AND current_revision_id=?",
+      values: [.text(revision.id), .text(request.transactionID), .text(predecessor.id)],
+      on: database)
+    guard sqlite3_changes(database) == 1 else { throw Error.incompatibleCanonicalStore }
+    return .init(status: .committed, revision: revision)
   }
 
   public func createAccount(_ account: LedgerAccount) throws {

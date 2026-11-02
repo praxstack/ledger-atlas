@@ -33,6 +33,9 @@ struct LedgerView: View {
   var saveTags: ((String, LedgerTagLinks) -> Void)?
   /// (transaction ID, template name).
   var saveAsTemplate: ((String, String) -> Void)?
+  var editSplit: ((LedgerSplitDraft) -> Void)?
+  var closeSplit: ((String) -> Void)?
+  @State private var editingSplit: LedgerSplitPurchase?
   @State private var selectedID: String?
   @State private var taggingID: String?
   @State private var templatingID: String?
@@ -58,7 +61,11 @@ struct LedgerView: View {
             copy: copy, tombstone: tombstone, tags: tags, revisionTags: revisionTags,
             editTags: isEditing && saveTags != nil ? { (id: String) in taggingID = id } : nil,
             saveAsTemplate: isEditing && saveAsTemplate != nil
-              ? { (id: String) in templatingID = id } : nil)
+              ? { (id: String) in templatingID = id } : nil,
+            editSplit: isEditing && editSplit != nil
+              ? { (purchase: LedgerSplitPurchase) in editingSplit = purchase } : nil,
+            closeSplit: isEditing && closeSplit != nil
+              ? { (purchase: LedgerSplitPurchase) in closeSplit?(purchase.id) } : nil)
         if let lifecycleMessage {
           Text(lifecycleMessage)
             .foregroundStyle(.secondary)
@@ -194,6 +201,15 @@ struct LedgerView: View {
     }
     .sheet(isPresented: $showingSplitForm) {
       SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
+    }
+    .sheet(
+      isPresented: Binding(get: { editingSplit != nil }, set: { if !$0 { editingSplit = nil } })
+    ) {
+      if let purchase = editingSplit {
+        SplitPurchaseForm(
+          accounts: accounts, categories: categories,
+          onSave: { draft in editSplit?(draft) }, existing: purchase)
+      }
     }
     .sheet(
       isPresented: Binding(get: { taggingID != nil }, set: { if !$0 { taggingID = nil } })

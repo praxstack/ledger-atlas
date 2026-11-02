@@ -1038,6 +1038,30 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   let purchases = try LedgerApplication.splitPurchases(from: try #require(journey.snapshot))
   #expect(purchases.count == 1)
   #expect(purchases[0].lines.count == 2)
+
+  // MACV2-07: editing the whole purchase keeps it one group; closing it closes every line.
+  let purchase = purchases[0]
+  let reordered = try purchase.lines.enumerated().map { index, line in
+    try LedgerSplitLine(
+      id: line.id,
+      amount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("3.00")),
+      categoryID: line.categoryID, description: line.description,
+      displayOrder: purchase.lines.count - 1 - index)
+  }
+  let edited = try journey.editSplit(
+    LedgerSplitDraft(
+      id: purchase.id, accountID: purchase.accountID,
+      parentAmount: CurrencyAmount(unitCode: account.currencyUnit, amount: ExactDecimal("6.00")),
+      lines: reordered, occurredAt: purchase.occurredAt, note: "Group, edited",
+      origin: purchase.origin),
+    createdAt: UTCInstant(epochMilliseconds: 3_002))
+  #expect(edited.id == purchase.id)
+  #expect(edited.lines.map(\.id) == purchase.lines.map(\.id).reversed())
+  #expect(edited.note == "Group, edited")
+  try journey.closeSplit(purchaseID: purchase.id, createdAt: UTCInstant(epochMilliseconds: 3_003))
+  let listing = LedgerApplication.splitPurchaseListing(from: try #require(journey.snapshot))
+  #expect(listing.purchases.isEmpty)
+  #expect(listing.closedTransactionIDs.count == 2)
 }
 
 @MainActor
