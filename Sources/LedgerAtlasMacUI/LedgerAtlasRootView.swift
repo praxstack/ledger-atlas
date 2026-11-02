@@ -375,9 +375,9 @@ public struct LedgerAtlasRootView: View {
     panel.nameFieldStringValue = "ledger-atlas.ledgerpackage"
     guard panel.runModal() == .OK, let destination = panel.url else { return }
     do {
-      try journey.exportPortablePackage(to: destination)
-      lifecycleMessage =
-        "Portable package exported. Imported ledgers require the exact SQLite backup."
+      let includesImportHistory = try journey.exportPortablePackage(to: destination)
+      lifecycleMessage = LedgerJourney.packageExportSuccessMessage(
+        includesImportHistory: includesImportHistory)
     } catch {
       journey.recordFailure("Portable package export failed.")
     }

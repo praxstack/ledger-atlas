@@ -141,6 +141,103 @@ struct ImportedLedgerPortablePackageTests {
       try expectRestoreRefused(renamedColumn, in: directory, with: .packageTampered)
     }
   }
+
+  @Test("an edited graph with a recomputed checksum is still refused and nothing is written")
+  func recomputedChecksumDoesNotHideAnEdit() throws {
+    try withPackageDirectory { directory in
+      let exported = try LedgerApplication(store: try importedLedger(in: directory))
+        .exportPackage()
+      // The checksum travels in the package, so an attacker can recompute it. Edit a copy of
+      // the ledger the same way and take its checksum, then patch both into the package.
+      let checksum = try forgedChecksum(in: directory) {
+        "UPDATE economic_event SET amount_literal='41.00' WHERE rowid=(SELECT min(rowid) FROM economic_event)"
+      }
+      let edited = try editingGraph(exported.payload) { graph in
+        try setCell(in: &graph, table: "economic_event", column: "amount_literal", to: ["t", "41.00"])
+        graph["canonicalChecksum"] = checksum
+      }
+      // Not `.packageTampered`: the checksum matches, so the refusal comes from the receipt
+      // checks in ledger health, which recompute the receipt digest from the rows.
+      try expectRestoreRefused(edited, in: directory, with: .invalidCommand)
+    }
+  }
+
+  @Test("a receipt signature made with another key is refused even with a matching checksum")
+  func forgedSignatureIsRefused() throws {
+    try withPackageDirectory { directory in
+      let exported = try LedgerApplication(store: try importedLedger(in: directory))
+        .exportPackage()
+      let object = try packageObject(exported.payload)
+      let graph = try #require(object["importGraph"] as? [String: Any])
+      let receipt = try #require(
+        cell(in: graph, table: "import_receipt", column: "idempotency_key"))
+      let integrityHash = try #require(
+        cell(in: graph, table: "import_receipt", column: "reconciliation_hash"))
+      // A well-formed HMAC over the real receipt, made with a key that isn't this ledger's.
+      let forged = LedgerReceiptTrust.signature(
+        key: Data(repeating: 7, count: 32), receiptID: receipt, integrityHash: integrityHash)
+      let checksum = try forgedChecksum(in: directory) {
+        "UPDATE ledger_receipt_trust_anchor SET signature='\(forged)'"
+      }
+      let edited = try editingGraph(exported.payload) { graph in
+        try setCell(in: &graph, table: "ledger_receipt_trust_anchor", column: "signature", to: ["t", forged])
+        graph["canonicalChecksum"] = checksum
+      }
+      // Rows, digest and checksum all match; only the HMAC check with this Mac's key fails.
+      try expectRestoreRefused(edited, in: directory, with: .invalidCommand)
+    }
+  }
+
+  @Test("a malformed import graph is refused before anything is written")
+  func malformedGraphIsRefused() throws {
+    try withPackageDirectory { directory in
+      let exported = try LedgerApplication(store: try importedLedger(in: directory))
+        .exportPackage()
+      let swapped = try editingGraph(exported.payload) { graph in
+        var tables = try #require(graph["tables"] as? [[String: Any]])
+        tables.swapAt(0, 1)
+        graph["tables"] = tables
+      }
+      try expectRestoreRefused(swapped, in: directory, with: .invalidCommand)
+      let shortRow = try editingGraph(exported.payload) { graph in
+        var tables = try #require(graph["tables"] as? [[String: Any]])
+        var rows = try #require(tables[0]["rows"] as? [[[String]]])
+        rows[0].removeLast()
+        tables[0]["rows"] = rows
+        graph["tables"] = tables
+      }
+      try expectRestoreRefused(shortRow, in: directory, with: .invalidCommand)
+    }
+  }
+
+  @Test("a v3 package that carries an import graph is refused")
+  func legacyPackageWithGraphIsRefused() throws {
+    try withPackageDirectory { directory in
+      let exported = try LedgerApplication(store: try importedLedger(in: directory))
+        .exportPackage()
+      // Strip the other v4 keys so the import graph is the only thing v3 doesn't allow.
+      var object = removingV4ProvenanceKeys(try packageObject(exported.payload))
+      object["importGraph"] = try packageObject(exported.payload)["importGraph"]
+      let payload = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+      let manifest = LedgerExportManifest(
+        formatVersion: LedgerPortablePackageFormat.legacyV3Version,
+        formatFingerprint: LedgerPortablePackageFormat.legacyV3Fingerprint,
+        payloadSHA256: SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined(),
+        createdAtMilliseconds: 0)
+      try expectRestoreRefused((manifest, payload), in: directory, with: .invalidCommand)
+    }
+  }
+
+  /// A package with import history restores only at the canonical schema it was exported from.
+  /// When the schema version changes, restoring an older imported package needs an upgrade path
+  /// (see the LA-048 follow-up), so this pins the version to make that step impossible to miss.
+  @Test("bumping the canonical schema needs an upgrade path for imported packages")
+  func importGraphSchemaIsPinned() {
+    #expect(
+      CanonicalLedgerSchema.version == 12,
+      "Imported-ledger packages from schema 12 must still restore: add the upgrade path, then update this pin."
+    )
+  }
 }
 
 // MARK: - Helpers
@@ -172,6 +269,69 @@ private func expectRestoreRefused(
       manifest: package.manifest, payload: package.payload)
   }
   #expect(try store.semanticChecksum() == before)
+  #expect(try store.readSnapshot().transactions.isEmpty)
+}
+
+/// Copies the imported ledger, runs `sql` on the copy, and returns the copy's location.
+private func editedCopy(in directory: URL, named name: String, _ sql: () -> String) throws -> URL {
+  let copy = directory.appendingPathComponent(name)
+  try withDatabase(directory.appendingPathComponent("imported.sqlite"), readOnly: true) {
+    try exec($0, "VACUUM INTO '\(copy.path)'")
+  }
+  try withDatabase(copy, readOnly: false) { try exec($0, sql()) }
+  return copy
+}
+
+/// What an attacker would put in the package: the checksum of the source ledger after the edit.
+private func forgedChecksum(in directory: URL, _ sql: () -> String) throws -> String {
+  let copy = try editedCopy(in: directory, named: "forged-\(UUID().uuidString).sqlite", sql)
+  var checksum = ""
+  try withDatabase(copy, readOnly: true) { checksum = try LedgerStore.canonicalChecksum($0) }
+  return checksum
+}
+
+private func withDatabase(
+  _ url: URL, readOnly: Bool, _ body: (OpaquePointer) throws -> Void
+) throws {
+  var database: OpaquePointer?
+  let flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE
+  guard sqlite3_open_v2(url.path, &database, flags, nil) == SQLITE_OK, let database else {
+    throw SyntheticV19BackupError.sqlite
+  }
+  defer { sqlite3_close(database) }
+  try body(database)
+}
+
+private func exec(_ database: OpaquePointer, _ sql: String) throws {
+  guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+    throw SyntheticV19BackupError.sqlite
+  }
+}
+
+private func cell(in graph: [String: Any], table name: String, column: String) -> String? {
+  guard let tables = graph["tables"] as? [[String: Any]],
+    let table = tables.first(where: { $0["name"] as? String == name }),
+    let columns = table["columns"] as? [String], let index = columns.firstIndex(of: column),
+    let rows = table["rows"] as? [[[String]]], let row = rows.first, row[index].count == 2
+  else { return nil }
+  return row[index][1]
+}
+
+private func removingV4ProvenanceKeys(_ object: [String: Any]) -> [String: Any] {
+  func strip(_ value: Any) -> Any {
+    if var row = value as? [String: Any] {
+      row.removeValue(forKey: "originProvenanceID")
+      if Set(row.keys) == ["field", "literal", "provenanceID"] {
+        row.removeValue(forKey: "provenanceID")
+      }
+      return row.mapValues(strip)
+    }
+    if let rows = value as? [Any] { return rows.map(strip) }
+    return value
+  }
+  var object = object
+  object.removeValue(forKey: "importGraph")
+  return object.mapValues(strip)
 }
 
 private func packageObject(_ payload: Data) throws -> [String: Any] {

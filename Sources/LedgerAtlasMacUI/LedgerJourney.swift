@@ -508,7 +508,9 @@ public final class LedgerJourney {
     }
   }
 
-  public func exportPortablePackage(to destination: URL) throws {
+  /// Returns true when the package carries imported Money Manager history.
+  @discardableResult
+  public func exportPortablePackage(to destination: URL) throws -> Bool {
     guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
       throw LedgerApplication.Error.invalidCommand
     }
@@ -520,6 +522,14 @@ public final class LedgerJourney {
     } catch {
       throw LedgerApplication.Error.invalidCommand
     }
+    let object = try? JSONSerialization.jsonObject(with: exported.payload) as? [String: Any]
+    return object?["importGraph"].map { !($0 is NSNull) } ?? false
+  }
+
+  package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
+    guard includesImportHistory else { return "Portable package exported." }
+    return
+      "Portable package exported with its imported Money Manager history. It restores only on a Mac that has this ledger's receipt key (iCloud Keychain carries it) and on this version of Ledger Atlas. Keep the original Money Manager backup (.mmbak) and an XLSX export as fallbacks."
   }
 
   public func restoreCanonicalBackup(from source: URL, to destination: URL) throws {
