@@ -134,6 +134,10 @@ screen's assets, liabilities and every per-account balance reconcile to the pais
 when type 7 adds money and type 8 subtracts it. The app's XLSX export omits types 7 and
 8 entirely, so the XLSX is lossy and the backup is the only source of truth.
 
+Import mapping: type `0` → income, `1` → expense, `7` → `adjustment` (adds money),
+`8` → `adjustment_debit` (removes money). Types 7 and 8 are admitted only with category
+`-4`; with any other category they stay preserved and flagged.
+
 Time zone (observed): in both snapshots, every `WDATE` equals the local date of `ZDATE`
 at UTC+05:30. The importer must not assume this offset; it should derive and confirm
 the offset per backup (the checker reports every offset consistent with all rows).

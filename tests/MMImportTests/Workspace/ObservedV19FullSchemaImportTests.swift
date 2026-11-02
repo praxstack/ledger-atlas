@@ -31,12 +31,12 @@ struct ObservedV19FullSchemaImportTests {
       let handle = try #require(preparation.preparedHandle)
       let result = try workspace.commit(handle, approval: workspace.approve(handle))
 
-      // income, expense, balance edits recorded as income (0, -4) and expense (1, -4), and a
-      // balance increase left out of income (7, -4) as an adjustment. The balance decrease left
-      // out of expenses (8, -4) and the transfer legs stay preserved for now.
+      // income, expense, balance edits recorded as income (0, -4) and expense (1, -4), a
+      // balance increase left out of income (7, -4) as an adjustment, and a balance decrease
+      // left out of expenses (8, -4) as a decreasing adjustment. Transfer legs stay preserved.
       #expect(result.status == .committed)
-      #expect(result.eventCount == 5)
-      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 5)
+      #expect(result.eventCount == 6)
+      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 6)
       #expect(try Data(contentsOf: source) == sourceBefore)
 
       let retry = try workspace.prepare(
@@ -47,11 +47,11 @@ struct ObservedV19FullSchemaImportTests {
       let retryHandle = try #require(retry.preparedHandle)
       let second = try workspace.commit(retryHandle, approval: workspace.approve(retryHandle))
       #expect(second.status == .unchanged)
-      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 5)
+      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 6)
     }
   }
 
-  @Test("type 7 maps to an adjustment only with the built-in balance-edit category")
+  @Test("types 7 and 8 map to adjustments only with the built-in balance-edit category")
   func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
     #expect(
@@ -65,8 +65,12 @@ struct ObservedV19FullSchemaImportTests {
     #expect(MoneyManagerV19Vocabulary.eventKind(forType: "0") == .income)
     #expect(MoneyManagerV19Vocabulary.eventKind(forType: "1") == .expense)
     #expect(MoneyManagerV19Vocabulary.eventKind(forType: "7") == .adjustment)
-    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "8") == nil)
-    #expect(MoneyManagerV19Vocabulary.reason(forType: "8", categoryUID: "-4") != nil)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "8") == .adjustmentDebit)
+    #expect(MoneyManagerV19Vocabulary.reason(forType: "8", categoryUID: "-4") == nil)
+    #expect(
+      MoneyManagerV19Vocabulary.reason(forType: "8", categoryUID: "cat-food")
+        == .unsupportedTransactionType)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "9") == nil)
     #expect(MoneyManagerV19Vocabulary.categoryResolves("-4", known: []))
     #expect(!MoneyManagerV19Vocabulary.categoryResolves("missing", known: ["cat-food"]))
   }

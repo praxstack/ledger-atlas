@@ -17,10 +17,14 @@ extension MoneyManagerV19Semantics {
     }
   }
 
-  /// Type 7 is a balance increase only when it carries the built-in balance-edit category.
-  /// Any other type-7 row keeps its unknown-type preservation.
+  /// Types 7 and 8 are quiet balance edits only when they carry the built-in balance-edit
+  /// category. Any other type-7 or type-8 row keeps its preservation.
   static func reason(forType type: String, categoryUID: String?) -> MoneyManagerV19BlockReason? {
-    if type == balanceIncreaseType, categoryUID == balanceEditCategoryUID { return nil }
+    if type == balanceIncreaseType || type == balanceDecreaseType,
+      categoryUID == balanceEditCategoryUID
+    {
+      return nil
+    }
     return reason(forType: type)
   }
 
@@ -35,6 +39,7 @@ extension MoneyManagerV19Semantics {
     case "0": .income
     case "1": .expense
     case balanceIncreaseType: .adjustment
+    case balanceDecreaseType: .adjustmentDebit
     default: nil
     }
   }
