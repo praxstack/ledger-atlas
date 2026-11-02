@@ -29,8 +29,9 @@ real Android v19 SQLite and `.mmbak` inputs remain classification-only.
 
 ## Cloud development and DMG builds
 
-CI runs the web, Python, and Swift checks on every pull request, and the
-`Mac app (DMG)` workflow builds an installable DMG on GitHub's macOS runners. See
+CI runs the web and Python checks on every pull request, and the Swift checks on
+pull requests that touch Swift, Xcode, or scripts. The `Mac app (DMG)` workflow
+builds an installable DMG on GitHub's macOS runners. See
 [docs/development/cloud-and-dmg.md](docs/development/cloud-and-dmg.md).
 
 ## Scripts
