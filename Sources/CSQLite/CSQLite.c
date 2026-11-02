@@ -458,6 +458,9 @@ static int csqlite_pinned_open(
                         || !csqlite_journal_binding_matches(context, &existing)) {
                         return SQLITE_CANTOPEN;
                     }
+                    // Adopt the empty journal an earlier session left; later checks
+                    // compare the opened descriptor against this identity.
+                    context->journal_identity = existing;
                     owned_existing = 1;
                     created = 0;
                 } else if (errno != ENOENT) {

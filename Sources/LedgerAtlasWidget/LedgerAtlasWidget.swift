@@ -8,7 +8,7 @@ struct LedgerAtlasWidget: Widget {
       ProjectionWidgetView(projection: $0.projection)
     }
     .configurationDisplayName("Ledger Atlas")
-    .description("A private Ledger Atlas status summary.")
+    .description("Ledger status with this month's entry count and budget health. No names or amounts.")
     .supportedFamilies([.systemSmall])
   }
 }
@@ -36,7 +36,8 @@ private struct ProjectionProvider: TimelineProvider {
     guard let containerURL = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: RedactedWidgetProjectionStore.appGroupIdentifier)
     else { return .reopenRequired }
-    return RedactedWidgetProjectionStore(containerURL: containerURL).read()
+    // The widget only reads. The app owns the file and repairs it.
+    return RedactedWidgetProjectionStore(containerURL: containerURL).readOnly()
   }
 }
 
@@ -45,10 +46,15 @@ private struct ProjectionWidgetView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Label("Ledger Atlas", systemImage: "lock.shield")
+      Label("Ledger Atlas", systemImage: projection.state == .locked ? "lock.fill" : "lock.shield")
         .font(.headline)
       Text(projection.message)
         .font(.subheadline)
+      ForEach(projection.summaryLines, id: \.self) { line in
+        Text(line)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
     }
     .containerBackground(.fill.tertiary, for: .widget)
     .accessibilityElement(children: .combine)
