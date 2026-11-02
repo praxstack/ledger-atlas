@@ -57,6 +57,15 @@ package enum LedgerReceiptTrust {
     CanonicalReceiptDigest.sha256(Data("ledger-atlas/receipt-key/\(namespace)\n\(identity)".utf8))
   }
 
+  #if DEBUG
+    /// Tests only, never in release builds: stores a known key for a receipt identity, so a
+    /// committed package fixture signed with that key can be restored. Returns false when a
+    /// different key already exists for the identity; nothing is replaced.
+    package static func installKeyForTesting(_ key: Data, identity: String) throws -> Bool {
+      try store(key, account: account(for: identity, namespace: currentNamespace)) == key
+    }
+  #endif
+
   private static func read(account: String, synchronizable: Bool?) throws -> Data? {
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
