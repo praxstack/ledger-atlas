@@ -586,7 +586,10 @@ public enum MoneyManagerV19Adapter {
     else {
       return preserve(.missingRequiredField)
     }
-    if let reason = MoneyManagerV19Vocabulary.reason(forType: type) {
+    let categoryLiteral = sourceField(
+      record, aliases: MoneyManagerV19Vocabulary.categoryAliases
+    ).flatMap(mappingLiteral)
+    if let reason = MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryLiteral) {
       return preserve(reason)
     }
     guard let account = sourceField(record, aliases: MoneyManagerV19Vocabulary.assetAliases),
@@ -606,7 +609,9 @@ public enum MoneyManagerV19Adapter {
       (try? CurrencyAmount(unitCode: mappingLiteral(currency) ?? currency.value, amount: decimal))
         != nil
     else { return preserve(.missingRequiredField) }
-    guard categoryUIDs.contains(categoryKey) else { return preserve(.unresolvedCategory) }
+    guard MoneyManagerV19Vocabulary.categoryResolves(categoryKey, known: categoryUIDs) else {
+      return preserve(.unresolvedCategory)
+    }
     return .mapped(
       .init(
         sourceRecordID: record.sourceRecordID,

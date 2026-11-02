@@ -115,7 +115,9 @@ enum MoneyManagerV19ObservedGraph {
         let type = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.doTypeAliases)),
         let wdate = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.wdateAliases)),
         let zdate = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.zdateAliases)),
-        accountUIDs.contains(accountUID), categoryUIDs.contains(categoryUID),
+        accountUIDs.contains(accountUID),
+        MoneyManagerV19Vocabulary.categoryResolves(categoryUID, known: categoryUIDs),
+        MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryUID) == nil,
         currencies[currencyUID] != nil
       else { throw CanonicalCommitError.unsafeMapping }
       for event in effects {
@@ -124,7 +126,8 @@ enum MoneyManagerV19ObservedGraph {
           event.accountID
             == (try? StableCanonicalID.account(
               profileID: request.expectedManifest.profileID, sourceAccountID: accountUID)),
-          (type == "0" && event.kind == .income) || (type == "1" && event.kind == .expense),
+          (type == "0" && event.kind == .income)
+            || (MoneyManagerV19Vocabulary.isExpenseType(type) && event.kind == .expense),
           event.occurredAt.precision == .millisecond,
           observedLocalDateTime(zdate) == event.occurredAt.localDateTime,
           observedDay(wdate) == event.occurredAt.localDay

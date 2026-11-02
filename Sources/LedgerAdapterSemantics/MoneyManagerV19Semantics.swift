@@ -27,7 +27,7 @@ public enum MoneyManagerV19Semantics {
     .union(transactionTables)
   public static let uidAliases = ["uid", "UID", "ZUID", "Z_PK"]
   public static let isoAliases = ["ISO", "ZISO", "CODE"]
-  public static let nameAliases = ["name", "NAME", "ZNAME"]
+  public static let nameAliases = ["name", "NAME", "ZNAME", "NIC_NAME"]
   public static let parentCategoryAliases = [
     "pUid", "PUID", "ZPUID", "parentUid", "PARENT_UID", "ZPARENTUID",
     "parentCategoryUid", "PARENT_CATEGORY_UID", "ZPARENTCATEGORYUID",
@@ -41,6 +41,12 @@ public enum MoneyManagerV19Semantics {
   public static let amountAliases = ["ZMONEY", "AMOUNT", "ZAMOUNT"]
   public static let wdateAliases = ["WDATE", "ZWDATE"]
   public static let zdateAliases = ["ZDATE"]
+  /// Built-in category the app writes when the user edits an account balance. It has no
+  /// category row. Owner-described and data-backed on 2026-11-01; see
+  /// docs/compatibility/money-manager-v19-schema-contract.md.
+  public static let balanceEditCategoryUID = "-4"
+  /// The decrease side of a balance edit. Admitted only together with `balanceEditCategoryUID`.
+  public static let balanceDecreaseType = "7"
 
   public struct RetainedField: Sendable {
     public let semantic: CanonicalEventSourceSemantic
@@ -176,7 +182,7 @@ public enum MoneyManagerV19Semantics {
       event.accountID
         == (try? StableCanonicalID.account(profileID: profileID, sourceAccountID: accountLiteral)),
       (kindLiteral == "0" && event.kind == .income)
-        || (kindLiteral == "1" && event.kind == .expense),
+        || ((kindLiteral == "1" || kindLiteral == balanceDecreaseType) && event.kind == .expense),
       let observedLocal = observedLocalDateTime(occurredLiteral),
       observedLocal == event.occurredAt.localDateTime,
       event.occurredAt.timeZone.fixedOffsetSeconds == nil
