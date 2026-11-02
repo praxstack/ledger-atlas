@@ -295,6 +295,10 @@ struct LedgerBrowseList: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(title).strikethrough(entry.lifecycle == .tombstoned)
         Text(detail).font(.caption).foregroundStyle(.secondary)
+        if let conversion = entry.conversion {
+          Text(conversion).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
         if let note = entry.note {
           Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
@@ -315,7 +319,7 @@ struct LedgerBrowseList: View {
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
       [
-        title, detail, entry.note, tagLine.isEmpty ? nil : "tags \(tagLine)",
+        title, detail, entry.conversion, entry.note, tagLine.isEmpty ? nil : "tags \(tagLine)",
         markers.isEmpty ? nil : markers,
       ].compactMap { $0 }
         .joined(separator: ", "))

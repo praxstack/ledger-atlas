@@ -75,6 +75,42 @@ struct LedgerBrowserTests {
     #expect(shuffled.entries.map(\.id) == browser.entries.map(\.id))
   }
 
+  @Test("a cross-currency transfer shows what arrived, the rate and the rounding")
+  func showsConversionDetail() throws {
+    let usd = try CurrencyAmount(unitCode: "USD", amount: ExactDecimal("100"))
+    let inr = try CurrencyAmount(unitCode: "INR", amount: ExactDecimal("8325.50"))
+    let conversion = try LedgerConversion(
+      sourceAmount: usd, convertedAmount: inr, rate: ExactDecimal("0.0120112906"),
+      rateScale: 10, rounding: .halfEven)
+    let transactionID = try StableLedgerID.transaction(
+      origin: Self.origin, localKey: String(format: "%064x", 99))
+    let when = try SourceTemporal(
+      resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 3, day: 1), hour: 9),
+      in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .minute)
+    let draft = try LedgerTransactionDraft(
+      effects: [
+        try .init(accountID: Self.cash, direction: .decrease, amount: usd),
+        try .init(accountID: Self.bank, direction: .increase, amount: inr),
+      ], categoryID: nil, kind: .transfer, occurredAt: when,
+      roundingPolicy: conversion.rounding, sourceLiterals: try conversion.literals,
+      origin: Self.origin)
+    let revision = try LedgerTransactionRevision(
+      id: StableLedgerID.revision(transactionID: transactionID, revision: 1),
+      transactionID: transactionID, revision: 1, predecessorID: nil, draft: draft,
+      createdAt: UTCInstant(epochMilliseconds: 0))
+    let fx = try LedgerTransactionSnapshot(id: transactionID, currentRevision: revision)
+
+    let browser = LedgerBrowser(transactions: try Self.sample() + [fx])
+
+    let entry = try #require(browser.entry(id: transactionID))
+    #expect(entry.indicators == [.transfer, .conversion])
+    #expect(
+      entry.conversion
+        == "received 8325.50 INR, rate 0.0120112906 USD per INR, rounding halfEven")
+    // Same-currency transfers and everything else carry no conversion line.
+    #expect(browser.entries.filter { $0.id != transactionID }.allSatisfy { $0.conversion == nil })
+  }
+
   @Test("five modes group by day, month, everything, or notes only")
   func groupsByMode() throws {
     let browser = LedgerBrowser(transactions: try Self.sample())

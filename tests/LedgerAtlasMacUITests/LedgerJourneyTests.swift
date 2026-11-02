@@ -905,6 +905,85 @@ import Testing
       == "Amount could not be saved.")
 }
 
+@MainActor
+@Test func staleEditIsRefusedAndEntriesCorrectionsAndClosuresSurviveReopen() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let accountID = try StableLedgerID.account(
+    origin: origin, localKey: String(repeating: "a", count: 64))
+  let url = directory.appendingPathComponent("ledger.sqlite")
+  try writeEmptyCanonicalLedger(to: url, origin: origin, accountID: accountID)
+  #expect(chmod(url.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+  let now = UTCInstant.currentEpochMilliseconds()
+  var keptID = ""
+  var closedID = ""
+  var correctedDraft: LedgerTransactionDraft?
+
+  do {
+    let journey = LedgerJourney()
+    journey.openLedger(url)
+    try journey.beginEditing(url)
+    let kept = try journey.createNativeTransaction(
+      amountLiteral: "4.00", kind: .expense, accountID: accountID, categoryID: nil,
+      note: "Lunch", createdAt: UTCInstant(epochMilliseconds: now), submissionID: "form-1")
+    let closed = try journey.createNativeTransaction(
+      amountLiteral: "9.00", kind: .income, accountID: accountID, categoryID: nil,
+      note: nil, createdAt: UTCInstant(epochMilliseconds: now + 1), submissionID: "form-2")
+    keptID = kept.transactionID
+    closedID = closed.transactionID
+
+    try journey.correctAmount(
+      transactionID: keptID, amountLiteral: "5.00",
+      createdAt: UTCInstant(epochMilliseconds: now + 2))
+    let corrected = try #require(
+      journey.snapshot?.transactions.first { $0.id == keptID }?.currentRevision)
+    correctedDraft = corrected.draft
+    #expect(corrected.draft.note == "Lunch")
+    #expect(corrected.revision == 2 && corrected.draft.effects != kept.draft.effects)
+
+    // An edit made from the first version, after the correction, is a conflict, not a write.
+    let checksum = try journey.checksum()
+    let staleDraft = try LedgerTransactionDraft(
+      effects: [
+        try LedgerTransactionEffect(
+          accountID: accountID, direction: .decrease,
+          amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("7.00")))
+      ], categoryID: nil, kind: .expense, occurredAt: kept.draft.occurredAt, note: "Lunch",
+      origin: kept.draft.origin)
+    #expect(throws: LedgerStore.Error.revisionConflict) {
+      try journey.edit(
+        ledgerURL: url, transactionID: keptID, expectedRevisionID: kept.id, draft: staleDraft,
+        createdAt: UTCInstant(epochMilliseconds: now + 3))
+    }
+    #expect(try journey.checksum() == checksum)
+    #expect(journey.snapshot?.transactions.first { $0.id == keptID }?.currentRevision == corrected)
+
+    try journey.tombstoneTransaction(
+      transactionID: closedID, createdAt: UTCInstant(epochMilliseconds: now + 4))
+  }
+
+  let reopened = LedgerJourney()
+  reopened.openLedger(url)
+  try reopened.beginEditing(url)
+  let snapshot = try #require(reopened.snapshot)
+  let kept = try #require(snapshot.transactions.first { $0.id == keptID })
+  #expect(kept.currentRevision.revision == 2)
+  #expect(kept.currentRevision.draft == correctedDraft)
+  #expect(
+    snapshot.transactions.first { $0.id == closedID }?.currentRevision.lifecycle == .tombstoned)
+  // The same form submitted again after reopening still records nothing new.
+  let count = snapshot.transactions.count
+  _ = try reopened.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: accountID, categoryID: nil,
+    note: "Lunch", createdAt: UTCInstant(epochMilliseconds: now + 5), submissionID: "form-1")
+  #expect(reopened.snapshot?.transactions.count == count)
+  #expect(
+    reopened.snapshot?.transactions.first { $0.id == keptID }?.currentRevision
+      == kept.currentRevision)
+}
+
 private func writeSyntheticV19(to url: URL) throws {
   var database: OpaquePointer?
   guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
