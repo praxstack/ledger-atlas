@@ -230,7 +230,7 @@ struct ImportedLedgerPortablePackageTests {
 
   /// A package with import history restores only at the canonical schema it was exported from.
   /// When the schema version changes, restoring an older imported package needs an upgrade path
-  /// (see the LA-048 follow-up), so this pins the version to make that step impossible to miss.
+  /// (issue #115), so this pins the version to make that step impossible to miss.
   @Test("bumping the canonical schema needs an upgrade path for imported packages")
   func importGraphSchemaIsPinned() {
     #expect(
