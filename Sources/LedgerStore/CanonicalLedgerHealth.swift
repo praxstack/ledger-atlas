@@ -276,8 +276,7 @@ package enum CanonicalLedgerHealth {
     {
       guard CanonicalIdentifier.isValid(row.text(0)), CanonicalIdentifier.isValid(row.text(1)),
         CanonicalIdentifier.isValid(row.text(17)), CanonicalIdentifier.isValid(row.text(18)),
-        ["income", "expense", "transfer_debit", "transfer_credit", "adjustment"]
-          .contains(row.text(2))
+        CanonicalEventKind(rawValue: row.text(2)) != nil
       else { throw HealthError.invalid }
       _ = try CurrencyAmount(unitCode: row.text(4), amount: ExactDecimal(row.text(3)))
       let local = try SourceLocalDateTime(
