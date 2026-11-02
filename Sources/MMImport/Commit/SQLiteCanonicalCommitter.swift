@@ -1071,6 +1071,8 @@ public struct SQLiteCanonicalCommitter: Sendable {
     var usageByCategory: [String: Set<String>] = [:]
     var categoryUIDByEventID: [String: String] = [:]
     for event in request.events {
+      // Transfer legs carry no category; the adapter admits them only when it is empty.
+      if event.kind == .transferDebit || event.kind == .transferCredit { continue }
       let sourceFields = fields(for: event.sourceRecordID)
       guard let categoryUID = nonEmpty(
         literal(sourceFields, aliases: MoneyManagerV19Vocabulary.categoryAliases))
@@ -1131,7 +1133,8 @@ public struct SQLiteCanonicalCommitter: Sendable {
 
     var eventCategoryIDs: [String: String] = [:]
     for event in request.events {
-      // The first pass throws for every event except balance edits, which stay uncategorized.
+      // The first pass throws for every event except balance edits and transfer legs, which
+      // stay uncategorized.
       guard let categoryUID = categoryUIDByEventID[event.eventID] else { continue }
       guard let row = categoryRows.first(where: { $0.uid == categoryUID })
       else { throw CanonicalCommitError.unsafeMapping }
