@@ -2696,3 +2696,82 @@ func activityReportCountsEachTransferOncePerTransaction(_ scenario: String) thro
       createdAt: UTCInstant(epochMilliseconds: 3)) == all)
   #expect(try app.checksum() == checksum)
 }
+
+@Test func recurrenceStaysIdempotentAndHistoryStaysFixedAcrossReopen() throws {
+  // MACV2-11: generated entries stay exact and idempotent across a restart, a rule edit only
+  // affects dates not generated yet, and an invalid budget change writes nothing.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("ledger.sqlite")
+  let origin = try LedgerOrigin(id: String(repeating: "1", count: 64), label: "local")
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "a", count: 64)),
+    name: "Cash", currencyUnit: "USD", origin: origin)
+  let category = try LedgerCategory(
+    id: StableLedgerID.category(origin: origin, localKey: String(repeating: "c", count: 64)),
+    name: "Rent", kind: .expense, origin: origin)
+  let start = try SourceLocalDate(year: 2026, month: 1, day: 31)
+  let rule = try LedgerRecurrenceRule(
+    id: StableLedgerID.recurrenceRule(origin: origin, localKey: String(repeating: "2", count: 64)),
+    origin: origin, accountID: account.id, categoryID: category.id, kind: .expense,
+    amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("2.50")), frequency: .monthly,
+    interval: 1, dayOfMonth: 31, timeZone: SourceTimeZone(fixedOffsetSeconds: 19_800),
+    start: start)
+  let march = try SourceLocalDate(year: 2026, month: 3, day: 31)
+  let april = try SourceLocalDate(year: 2026, month: 4, day: 30)
+  var firstRun: [LedgerTransactionRevision] = []
+  var checksum = ""
+
+  do {
+    let app = LedgerApplication(store: try LedgerStoreLifecycle.create(at: url).store)
+    try app.createAccount(account)
+    try app.createCategory(category)
+    try app.createRecurrence(rule)
+    try app.createBudget(
+      LedgerBudget(
+        id: StableLedgerID.budget(origin: origin, localKey: String(repeating: "3", count: 64)),
+        origin: origin, name: "Rent", categoryID: category.id,
+        amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("10.00")), period: .monthly,
+        rollover: true, start: start))
+    firstRun = try app.generateOccurrences(
+      rule, through: march, createdAt: UTCInstant(epochMilliseconds: 1))
+    #expect(firstRun.count == 3)
+    // A raise from April on: the three generated months stay as they were.
+    let raised = try LedgerRecurrenceRule(
+      id: rule.id, origin: origin, accountID: account.id, categoryID: category.id, kind: .expense,
+      amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("3.00")), frequency: .monthly,
+      interval: 1, dayOfMonth: 31, timeZone: rule.timeZone, start: start)
+    try app.updateRecurrence(raised, scope: .thisAndFuture)
+    checksum = try app.checksum()
+    // Changing a budget that does not exist is refused and writes nothing.
+    #expect(throws: (any Swift.Error).self) {
+      try app.updateBudget(
+        LedgerBudget(
+          id: StableLedgerID.budget(origin: origin, localKey: String(repeating: "9", count: 64)),
+          origin: origin, name: "Missing", categoryID: category.id,
+          amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("1.00")),
+          period: .monthly, rollover: false, start: start))
+    }
+    #expect(try app.checksum() == checksum)
+  }
+
+  let reopened = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
+  #expect(try reopened.checksum() == checksum)
+  let stored = try #require(try reopened.snapshot().recurrenceRules.first { $0.id == rule.id })
+  #expect(stored.amount.amount == (try ExactDecimal("3.00")))
+  // Catching up again after the restart returns the same three entries and writes nothing.
+  #expect(
+    try reopened.generateOccurrences(
+      stored, through: march, createdAt: UTCInstant(epochMilliseconds: 2)) == firstRun)
+  #expect(try reopened.checksum() == checksum)
+  // The next month uses the new amount; the earlier ones keep theirs.
+  let throughApril = try reopened.generateOccurrences(
+    stored, through: april, createdAt: UTCInstant(epochMilliseconds: 3))
+  #expect(throughApril.count == 4)
+  #expect(Array(throughApril.prefix(3)) == firstRun)
+  #expect(
+    throughApril.map { $0.draft.effects[0].amount.amount.rawLiteral }
+      == ["2.50", "2.50", "2.50", "3.00"])
+  #expect(throughApril[1].draft.occurredAt.localDay == (try SourceLocalDate(year: 2026, month: 2, day: 28)))
+}
