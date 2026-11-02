@@ -353,14 +353,6 @@ public struct LedgerAtlasRootView: View {
       journey.recordFailure("Open a ledger before importing a workbook.")
       return
     }
-    if !journey.isEditing {
-      do {
-        try journey.performBeginEditing()
-      } catch {
-        journey.recordFailure("This ledger can't be edited, so a workbook can't be imported.")
-        return
-      }
-    }
     let openPanel = NSOpenPanel()
     openPanel.title = "Choose an XLSX workbook"
     openPanel.allowedContentTypes = [Self.xlsxType]
@@ -398,6 +390,16 @@ public struct LedgerAtlasRootView: View {
     alert.addButton(withTitle: "Import")
     alert.addButton(withTitle: "Cancel")
     guard alert.runModal() == .alertFirstButtonReturn else { return }
+    // Editing starts only once the person has confirmed, so cancelling leaves the ledger as it
+    // was. The plan is checked again inside the write, so reopening for editing is safe.
+    if !journey.isEditing {
+      do {
+        try journey.performBeginEditing()
+      } catch {
+        journey.recordFailure("This ledger can't be edited, so the workbook wasn't imported.")
+        return
+      }
+    }
     do {
       try journey.applyXLSXImport(
         plan, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))

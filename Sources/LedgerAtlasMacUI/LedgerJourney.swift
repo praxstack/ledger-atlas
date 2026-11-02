@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import LedgerCore
 import LedgerStore
@@ -541,14 +542,32 @@ public final class LedgerJourney {
   /// Reads and checks a workbook, then works out what importing it would add. Nothing is
   /// written. Throws `LedgerXLSXExchange.Error.invalid` with the problems a person can fix.
   public func planXLSXImport(from source: URL) throws -> LedgerXLSXImportPlan {
-    guard let application, source.isFileURL else { throw LedgerApplication.Error.invalidCommand }
-    let values = try source.resourceValues(
-      forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-    guard values.isRegularFile == true, values.isSymbolicLink != true,
-      let size = values.fileSize, size <= Self.maximumXLSXImportBytes
-    else { throw LedgerApplication.Error.invalidCommand }
-    let data = try Data(contentsOf: source, options: .mappedIfSafe)
-    return try application.planXLSXImport(LedgerXLSXExchange.content(fromXLSX: data))
+    // Planning only reads, so it works on a ledger that is open but not yet being edited.
+    guard source.isFileURL, let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data = try Self.readRegularFile(source, maximumBytes: Self.maximumXLSXImportBytes)
+    return try (application ?? LedgerApplication(store: store))
+      .planXLSXImport(LedgerXLSXExchange.content(fromXLSX: data))
+  }
+
+  /// Reads a picked file without following a symlink, refusing anything that is not a regular
+  /// file. The size limit applies to the bytes actually read, so a file that grows after it
+  /// was chosen is still refused.
+  nonisolated package static func readRegularFile(_ url: URL, maximumBytes: Int) throws -> Data {
+    let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+    guard descriptor >= 0 else { throw LedgerApplication.Error.invalidCommand }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    var info = Darwin.stat()
+    guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data: Data
+    do { data = try handle.read(upToCount: maximumBytes + 1) ?? Data() } catch {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    guard data.count <= maximumBytes else { throw LedgerApplication.Error.invalidCommand }
+    return data
   }
 
   /// Adds everything in the plan in one step, or nothing.
@@ -588,7 +607,11 @@ public final class LedgerJourney {
     let unchanged = plan.summary.values.reduce(0) { $0 + $1.unchanged }
     if unchanged > 0 { lines.append("\(unchanged) already in this ledger and skipped.") }
     if plan.skippedDeletedTransactions > 0 {
-      lines.append("\(plan.skippedDeletedTransactions) deleted rows are not imported.")
+      let skipped = plan.skippedDeletedTransactions
+      lines.append(
+        skipped == 1
+          ? "1 deleted transaction is not imported."
+          : "\(skipped) deleted transactions are not imported.")
     }
     lines.append("Existing records are never changed.")
     return lines.joined(separator: " ")

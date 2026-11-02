@@ -341,7 +341,7 @@ extension LedgerXLSXExchange {
       guard let text = required(table, row, column) else { return nil }
       guard let value = T(rawValue: text) else {
         let allowed = T.allCases.map(\.rawValue).joined(separator: ", ")
-        report(table.sheet, row.number, column, "“\(text)” is not one of: \(allowed).")
+        report(table.sheet, row.number, column, "This value is not one of: \(allowed).")
         return nil
       }
       return value
@@ -353,7 +353,7 @@ extension LedgerXLSXExchange {
     ) -> Int? {
       guard let text = required(table, row, column) else { return nil }
       guard let value = Int(text), value >= minimum else {
-        report(table.sheet, row.number, column, "“\(text)” is not a whole number of at least \(minimum).")
+        report(table.sheet, row.number, column, "This value is not a whole number of at least \(minimum).")
         return nil
       }
       return value
@@ -367,7 +367,7 @@ extension LedgerXLSXExchange {
       case "TRUE", "1", "YES": return true
       case "FALSE", "0", "NO": return false
       default:
-        report(table.sheet, row.number, column, "“\(text)” is not TRUE or FALSE.")
+        report(table.sheet, row.number, column, "This value is not TRUE or FALSE.")
         return nil
       }
     }
@@ -545,7 +545,7 @@ extension LedgerXLSXExchange {
         guard currency == account.currencyUnit else {
           report(
             effectTable.sheet, row.number, "currency",
-            "The account “\(account.name)” holds \(account.currencyUnit), not \(currency).")
+            "This account holds \(account.currencyUnit), not \(currency).")
           continue
         }
         guard let amount = try? ExactDecimal(amountText),
@@ -553,7 +553,7 @@ extension LedgerXLSXExchange {
           let effect = try? LedgerTransactionEffect(
             accountID: accountID, direction: direction, amount: value)
         else {
-          report(effectTable.sheet, row.number, "amount", "“\(amountText)” is not a valid amount.")
+          report(effectTable.sheet, row.number, "amount", "This is not a valid amount.")
           continue
         }
         effects[transactionID, default: []].append((row.number, effect))
@@ -616,7 +616,7 @@ extension LedgerXLSXExchange {
         {
           report(
             table.sheet, row.number, "category_id",
-            "A \(kind.rawValue) cannot use the \(category.kind.rawValue) category “\(category.name)”.")
+            "A \(kind.rawValue) cannot use a \(category.kind.rawValue) category.")
           continue
         }
         do {
@@ -657,7 +657,7 @@ extension LedgerXLSXExchange {
       guard let local = Self.parseLocalDateTime(text) else {
         report(
           table.sheet, row.number, "local_date_time",
-          "“\(text)” is not a date and time like 2026-03-01 09:30:00.000.")
+          "This value is not a date and time like 2026-03-01 09:30:00.000.")
         return nil
       }
       guard let precision = choice(table, row, "precision", SourceTemporalPrecision.self) else {
@@ -667,7 +667,7 @@ extension LedgerXLSXExchange {
       let offsetText = optional(table, row, "utc_offset_seconds")
       let offset = offsetText.flatMap { Int($0) }
       if offsetText != nil, offset == nil {
-        report(table.sheet, row.number, "utc_offset_seconds", "“\(offsetText!)” is not a whole number.")
+        report(table.sheet, row.number, "utc_offset_seconds", "This value is not a whole number.")
         return nil
       }
       if identifier == nil, offset == nil {
