@@ -424,8 +424,7 @@ public struct LedgerAtlasRootView: View {
       performLedgerSelection(.open, url: destination)
       lifecycleMessage = "Portable package imported as a new ledger."
     } catch {
-      journey.recordFailure(
-        "The portable package could not be imported without changing the source.")
+      journey.recordFailure(LedgerJourney.packageRestoreFailureMessage(for: error))
     }
   }
 

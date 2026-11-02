@@ -248,9 +248,28 @@ private struct AnnotationFixture {
   #expect(restored.revisionTags.count == 2)
   #expect(try destinationStore.semanticChecksum() == store.semanticChecksum())
 
+  // A v3 package (no provenance keys, no import graph) still imports, annotations included.
+  let v3Object = removingV4PackageKeys(
+    try #require(JSONSerialization.jsonObject(with: exported.payload) as? [String: Any]))
+    .merging(
+      [
+        "formatVersion": LedgerPortablePackageFormat.legacyV3Version,
+        "formatFingerprint": LedgerPortablePackageFormat.legacyV3Fingerprint,
+      ], uniquingKeysWith: { _, new in new })
+  let v3Payload = try JSONSerialization.data(withJSONObject: v3Object, options: [.sortedKeys])
+  let v3Store = try makeAnnotationStore()
+  try LedgerApplication(store: v3Store).importPackage(
+    manifest: LedgerExportManifest(
+      formatVersion: LedgerPortablePackageFormat.legacyV3Version,
+      formatFingerprint: LedgerPortablePackageFormat.legacyV3Fingerprint,
+      payloadSHA256: SHA256.hash(data: v3Payload).map { String(format: "%02x", $0) }.joined(),
+      createdAtMilliseconds: 0),
+    payload: v3Payload)
+  #expect(try v3Store.semanticChecksum() == store.semanticChecksum())
+
   // A v2 package (no annotation keys) still imports.
-  var object = try #require(
-    JSONSerialization.jsonObject(with: exported.payload) as? [String: Any])
+  var object = removingV4PackageKeys(
+    try #require(JSONSerialization.jsonObject(with: exported.payload) as? [String: Any]))
   for key in ["tags", "transactionTemplates", "memos", "revisionTags"] {
     object.removeValue(forKey: key)
   }

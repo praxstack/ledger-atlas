@@ -59,6 +59,10 @@ public final class LedgerStore {
     package let ledger: LedgerReadSnapshot
     package let isRepresentable: Bool
     package let hasImportHistory: Bool
+    /// Read in the same transaction as `ledger` when the ledger has import history.
+    package let importGraph: LedgerImportGraph?
+    /// Imported events with no transaction yet. A package can only carry a fully shown ledger.
+    package let unmaterializedEventCount: Int
   }
   public struct SchemaIdentity: Equatable, Sendable {
     public let version: Int
@@ -84,11 +88,21 @@ public final class LedgerStore {
     /// was written; plan the import again.
     case importPlanNotApplicable
     case sqliteFailure(code: Int32)
+    /// A package with import history needs this Mac to hold the ledger's receipt key, which
+    /// iCloud Keychain carries between Macs. Nothing was written.
+    case importGraphKeyMissing
+    /// A package with import history was written by a different canonical schema. Nothing was
+    /// written.
+    case importGraphSchemaMismatch
+    /// A package with import history did not rebuild the ledger it was exported from. Nothing
+    /// was written.
+    case importGraphMismatch
 
     fileprivate var preservesMutationError: Bool {
       switch self {
       case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts,
-        .revisionConflict, .duplicateTagName, .importPlanNotApplicable:
+        .revisionConflict, .duplicateTagName, .importPlanNotApplicable, .importGraphKeyMissing,
+        .importGraphSchemaMismatch, .importGraphMismatch:
         true
       default:
         false
@@ -407,7 +421,20 @@ public final class LedgerStore {
         let importReceiptCount = Self.scalarInt(
           "SELECT count(*) FROM main.import_receipt", on: database)
       else { throw Error.incompatibleCanonicalStore }
-      let representable = try Self.portablePackageExportIsRepresentable(on: database)
+      // Legacy preservation metadata lives in ledger_meta, which no package carries.
+      guard
+        let legacyPreservation = Self.scalarInt(
+          "SELECT count(*) FROM main.ledger_meta WHERE key='source_preservation_v1'",
+          on: database)
+      else { throw Error.incompatibleCanonicalStore }
+      let representable =
+        try Self.portablePackageExportIsRepresentable(on: database) && legacyPreservation == 0
+      let importGraph = importReceiptCount > 0 ? try Self.readImportGraph(on: database) : nil
+      guard
+        let unmaterialized = Self.scalarInt(
+          "SELECT count(*) FROM main.economic_event e WHERE NOT EXISTS (SELECT 1 FROM main.ledger_transaction_source_literal l WHERE l.field IN ('import.eventID', 'import.eventID.debit', 'import.eventID.credit') AND l.literal=e.event_id)",
+          on: database)
+      else { throw Error.incompatibleCanonicalStore }
       try Self.execute("COMMIT", on: database)
       if let descriptor = pinnedIdentity, let url {
         if isMutable {
@@ -419,7 +446,8 @@ public final class LedgerStore {
       }
       return .init(
         ledger: snapshot, isRepresentable: representable,
-        hasImportHistory: importReceiptCount > 0)
+        hasImportHistory: importReceiptCount > 0, importGraph: importGraph,
+        unmaterializedEventCount: unmaterialized)
     } catch {
       _ = try? Self.execute("ROLLBACK", on: database)
       throw Error.incompatibleCanonicalStore
@@ -1080,6 +1108,24 @@ public final class LedgerStore {
         || (package.formatVersion == LedgerPortablePackageFormat.legacyV1Version
           && package.formatFingerprint == LedgerPortablePackageFormat.legacyV1Fingerprint)
     else { throw Error.incompatibleCanonicalStore }
+    if let graph = package.importGraph {
+      try applyImportedExport(package, graph: graph)
+      return
+    }
+    try Self.validateProductRows(package, allowingImportProvenance: false)
+    _ = try mutate { snapshot in
+      try Self.writeProductRows(
+        package, snapshot: snapshot, on: database,
+        afterCore: { try self.mutationTestHook?(.afterApplyingExportCore) })
+      return try Self.placeholderResult(
+        origin: package.accounts.first?.origin
+          ?? LedgerOrigin(id: String(repeating: "1", count: 64), label: "restore"))
+    }
+  }
+
+  private static func validateProductRows(
+    _ package: LedgerCanonicalPackage, allowingImportProvenance: Bool
+  ) throws {
     let origins =
       package.accounts.map(\.origin) + package.categories.map(\.origin)
       + package.revisions.map(\.draft.origin) + package.recurrenceRules.map(\.origin)
@@ -1104,15 +1150,17 @@ public final class LedgerStore {
       Set(package.recurrenceRules.map(\.id)).count == package.recurrenceRules.count,
       Set(package.budgets.map(\.id)).count == package.budgets.count,
       Set(package.installmentPlans.map(\.id)).count == package.installmentPlans.count,
-      !origins.contains(where: {
-        $0.provenanceID != nil || $0.id == importedOriginID
-          || $0.label == LedgerOrigin.importedLabel
-      }),
-      !package.revisions.contains(where: { revision in
-        revision.draft.sourceLiterals.contains {
-          $0.provenanceID != nil || $0.field.hasPrefix("import.")
-        }
-      })
+      allowingImportProvenance
+        || !origins.contains(where: {
+          $0.provenanceID != nil || $0.id == importedOriginID
+            || $0.label == LedgerOrigin.importedLabel
+        }),
+      allowingImportProvenance
+        || !package.revisions.contains(where: { revision in
+          revision.draft.sourceLiterals.contains {
+            $0.provenanceID != nil || $0.field.hasPrefix("import.")
+          }
+        })
     else { throw Error.incompatibleCanonicalStore }
     let currencyByAccount = Dictionary(
       package.accounts.map { ($0.id, $0.currencyUnit) }, uniquingKeysWith: { first, _ in first })
@@ -1150,9 +1198,18 @@ public final class LedgerStore {
       return true
     }
     guard package.categories.allSatisfy(visit) else { throw Error.incompatibleCanonicalStore }
-    _ = try mutate { snapshot in
+  }
+
+  private static func writeProductRows(
+    _ package: LedgerCanonicalPackage, snapshot: LedgerReadSnapshot, on database: OpaquePointer,
+    afterImportGraph: Bool = false, afterCore: (() throws -> Void)? = nil
+  ) throws {
+      // After an import graph write, only its own tables may already hold rows.
       let tables = CanonicalLedgerSchema.expectedObjects
-        .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
+        .filter {
+          $0.type == "table" && $0.name != "ledger_meta"
+            && !(afterImportGraph && LedgerImportGraph.tableNames.contains($0.name))
+        }.map(\.name)
       guard snapshot.transactions.isEmpty, snapshot.accounts.isEmpty,
         try !Self.hasRows(in: tables, on: database)
       else {
@@ -1174,7 +1231,7 @@ public final class LedgerStore {
             .text(account.id), .text(account.name), .text(account.currencyUnit),
             .text(account.origin.id), .text(account.lifecycle.rawValue),
           ], on: database)
-        try Self.writeAccountPreferences(account, on: database)
+        if !afterImportGraph { try Self.writeAccountPreferences(account, on: database) }
       }
       var pendingCategories = package.categories
       var insertedCategoryIDs: Set<String> = []
@@ -1191,7 +1248,7 @@ public final class LedgerStore {
               .text(category.id), .text(category.name), .text(category.kind.rawValue),
               .text(category.origin.id), .text(category.lifecycle.rawValue),
             ], on: database)
-          try Self.writeCategoryTree(category, on: database)
+          if !afterImportGraph { try Self.writeCategoryTree(category, on: database) }
           insertedCategoryIDs.insert(category.id)
         }
         pendingCategories.removeAll { insertedCategoryIDs.contains($0.id) }
@@ -1205,7 +1262,8 @@ public final class LedgerStore {
           "INSERT INTO main.ledger_transaction(transaction_id, current_revision_id) VALUES (?, ?)",
           values: [.text(transactionID), .text(first.id)], on: database)
         for revision in ordered {
-          try Self.insert(revision, on: database)
+          // An import graph carries the literal rows verbatim, ordinals included.
+          try Self.insert(revision, on: database, includingSourceLiterals: !afterImportGraph)
         }
         if let current = ordered.last {
           try Self.run(
@@ -1221,15 +1279,11 @@ public final class LedgerStore {
             .text(link.kind.rawValue),
           ], on: database)
       }
-      try mutationTestHook?(.afterApplyingExportCore)
+      try afterCore?()
       for rule in package.recurrenceRules { try Self.writeRecurrence(rule, on: database) }
       for budget in package.budgets { try Self.writeBudget(budget, on: database) }
       for plan in package.installmentPlans { try Self.writeInstallment(plan, on: database) }
       try Self.writeImportedAnnotations(package, on: database)
-      return try Self.placeholderResult(
-        origin: package.accounts.first?.origin
-          ?? LedgerOrigin(id: String(repeating: "1", count: 64), label: "restore"))
-    }
   }
 
   public func materializeImportedEvents() throws {
@@ -2207,9 +2261,11 @@ public final class LedgerStore {
     self.mutationTestHook = mutationTestHook
   }
 
-  package func mutate(_ body: (LedgerReadSnapshot) throws -> MutationResult) throws
-    -> MutationResult
-  {
+  /// `trustIdentity` names the receipt key for a write that adds the ledger's first receipt,
+  /// which the file on disk cannot name until the transaction commits.
+  package func mutate(
+    trustIdentity: String? = nil, _ body: (LedgerReadSnapshot) throws -> MutationResult
+  ) throws -> MutationResult {
     try validateMutationIdentity(requiringNoCompanions: true)
     try Self.execute("BEGIN IMMEDIATE", on: database)
     do {
@@ -2221,7 +2277,7 @@ public final class LedgerStore {
       try CanonicalLedgerHealth.validate(
         database,
         trustKey: try self.url.flatMap {
-          try LedgerReceiptTrust.key(for: $0, create: false)
+          try LedgerReceiptTrust.key(for: $0, create: false, stableIdentity: trustIdentity)
         })
       guard Self.hasNoRows("PRAGMA foreign_key_check", on: database) else {
         throw Error.incompatibleCanonicalStore
@@ -2315,9 +2371,10 @@ public final class LedgerStore {
     return revision
   }
 
-  package static func insert(_ revision: LedgerTransactionRevision, on database: OpaquePointer)
-    throws
-  {
+  package static func insert(
+    _ revision: LedgerTransactionRevision, on database: OpaquePointer,
+    includingSourceLiterals: Bool = true
+  ) throws {
     let temporal = revision.draft.occurredAt
     let local = temporal.localDateTime
     let zone: (String, String)
@@ -2356,7 +2413,8 @@ public final class LedgerStore {
           .text(effect.amount.amount.rawLiteral), .text(effect.amount.unitCode),
         ], on: database)
     }
-    for (ordinal, literal) in revision.draft.sourceLiterals.enumerated() {
+    for (ordinal, literal) in revision.draft.sourceLiterals.enumerated()
+    where includingSourceLiterals {
       try run(
         "INSERT INTO main.ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES (?, ?, ?, ?, ?)",
         values: [
@@ -3150,5 +3208,178 @@ extension LedgerStore {
       }
     }
     try ensureUniqueActiveTagNames(snapshot.tags)
+  }
+}
+
+// MARK: - Portable package import graph (LA-048)
+
+extension LedgerStore {
+  /// More rows than any real ledger has. A package over this is refused before anything is
+  /// written.
+  static let maximumImportGraphRows = 2_000_000
+
+  /// Rebuilds an imported ledger from a package. The graph rows go in first, verbatim, then
+  /// the product rows, then materialization; health validation and the receipt signature check
+  /// run before commit, and the whole ledger must hash to the checksum taken at export.
+  fileprivate func applyImportedExport(
+    _ package: LedgerCanonicalPackage, graph: LedgerImportGraph
+  ) throws {
+    guard graph.schemaVersion == CanonicalLedgerSchema.version,
+      graph.schemaFingerprint == CanonicalLedgerSchema.fingerprint
+    else { throw Error.importGraphSchemaMismatch }
+    guard package.preservedSource.isEmpty,
+      graph.tables.map(\.name) == LedgerImportGraph.tableNames,
+      graph.tables.reduce(0, { $0 + $1.rows.count }) <= Self.maximumImportGraphRows,
+      let identity = graph.trustIdentity
+    else { throw Error.importGraphMismatch }
+    guard let url, try LedgerReceiptTrust.key(for: url, create: false, stableIdentity: identity) != nil
+    else { throw Error.importGraphKeyMissing }
+    do {
+      try Self.validateProductRows(package, allowingImportProvenance: true)
+      _ = try mutate(trustIdentity: identity) { snapshot in
+        let tables = CanonicalLedgerSchema.expectedObjects
+          .filter { $0.type == "table" && $0.name != "ledger_meta" }.map(\.name)
+        guard try !Self.hasRows(in: tables, on: database) else {
+          throw Error.incompatibleCanonicalStore
+        }
+        try Self.writeImportGraph(graph, phase: .beforeProductRows, on: database)
+        try Self.writeProductRows(
+          package, snapshot: snapshot, on: database, afterImportGraph: true)
+        try Self.writeImportGraph(graph, phase: .afterProductRows, on: database)
+        try Self.materializeImportedEvents(on: database)
+        guard try Self.canonicalChecksum(database) == graph.canonicalChecksum else {
+          throw Error.importGraphMismatch
+        }
+        return try Self.placeholderResult(origin: LedgerOrigin.imported())
+      }
+    } catch let error as Error where error == .importGraphKeyMissing {
+      throw error
+    } catch {
+      throw Error.importGraphMismatch
+    }
+  }
+
+  /// Reads every import-graph table in rowid order, so the first receipt stays first and keeps
+  /// naming the ledger's receipt key. Runs inside the caller's read transaction.
+  static func readImportGraph(on database: OpaquePointer) throws -> LedgerImportGraph {
+    guard
+      let version = scalarText(
+        "SELECT value FROM main.ledger_meta WHERE key='schema_version'", on: database),
+      let schemaVersion = Int(version),
+      let fingerprint = scalarText(
+        "SELECT value FROM main.ledger_meta WHERE key='schema_fingerprint'", on: database)
+    else { throw Error.incompatibleCanonicalStore }
+    var tables: [LedgerImportGraph.Table] = []
+    for name in LedgerImportGraph.tableNames {
+      let columns = try tableColumns(name, on: database)
+      let quoted = columns.map { "\"\($0)\"" }.joined(separator: ", ")
+      var statement: OpaquePointer?
+      guard
+        sqlite3_prepare_v2(
+          database, "SELECT \(quoted) FROM main.\(name) ORDER BY rowid", -1, &statement, nil)
+          == SQLITE_OK, let statement
+      else { throw Error.incompatibleCanonicalStore }
+      defer { sqlite3_finalize(statement) }
+      var rows: [[LedgerImportGraph.Value]] = []
+      while true {
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { break }
+        guard step == SQLITE_ROW else { throw Error.incompatibleCanonicalStore }
+        rows.append(try (0..<Int32(columns.count)).map { try graphValue(statement, column: $0) })
+      }
+      tables.append(.init(name: name, columns: columns, rows: rows))
+    }
+    return .init(
+      schemaVersion: schemaVersion, schemaFingerprint: fingerprint,
+      canonicalChecksum: try canonicalChecksum(database), tables: tables)
+  }
+
+  private enum ImportGraphPhase { case beforeProductRows, afterProductRows }
+
+  private static func writeImportGraph(
+    _ graph: LedgerImportGraph, phase: ImportGraphPhase, on database: OpaquePointer
+  ) throws {
+    for table in graph.tables
+    where LedgerImportGraph.productLinkedTableNames.contains(table.name)
+      == (phase == .afterProductRows)
+    {
+      // Column names come from this ledger's own schema, never from the package.
+      guard LedgerImportGraph.tableNames.contains(table.name),
+        try tableColumns(table.name, on: database) == table.columns
+      else { throw Error.importGraphMismatch }
+      let quoted = table.columns.map { "\"\($0)\"" }.joined(separator: ", ")
+      let placeholders = Array(repeating: "?", count: table.columns.count).joined(separator: ", ")
+      var statement: OpaquePointer?
+      guard
+        sqlite3_prepare_v2(
+          database, "INSERT INTO main.\(table.name)(\(quoted)) VALUES (\(placeholders))", -1,
+          &statement, nil) == SQLITE_OK, let statement
+      else { throw Error.incompatibleCanonicalStore }
+      defer { sqlite3_finalize(statement) }
+      for row in table.rows {
+        guard row.count == table.columns.count,
+          sqlite3_reset(statement) == SQLITE_OK, sqlite3_clear_bindings(statement) == SQLITE_OK
+        else { throw Error.importGraphMismatch }
+        for (offset, value) in row.enumerated() {
+          guard bindGraphValue(value, to: statement, at: Int32(offset + 1)) else {
+            throw Error.importGraphMismatch
+          }
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw Error.importGraphMismatch }
+      }
+    }
+  }
+
+  private static func tableColumns(_ table: String, on database: OpaquePointer) throws -> [String] {
+    let columns = try load(
+      sql: "SELECT name FROM pragma_table_info('\(table)') ORDER BY cid", on: database,
+      map: { $0[0] })
+    guard !columns.isEmpty else { throw Error.incompatibleCanonicalStore }
+    return columns
+  }
+
+  private static func graphValue(_ statement: OpaquePointer, column: Int32) throws
+    -> LedgerImportGraph.Value
+  {
+    switch sqlite3_column_type(statement, column) {
+    case SQLITE_NULL: return .null
+    case SQLITE_INTEGER: return .integer(sqlite3_column_int64(statement, column))
+    case SQLITE_FLOAT: return .real(sqlite3_column_double(statement, column))
+    case SQLITE_TEXT:
+      guard let text = text(statement, column: column) else {
+        throw Error.incompatibleCanonicalStore
+      }
+      return .text(text)
+    case SQLITE_BLOB:
+      let count = Int(sqlite3_column_bytes(statement, column))
+      guard count > 0 else { return .blob(Data()) }
+      guard let bytes = sqlite3_column_blob(statement, column) else {
+        throw Error.incompatibleCanonicalStore
+      }
+      return .blob(Data(bytes: bytes, count: count))
+    default: throw Error.incompatibleCanonicalStore
+    }
+  }
+
+  private static func bindGraphValue(
+    _ value: LedgerImportGraph.Value, to statement: OpaquePointer, at index: Int32
+  ) -> Bool {
+    let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    switch value {
+    case .null: return sqlite3_bind_null(statement, index) == SQLITE_OK
+    case .integer(let value): return sqlite3_bind_int64(statement, index, value) == SQLITE_OK
+    case .real(let value): return sqlite3_bind_double(statement, index, value) == SQLITE_OK
+    case .text(let text):
+      return text.withCString {
+        sqlite3_bind_text(statement, index, $0, -1, transient) == SQLITE_OK
+      }
+    case .blob(let data):
+      // An empty blob binds as a zero-length blob, not as NULL.
+      return data.withUnsafeBytes {
+        sqlite3_bind_blob(
+          statement, index, $0.baseAddress ?? UnsafeRawPointer(bitPattern: 1), Int32(data.count),
+          transient) == SQLITE_OK
+      }
+    }
   }
 }
