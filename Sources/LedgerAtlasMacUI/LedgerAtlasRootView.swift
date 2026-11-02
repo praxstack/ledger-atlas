@@ -394,6 +394,7 @@ public struct LedgerAtlasRootView: View {
     panel.prompt = "Export"
     panel.allowedContentTypes = [Self.xlsxType]
     panel.nameFieldStringValue = "ledger-atlas.xlsx"
+    panel.message = "Receipt images aren't included in the workbook. Save 1:1 backup keeps them."
     guard panel.runModal() == .OK, let url = panel.url else { return }
     do {
       try journey.exportXLSX(to: url)
