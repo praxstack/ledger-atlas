@@ -151,7 +151,7 @@ func legacyReceiptTrustKeyMigratesToCurrentNamespace() throws {
   #expect(item as? Data == legacyValue)
 }
 
-@Test("a current v11 ledger cannot be downgraded to the legacy v19 receipt generation")
+@Test("a current-schema ledger cannot be downgraded to the legacy v19 receipt generation")
 func currentV11RejectsLegacyReceiptGenerationDowngrade() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
     try mutateAndRehash(
@@ -172,8 +172,8 @@ func currentV11RejectsLegacyReceiptGenerationDowngrade() throws {
 }
 
 @Test(
-  "persisted v10 and current v11 reject kind bindings repointed to memo without mutation",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject kind bindings repointed to memo without mutation",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsKindBindingToMemoWithoutMutation(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let kind = fixture.field(.kind).id(in: fixture)
@@ -197,8 +197,8 @@ func lifecycleRejectsKindBindingToMemoWithoutMutation(_ version: Int) throws {
 }
 
 @Test(
-  "persisted v10 and current v11 reject occurred_at bindings repointed to memo without mutation",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject occurred_at bindings repointed to memo without mutation",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsOccurredAtBindingToMemoWithoutMutation(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let occurredAt = fixture.field(.occurredAt).id(in: fixture)
@@ -221,8 +221,8 @@ func lifecycleRejectsOccurredAtBindingToMemoWithoutMutation(_ version: Int) thro
 }
 
 @Test(
-  "persisted v10 and current v11 reject amount storage and payload relabelled BLOB without mutation",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject amount storage and payload relabelled BLOB without mutation",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsAmountBlobRelabelWithoutMutation(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let amount = fixture.field(.amount).id(in: fixture)
@@ -243,8 +243,8 @@ func lifecycleRejectsAmountBlobRelabelWithoutMutation(_ version: Int) throws {
 }
 
 @Test(
-  "persisted v10 and current v11 reject a fully rekeyed known profile with a forged adapter version without mutation",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject a fully rekeyed known profile with a forged adapter version without mutation",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsFullyRekeyedForgedAdapterWithoutMutation(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let forged = try V19Fixture(adapterVersion: "forged-money-manager-adapter-v1")
@@ -262,8 +262,8 @@ func lifecycleRejectsFullyRekeyedForgedAdapterWithoutMutation(_ version: Int) th
 }
 
 @Test(
-  "persisted v10 and current v11 reject canonical amount normalization with recomputed public hashes without mutation",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject canonical amount normalization with recomputed public hashes without mutation",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsCanonicalAmountNormalizationWithoutMutation(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     var overrides = fixture.digestOverrides()
@@ -278,8 +278,8 @@ func lifecycleRejectsCanonicalAmountNormalizationWithoutMutation(_ version: Int)
 }
 
 @Test(
-  "persisted v10 and current v11 reject a wrong admitted adapter even when no events remain",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject a wrong admitted adapter even when no events remain",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsWrongAdmittedAdapterForZeroEventReceipt(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let forged = try V19Fixture(adapterVersion: "forged-money-manager-adapter-v1")
@@ -289,7 +289,7 @@ func lifecycleRejectsWrongAdmittedAdapterForZeroEventReceipt(_ version: Int) thr
   }
 }
 
-@Test("persisted v10 and current v11 reject fully rekeyed admitted event IDs", arguments: [10, 11])
+@Test("persisted v10 and current-schema reject fully rekeyed admitted event IDs", arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsFullyRekeyedAdmittedEventID(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let forgedID = String(repeating: "f", count: 64)
@@ -302,8 +302,8 @@ func lifecycleRejectsFullyRekeyedAdmittedEventID(_ version: Int) throws {
 }
 
 @Test(
-  "persisted v10 and current v11 reject a fully rehashed opaque NOTE sidecar deletion",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject a fully rehashed opaque NOTE sidecar deletion",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsFullyRehashedOpaqueSidecarDeletion(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let note = fixture.field(named: "NOTE").id(in: fixture)
@@ -322,8 +322,8 @@ func lifecycleRejectsFullyRehashedOpaqueSidecarDeletion(_ version: Int) throws {
 }
 
 @Test(
-  "persisted v10 and current v11 reject deleting the complete new v19 opaque commitment",
-  arguments: [10, 11])
+  "persisted v10 and current-schema reject deleting the complete new v19 opaque commitment",
+  arguments: [10, CanonicalLedgerSchema.version])
 func lifecycleRejectsCompleteV19CommitmentDeletion(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let note = fixture.field(named: "NOTE").id(in: fixture)
@@ -363,8 +363,8 @@ func lifecycleRejectsCompleteV19CommitmentDeletion(_ version: Int) throws {
 }
 
 @Test(
-  "a current v11 ledger rejects an opaque field deleted from both retention paths",
-  arguments: [11])
+  "a current-schema ledger rejects an opaque field deleted from both retention paths",
+  arguments: [CanonicalLedgerSchema.version])
 func lifecycleRejectsRehashedOpaqueFieldDeletionFromBothPaths(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     let note = fixture.field(named: "NOTE").id(in: fixture)
@@ -391,8 +391,8 @@ func lifecycleRejectsRehashedOpaqueFieldDeletionFromBothPaths(_ version: Int) th
 }
 
 @Test(
-  "a current v11 ledger rejects a consistently rewritten v19 timezone tuple",
-  arguments: [11])
+  "a current-schema ledger rejects a consistently rewritten v19 timezone tuple",
+  arguments: [CanonicalLedgerSchema.version])
 func lifecycleRejectsRehashedV19TimezoneTuple(_ version: Int) throws {
   try withPersistedV19Ledger(version: version) { url, fixture in
     var overrides = fixture.digestOverrides()
