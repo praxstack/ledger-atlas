@@ -63,8 +63,9 @@ struct SettingsSurface: View {
   @FocusState private var focusedField: LedgerProductSettings.Field?
 
   /// Applies a valid draft; an invalid one keeps the last good settings and focuses the field.
-  private func commit(_ candidate: LedgerProductSettings, previous: LedgerProductSettings) {
+  private func commit(_ candidate: LedgerProductSettings) {
     guard candidate != settings else { return }
+    let before = settings
     if let field = settings.apply(candidate) {
       invalid = (field, candidate.validationErrors()[field] ?? "This value is not valid.")
       focusedField = field
@@ -72,7 +73,7 @@ struct SettingsSurface: View {
     }
     invalid = nil
     settings.save()
-    if candidate.remindersEnabled != previous.remindersEnabled || candidate.reminderHour != previous.reminderHour {
+    if candidate.remindersEnabled != before.remindersEnabled || candidate.reminderHour != before.reminderHour {
       scheduleReminder(enabled: candidate.remindersEnabled, hour: candidate.reminderHour)
     }
   }
@@ -81,6 +82,9 @@ struct SettingsSurface: View {
     Task { @MainActor in
       let granted = await LedgerNotificationScheduler.setDailyReminder(enabled: enabled, hour: hour)
       if !granted {
+        // Save "off" first so the draft change below is a no-op commit and keeps this message.
+        settings.remindersEnabled = false
+        settings.save()
         draft.remindersEnabled = false
         message = "Notifications were not authorized. You can allow them in System Settings > Notifications."
       } else {
@@ -228,7 +232,7 @@ struct SettingsSurface: View {
     .navigationTitle("Settings")
     .onAppear { draft = settings }
     .onChange(of: settings) { _, value in if draft != value { draft = value } }
-    .onChange(of: draft) { old, candidate in commit(candidate, previous: old) }
+    .onChange(of: draft) { _, candidate in commit(candidate) }
     .sheet(item: $passcodeForm) { mode in
       PasscodeForm(mode: mode) { current, passcode in
         do {
