@@ -109,24 +109,39 @@ enum MoneyManagerV19ObservedGraph {
 
     var commonZone: SourceTimeZone?
     var transactionUIDs = Set<String>()
+    var transferGroups: [String: String] = [:]
+    var accountsByRecord: [String: String] = [:]
     for (recordID, effects) in eventsByRecord {
       let values = try fields(for: recordID)
+      let categoryUID = mappingLiteral(
+        aliased(values, MoneyManagerV19Vocabulary.categoryAliases))
+      let rawType = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.doTypeAliases)) ?? ""
+      let isTransfer = MoneyManagerV19Vocabulary.isTransferType(rawType)
+      if isTransfer {
+        guard
+          let group = mappingLiteral(
+            aliased(values, MoneyManagerV19Vocabulary.transferGroupAliases)),
+          !group.isEmpty
+        else { throw CanonicalCommitError.unsafeMapping }
+        transferGroups[recordID] = group
+      }
       guard let amount = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.amountAliases)),
         let currencyUID = mappingLiteral(
           aliased(values, MoneyManagerV19Vocabulary.currencyUIDAliases)),
         let accountUID = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.assetAliases)),
-        let categoryUID = mappingLiteral(
-          aliased(values, MoneyManagerV19Vocabulary.categoryAliases)),
+        isTransfer || categoryUID != nil,
         let transactionUID = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.uidAliases)),
         !transactionUID.isEmpty, transactionUIDs.insert(transactionUID).inserted,
         let type = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.doTypeAliases)),
         let wdate = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.wdateAliases)),
         let zdate = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.zdateAliases)),
         accountUIDs.contains(accountUID),
-        MoneyManagerV19Vocabulary.categoryResolves(categoryUID, known: categoryUIDs),
+        isTransfer
+          || MoneyManagerV19Vocabulary.categoryResolves(categoryUID ?? "", known: categoryUIDs),
         MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryUID) == nil,
         currencies[currencyUID] != nil
       else { throw CanonicalCommitError.unsafeMapping }
+      accountsByRecord[recordID] = accountUID
       for event in effects {
         guard currencies[currencyUID] == event.amount.unitCode,
           amount == event.amount.amount.rawLiteral,
@@ -168,6 +183,22 @@ enum MoneyManagerV19ObservedGraph {
           }
         }
       }
+    }
+    // Each requested pair must be the source's own grouping: both legs share one group id and
+    // name different accounts, and no other mapped leg uses that group.
+    let recordByEventID = Dictionary(
+      uniqueKeysWithValues: request.events.map { ($0.eventID, $0.sourceRecordID) })
+    var pairedGroups = Set<String>()
+    for pair in request.transferPairs {
+      guard let debitRecord = recordByEventID[pair.debitEventID],
+        let creditRecord = recordByEventID[pair.creditEventID],
+        let group = transferGroups[debitRecord], transferGroups[creditRecord] == group,
+        accountsByRecord[debitRecord] != accountsByRecord[creditRecord],
+        pairedGroups.insert(group).inserted
+      else { throw CanonicalCommitError.unsafeMapping }
+    }
+    guard pairedGroups.count * 2 == transferGroups.count else {
+      throw CanonicalCommitError.unsafeMapping
     }
   }
 

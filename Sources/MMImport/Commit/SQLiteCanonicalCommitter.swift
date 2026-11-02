@@ -289,6 +289,9 @@ public struct SQLiteCanonicalCommitter: Sendable {
           throw CanonicalCommitError.injectedFailure
         }
       }
+      for pair in request.transferPairs.sorted(by: { $0.transferID < $1.transferID }) {
+        try insertTransferPair(pair, into: database)
+      }
       try insertReceipt(
         request: request, integrityHash: String(repeating: "0", count: 64),
         eventSetHash: eventSetHash,
@@ -471,6 +474,52 @@ public struct SQLiteCanonicalCommitter: Sendable {
         && (request.observedV19ReceiptOwnedSubjectIDs?.allSatisfy(CanonicalIdentifier.isValid)
           ?? true)
     else { throw CanonicalCommitError.unsafeMapping }
+    try validateTransferPairs(request)
+  }
+
+  /// Every transfer leg is in exactly one pair, each pair joins one debit and one credit on
+  /// different accounts, and the pair id is derived from its two legs.
+  private func validateTransferPairs(_ request: CanonicalCommitRequest) throws {
+    let eventsByID = Dictionary(uniqueKeysWithValues: request.events.map { ($0.eventID, $0) })
+    let pairedIDs = request.transferPairs.flatMap { [$0.debitEventID, $0.creditEventID] }
+    let transferLegCount = request.events.filter {
+      $0.kind == .transferDebit || $0.kind == .transferCredit
+    }.count
+    guard
+      request.transferPairs.allSatisfy({ pair in
+        guard let debit = eventsByID[pair.debitEventID],
+          let credit = eventsByID[pair.creditEventID]
+        else { return false }
+        return debit.kind == .transferDebit && credit.kind == .transferCredit
+          && debit.accountID != credit.accountID
+          && pair.transferID
+            == MoneyManagerV19Vocabulary.transferID(
+              debitEventID: pair.debitEventID, creditEventID: pair.creditEventID)
+      }),
+      Set(pairedIDs).count == pairedIDs.count,
+      Set(request.transferPairs.map(\.transferID)).count == request.transferPairs.count,
+      pairedIDs.count == transferLegCount
+    else { throw CanonicalCommitError.unsafeMapping }
+  }
+
+  private func insertTransferPair(_ pair: CanonicalTransferPair, into database: OpaquePointer)
+    throws
+  {
+    try run(
+      database,
+      sql:
+        "INSERT INTO economic_event_transfer(transfer_id, debit_event_id, credit_event_id) VALUES(?, ?, ?)",
+      values: [.text(pair.transferID), .text(pair.debitEventID), .text(pair.creditEventID)])
+  }
+
+  /// The ledger transaction that carries an event: its transfer for a paired leg, else itself.
+  private func transactionIDs(for request: CanonicalCommitRequest) -> [String: String] {
+    var ids: [String: String] = [:]
+    for pair in request.transferPairs {
+      ids[pair.debitEventID] = pair.transferID
+      ids[pair.creditEventID] = pair.transferID
+    }
+    return ids
   }
 
   private func prepareCommit(_ request: CanonicalCommitRequest) throws -> PreparedCommit {
@@ -1826,57 +1875,49 @@ public struct SQLiteCanonicalCommitter: Sendable {
     request: CanonicalCommitRequest, plan: TrustedCommitPlan, into database: OpaquePointer
   ) throws {
     guard request.isObservedV19AdapterAuthorized else { return }
+    let transactionIDs = transactionIDs(for: request)
     for event in request.events {
-      try run(
-        database,
-        sql:
-          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 1, ?, ?, NULL)",
-        values: [
-          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
-          .text(MoneyManagerV19Vocabulary.temporalCommitmentField),
-          .text(MoneyManagerV19Vocabulary.temporalCommitment(event.occurredAt)),
-        ])
-      try run(
-        database,
-        sql:
-          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 2, ?, ?, NULL)",
-        values: [
-          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
-          .text(MoneyManagerV19Vocabulary.receiptGenerationField),
-          .text(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral),
-        ])
-      try run(
-        database,
-        sql:
-          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 3, ?, ?, NULL)",
-        values: [
-          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
-          .text(MoneyManagerV19Vocabulary.temporalAnchorField),
-          .text(MoneyManagerV19Vocabulary.temporalCommitment(event.occurredAt)),
-        ])
+      // A paired transfer leg writes onto the shared transfer revision with leg-qualified
+      // field names; every other event writes onto its own revision as before.
+      let revisionID = StableLedgerID.revision(
+        transactionID: transactionIDs[event.eventID] ?? event.eventID, revision: 1)
+      let base = MoneyManagerV19Vocabulary.commitmentOrdinalBase(kind: event.kind)
       let fieldIDs = plan.sidecarsByEvent[event.eventID, default: []].map(\.sidecarID)
-      try run(
-        database,
-        sql:
-          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 4, ?, ?, NULL)",
-        values: [
-          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
-          .text(MoneyManagerV19Vocabulary.sourceSubjectSetField),
-          .text(
-            MoneyManagerV19Vocabulary.sourceSubjectSetCommitment(
-              sourceRecordID: event.sourceRecordID, fieldIDs: fieldIDs)),
-        ])
-      try run(
-        database,
-        sql:
-          "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, 5, ?, ?, NULL)",
-        values: [
-          .text(StableLedgerID.revision(transactionID: event.eventID, revision: 1)),
-          .text(MoneyManagerV19Vocabulary.sourceTimeZoneField),
-          .text(
-            MoneyManagerV19Vocabulary.sourceTimeZoneLiteral(
-              request.observedV19SourceTimeZone ?? event.occurredAt.timeZone)),
-        ])
+      let commitments: [(String, String)] = [
+        (
+          MoneyManagerV19Vocabulary.temporalCommitmentField,
+          MoneyManagerV19Vocabulary.temporalCommitment(event.occurredAt)
+        ),
+        (
+          MoneyManagerV19Vocabulary.receiptGenerationField,
+          MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral
+        ),
+        (
+          MoneyManagerV19Vocabulary.temporalAnchorField,
+          MoneyManagerV19Vocabulary.temporalCommitment(event.occurredAt)
+        ),
+        (
+          MoneyManagerV19Vocabulary.sourceSubjectSetField,
+          MoneyManagerV19Vocabulary.sourceSubjectSetCommitment(
+            sourceRecordID: event.sourceRecordID, fieldIDs: fieldIDs)
+        ),
+        (
+          MoneyManagerV19Vocabulary.sourceTimeZoneField,
+          MoneyManagerV19Vocabulary.sourceTimeZoneLiteral(
+            request.observedV19SourceTimeZone ?? event.occurredAt.timeZone)
+        ),
+      ]
+      for (offset, commitment) in commitments.enumerated() {
+        try run(
+          database,
+          sql:
+            "INSERT INTO ledger_transaction_source_literal(revision_id, ordinal, field, literal, provenance_id) VALUES(?, ?, ?, ?, NULL)",
+          values: [
+            .text(revisionID), .int(base + offset),
+            .text(MoneyManagerV19Vocabulary.commitmentField(commitment.0, kind: event.kind)),
+            .text(commitment.1),
+          ])
+      }
     }
   }
 
@@ -1923,6 +1964,14 @@ public struct SQLiteCanonicalCommitter: Sendable {
       queryHasNoRows(
         database,
         "SELECT 1 FROM economic_event WHERE amount_literal IS NULL OR amount_literal='' OR amount_literal GLOB '*[^0-9.+-]*' OR amount_literal NOT GLOB '*[0-9]*' OR currency_unit IS NULL OR length(currency_unit)<1 OR length(currency_unit)>32 OR currency_unit GLOB '*[^A-Za-z0-9_-]*' OR event_kind NOT IN ('income','expense','transfer_debit','transfer_credit','adjustment','adjustment_debit')"
+      ),
+      queryHasNoRows(
+        database,
+        "SELECT 1 FROM economic_event_transfer t LEFT JOIN economic_event d ON d.event_id=t.debit_event_id LEFT JOIN economic_event c ON c.event_id=t.credit_event_id WHERE length(t.transfer_id)<>64 OR t.transfer_id GLOB '*[^0-9a-f]*' OR d.event_kind IS NOT 'transfer_debit' OR c.event_kind IS NOT 'transfer_credit' OR d.account_id=c.account_id"
+      ),
+      queryHasNoRows(
+        database,
+        "SELECT 1 FROM economic_event e WHERE e.event_kind IN ('transfer_debit','transfer_credit') AND NOT EXISTS (SELECT 1 FROM economic_event_transfer t WHERE t.debit_event_id=e.event_id OR t.credit_event_id=e.event_id)"
       ),
       queryHasNoRows(
         database,
@@ -2110,12 +2159,12 @@ public struct SQLiteCanonicalCommitter: Sendable {
     let current =
       scalarText(
         database,
-        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON r.event_id=v.transaction_id WHERE r.idempotency_key='\(receipt)' AND l.field='\(MoneyManagerV19Vocabulary.receiptGenerationField)' AND l.literal='\(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral)' LIMIT 1"
+        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=COALESCE((SELECT t.transfer_id FROM economic_event_transfer t WHERE t.debit_event_id=r.event_id OR t.credit_event_id=r.event_id), r.event_id) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Vocabulary.receiptGenerationField)', '\(MoneyManagerV19Vocabulary.receiptGenerationField).debit', '\(MoneyManagerV19Vocabulary.receiptGenerationField).credit') AND l.literal='\(MoneyManagerV19Vocabulary.currentReceiptGenerationLiteral)' LIMIT 1"
       ) != nil
     let legacy =
       scalarText(
         database,
-        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON r.event_id=v.transaction_id WHERE r.idempotency_key='\(receipt)' AND l.field='\(MoneyManagerV19Vocabulary.receiptGenerationField)' AND l.literal='\(MoneyManagerV19Vocabulary.legacyReceiptGenerationLiteral)' LIMIT 1"
+        "SELECT 1 FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=COALESCE((SELECT t.transfer_id FROM economic_event_transfer t WHERE t.debit_event_id=r.event_id OR t.credit_event_id=r.event_id), r.event_id) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Vocabulary.receiptGenerationField)', '\(MoneyManagerV19Vocabulary.receiptGenerationField).debit', '\(MoneyManagerV19Vocabulary.receiptGenerationField).credit') AND l.literal='\(MoneyManagerV19Vocabulary.legacyReceiptGenerationLiteral)' LIMIT 1"
       ) != nil
     guard !(current && legacy) else { throw CanonicalCommitError.canonicalReadFailed }
     return current || !legacy ? .current : .legacy
@@ -2441,6 +2490,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
     else {
       return false
     }
+    guard try transferPairsMatch(request, database: database) else { return false }
     for event in request.events {
       guard
         try countRows(
@@ -2515,6 +2565,33 @@ public struct SQLiteCanonicalCommitter: Sendable {
     // Checksum computation is deliberately included in retry validation: any malformed
     // canonical value is rejected rather than being hidden behind the receipt fast path.
     return !(try checksum(database)).isEmpty
+  }
+
+  /// The persisted pairs that touch this receipt's events are exactly the requested pairs.
+  private func transferPairsMatch(_ request: CanonicalCommitRequest, database: OpaquePointer)
+    throws -> Bool
+  {
+    let receipt = request.expectedManifest.stagingID
+    guard CanonicalIdentifier.isValid(receipt) else { return false }
+    var persisted: [[String]] = []
+    try readRows(
+      database,
+      sql: """
+        SELECT t.transfer_id, t.debit_event_id, t.credit_event_id FROM economic_event_transfer t
+        WHERE EXISTS (SELECT 1 FROM receipt_event r WHERE r.idempotency_key='\(receipt)'
+          AND (r.event_id=t.debit_event_id OR r.event_id=t.credit_event_id))
+        ORDER BY t.transfer_id
+        """
+    ) { statement in
+      persisted.append([
+        columnText(statement, 0) ?? "", columnText(statement, 1) ?? "",
+        columnText(statement, 2) ?? "",
+      ])
+    }
+    let expected = request.transferPairs.sorted { $0.transferID < $1.transferID }.map {
+      [$0.transferID, $0.debitEventID, $0.creditEventID]
+    }
+    return persisted == expected
   }
 
   private func eventMatches(_ event: CanonicalEconomicEvent, database: OpaquePointer) throws -> Bool

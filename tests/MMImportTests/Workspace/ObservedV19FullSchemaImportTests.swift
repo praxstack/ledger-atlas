@@ -32,11 +32,18 @@ struct ObservedV19FullSchemaImportTests {
       let result = try workspace.commit(handle, approval: workspace.approve(handle))
 
       // income, expense, balance edits recorded as income (0, -4) and expense (1, -4), a
-      // balance increase left out of income (7, -4) as an adjustment, and a balance decrease
-      // left out of expenses (8, -4) as a decreasing adjustment. Transfer legs stay preserved.
+      // balance increase left out of income (7, -4) as an adjustment, a balance decrease left
+      // out of expenses (8, -4) as a decreasing adjustment, and both legs of the grp-1
+      // transfer. The orphan leg and the same-account pair stay preserved.
       #expect(result.status == .committed)
-      #expect(result.eventCount == 6)
-      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 6)
+      #expect(result.eventCount == 8)
+      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 8)
+      #expect(try scalar(at: canonical, "SELECT count(*) FROM economic_event_transfer") == 1)
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM economic_event_transfer t JOIN economic_event d ON d.event_id=t.debit_event_id JOIN economic_event c ON c.event_id=t.credit_event_id WHERE d.event_kind='transfer_debit' AND c.event_kind='transfer_credit' AND d.amount_literal='40.00' AND c.amount_literal='40.00'"
+        ) == 1)
       #expect(try Data(contentsOf: source) == sourceBefore)
 
       let retry = try workspace.prepare(
@@ -47,11 +54,12 @@ struct ObservedV19FullSchemaImportTests {
       let retryHandle = try #require(retry.preparedHandle)
       let second = try workspace.commit(retryHandle, approval: workspace.approve(retryHandle))
       #expect(second.status == .unchanged)
-      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 6)
+      #expect(try SQLiteCanonicalCommitter().eventCount(at: canonical) == 8)
+      #expect(try scalar(at: canonical, "SELECT count(*) FROM economic_event_transfer") == 1)
     }
   }
 
-  @Test("types 7 and 8 map to adjustments only with the built-in balance-edit category")
+  @Test("balance edits and transfer legs map only with the expected category")
   func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
     #expect(
@@ -71,6 +79,19 @@ struct ObservedV19FullSchemaImportTests {
       MoneyManagerV19Vocabulary.reason(forType: "8", categoryUID: "cat-food")
         == .unsupportedTransactionType)
     #expect(MoneyManagerV19Vocabulary.eventKind(forType: "9") == nil)
+    #expect(MoneyManagerV19Vocabulary.reason(forType: "3", categoryUID: nil) == nil)
+    #expect(MoneyManagerV19Vocabulary.reason(forType: "4", categoryUID: "") == nil)
+    #expect(
+      MoneyManagerV19Vocabulary.reason(forType: "3", categoryUID: "cat-food")
+        == .transferDirectionUnproven)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "3") == .transferDebit)
+    #expect(MoneyManagerV19Vocabulary.eventKind(forType: "4") == .transferCredit)
+    #expect(
+      MoneyManagerV19Vocabulary.transferID(debitEventID: "d", creditEventID: "c")
+        == MoneyManagerV19Vocabulary.transferID(debitEventID: "d", creditEventID: "c"))
+    #expect(
+      MoneyManagerV19Vocabulary.transferID(debitEventID: "d", creditEventID: "c")
+        != MoneyManagerV19Vocabulary.transferID(debitEventID: "c", creditEventID: "d"))
     #expect(MoneyManagerV19Vocabulary.categoryResolves("-4", known: []))
     #expect(!MoneyManagerV19Vocabulary.categoryResolves("missing", known: ["cat-food"]))
   }
@@ -117,7 +138,13 @@ private func writeFullSchemaBackup(to url: URL) throws {
         ('tx-transfer-out', 'acct-a', NULL, 'acct-b', 'grp-1', '3', '40.00', '40.00', 40.0,
          '1738547440000', '2025-02-03', '', '', '0', 'cur-main', 1738547440000),
         ('tx-transfer-in', 'acct-b', NULL, 'acct-a', 'grp-1', '4', '40.00', '40.00', 40.0,
-         '1738547440000', '2025-02-03', '', '', '0', 'cur-main', 1738547440000);
+         '1738547440000', '2025-02-03', '', '', '0', 'cur-main', 1738547440000),
+        ('tx-orphan-out', 'acct-a', NULL, 'acct-b', 'grp-2', '3', '5.00', '5.00', 5.0,
+         '1738547500000', '2025-02-03', '', '', '0', 'cur-main', 1738547500000),
+        ('tx-self-out', 'acct-a', '', 'acct-a', 'grp-3', '3', '6.00', '6.00', 6.0,
+         '1738547560000', '2025-02-03', '', '', '0', 'cur-main', 1738547560000),
+        ('tx-self-in', 'acct-a', '', 'acct-a', 'grp-3', '4', '6.00', '6.00', 6.0,
+         '1738547560001', '2025-02-03', '', '', '0', 'cur-main', 1738547560001);
       INSERT INTO PHOTO (uid, IS_DEL, txUid, FILE_SIZE, FILE_PATH, FILE_NAME)
         VALUES ('photo-1', 0, 'tx-expense', 10, '/synthetic/photo.jpg', 'photo.jpg');
       INSERT INTO REPEATTRANSACTION (uid, IS_DEL, END_DATE, NEXT_DATE, DO_TYPE, REPEAT_TYPE,
@@ -130,6 +157,21 @@ private func writeFullSchemaBackup(to url: URL) throws {
         VALUES ('budget-1', 'cat-food', 1, 6, 0);
       INSERT INTO BUDGET_AMOUNT (uid, budgetUid, IS_DEL, AMOUNT) VALUES ('ba-1', 'budget-1', 0, 50.0);
       """)
+}
+
+private func scalar(at url: URL, _ sql: String) throws -> Int {
+  var database: OpaquePointer?
+  guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+    let database
+  else { throw FullSchemaTestError.sqlite }
+  defer { sqlite3_close(database) }
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+    throw FullSchemaTestError.sqlite
+  }
+  defer { sqlite3_finalize(statement) }
+  guard sqlite3_step(statement) == SQLITE_ROW else { throw FullSchemaTestError.sqlite }
+  return Int(sqlite3_column_int64(statement, 0))
 }
 
 private func execute(at url: URL, sql: String) throws {

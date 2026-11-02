@@ -145,6 +145,16 @@ public enum MoneyManagerV19Adapter {
           amountProvenance: amount.provenance, sourceBindings: bindings,
           sidecarReferences: sidecars))
     }
+    let eventIDsByRecord = Dictionary(
+      uniqueKeysWithValues: events.map { ($0.sourceRecordID, $0.eventID) })
+    let transferPairs = try plan.transferPairs.map { pair -> CanonicalTransferPair in
+      guard let debit = eventIDsByRecord[pair.debitRecordID],
+        let credit = eventIDsByRecord[pair.creditRecordID]
+      else { throw MoneyManagerV19AdapterError.semanticBindingRequired }
+      return CanonicalTransferPair(
+        transferID: MoneyManagerV19Vocabulary.transferID(debitEventID: debit, creditEventID: credit),
+        debitEventID: debit, creditEventID: credit)
+    }
     let eventRecordIDs = Set(events.map(\.sourceRecordID))
     let receiptOwnedRecords = input.allRecords.filter {
       !eventRecordIDs.contains($0.sourceRecordID)
@@ -166,8 +176,8 @@ public enum MoneyManagerV19Adapter {
       observedV19CanonicalDatabaseURL: canonicalDatabaseURL,
       stagingDatabaseURL: stagingDatabaseURL, expectedManifest: input.manifest,
       expectedStagingDigest: input.stagingDigest, mappingDecisions: decisions,
-      events: events, receiptOwnedSubjectIDs: receiptOwnedSubjectIDs,
-      sourceTimeZone: sourceTimeZone)
+      events: events, transferPairs: transferPairs,
+      receiptOwnedSubjectIDs: receiptOwnedSubjectIDs, sourceTimeZone: sourceTimeZone)
   }
 
   private static func binding(
@@ -268,6 +278,7 @@ public enum MoneyManagerV19Adapter {
       case .blocked(let item): blocked.append(item)
       }
     }
+    let pairs = pairTransfers(&events, preservedReasons: &preservedReasons)
     let opaqueTableNames = input.allTableNames.filter { !recognizedTables.contains($0) }
     let opaqueRecords = input.allRecords.filter { opaqueTableNames.contains($0.tableName) }
     return MoneyManagerV19Plan(
@@ -276,10 +287,41 @@ public enum MoneyManagerV19Adapter {
       categories: try input.categories.map { try entity(.category, $0) },
       currencies: try input.currencies.map { try entity(.currency, $0) },
       mappedEvents: events.sorted { $0.sourceRecordID < $1.sourceRecordID },
+      transferPairs: pairs.sorted { $0.debitRecordID < $1.debitRecordID },
       opaqueTableNames: opaqueTableNames.sorted(),
       opaqueRecords: opaqueRecords.sorted { $0.sourceRecordID < $1.sourceRecordID },
       blockedRecords: blocked.sorted { $0.sourceRecordID < $1.sourceRecordID },
       preservedReasons: preservedReasons)
+  }
+
+  /// Matches transfer legs on their group id. A group that is not exactly one debit and one
+  /// credit is preserved loudly; a same-account pair is preserved because it moves no money.
+  private static func pairTransfers(
+    _ events: inout [MoneyManagerV19MappedEvent],
+    preservedReasons: inout [String: MoneyManagerV19BlockReason]
+  ) -> [MoneyManagerV19TransferPair] {
+    let legs = events.filter { $0.transferGroup != nil }
+    var pairs: [MoneyManagerV19TransferPair] = []
+    var unmapped: [String: MoneyManagerV19BlockReason] = [:]
+    for (_, group) in Dictionary(grouping: legs, by: { $0.transferGroup! }) {
+      let debits = group.filter { $0.kind == .transferDebit }
+      let credits = group.filter { $0.kind == .transferCredit }
+      guard group.count == 2, debits.count == 1, credits.count == 1 else {
+        for leg in group { unmapped[leg.sourceRecordID] = .transferDirectionUnproven }
+        continue
+      }
+      let debit = debits[0]
+      let credit = credits[0]
+      guard mappingLiteral(debit.account) != mappingLiteral(credit.account) else {
+        unmapped[debit.sourceRecordID] = .sameAccountTransfer
+        unmapped[credit.sourceRecordID] = .sameAccountTransfer
+        continue
+      }
+      pairs.append(.init(debitRecordID: debit.sourceRecordID, creditRecordID: credit.sourceRecordID))
+    }
+    events.removeAll { unmapped[$0.sourceRecordID] != nil }
+    preservedReasons.merge(unmapped) { _, new in new }
+    return pairs
   }
 
   private static func uniqueUIDs(_ records: [MoneyManagerV19SourceRecord]) throws -> Set<String> {
@@ -592,10 +634,10 @@ public enum MoneyManagerV19Adapter {
     if let reason = MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryLiteral) {
       return preserve(reason)
     }
+    let isTransfer = MoneyManagerV19Vocabulary.isTransferType(type)
     guard let account = sourceField(record, aliases: MoneyManagerV19Vocabulary.assetAliases),
       let accountKey = mappingLiteral(account), accountUIDs.contains(accountKey),
-      let category = sourceField(record, aliases: MoneyManagerV19Vocabulary.categoryAliases),
-      let categoryKey = mappingLiteral(category),
+      isTransfer || categoryLiteral != nil,
       let currencyUID = sourceField(record, aliases: MoneyManagerV19Vocabulary.currencyUIDAliases),
       let currencyKey = mappingLiteral(currencyUID),
       let currency = currenciesByUID[currencyKey],
@@ -609,8 +651,19 @@ public enum MoneyManagerV19Adapter {
       (try? CurrencyAmount(unitCode: mappingLiteral(currency) ?? currency.value, amount: decimal))
         != nil
     else { return preserve(.missingRequiredField) }
-    guard MoneyManagerV19Vocabulary.categoryResolves(categoryKey, known: categoryUIDs) else {
-      return preserve(.unresolvedCategory)
+    if let categoryLiteral, !isTransfer {
+      guard MoneyManagerV19Vocabulary.categoryResolves(categoryLiteral, known: categoryUIDs) else {
+        return preserve(.unresolvedCategory)
+      }
+    }
+    var transferGroup: String?
+    if isTransfer {
+      guard
+        let group = sourceField(record, aliases: MoneyManagerV19Vocabulary.transferGroupAliases)
+          .flatMap(mappingLiteral),
+        !group.isEmpty
+      else { return preserve(.transferDirectionUnproven) }
+      transferGroup = group
     }
     guard let kind = MoneyManagerV19Vocabulary.eventKind(forType: type) else {
       return preserve(.unknownTransactionType)
@@ -622,6 +675,7 @@ public enum MoneyManagerV19Adapter {
         currency: currency,
         timestamp: .init(
           wdate: wdate, zdate: zdate, localDay: day, localEpochMilliseconds: localEpoch),
+        transferGroup: transferGroup,
         preservedFields: record.fields))
   }
 
@@ -747,7 +801,7 @@ public struct MoneyManagerV19ObservedEntity: Equatable, Sendable {
   public let fields: [MoneyManagerV19SourceField]
 }
 public enum MoneyManagerV19EventKind: String, Equatable, Sendable {
-  case income, expense, adjustment, adjustmentDebit
+  case income, expense, adjustment, adjustmentDebit, transferDebit, transferCredit
 
   var canonical: CanonicalEventKind {
     switch self {
@@ -755,6 +809,8 @@ public enum MoneyManagerV19EventKind: String, Equatable, Sendable {
     case .expense: .expense
     case .adjustment: .adjustment
     case .adjustmentDebit: .adjustmentDebit
+    case .transferDebit: .transferDebit
+    case .transferCredit: .transferCredit
     }
   }
 }
@@ -769,13 +825,24 @@ public struct MoneyManagerV19MappedEvent: Equatable, Sendable {
   public let kind: MoneyManagerV19EventKind
   public let account, amount, currency: MoneyManagerV19SourceField
   public let timestamp: MoneyManagerV19ObservedTimestamp
+  /// The shared group id for a transfer leg; nil for every other event.
+  public let transferGroup: String?
   /// Includes all source fields so unmodelled values remain available for opaque sidecar handling.
   public let preservedFields: [MoneyManagerV19SourceField]
 }
 public enum MoneyManagerV19BlockReason: String, Equatable, Sendable {
   case unexpectedTransactionTable, nonTextField, missingRequiredField, invalidObservedLiteral,
     unresolvedCategory, transferDirectionUnproven, unknownTransactionType,
-    unsupportedTransactionType, unknownStagedTable
+    unsupportedTransactionType, unknownStagedTable,
+    /// Both legs of a transfer name the same account. It moves no money, so the legs are kept
+    /// as preserved source records instead of a ledger transfer.
+    sameAccountTransfer
+}
+
+/// The two source records of one transfer, matched on their shared group id.
+public struct MoneyManagerV19TransferPair: Equatable, Sendable {
+  public let debitRecordID: String
+  public let creditRecordID: String
 }
 public struct MoneyManagerV19BlockedRecord: Equatable, Sendable {
   public let sourceRecordID: String
@@ -787,6 +854,8 @@ public struct MoneyManagerV19Plan: Equatable, Sendable {
   public let stagingDigest: String
   public let accounts, categories, currencies: [MoneyManagerV19ObservedEntity]
   public let mappedEvents: [MoneyManagerV19MappedEvent]
+  /// Every mapped transfer leg appears in exactly one pair.
+  public let transferPairs: [MoneyManagerV19TransferPair]
   /// Unknown tables are retained even when they have zero records.
   public let opaqueTableNames: [String]
   /// Records from tables outside the observed v19 mapping are retained verbatim as opaque receipt data.
