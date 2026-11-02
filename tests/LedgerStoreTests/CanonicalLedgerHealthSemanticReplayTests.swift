@@ -27,6 +27,32 @@ func legacyV19ReceiptWithoutCommitmentRemainsReadable() throws {
   }
 }
 
+@Test("an imported v19 transaction can be corrected the way the app does it, and reopens")
+func importedV19TransactionCorrectionReopens() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    do {
+      let app = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
+      let target = try #require(
+        try app.snapshot().transactions.first { $0.currentRevision.lifecycle == .active })
+      let draft = target.currentRevision.draft
+      // LedgerJourney drops the import receipt markers from a correction.
+      _ = try app.correctTransaction(
+        transactionID: target.id, expectedCurrentRevisionID: target.currentRevision.id,
+        draft: try LedgerTransactionDraft(
+          effects: draft.effects, categoryID: draft.categoryID, kind: draft.kind,
+          occurredAt: draft.occurredAt, note: (draft.note ?? "") + " (checked)",
+          roundingPolicy: draft.roundingPolicy,
+          sourceLiterals: draft.sourceLiterals.filter {
+            !$0.field.hasPrefix("import.") && !$0.field.hasPrefix("conversion.")
+          },
+          origin: draft.origin),
+        createdAt: UTCInstant(epochMilliseconds: 1_793_000_000_000))
+    }
+    let reopened = LedgerApplication(store: try LedgerStoreLifecycle.open(at: url).store)
+    #expect(try reopened.snapshot().revisionHistory.count == 2)
+  }
+}
+
 @Test("an authenticated v19 backup reopens on the same Mac with its external trust key")
 func authenticatedV19BackupReopensOnSameDevice() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
@@ -43,6 +69,36 @@ func currentV11RejectsMissingExternalTrustKey() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
     try withSQLite(url) { database in
       #expect(!CanonicalLedgerHealth.isHealthy(database, trustKey: nil))
+    }
+  }
+}
+
+@Test("the health check leaves the caller's connection as it found it")
+func healthCheckRestoresConnectionState() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let key = try LedgerReceiptTrust.key(
+      for: url, create: false, stableIdentity: fixture.receiptID)
+    try withSQLite(url) { database in
+      func cacheSize() -> Int64 {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(database, "PRAGMA cache_size", -1, &statement, nil) == SQLITE_OK,
+          sqlite3_step(statement) == SQLITE_ROW
+        else { return 0 }
+        return sqlite3_column_int64(statement, 0)
+      }
+      try execute(database, "PRAGMA cache_size=-1234")
+      // Outside a transaction: it opens and closes its own, pass or fail.
+      #expect(CanonicalLedgerHealth.isHealthy(database, trustKey: key))
+      #expect(!CanonicalLedgerHealth.isHealthy(database, trustKey: nil))
+      #expect(sqlite3_get_autocommit(database) != 0)
+      #expect(cacheSize() == -1234)
+      // Inside the caller's transaction: it never commits or ends it.
+      try execute(database, "BEGIN")
+      #expect(CanonicalLedgerHealth.isHealthy(database, trustKey: key))
+      #expect(sqlite3_get_autocommit(database) == 0)
+      try execute(database, "COMMIT")
+      #expect(cacheSize() == -1234)
     }
   }
 }
