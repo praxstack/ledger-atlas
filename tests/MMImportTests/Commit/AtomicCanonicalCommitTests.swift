@@ -143,7 +143,7 @@ struct AtomicCanonicalCommitTests {
           database,
           "SELECT CAST(count(*) AS TEXT) FROM sqlite_schema WHERE type='table' AND name IN ('ledger_tag','ledger_revision_tag','ledger_transaction_template','ledger_template_tag','ledger_memo','economic_event_transfer')"
         )
-        #expect(version == "12")
+        #expect(version == String(CanonicalLedgerSchema.version))
         #expect(annotationCount == "6")
       }
     }

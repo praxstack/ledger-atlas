@@ -83,12 +83,17 @@ public final class LedgerStore {
     /// The import plan has conflicts, or the ledger changed after the plan was made. Nothing
     /// was written; plan the import again.
     case importPlanNotApplicable
+    /// Not a JPEG, PNG, HEIC or PDF, empty, or over the per-receipt or per-ledger limit.
+    case unsupportedReceipt
+    /// The receipt was removed. Removed receipts never change again.
+    case receiptRemoved
     case sqliteFailure(code: Int32)
 
     fileprivate var preservesMutationError: Bool {
       switch self {
       case .categoryCycleDetected, .categoryHasActiveChildren, .accountGroupHasActiveAccounts,
-        .revisionConflict, .duplicateTagName, .importPlanNotApplicable:
+        .revisionConflict, .duplicateTagName, .importPlanNotApplicable, .unsupportedReceipt,
+        .receiptRemoved:
         true
       default:
         false
@@ -1656,10 +1661,17 @@ public final class LedgerStore {
             AND NOT EXISTS (SELECT 1 FROM main.ledger_tag t WHERE t.origin_id=o.origin_id)
             AND NOT EXISTS (SELECT 1 FROM main.ledger_transaction_template t WHERE t.origin_id=o.origin_id)
             AND NOT EXISTS (SELECT 1 FROM main.ledger_memo m WHERE m.origin_id=o.origin_id)
+            AND NOT EXISTS (SELECT 1 FROM main.ledger_receipt_attachment r WHERE r.origin_id=o.origin_id)
         )
         """, on: database)
     else { throw Error.incompatibleCanonicalStore }
-    return standaloneOriginCount != 1
+    // The portable package has no receipts section yet, so a ledger with receipts must use the
+    // exact canonical backup until the package can carry them.
+    guard
+      let receiptCount = scalarInt(
+        "SELECT count(*) FROM main.ledger_receipt_attachment", on: database)
+    else { throw Error.incompatibleCanonicalStore }
+    return standaloneOriginCount != 1 && receiptCount == 0
   }
 
   package func isEmptyForPortablePackageImport() throws -> Bool {
@@ -2222,7 +2234,7 @@ public final class LedgerStore {
         database,
         trustKey: try self.url.flatMap {
           try LedgerReceiptTrust.key(for: $0, create: false)
-        })
+        }, verifyingReceiptImages: false)
       guard Self.hasNoRows("PRAGMA foreign_key_check", on: database) else {
         throw Error.incompatibleCanonicalStore
       }
@@ -2457,6 +2469,7 @@ public final class LedgerStore {
     case int(Int)
     case optionalInt(Int?)
     case int64(Int64)
+    case blob(Data)
   }
 
   private static func run(_ sql: String, values: [SQLValue], on database: OpaquePointer) throws {
@@ -2490,6 +2503,12 @@ public final class LedgerStore {
       guard let value else { return sqlite3_bind_null(statement, index) == SQLITE_OK }
       return bind(.int(value), to: statement, at: index)
     case .int64(let value): return sqlite3_bind_int64(statement, index, value) == SQLITE_OK
+    case .blob(let data):
+      return data.withUnsafeBytes {
+        sqlite3_bind_blob64(
+          statement, index, $0.baseAddress ?? UnsafeRawPointer(bitPattern: 1), UInt64(data.count),
+          unsafeBitCast(-1, to: sqlite3_destructor_type.self)) == SQLITE_OK
+      }
     }
   }
 
@@ -3150,5 +3169,179 @@ extension LedgerStore {
       }
     }
     try ensureUniqueActiveTagNames(snapshot.tags)
+  }
+}
+
+// MARK: - Receipt attachments (schema v13, LA-041)
+
+extension LedgerStore {
+  /// Stores a receipt in the ledger. The media type comes from the bytes, never the caller.
+  /// Adding the same image again from the same origin returns the stored receipt and, when
+  /// `transactionID` is given, links it there.
+  @discardableResult
+  public func addReceipt(
+    _ bytes: Data, origin: LedgerOrigin, linkedTo transactionID: String? = nil,
+    createdAt: UTCInstant
+  ) throws -> LedgerReceiptAttachment {
+    guard !bytes.isEmpty, bytes.count <= LedgerReceiptAttachment.maximumBytes,
+      let mediaType = LedgerReceiptAttachment.MediaType(sniffing: bytes)
+    else { throw Error.unsupportedReceipt }
+    let sha256 = LedgerReceiptAttachment.digest(bytes)
+    let attachment = try LedgerReceiptAttachment(
+      id: LedgerReceiptAttachment.id(origin: origin, sha256: sha256),
+      transactionID: transactionID, sha256: sha256, byteCount: bytes.count,
+      mediaType: mediaType, origin: origin, createdAt: createdAt)
+    var stored = attachment
+    _ = try mutate { _ in
+      if let existing = try Self.loadReceiptAttachments(on: database).first(where: {
+        $0.id == attachment.id
+      }) {
+        guard existing.lifecycle == .active else { throw Error.receiptRemoved }
+        stored = existing
+        if let transactionID, existing.transactionID != transactionID {
+          stored = try Self.relinkReceipt(existing, to: transactionID, on: database)
+        }
+        return try Self.placeholderResult(origin: origin, status: .unchanged)
+      }
+      if let transactionID { try Self.ensureReceiptTarget(transactionID, on: database) }
+      try Self.ensureOrigin(origin, on: database)
+      try Self.run(
+        """
+        INSERT INTO main.ledger_receipt_attachment(
+          attachment_id, transaction_id, sha256, byte_count, media_type, bytes, origin_id,
+          created_at_milliseconds, lifecycle
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        values: [
+          .text(attachment.id), .optionalText(transactionID), .text(sha256),
+          .int(bytes.count), .text(mediaType.rawValue), .blob(bytes), .text(origin.id),
+          .int64(createdAt.epochMilliseconds), .text(LedgerLifecycleState.active.rawValue),
+        ], on: database)
+      // The total budget is checked here, inside the same transaction as the insert, so two
+      // adds cannot race past it.
+      guard Self.receiptBytesTotal(on: database) <= LedgerReceiptAttachment.maximumTotalBytes
+      else { throw Error.unsupportedReceipt }
+      return try Self.placeholderResult(origin: origin)
+    }
+    return stored
+  }
+
+  /// Links a receipt to a transaction, or unlinks it with nil. The target may be a ledger
+  /// transaction (deleted ones included), an imported event or an imported transfer.
+  public func linkReceipt(_ attachmentID: String, to transactionID: String?) throws {
+    _ = try mutate { _ in
+      guard
+        let existing = try Self.loadReceiptAttachments(on: database).first(where: {
+          $0.id == attachmentID
+        })
+      else { throw Error.incompatibleCanonicalStore }
+      guard existing.lifecycle == .active else { throw Error.receiptRemoved }
+      if existing.transactionID == transactionID {
+        return try Self.placeholderResult(origin: existing.origin, status: .unchanged)
+      }
+      _ = try Self.relinkReceipt(existing, to: transactionID, on: database)
+      return try Self.placeholderResult(origin: existing.origin)
+    }
+  }
+
+  /// Removes a receipt from view. Its bytes stay so a restore of this ledger is exact.
+  public func tombstoneReceipt(_ attachmentID: String) throws {
+    _ = try mutate { _ in
+      guard
+        let existing = try Self.loadReceiptAttachments(on: database).first(where: {
+          $0.id == attachmentID
+        })
+      else { throw Error.incompatibleCanonicalStore }
+      if existing.lifecycle == .tombstoned {
+        return try Self.placeholderResult(origin: existing.origin, status: .unchanged)
+      }
+      try Self.run(
+        "UPDATE main.ledger_receipt_attachment SET lifecycle=? WHERE attachment_id=?",
+        values: [.text(LedgerLifecycleState.tombstoned.rawValue), .text(attachmentID)],
+        on: database)
+      return try Self.placeholderResult(origin: existing.origin)
+    }
+  }
+
+  /// Every receipt's metadata, without the bytes.
+  public func receiptAttachments() throws -> [LedgerReceiptAttachment] {
+    try Self.loadReceiptAttachments(on: database)
+  }
+
+  /// One receipt's bytes, checked against its stored sha256.
+  public func receiptBytes(_ attachmentID: String) throws -> Data {
+    var statement: OpaquePointer?
+    guard
+      sqlite3_prepare_v2(
+        database,
+        "SELECT bytes, sha256 FROM main.ledger_receipt_attachment WHERE attachment_id=?", -1,
+        &statement, nil) == SQLITE_OK, let statement
+    else { throw Error.incompatibleCanonicalStore }
+    defer { sqlite3_finalize(statement) }
+    guard Self.bind(.text(attachmentID), to: statement, at: 1),
+      sqlite3_step(statement) == SQLITE_ROW,
+      sqlite3_column_type(statement, 0) == SQLITE_BLOB
+    else { throw Error.incompatibleCanonicalStore }
+    let count = Int(sqlite3_column_bytes(statement, 0))
+    guard count > 0, let pointer = sqlite3_column_blob(statement, 0) else {
+      throw Error.incompatibleCanonicalStore
+    }
+    let data = Data(bytes: pointer, count: count)
+    guard LedgerReceiptAttachment.digest(data) == Self.text(statement, column: 1) else {
+      throw Error.incompatibleCanonicalStore
+    }
+    return data
+  }
+
+  private static func relinkReceipt(
+    _ existing: LedgerReceiptAttachment, to transactionID: String?, on database: OpaquePointer
+  ) throws -> LedgerReceiptAttachment {
+    if let transactionID { try ensureReceiptTarget(transactionID, on: database) }
+    try run(
+      "UPDATE main.ledger_receipt_attachment SET transaction_id=? WHERE attachment_id=?",
+      values: [.optionalText(transactionID), .text(existing.id)], on: database)
+    return try LedgerReceiptAttachment(
+      id: existing.id, transactionID: transactionID, sha256: existing.sha256,
+      byteCount: existing.byteCount, mediaType: existing.mediaType, origin: existing.origin,
+      createdAt: existing.createdAt, lifecycle: existing.lifecycle)
+  }
+
+  private static func ensureReceiptTarget(_ transactionID: String, on database: OpaquePointer)
+    throws
+  {
+    guard CanonicalIdentifier.isValid(transactionID),
+      !hasNoRows(
+        """
+        SELECT 1 FROM main.ledger_transaction WHERE transaction_id='\(transactionID)'
+        UNION ALL SELECT 1 FROM main.economic_event WHERE event_id='\(transactionID)'
+        UNION ALL SELECT 1 FROM main.economic_event_transfer WHERE transfer_id='\(transactionID)'
+        """, on: database)
+    else { throw Error.incompatibleCanonicalStore }
+  }
+
+  private static func receiptBytesTotal(on database: OpaquePointer) -> Int {
+    scalarInt(
+      "SELECT coalesce(sum(length(bytes)), 0) FROM main.ledger_receipt_attachment",
+      on: database) ?? Int.max
+  }
+
+  fileprivate static func loadReceiptAttachments(on database: OpaquePointer) throws
+    -> [LedgerReceiptAttachment]
+  {
+    try load(
+      sql:
+        "SELECT r.attachment_id, r.transaction_id, r.sha256, r.byte_count, r.media_type, o.origin_id, o.label, o.provenance_id, r.created_at_milliseconds, r.lifecycle FROM main.ledger_receipt_attachment r JOIN main.ledger_origin o ON o.origin_id=r.origin_id ORDER BY r.created_at_milliseconds, r.attachment_id",
+      on: database
+    ) { row in
+      guard let byteCount = Int(row[3]), let created = Int64(row[8]),
+        let mediaType = LedgerReceiptAttachment.MediaType(rawValue: row[4])
+      else { throw Error.incompatibleCanonicalStore }
+      return try LedgerReceiptAttachment(
+        id: row[0], transactionID: row[1].isEmpty ? nil : row[1], sha256: row[2],
+        byteCount: byteCount, mediaType: mediaType,
+        origin: LedgerOrigin(id: row[5], label: row[6], provenanceID: row[7].isEmpty ? nil : row[7]),
+        createdAt: UTCInstant(epochMilliseconds: created),
+        lifecycle: try requireRaw(LedgerLifecycleState.self, row[9]))
+    }
   }
 }
