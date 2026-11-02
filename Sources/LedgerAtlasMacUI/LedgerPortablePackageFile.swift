@@ -56,4 +56,45 @@ public enum LedgerPortablePackageFile {
     guard digest == manifest.payloadSHA256 else { throw Error.invalidEnvelope }
     return (manifest, envelope.payload)
   }
+
+  /// Writes `data` to a new owner-only file at `destination` and nothing else.
+  ///
+  /// The App Sandbox lets the app create only the file the person picked, not a temporary
+  /// file beside it, so this creates `destination` exclusively and writes it in place. If any
+  /// step fails, the partial file this call created is removed.
+  public static func publish(_ data: Data, to destination: URL) throws {
+    guard destination.isFileURL else { throw Error.writeFailed }
+    let descriptor = open(
+      destination.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+      mode_t(S_IRUSR | S_IWUSR))
+    guard descriptor >= 0 else {
+      throw errno == EEXIST ? Error.destinationExists : Error.writeFailed
+    }
+    var created = stat()
+    let wroteAll: Bool = {
+      guard fstat(descriptor, &created) == 0, fchmod(descriptor, mode_t(S_IRUSR | S_IWUSR)) == 0
+      else { return false }
+      var offset = 0
+      let complete = data.withUnsafeBytes { buffer -> Bool in
+        while offset < buffer.count {
+          let written = write(descriptor, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
+          guard written > 0 else { return false }
+          offset += written
+        }
+        return true
+      }
+      return complete && fsync(descriptor) == 0
+    }()
+    close(descriptor)
+    guard wroteAll else {
+      // Remove only the file this call created, never one that replaced it meanwhile.
+      var atPath = stat()
+      if lstat(destination.path, &atPath) == 0, atPath.st_dev == created.st_dev,
+        atPath.st_ino == created.st_ino
+      {
+        unlink(destination.path)
+      }
+      throw Error.writeFailed
+    }
+  }
 }
