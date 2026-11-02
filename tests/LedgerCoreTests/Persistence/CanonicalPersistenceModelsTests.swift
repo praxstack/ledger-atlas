@@ -16,6 +16,17 @@ struct CanonicalPersistenceModelsTests {
         == "6f32860910ca0fb2a20c7fda143666b09dbf8db5238195c90a586fb542ff0cad")
   }
 
+  @Test("hex encoding matches the per-byte %02x format for every byte")
+  func hexMatchesFormatForEveryByte() {
+    // Every persisted digest goes through this encoder, so it must stay byte-identical to the
+    // String(format:) output it replaced.
+    let allBytes = (0...255).map { UInt8($0) }
+    #expect(
+      CanonicalReceiptDigest.hex(allBytes)
+        == allBytes.map { String(format: "%02x", $0) }.joined())
+    #expect(CanonicalReceiptDigest.hex([UInt8]()) == "")
+  }
+
   @Test("stable event identifiers are deterministic and effect-specific")
   func stableEventIdentifiers() throws {
     let sourceRecordID = String(repeating: "a", count: 64)
