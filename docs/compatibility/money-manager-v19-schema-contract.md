@@ -112,8 +112,8 @@ bookkeeping). They carry no financial meaning but must be preserved as sidecars.
 
 Transfer shape (observed in every pair of both snapshots): one `3` row and one `4` row
 share `txUidTrans`, with equal `ZMONEY` and `WDATE`, and swapped `assetUid` /
-`toAssetUid`. `ZDATE` can differ by milliseconds between the two legs. The importer
-should map each pair to one canonical transfer, and treat a lone leg as blocking.
+`toAssetUid`. `ZDATE` can differ by milliseconds between the two legs (6 of 426 pairs, by
+1 ms). One pair in the 2026-11-01 backup names the same account on both legs.
 
 Balance modification (observed on the 2026-11-02 test backup with screenshots). When
 the user edits an account balance, the app asks whether to record the difference as
@@ -137,6 +137,17 @@ when type 7 adds money and type 8 subtracts it. The app's XLSX export omits type
 Import mapping: type `0` → income, `1` → expense, `7` → `adjustment` (adds money),
 `8` → `adjustment_debit` (removes money). Types 7 and 8 are admitted only with category
 `-4`; with any other category they stay preserved and flagged.
+
+Transfers: type `3` → `transfer_debit`, `4` → `transfer_credit`, admitted only with an
+empty or `NULL` category. The two legs of one `txUidTrans` group become one row of
+`economic_event_transfer` (canonical v12). Its `transfer_id` is the SHA-256 of
+length-prefixed `("mm-transfer", debit_event_id, credit_event_id)`, so a reimport writes
+the same row. The ledger shows each pair as one transfer, dated by the debit leg. Two
+cases stay preserved as source records instead:
+- A group that is not exactly one `3` leg plus one `4` leg, or a leg with no group id.
+  It is flagged `transfer_direction_unproven` and blocks lossless certification.
+- A same-account pair. It moves no money; it is flagged `sameAccountTransfer` and does
+  not block certification.
 
 Time zone (observed): in both snapshots, every `WDATE` equals the local date of `ZDATE`
 at UTC+05:30. The importer must not assume this offset; it should derive and confirm
@@ -245,9 +256,8 @@ reported, never dropped.
    thing today (`pUid`, `IS_DEL`, `toAssetUid`).
 6. Keep every `uid` exactly as text. Small integer uids are valid.
 7. Map transfers per `txUidTrans` group, not per row. A group that is not exactly one
-   `3` leg plus one `4` leg blocks the import.
-8. Map balance edits as the table above says. Preserve and flag: type `8` (until imported
-   adjustments can decrease), `txUidFee`, `CARDDIVIDMONTH`, budgets,
+   `3` leg plus one `4` leg stays preserved and blocks lossless certification.
+8. Map balance edits as the table above says. Preserve and flag: `txUidFee`, `CARDDIVIDMONTH`, budgets,
    recurring rules, photos, settings, and sync columns. Each gets a LossReport line.
 9. Fixtures in Git are synthetic only, built from the DDL file. Real backups stay
    outside the repo (see `EVIDENCE.md`).

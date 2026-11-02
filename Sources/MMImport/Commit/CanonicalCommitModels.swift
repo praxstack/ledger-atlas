@@ -3,6 +3,19 @@ import CryptoKit
 import Foundation
 import LedgerCore
 
+/// The two economic events of one transfer, stored as one row of `economic_event_transfer`.
+public struct CanonicalTransferPair: Equatable, Sendable {
+  public let transferID: String
+  public let debitEventID: String
+  public let creditEventID: String
+
+  public init(transferID: String, debitEventID: String, creditEventID: String) {
+    self.transferID = transferID
+    self.debitEventID = debitEventID
+    self.creditEventID = creditEventID
+  }
+}
+
 public struct CanonicalCommitRequest: Sendable {
   public let canonicalDatabaseURL: URL
   public let stagingDatabaseURL: URL
@@ -10,6 +23,7 @@ public struct CanonicalCommitRequest: Sendable {
   public let expectedStagingDigest: String
   public let mappingDecisions: [ReconciliationDecision]
   public let events: [CanonicalEconomicEvent]
+  public let transferPairs: [CanonicalTransferPair]
   let adapterAuthorization: CanonicalCommitAdapterAuthorization?
 
   public init(
@@ -26,6 +40,7 @@ public struct CanonicalCommitRequest: Sendable {
     self.expectedStagingDigest = expectedStagingDigest
     self.mappingDecisions = mappingDecisions
     self.events = events
+    transferPairs = []
     adapterAuthorization = nil
   }
 
@@ -36,6 +51,7 @@ public struct CanonicalCommitRequest: Sendable {
     expectedStagingDigest: String,
     mappingDecisions: [ReconciliationDecision],
     events: [CanonicalEconomicEvent],
+    transferPairs: [CanonicalTransferPair] = [],
     receiptOwnedSubjectIDs: Set<String>,
     sourceTimeZone: SourceTimeZone? = nil
   ) {
@@ -45,6 +61,7 @@ public struct CanonicalCommitRequest: Sendable {
     self.expectedStagingDigest = expectedStagingDigest
     self.mappingDecisions = mappingDecisions
     self.events = events
+    self.transferPairs = transferPairs
     adapterAuthorization = .observedV19(
       receiptOwnedSubjectIDs: receiptOwnedSubjectIDs, sourceTimeZone: sourceTimeZone)
   }

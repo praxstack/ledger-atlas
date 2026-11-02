@@ -55,6 +55,42 @@ public enum MoneyManagerV19Semantics {
   /// decreasing adjustment. Admitted only together with `balanceEditCategoryUID`. Proven on the
   /// 2026-11-02 test backup: account balances only reconcile when type 8 removes money.
   public static let balanceDecreaseType = "8"
+  /// The money-out leg of a transfer. Its partner is the type-4 row with the same group id.
+  public static let transferDebitType = "3"
+  /// The money-in leg of a transfer.
+  public static let transferCreditType = "4"
+  /// Group id shared by the two legs of one transfer. Observed on the 2026-11-01 backup: every
+  /// group holds exactly one type-3 and one type-4 row.
+  public static let transferGroupAliases = ["txUidTrans", "TX_UID_TRANS", "ZTXUIDTRANS"]
+
+  public static func isTransferType(_ type: String) -> Bool {
+    type == transferDebitType || type == transferCreditType
+  }
+
+  /// Deterministic id of a transfer pair, so a reimport writes the same row.
+  public static func transferID(debitEventID: String, creditEventID: String) -> String {
+    CanonicalReceiptDigest.hash(["mm-transfer", debitEventID, creditEventID])
+  }
+
+  /// A transfer leg's commitments live on the shared transfer revision, so each field name is
+  /// qualified by the leg. Other events keep the plain field name.
+  public static func commitmentField(_ field: String, kind: CanonicalEventKind) -> String {
+    switch kind {
+    case .transferDebit: field + ".debit"
+    case .transferCredit: field + ".credit"
+    default: field
+    }
+  }
+
+  /// First ordinal of an event's five commitments on its revision. The store's own literals sit
+  /// before them: `import.eventID` at 0, or `import.eventID.debit/.credit` at 0 and 1.
+  public static func commitmentOrdinalBase(kind: CanonicalEventKind) -> Int {
+    switch kind {
+    case .transferDebit: 2
+    case .transferCredit: 7
+    default: 1
+    }
+  }
 
   public struct RetainedField: Sendable {
     public let semantic: CanonicalEventSourceSemantic
@@ -192,7 +228,9 @@ public enum MoneyManagerV19Semantics {
       (kindLiteral == "0" && event.kind == .income)
         || (kindLiteral == "1" && event.kind == .expense)
         || (kindLiteral == balanceIncreaseType && event.kind == .adjustment)
-        || (kindLiteral == balanceDecreaseType && event.kind == .adjustmentDebit),
+        || (kindLiteral == balanceDecreaseType && event.kind == .adjustmentDebit)
+        || (kindLiteral == transferDebitType && event.kind == .transferDebit)
+        || (kindLiteral == transferCreditType && event.kind == .transferCredit),
       let observedLocal = observedLocalDateTime(occurredLiteral),
       observedLocal == event.occurredAt.localDateTime,
       event.occurredAt.timeZone.fixedOffsetSeconds == nil

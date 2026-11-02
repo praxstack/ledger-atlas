@@ -469,18 +469,35 @@ package enum CanonicalLedgerHealth {
       database,
       "SELECT e.event_id, e.account_id, e.event_kind, e.amount_literal, e.currency_unit, e.instant_milliseconds, e.local_year, e.local_month, e.local_day, e.local_hour, e.local_minute, e.local_second, e.local_millisecond, e.timezone_kind, e.timezone_value, e.temporal_precision, e.resolved_offset_seconds, e.source_record_id, e.provenance_id FROM receipt_event r JOIN economic_event e ON e.event_id=r.event_id WHERE r.idempotency_key='\(receipt)' ORDER BY e.event_id",
       { $0 })
+    let hasTransferTable = try transferTableExists(database)
     for event in events {
       let eventID = event.text(0)
+      // A paired transfer leg's commitments live on its transfer's revision, under field names
+      // that name the leg; every other event uses its own transaction and the plain names.
+      guard let eventKind = CanonicalEventKind(rawValue: event.text(2)) else {
+        throw HealthError.invalid
+      }
+      let transactionID =
+        try hasTransferTable
+        ? rows(
+          database,
+          "SELECT transfer_id FROM economic_event_transfer WHERE debit_event_id='\(eventID)' OR credit_event_id='\(eventID)'",
+          { $0.text(0) }
+        ).first ?? eventID
+        : eventID
+      func field(_ name: String) -> String {
+        MoneyManagerV19Semantics.commitmentField(name, kind: eventKind)
+      }
       let sourceRecordID = event.text(17)
       let commitments = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(eventID)' AND l.field='\(MoneyManagerV19Semantics.temporalCommitmentField)'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.temporalCommitmentField))'",
         { $0.text(0) })
       guard commitments.count <= 1 else { throw HealthError.invalid }
       if generation == .current, commitments.count > 1 { throw HealthError.invalid }
       let temporalAnchors = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(eventID)' AND l.field='\(MoneyManagerV19Semantics.temporalAnchorField)'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.temporalAnchorField))'",
         { $0.text(0) })
       guard temporalAnchors.count <= 1 else { throw HealthError.invalid }
       if generation == .current {
@@ -504,7 +521,7 @@ package enum CanonicalLedgerHealth {
       }
       let generationDeclarations = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(eventID)' AND l.field='\(MoneyManagerV19Semantics.receiptGenerationField)'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.receiptGenerationField))'",
         { $0.text(0) })
       guard generationDeclarations.count == 1,
         generationDeclarations[0]
@@ -529,11 +546,11 @@ package enum CanonicalLedgerHealth {
       guard hasAnchor || commitments.isEmpty else { throw HealthError.invalid }
       let sourceSubjectSetMarkers = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(eventID)' AND l.field='\(MoneyManagerV19Semantics.sourceSubjectSetField)'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.sourceSubjectSetField))'",
         { $0.text(0) })
       let sourceTimeZoneMarkers = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(eventID)' AND l.field='\(MoneyManagerV19Semantics.sourceTimeZoneField)'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.sourceTimeZoneField))'",
         { $0.text(0) })
       if generation == .current && requireCurrentMarkers {
         let fieldIDs = try rows(
@@ -565,12 +582,25 @@ package enum CanonicalLedgerHealth {
     }
   }
 
+  private static func transferTableExists(_ database: OpaquePointer) throws -> Bool {
+    try !rows(
+      database,
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='economic_event_transfer'",
+      { _ in true }
+    ).isEmpty
+  }
+
   private static func declaredV19ReceiptGeneration(
     _ database: OpaquePointer, receipt: String
   ) throws -> MoneyManagerV19Semantics.ReceiptGeneration? {
+    // Ledgers older than v12 have no transfer table and no paired legs.
+    let transactionOfEvent =
+      try transferTableExists(database)
+      ? "COALESCE((SELECT t.transfer_id FROM economic_event_transfer t WHERE t.debit_event_id=r.event_id OR t.credit_event_id=r.event_id), r.event_id)"
+      : "r.event_id"
     let values = try rows(
       database,
-      "SELECT DISTINCT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON r.event_id=v.transaction_id WHERE r.idempotency_key='\(receipt)' AND l.field='\(MoneyManagerV19Semantics.receiptGenerationField)'",
+      "SELECT DISTINCT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id JOIN receipt_event r ON v.transaction_id=\(transactionOfEvent) WHERE r.idempotency_key='\(receipt)' AND l.field IN ('\(MoneyManagerV19Semantics.receiptGenerationField)', '\(MoneyManagerV19Semantics.receiptGenerationField).debit', '\(MoneyManagerV19Semantics.receiptGenerationField).credit')",
       { $0.text(0) })
     guard values.count <= 1 else { throw HealthError.invalid }
     switch values.first {
