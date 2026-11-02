@@ -29,7 +29,10 @@ private func editableLedger(at url: URL) async throws -> LedgerJourney {
   return journey
 }
 
-private func withDirectory(_ body: (URL) async throws -> Void) async throws {
+// Runs `body` on the caller's actor, so main-actor tests don't send it across isolation.
+private func withDirectory(
+  isolation: isolated (any Actor)? = #isolation, _ body: (URL) async throws -> Void
+) async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }

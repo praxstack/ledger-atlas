@@ -358,6 +358,7 @@ import Testing
   #expect(try restored.checksum() == expectedChecksum)
 }
 
+@MainActor
 @Test func packageExportMessageNamesFallbacksForImportedHistory() {
   #expect(
     LedgerJourney.packageExportSuccessMessage(includesImportHistory: false)
