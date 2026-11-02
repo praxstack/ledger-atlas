@@ -1879,7 +1879,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
     for event in request.events {
       // A paired transfer leg writes onto the shared transfer revision with leg-qualified
       // field names; every other event writes onto its own revision as before.
-      let revisionID = StableLedgerID.revision(
+      let revisionID = try StableLedgerID.revision(
         transactionID: transactionIDs[event.eventID] ?? event.eventID, revision: 1)
       let base = MoneyManagerV19Vocabulary.commitmentOrdinalBase(kind: event.kind)
       let fieldIDs = plan.sidecarsByEvent[event.eventID, default: []].map(\.sidecarID)
