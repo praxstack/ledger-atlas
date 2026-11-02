@@ -537,16 +537,16 @@ private func publicClientTypechecks(_ expression: String) throws -> Bool {
   while let candidate = enumerator.nextObject() as? URL {
     if candidate.lastPathComponent == "MMImport.swiftmodule" {
       modules = candidate.deletingLastPathComponent()
-    } else if candidate.lastPathComponent == "module.modulemap",
-      candidate.path.contains("CSQLite.build")
-    {
+    } else if isCSQLiteModuleMap(candidate) {
       moduleMap = candidate
     }
   }
   guard let modules, let moduleMap else { throw ReconciliationTestFailure.io }
-  let triple = modules.deletingLastPathComponent().deletingLastPathComponent()
-    .lastPathComponent
-  let architecture = triple.split(separator: "-").first.map(String.init) ?? "arm64"
+  #if arch(arm64)
+    let architecture = "arm64"
+  #else
+    let architecture = "x86_64"
+  #endif
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
     "ledger-atlas-public-api-test-\(UUID().uuidString)", isDirectory: true)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
@@ -566,6 +566,15 @@ private func publicClientTypechecks(_ expression: String) throws -> Bool {
   try process.run()
   process.waitUntilExit()
   return process.terminationStatus == 0
+}
+
+/// SwiftPM puts the generated CSQLite module map in different places depending on the
+/// build system: `.build/<triple>/debug/CSQLite.build/module.modulemap` (classic) or
+/// `.build/out/Intermediates.noindex/GeneratedModuleMaps/CSQLite.modulemap` (Xcode 27+).
+private func isCSQLiteModuleMap(_ candidate: URL) -> Bool {
+  if candidate.lastPathComponent == "CSQLite.modulemap" { return true }
+  return candidate.lastPathComponent == "module.modulemap"
+    && candidate.path.contains("CSQLite.build")
 }
 
 private func processOutput(_ executable: String, _ arguments: [String]) throws -> String {

@@ -379,6 +379,22 @@ public enum StableLedgerID {
     return digest(["ledger-atlas:v1:split-line", origin.id, localKey])
   }
 
+  public static func tag(origin: LedgerOrigin, localKey: String) throws -> String {
+    guard CanonicalIdentifier.isValid(localKey) else { throw LedgerDomainError.invalidIdentifier }
+    return digest(["ledger-atlas:v1:tag", origin.id, localKey])
+  }
+
+  public static func transactionTemplate(origin: LedgerOrigin, localKey: String) throws -> String
+  {
+    guard CanonicalIdentifier.isValid(localKey) else { throw LedgerDomainError.invalidIdentifier }
+    return digest(["ledger-atlas:v1:transaction-template", origin.id, localKey])
+  }
+
+  public static func memo(origin: LedgerOrigin, localKey: String) throws -> String {
+    guard CanonicalIdentifier.isValid(localKey) else { throw LedgerDomainError.invalidIdentifier }
+    return digest(["ledger-atlas:v1:memo", origin.id, localKey])
+  }
+
   private static func digest(_ components: [String]) -> String {
     var hasher = SHA256()
     for component in components {

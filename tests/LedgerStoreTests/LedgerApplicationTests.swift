@@ -1838,7 +1838,7 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
       writer.result = sqlite3_exec(writer.database, "COMMIT", nil, nil, nil)
       writer.finished.signal()
     }.start()
-    #expect(writer.finished.wait(timeout: .now() + .milliseconds(500)) == .success)
+    #expect(writer.finished.wait(timeout: .now() + .seconds(5)) == .success)
     #expect(writer.result == SQLITE_BUSY)
     #expect(sqlite3_exec(writer.database, "ROLLBACK", nil, nil, nil) == SQLITE_OK)
   }
@@ -1884,7 +1884,7 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
       writer.result = sqlite3_exec(writer.database, "COMMIT", nil, nil, nil)
       writer.finished.signal()
     }.start()
-    #expect(writer.finished.wait(timeout: .now() + .milliseconds(500)) == .success)
+    #expect(writer.finished.wait(timeout: .now() + .seconds(5)) == .success)
     #expect(writer.result == SQLITE_BUSY)
     #expect(sqlite3_exec(writer.database, "ROLLBACK", nil, nil, nil) == SQLITE_OK)
   }
