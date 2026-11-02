@@ -469,6 +469,7 @@ package enum CanonicalLedgerHealth {
       database,
       "SELECT e.event_id, e.account_id, e.event_kind, e.amount_literal, e.currency_unit, e.instant_milliseconds, e.local_year, e.local_month, e.local_day, e.local_hour, e.local_minute, e.local_second, e.local_millisecond, e.timezone_kind, e.timezone_value, e.temporal_precision, e.resolved_offset_seconds, e.source_record_id, e.provenance_id FROM receipt_event r JOIN economic_event e ON e.event_id=r.event_id WHERE r.idempotency_key='\(receipt)' ORDER BY e.event_id",
       { $0 })
+    let hasTransferTable = try transferTableExists(database)
     for event in events {
       let eventID = event.text(0)
       // A paired transfer leg's commitments live on its transfer's revision, under field names
@@ -477,7 +478,7 @@ package enum CanonicalLedgerHealth {
         throw HealthError.invalid
       }
       let transactionID =
-        try transferTableExists(database)
+        try hasTransferTable
         ? rows(
           database,
           "SELECT transfer_id FROM economic_event_transfer WHERE debit_event_id='\(eventID)' OR credit_event_id='\(eventID)'",
