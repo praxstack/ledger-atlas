@@ -400,14 +400,21 @@ public struct LedgerReport: Equatable, Sendable {
     self.unitCode = unitCode
   }
 
-  public var accessibleTable: String {
+  /// Lines for this report's one currency: activity, categories, then the net.
+  /// The net is income minus expense; transfer legs cancel out.
+  public var currencyLines: [String] {
     let activity = rows.map { "\($0.label): \($0.amountLiteral) \($0.unitCode) (\($0.count))" }
     let categories = categoryRows.map {
       "Category \($0.label): \($0.amountLiteral) \($0.unitCode) (\($0.count))"
     }
-    let counts = inventory.map { "\($0.label): \($0.count)" }
-    return ([title] + activity + categories + ["Total: \(totalLiteral) \(unitCode)"] + counts)
-      .joined(separator: "\n")
+    return activity + categories + ["Net: \(totalLiteral) \(unitCode)"]
+  }
+
+  /// Record counts, which do not depend on the currency.
+  public var inventoryLines: [String] { inventory.map { "\($0.label): \($0.count)" } }
+
+  public var accessibleTable: String {
+    ([title] + currencyLines + inventoryLines).joined(separator: "\n")
   }
 }
 

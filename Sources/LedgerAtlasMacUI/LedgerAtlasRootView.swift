@@ -258,10 +258,7 @@ public struct LedgerAtlasRootView: View {
       journey.recordFailure("Open a ledger before exporting a statement.")
       return
     }
-    let unit = snapshot.accounts.first?.currencyUnit
-      ?? snapshot.transactions.first?.currentRevision.draft.effects.first?.amount.unitCode
-      ?? "USD"
-    guard let report = try? LedgerApplication.report(from: snapshot, unitCode: unit) else {
+    guard let statement = try? LedgerStatement(snapshot: snapshot) else {
       journey.recordFailure("The report could not be generated.")
       return
     }
@@ -270,7 +267,7 @@ public struct LedgerAtlasRootView: View {
     panel.nameFieldStringValue = "ledger-atlas-statement.pdf"
     guard panel.runModal() == .OK, let url = panel.url else { return }
     do {
-      try LedgerPDFStatementExporter.export(report, to: url)
+      try LedgerPDFStatementExporter.export(statement, to: url)
     } catch {
       journey.recordFailure("The PDF statement could not be saved.")
     }
