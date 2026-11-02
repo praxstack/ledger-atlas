@@ -262,9 +262,85 @@ import Testing
   let staleCorrection = LedgerStore.CorrectTransactionRequest(
     transactionID: created.revision.transactionID, expectedCurrentRevisionID: corrected.revision.id,
     draft: correctionDraft, createdAt: .init(epochMilliseconds: 4))
-  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+  #expect(throws: LedgerStore.Error.revisionConflict) {
     try store.correctTransaction(staleCorrection)
   }
+}
+
+@Test func repeatedSubmissionsAreIdempotentAndStaleEditsAreVisibleConflicts() throws {
+  let (store, accountID, origin) = try makeStoreWithAccountForRevisionTests()
+  let temporal = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 11, day: 2)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  func draft(_ amount: String) throws -> LedgerTransactionDraft {
+    try LedgerTransactionDraft(
+      effects: [
+        .init(
+          accountID: accountID, direction: .decrease,
+          amount: .init(unitCode: "USD", amount: .init(amount)))
+      ], categoryID: nil, kind: .expense, occurredAt: temporal, origin: origin)
+  }
+  let key = String(repeating: "7", count: 64)
+
+  // A double-click: same submission, a few milliseconds apart.
+  let first = try store.createTransaction(
+    .init(idempotencyKey: key, draft: try draft("4.00"), createdAt: .init(epochMilliseconds: 10)))
+  let second = try store.createTransaction(
+    .init(idempotencyKey: key, draft: try draft("4.00"), createdAt: .init(epochMilliseconds: 13)))
+  #expect(first.status == .committed)
+  #expect(second.status == .unchanged)
+  #expect(second.revision == first.revision)
+  #expect(try store.readSnapshot().transactions.count == 1)
+
+  // Two editors start from revision 1. The first correction wins; the second is a conflict
+  // that writes nothing, and repeating the first correction later is still a no-op.
+  let winner = try store.correctTransaction(
+    .init(
+      transactionID: first.revision.transactionID,
+      expectedCurrentRevisionID: first.revision.id, draft: try draft("5.00"),
+      createdAt: .init(epochMilliseconds: 20)))
+  let historyBefore = try store.readSnapshot().revisionHistory
+  #expect(throws: LedgerStore.Error.revisionConflict) {
+    try store.correctTransaction(
+      .init(
+        transactionID: first.revision.transactionID,
+        expectedCurrentRevisionID: first.revision.id, draft: try draft("6.00"),
+        createdAt: .init(epochMilliseconds: 21)))
+  }
+  #expect(throws: LedgerStore.Error.revisionConflict) {
+    try store.tombstoneTransaction(
+      .init(
+        transactionID: first.revision.transactionID,
+        expectedCurrentRevisionID: first.revision.id, createdAt: .init(epochMilliseconds: 22)))
+  }
+  #expect(try store.readSnapshot().revisionHistory == historyBefore)
+  let repeated = try store.correctTransaction(
+    .init(
+      transactionID: first.revision.transactionID,
+      expectedCurrentRevisionID: first.revision.id, draft: try draft("5.00"),
+      createdAt: .init(epochMilliseconds: 30)))
+  #expect(repeated.status == .unchanged)
+  #expect(repeated.revision == winner.revision)
+  let current = try #require(try store.readSnapshot().transactions.first)
+  #expect(current.currentRevision.draft.effects[0].amount.amount.rawLiteral == "5.00")
+}
+
+private func makeStoreWithAccountForRevisionTests() throws
+  -> (LedgerStore, String, LedgerOrigin)
+{
+  let database = try makeCanonicalDatabase()
+  let origin = try LedgerOrigin(id: String(repeating: "4", count: 64), label: "synthetic")
+  let accountID = try StableLedgerID.account(
+    origin: origin, localKey: String(repeating: "5", count: 64))
+  try execute(
+    database,
+    """
+    INSERT INTO ledger_origin VALUES ('\(origin.id)', 'synthetic', NULL);
+    INSERT INTO ledger_account VALUES ('\(accountID)', 'Cash', 'USD', '\(origin.id)', 'active');
+    """)
+  return (
+    try LedgerStore(takingOwnershipOfValidatedCanonicalDatabase: database), accountID, origin
+  )
 }
 
 @Test func mutableOpenerRejectsUnsafePathFormsBeforeWriting() throws {

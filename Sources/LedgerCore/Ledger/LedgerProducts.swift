@@ -22,7 +22,8 @@ public struct LedgerConversion: Equatable, Sendable {
     sourceAmount: CurrencyAmount, convertedAmount: CurrencyAmount, rate: ExactDecimal,
     rateScale: Int, rounding: RoundingPolicy
   ) throws {
-    guard sourceAmount.unitCode != convertedAmount.unitCode, rateScale >= 0, rateScale <= 16
+    guard sourceAmount.unitCode != convertedAmount.unitCode, rateScale >= 0, rateScale <= 16,
+      rate.isPositive
     else { throw LedgerCommandError.invalidTransfer }
     let expected = try sourceAmount.amount.divided(by: rate, scale: convertedAmount.amount.sourceScale, rounding: rounding)
     // Keep the declared converted amount as source of truth; rate is provenance.
@@ -32,6 +33,18 @@ public struct LedgerConversion: Equatable, Sendable {
     self.rate = rate
     self.rateScale = rateScale
     self.rounding = rounding
+  }
+
+  /// The rate implied by the two amounts, as `rate` is defined here (source units per converted
+  /// unit), so a transfer records exactly what left and what arrived.
+  public static func impliedRate(
+    sourceAmount: CurrencyAmount, convertedAmount: CurrencyAmount, scale: Int
+  ) throws -> ExactDecimal {
+    guard sourceAmount.amount.isPositive, convertedAmount.amount.isPositive else {
+      throw LedgerCommandError.invalidTransfer
+    }
+    return try sourceAmount.amount.divided(
+      by: convertedAmount.amount, scale: scale, rounding: .halfEven)
   }
 
   public var literals: [LedgerSourceLiteral] {

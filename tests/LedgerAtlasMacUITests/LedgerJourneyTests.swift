@@ -832,6 +832,68 @@ import Testing
   #expect(try journey.checksum() == before)
 }
 
+@MainActor
+@Test func nativeEntryIsIdempotentPerSubmissionAndRejectsFormattedDisplayStrings() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try journey.approveAndOpen(
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
+  try journey.performBeginEditing()
+  let account = try #require(journey.snapshot?.accounts.first)
+  let before = try #require(journey.snapshot).transactions.count
+  let now = UTCInstant.currentEpochMilliseconds()
+
+  // Pressing Save twice sends the same submission a moment apart: one transaction.
+  let submission = UUID().uuidString
+  let first = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: now), submissionID: submission)
+  let second = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: now + 3), submissionID: submission)
+  #expect(second == first)
+  #expect(journey.snapshot?.transactions.count == before + 1)
+
+  // A new form is a new submission, even with the same content.
+  _ = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: now + 5), submissionID: UUID().uuidString)
+  #expect(journey.snapshot?.transactions.count == before + 2)
+
+  // Display formatting never becomes canonical money: these are rejected, nothing is written.
+  let checksum = try journey.checksum()
+  for formatted in ["1,234.50", "$4.00", "4.00 USD", "4,00", "\u{0664}", "1e3", "4.00\u{00A0}"] {
+    #expect(throws: (any Error).self) {
+      try journey.createNativeTransaction(
+        amountLiteral: formatted, kind: .expense, accountID: account.id, categoryID: nil,
+        note: nil, createdAt: UTCInstant(epochMilliseconds: now + 7),
+        submissionID: UUID().uuidString)
+    }
+  }
+  #expect(try journey.checksum() == checksum)
+  #expect(journey.snapshot?.transactions.count == before + 2)
+}
+
+@MainActor
+@Test func staleEditsReportAConflictInsteadOfAGenericFailure() {
+  #expect(
+    LedgerJourney.editFailureMessage(
+      for: LedgerStore.Error.revisionConflict, otherwise: "Amount could not be saved.")
+      .contains("changed since you opened it"))
+  #expect(
+    LedgerJourney.editFailureMessage(
+      for: LedgerStore.Error.incompatibleCanonicalStore, otherwise: "Amount could not be saved.")
+      == "Amount could not be saved.")
+}
+
 private func writeSyntheticV19(to url: URL) throws {
   var database: OpaquePointer?
   guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
@@ -965,4 +1027,103 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   let purchases = try LedgerApplication.splitPurchases(from: try #require(journey.snapshot))
   #expect(purchases.count == 1)
   #expect(purchases[0].lines.count == 2)
+}
+
+@MainActor
+@Test func crossCurrencyTransfersDeriveTheRateFromBothAmountsAndRejectBadInput() throws {
+  // MACV2-08: the amounts sent and received are the truth; the rate is derived from them.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+  _ = try LedgerStoreLifecycle.create(at: canonical)
+  let journey = LedgerJourney()
+  try journey.beginEditing(canonical)
+  let macOrigin = try LedgerOrigin.macNative()
+  let usd = try LedgerAccount(
+    id: StableLedgerID.account(origin: macOrigin, localKey: String(repeating: "1", count: 64)),
+    name: "Synthetic USD", currencyUnit: "USD", origin: macOrigin)
+  let inr = try LedgerAccount(
+    id: StableLedgerID.account(origin: macOrigin, localKey: String(repeating: "2", count: 64)),
+    name: "Synthetic INR", currencyUnit: "INR", origin: macOrigin)
+  try journey.createAccount(usd)
+  try journey.createAccount(inr)
+  let now = UTCInstant.currentEpochMilliseconds()
+  func literal(_ revision: LedgerTransactionRevision, _ field: String) -> String? {
+    revision.draft.sourceLiterals.first(where: { $0.field == field })?.literal
+  }
+
+  // No rate typed: it is derived (source units per converted unit) and both amounts are kept.
+  let submission = UUID().uuidString
+  let first = try journey.createNativeTransfer(
+    sourceAccountID: usd.id, destinationAccountID: inr.id, sourceAmountLiteral: "100",
+    destinationAmountLiteral: "8325.50", rateLiteral: nil, feeAmountLiteral: nil,
+    feeAccountID: nil, createdAt: UTCInstant(epochMilliseconds: now), submissionID: submission)
+  #expect(literal(first.transfer, "conversion.sourceAmount") == "100")
+  #expect(literal(first.transfer, "conversion.convertedAmount") == "8325.50")
+  #expect(literal(first.transfer, "conversion.rate") == "0.0120112906")
+  #expect(literal(first.transfer, "conversion.rateScale") == "10")
+  let count = try #require(journey.snapshot).transactions.count
+
+  // Saving the same form twice records one transfer.
+  let again = try journey.createNativeTransfer(
+    sourceAccountID: usd.id, destinationAccountID: inr.id, sourceAmountLiteral: "100",
+    destinationAmountLiteral: "8325.50", rateLiteral: nil, feeAmountLiteral: nil,
+    feeAccountID: nil, createdAt: UTCInstant(epochMilliseconds: now + 4), submissionID: submission)
+  #expect(again.transfer == first.transfer)
+  #expect(journey.snapshot?.transactions.count == count)
+
+  // Zero or negative amounts or rates are refused and nothing is written.
+  let checksum = try journey.checksum()
+  let bad: [(String, String, String?)] = [
+    ("100", "0", nil), ("0", "8325", nil), ("-100", "8325", nil), ("100", "-8325", nil),
+    ("100", "8325", "-0.012"), ("100", "8325", "0"),
+  ]
+  for (sent, received, rate) in bad {
+    #expect(throws: (any Error).self) {
+      try journey.createNativeTransfer(
+        sourceAccountID: usd.id, destinationAccountID: inr.id, sourceAmountLiteral: sent,
+        destinationAmountLiteral: received, rateLiteral: rate, feeAmountLiteral: nil,
+        feeAccountID: nil, createdAt: UTCInstant(epochMilliseconds: now + 8),
+        submissionID: UUID().uuidString)
+    }
+  }
+  #expect(try journey.checksum() == checksum)
+  #expect(journey.snapshot?.transactions.count == count)
+}
+
+@Test func conversionPreviewShowsOneSourceUnitInTheDestinationUnit() {
+  #expect(
+    LedgerJourney.conversionPreview(
+      sourceLiteral: "100", sourceUnit: "USD", destinationLiteral: "8325.50",
+      destinationUnit: "INR") == "1 USD = 83.255 INR")
+  #expect(
+    LedgerJourney.conversionPreview(
+      sourceLiteral: "", sourceUnit: "USD", destinationLiteral: "8325", destinationUnit: "INR")
+      == nil)
+  #expect(
+    LedgerJourney.conversionPreview(
+      sourceLiteral: "0", sourceUnit: "USD", destinationLiteral: "8325", destinationUnit: "INR")
+      == nil)
+  #expect(
+    LedgerJourney.conversionPreview(
+      sourceLiteral: "1,000", sourceUnit: "USD", destinationLiteral: "8325",
+      destinationUnit: "INR") == nil)
+}
+
+@Test func impliedRateIsSourceUnitsPerConvertedUnitAndNeedsPositiveAmounts() throws {
+  let source = try CurrencyAmount(unitCode: "USD", amount: ExactDecimal("100"))
+  let converted = try CurrencyAmount(unitCode: "INR", amount: ExactDecimal("8325.50"))
+  #expect(
+    try LedgerConversion.impliedRate(sourceAmount: source, convertedAmount: converted, scale: 10)
+      .rawLiteral == "0.0120112906")
+  let zero = try CurrencyAmount(unitCode: "INR", amount: ExactDecimal("0"))
+  #expect(throws: (any Error).self) {
+    try LedgerConversion.impliedRate(sourceAmount: source, convertedAmount: zero, scale: 10)
+  }
+  #expect(throws: (any Error).self) {
+    try LedgerConversion(
+      sourceAmount: source, convertedAmount: converted, rate: ExactDecimal("-1"), rateScale: 6,
+      rounding: .halfEven)
+  }
 }

@@ -770,7 +770,7 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .ledger {
       let listing = splitListing
       LedgerView(
-        state: session.state, rows: journey.rows(for: .ledger), isEditing: journey.isEditing,
+        state: session.state, isEditing: journey.isEditing,
         accounts: journey.snapshot?.accounts ?? [], categories: journey.snapshot?.categories ?? [],
         transactions: journey.snapshot?.transactions ?? [],
         splitPurchases: listing?.purchases ?? [],
@@ -792,7 +792,11 @@ public struct LedgerAtlasRootView: View {
             try journey.tombstoneTransaction(
               transactionID: transactionID,
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
-          } catch { journey.recordFailure("Transaction could not be closed.") }
+          } catch {
+            journey.recordFailure(
+              LedgerJourney.editFailureMessage(
+                for: error, otherwise: "Transaction could not be closed."))
+          }
         },
         copy: { transactionID in
           do {
@@ -806,12 +810,13 @@ public struct LedgerAtlasRootView: View {
             amountLiteral: amountLiteral,
             createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
         },
-        createTransaction: { amount, kind, accountID, categoryID, note in
+        createTransaction: { submissionID, amount, kind, accountID, categoryID, note in
           do {
             _ = try journey.createNativeTransaction(
               amountLiteral: amount, kind: kind, accountID: accountID,
               categoryID: categoryID, note: note,
-              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+              submissionID: submissionID)
           } catch {
             journey.recordFailure("Transaction could not be saved.")
           }
@@ -863,13 +868,16 @@ public struct LedgerAtlasRootView: View {
         consumeIntent: { pendingIntent = nil }, isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
-        createTransfer: { sourceID, destinationID, sourceAmount, destinationAmount, rate, feeAmount, feeAccountID in
+        createTransfer: {
+          submissionID, sourceID, destinationID, sourceAmount, destinationAmount, feeAmount,
+          feeAccountID in
           do {
             _ = try journey.createNativeTransfer(
               sourceAccountID: sourceID, destinationAccountID: destinationID,
               sourceAmountLiteral: sourceAmount, destinationAmountLiteral: destinationAmount,
-              rateLiteral: rate, feeAmountLiteral: feeAmount, feeAccountID: feeAccountID,
-              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+              rateLiteral: nil, feeAmountLiteral: feeAmount, feeAccountID: feeAccountID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+              submissionID: submissionID)
           } catch {
             journey.recordFailure("Transfer could not be saved.")
           }
@@ -880,6 +888,7 @@ public struct LedgerAtlasRootView: View {
       AccountsView(
         state: session.state, rows: journey.rows(for: .accounts),
         accounts: journey.snapshot?.accounts ?? [], groups: journey.snapshot?.accountGroups ?? [],
+        transactions: journey.snapshot?.transactions ?? [],
         isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         saveAccount: { account in

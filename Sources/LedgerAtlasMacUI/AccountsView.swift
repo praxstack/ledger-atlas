@@ -10,6 +10,7 @@ struct AccountsView: View {
   let rows: [LedgerJourney.SurfaceRow]
   let accounts: [LedgerAccount]
   let groups: [LedgerAccountGroup]
+  let transactions: [LedgerTransactionSnapshot]
   let isEditing: Bool
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -21,36 +22,54 @@ struct AccountsView: View {
   @State private var showingAccountForm = false
   @State private var showingGroupForm = false
   @State private var editingAccount: LedgerAccount?
+  @State private var renamingGroup: LedgerAccountGroup?
 
   var body: some View {
+    let sheet = try? LedgerAccountBalanceSheet(accounts: accounts, transactions: transactions)
+    let orderedGroups = Self.sortedGroups(groups)
     VStack(alignment: .leading, spacing: 12) {
       if !accounts.isEmpty {
+        if let sheet {
+          AccountTotalsSummary(sheet: sheet)
+            .padding(.horizontal, 16)
+        }
         List {
-          ForEach(groups.sorted { $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder }, id: \.id) { group in
+          ForEach(Array(orderedGroups.enumerated()), id: \.element.id) { index, group in
+            let members = Self.sortedAccounts(accounts.filter { $0.groupID == group.id })
             Section {
-              ForEach(Self.sortedAccounts(accounts.filter { $0.groupID == group.id }), id: \.id) { account in
-                AccountRow(account: account, isEditing: isEditing, save: saveAccount) {
-                  editingAccount = $0
-                }
+              ForEach(Array(members.enumerated()), id: \.element.id) { position, account in
+                accountRow(account, balance: sheet?.balances[account.id], in: members, at: position)
               }
-              if !accounts.contains(where: { $0.groupID == group.id }) {
+              if members.isEmpty {
                 Text("No accounts in this group").foregroundStyle(.secondary)
               }
             } header: {
-              AccountGroupHeader(group: group, isEditing: isEditing, save: saveGroup)
+              AccountGroupHeader(
+                group: group, subtotal: sheet?.groupTotals[group.id] ?? [:],
+                isEditing: isEditing, save: saveGroup,
+                rename: { renamingGroup = group },
+                moveUp: index > 0 ? { move(group, in: orderedGroups, by: -1) } : nil,
+                moveDown: index < orderedGroups.count - 1
+                  ? { move(group, in: orderedGroups, by: 1) } : nil)
             }
           }
-          Section("Ungrouped") {
+          Section {
             let ungrouped = Self.sortedAccounts(accounts.filter { $0.groupID == nil })
             if ungrouped.isEmpty {
               Text("No ungrouped accounts").foregroundStyle(.secondary)
             } else {
-              ForEach(ungrouped, id: \.id) { account in
-                AccountRow(account: account, isEditing: isEditing, save: saveAccount) {
-                  editingAccount = $0
-                }
+              ForEach(Array(ungrouped.enumerated()), id: \.element.id) { position, account in
+                accountRow(account, balance: sheet?.balances[account.id], in: ungrouped, at: position)
               }
             }
+          } header: {
+            HStack {
+              Text("Ungrouped")
+              Spacer()
+              Text(AccountAmountText.subtotal(sheet?.groupTotals[nil] ?? [:]))
+                .monospacedDigit()
+            }
+            .accessibilityElement(children: .combine)
           }
         }
       } else if !rows.isEmpty {
@@ -100,6 +119,15 @@ struct AccountsView: View {
       })
     }
     .sheet(isPresented: Binding(
+      get: { renamingGroup != nil }, set: { if !$0 { renamingGroup = nil } })) {
+      if let renamingGroup {
+        AccountGroupForm(group: renamingGroup, onSave: { revised in
+          saveGroup(revised)
+          self.renamingGroup = nil
+        })
+      }
+    }
+    .sheet(isPresented: Binding(
       get: { editingAccount != nil }, set: { if !$0 { editingAccount = nil } })) {
       if let editingAccount {
         AccountEditForm(account: editingAccount, groups: groups) { revised in
@@ -127,22 +155,135 @@ struct AccountsView: View {
     }
   }
 
-  private static func revise(_ group: LedgerAccountGroup, lifecycle: LedgerLifecycleState) -> LedgerAccountGroup? {
-    try? LedgerAccountGroup(id: group.id, name: group.name, displayOrder: group.displayOrder, lifecycle: lifecycle)
+  private func accountRow(
+    _ account: LedgerAccount, balance: CurrencyAmount?, in members: [LedgerAccount], at position: Int
+  ) -> some View {
+    AccountRow(
+      account: account, balance: balance, isEditing: isEditing, save: saveAccount,
+      edit: { editingAccount = $0 },
+      moveUp: position > 0 ? { move(account, in: members, by: -1) } : nil,
+      moveDown: position < members.count - 1 ? { move(account, in: members, by: 1) } : nil)
   }
 
-  private static func sortedAccounts(_ accounts: [LedgerAccount]) -> [LedgerAccount] {
+  /// Moves one account within its section and saves every account whose order changed.
+  private func move(_ account: LedgerAccount, in members: [LedgerAccount], by offset: Int) {
+    for revised in Self.reordered(members, moving: account.id, by: offset) {
+      saveAccount(revised)
+    }
+  }
+
+  private func move(_ group: LedgerAccountGroup, in ordered: [LedgerAccountGroup], by offset: Int) {
+    for revised in Self.reordered(ordered, moving: group.id, by: offset) {
+      saveGroup(revised)
+    }
+  }
+
+  /// Swaps one account with its neighbour, then numbers the section 0, 1, 2… so equal display
+  /// orders (the default) still move. Returns only accounts whose order changed.
+  nonisolated static func reordered(_ members: [LedgerAccount], moving id: String, by offset: Int)
+    -> [LedgerAccount]
+  {
+    var ids = members.map(\.id)
+    guard let from = ids.firstIndex(of: id), ids.indices.contains(from + offset) else { return [] }
+    ids.swapAt(from, from + offset)
+    return members.compactMap { account in
+      guard let order = ids.firstIndex(of: account.id), order != account.displayOrder else {
+        return nil
+      }
+      return try? LedgerAccount(
+        id: account.id, name: account.name, currencyUnit: account.currencyUnit,
+        origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+        displayOrder: order, hidden: account.hidden, includeInTotals: account.includeInTotals,
+        variant: account.variant)
+    }
+  }
+
+  nonisolated static func reordered(_ groups: [LedgerAccountGroup], moving id: String, by offset: Int)
+    -> [LedgerAccountGroup]
+  {
+    var ids = groups.map(\.id)
+    guard let from = ids.firstIndex(of: id), ids.indices.contains(from + offset) else { return [] }
+    ids.swapAt(from, from + offset)
+    return groups.compactMap { group in
+      guard let order = ids.firstIndex(of: group.id), order != group.displayOrder else {
+        return nil
+      }
+      return try? LedgerAccountGroup(
+        id: group.id, name: group.name, displayOrder: order, lifecycle: group.lifecycle)
+    }
+  }
+
+  nonisolated static func sortedGroups(_ groups: [LedgerAccountGroup]) -> [LedgerAccountGroup] {
+    groups.sorted {
+      $0.displayOrder == $1.displayOrder ? ($0.name, $0.id) < ($1.name, $1.id) : $0.displayOrder < $1.displayOrder
+    }
+  }
+
+  nonisolated static func sortedAccounts(_ accounts: [LedgerAccount]) -> [LedgerAccount] {
     accounts.sorted {
-      $0.displayOrder == $1.displayOrder ? $0.name < $1.name : $0.displayOrder < $1.displayOrder
+      $0.displayOrder == $1.displayOrder ? ($0.name, $0.id) < ($1.name, $1.id) : $0.displayOrder < $1.displayOrder
+    }
+  }
+}
+
+/// Plain-text amounts for the accounts screen. Exact decimals are shown as stored, with the
+/// currency code, so nothing is rounded for display.
+enum AccountAmountText {
+  static func amount(_ value: CurrencyAmount) -> String {
+    "\(value.unitCode) \(value.amount.description)"
+  }
+
+  static func subtotal(_ byUnit: [String: ExactDecimal]) -> String {
+    byUnit.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value.description)" }
+      .joined(separator: " · ")
+  }
+}
+
+struct AccountTotalsSummary: View {
+  let sheet: LedgerAccountBalanceSheet
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(sheet.summaries, id: \.unitCode) { summary in
+        HStack(spacing: 16) {
+          Text(summary.unitCode).font(.headline)
+          labeled("Assets", summary.assets)
+          labeled("Liabilities", summary.liabilities)
+          labeled("Net", summary.net)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+          "\(summary.unitCode): assets \(summary.assets.description), liabilities \(summary.liabilities.description), net \(summary.net.description), \(summary.accountCount) accounts counted")
+      }
+      if sheet.foreignCurrencyEffectCount > 0 {
+        Label(
+          "\(sheet.foreignCurrencyEffectCount) entries use a currency different from their account and are not in these balances.",
+          systemImage: "exclamationmark.triangle")
+          .font(.caption)
+          .foregroundStyle(.orange)
+      }
+      Text("Totals count open, visible accounts that are included in totals.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  private func labeled(_ title: String, _ value: ExactDecimal) -> some View {
+    VStack(alignment: .leading, spacing: 1) {
+      Text(title).font(.caption).foregroundStyle(.secondary)
+      Text(value.description).monospacedDigit()
     }
   }
 }
 
 struct AccountRow: View {
   let account: LedgerAccount
+  var balance: CurrencyAmount? = nil
   let isEditing: Bool
   let save: (LedgerAccount) -> Void
   let edit: (LedgerAccount) -> Void
+  var moveUp: (() -> Void)? = nil
+  var moveDown: (() -> Void)? = nil
 
   var body: some View {
     HStack {
@@ -156,8 +297,15 @@ struct AccountRow: View {
       if account.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
       if !account.includeInTotals { Label("Excluded from totals", systemImage: "minus.circle").font(.caption) }
       if account.lifecycle == .tombstoned { Label("Closed", systemImage: "archivebox").font(.caption) }
+      if let balance {
+        Text(AccountAmountText.amount(balance))
+          .monospacedDigit()
+          .foregroundStyle(account.countsInTotals ? HierarchicalShapeStyle.primary : HierarchicalShapeStyle.secondary)
+      }
       Menu("Actions") {
         Button("Edit account") { edit(account) }
+        if let moveUp { Button("Move up", action: moveUp) }
+        if let moveDown { Button("Move down", action: moveDown) }
         Button(account.hidden ? "Show account" : "Hide account") {
           update(hidden: !account.hidden)
         }
@@ -172,7 +320,15 @@ struct AccountRow: View {
       .accessibilityLabel("Actions for \(account.name)")
     }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(account.name), \(account.currencyUnit), \(account.lifecycle.rawValue)")
+    .accessibilityLabel(accessibilityText)
+  }
+
+  private var accessibilityText: String {
+    var parts = [account.name, account.variant.rawValue, account.lifecycle.rawValue]
+    if let balance { parts.insert("balance \(AccountAmountText.amount(balance))", at: 1) }
+    if account.hidden { parts.append("hidden") }
+    if !account.includeInTotals { parts.append("excluded from totals") }
+    return parts.joined(separator: ", ")
   }
 
   private func update(
@@ -251,8 +407,12 @@ struct AccountEditForm: View {
 
 struct AccountGroupHeader: View {
   let group: LedgerAccountGroup
+  var subtotal: [String: ExactDecimal] = [:]
   let isEditing: Bool
   let save: (LedgerAccountGroup) -> Void
+  var rename: (() -> Void)? = nil
+  var moveUp: (() -> Void)? = nil
+  var moveDown: (() -> Void)? = nil
 
   var body: some View {
     HStack {
@@ -261,7 +421,27 @@ struct AccountGroupHeader: View {
         Text("Closed").font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
+      if !subtotal.isEmpty {
+        Text(AccountAmountText.subtotal(subtotal))
+          .monospacedDigit()
+          .accessibilityLabel("Group total \(AccountAmountText.subtotal(subtotal))")
+      }
       if isEditing {
+        if let rename {
+          Button("Rename", action: rename)
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Rename account group \(group.name)")
+        }
+        if let moveUp {
+          Button(action: moveUp) { Image(systemName: "chevron.up") }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Move account group \(group.name) up")
+        }
+        if let moveDown {
+          Button(action: moveDown) { Image(systemName: "chevron.down") }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Move account group \(group.name) down")
+        }
         Button(group.lifecycle == .active ? "Close group" : "Restore group") {
           guard let revised = try? LedgerAccountGroup(
             id: group.id, name: group.name, displayOrder: group.displayOrder,
@@ -334,6 +514,8 @@ struct AccountForm: View {
 }
 
 struct AccountGroupForm: View {
+  /// Nil creates a new group; a group renames that group and keeps its order and state.
+  var group: LedgerAccountGroup? = nil
   let onSave: (LedgerAccountGroup) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var name = ""
@@ -344,18 +526,29 @@ struct AccountGroupForm: View {
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()
-        Button("Create") { create() }
+        Button(group == nil ? "Create" : "Save") { create() }
           .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
     }
     .padding(20)
     .frame(width: 360)
+    .onAppear { if let group, name.isEmpty { name = group.name } }
   }
 
   private func create() {
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let id = Self.generatedID(), let group = try? LedgerAccountGroup(id: id, name: trimmedName) else { return }
-    onSave(group)
+    let saved: LedgerAccountGroup?
+    if let group {
+      saved = try? LedgerAccountGroup(
+        id: group.id, name: trimmedName, displayOrder: group.displayOrder,
+        lifecycle: group.lifecycle)
+    } else if let id = Self.generatedID() {
+      saved = try? LedgerAccountGroup(id: id, name: trimmedName)
+    } else {
+      saved = nil
+    }
+    guard let saved else { return }
+    onSave(saved)
     dismiss()
   }
 

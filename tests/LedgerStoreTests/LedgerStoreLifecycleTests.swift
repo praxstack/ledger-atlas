@@ -14,7 +14,7 @@ import Testing
     #expect(created.disposition == .created)
     #expect(created.recoveryImageURL == nil)
     #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
-    #expect(created.store.schemaIdentity.version == 11)
+    #expect(created.store.schemaIdentity.version == 12)
     #expect(try created.store.readSnapshot().accounts.isEmpty)
     #expect(try fileMode(url) == mode_t(S_IRUSR | S_IWUSR))
     let bytes = try Data(contentsOf: url)

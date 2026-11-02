@@ -192,8 +192,16 @@ public final class LedgerJourney {
       try correctAmount(
         transactionID: transactionID, amountLiteral: amountLiteral, createdAt: createdAt)
     } catch {
-      failClosed(message: "Amount could not be saved.")
+      failClosed(message: Self.editFailureMessage(for: error, otherwise: "Amount could not be saved."))
     }
+  }
+
+  /// A stale edit is not a failure of the ledger: say what happened and show the latest version.
+  package static func editFailureMessage(for error: Error, otherwise message: String) -> String {
+    if case LedgerStore.Error.revisionConflict = error {
+      return "This transaction changed since you opened it. The latest version is shown; edit it again."
+    }
+    return message
   }
 
   public func checksum() throws -> String {
@@ -271,9 +279,14 @@ public final class LedgerJourney {
     guard let application,
       let current = snapshot?.transactions.first(where: { $0.id == transactionID })?.currentRevision
     else { throw LedgerApplication.Error.invalidCommand }
-    _ = try application.tombstoneTransaction(
-      transactionID: transactionID, expectedCurrentRevisionID: current.id, createdAt: createdAt)
-    snapshot = try application.snapshot()
+    do {
+      _ = try application.tombstoneTransaction(
+        transactionID: transactionID, expectedCurrentRevisionID: current.id, createdAt: createdAt)
+      snapshot = try application.snapshot()
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
   }
 
   public func copyTransaction(transactionID: String, createdAt: UTCInstant) throws
@@ -331,7 +344,7 @@ public final class LedgerJourney {
 
   public func createNativeTransaction(
     amountLiteral: String, kind: LedgerTransactionKind, accountID: String,
-    categoryID: String?, note: String?, createdAt: UTCInstant
+    categoryID: String?, note: String?, createdAt: UTCInstant, submissionID: String? = nil
   ) throws -> LedgerTransactionRevision {
     guard application != nil, let snapshot,
       let account = snapshot.accounts.first(where: { $0.id == accountID }),
@@ -341,10 +354,12 @@ public final class LedgerJourney {
     let amount = try CurrencyAmount(
       unitCode: account.currencyUnit, amount: ExactDecimal(amountLiteral))
     let when = try Self.nativeTemporal(for: createdAt)
-    let key = SHA256.hash(
-      data: Data(
-        "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")".utf8)
-    ).map { String(format: "%02x", $0) }.joined()
+    // A form submission keys on its own ID, so pressing Save twice records one transaction.
+    let keyMaterial =
+      submissionID.map { "mac-native-submission:\($0)" }
+      ?? "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")"
+    let key = SHA256.hash(data: Data(keyMaterial.utf8)).map { String(format: "%02x", $0) }
+      .joined()
     let draft = try LedgerTransactionDraft(
       effects: [
         try LedgerTransactionEffect(
@@ -357,7 +372,8 @@ public final class LedgerJourney {
   public func createNativeTransfer(
     sourceAccountID: String, destinationAccountID: String,
     sourceAmountLiteral: String, destinationAmountLiteral: String?, rateLiteral: String?,
-    rateScale: Int = 6, feeAmountLiteral: String?, feeAccountID: String?, createdAt: UTCInstant
+    rateScale: Int = 10, feeAmountLiteral: String?, feeAccountID: String?, createdAt: UTCInstant,
+    submissionID: String? = nil
   ) throws -> (transfer: LedgerTransactionRevision, fee: LedgerTransactionRevision?) {
     guard application != nil, let snapshot,
       sourceAccountID != destinationAccountID,
@@ -378,14 +394,21 @@ public final class LedgerJourney {
       conversion = nil
     } else {
       guard let destinationLiteral = destinationAmountLiteral,
-        !destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-        let rateLiteral, !rateLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else { throw LedgerApplication.Error.invalidCommand }
       destinationAmount = try CurrencyAmount(
         unitCode: destination.currencyUnit, amount: ExactDecimal(destinationLiteral))
+      // The two amounts are the truth (what left, what arrived); the rate is derived from them
+      // unless a caller supplies one explicitly.
+      let trimmedRate = rateLiteral?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let rate =
+        trimmedRate.isEmpty
+        ? try LedgerConversion.impliedRate(
+          sourceAmount: sourceAmount, convertedAmount: destinationAmount, scale: rateScale)
+        : try ExactDecimal(trimmedRate)
       conversion = try LedgerConversion(
         sourceAmount: sourceAmount, convertedAmount: destinationAmount,
-        rate: ExactDecimal(rateLiteral), rateScale: rateScale, rounding: .halfEven)
+        rate: rate, rateScale: rateScale, rounding: .halfEven)
     }
     let fee: CurrencyAmount?
     if let feeLiteral = feeAmountLiteral,
@@ -403,10 +426,11 @@ public final class LedgerJourney {
       }
       fee = nil
     }
-    let key = SHA256.hash(
-      data: Data(
-        "mac-native-transfer:\(createdAt.epochMilliseconds):\(sourceAccountID):\(destinationAccountID):\(sourceAmountLiteral):\(destinationAmountLiteral ?? ""):\(rateLiteral ?? ""):\(feeAmountLiteral ?? ""):\(feeAccountID ?? "")".utf8)
-    ).map { String(format: "%02x", $0) }.joined()
+    let keyMaterial =
+      submissionID.map { "mac-native-transfer-submission:\($0)" }
+      ?? "mac-native-transfer:\(createdAt.epochMilliseconds):\(sourceAccountID):\(destinationAccountID):\(sourceAmountLiteral):\(destinationAmountLiteral ?? ""):\(rateLiteral ?? ""):\(feeAmountLiteral ?? ""):\(feeAccountID ?? "")"
+    let key = SHA256.hash(data: Data(keyMaterial.utf8)).map { String(format: "%02x", $0) }
+      .joined()
     return try createTransfer(
       idempotencyKey: key, sourceAccountID: sourceAccountID,
       destinationAccountID: destinationAccountID, sourceAmount: sourceAmount,
@@ -414,6 +438,20 @@ public final class LedgerJourney {
       feeAccountID: fee == nil ? nil : feeAccountID,
       occurredAt: try Self.nativeTemporal(for: createdAt), origin: try LedgerOrigin.macNative(),
       createdAt: createdAt)
+  }
+
+  /// "1 USD = 83.25 INR" for the transfer form, from the two typed amounts; nil until both parse.
+  nonisolated package static func conversionPreview(
+    sourceLiteral: String, sourceUnit: String, destinationLiteral: String, destinationUnit: String
+  ) -> String? {
+    guard
+      let source = try? ExactDecimal(sourceLiteral.trimmingCharacters(in: .whitespacesAndNewlines)),
+      let destination = try? ExactDecimal(
+        destinationLiteral.trimmingCharacters(in: .whitespacesAndNewlines)),
+      source.isPositive, destination.isPositive,
+      let perUnit = try? destination.divided(by: source, scale: 6, rounding: .halfEven)
+    else { return nil }
+    return "1 \(sourceUnit) = \(perUnit.rawLiteral) \(destinationUnit)"
   }
 
   package static func localDate(for instant: UTCInstant, in timeZone: TimeZone) throws

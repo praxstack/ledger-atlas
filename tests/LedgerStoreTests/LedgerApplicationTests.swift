@@ -964,7 +964,7 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
   #expect(
     sqlite3_exec(
       database,
-      "PRAGMA application_id=\(CanonicalLedgerSchema.applicationID); INSERT INTO ledger_meta VALUES ('schema_version','11'), ('ledger_identity','ledger-atlas-canonical'), ('schema_fingerprint','\(CanonicalLedgerSchema.fingerprint)')",
+      "PRAGMA application_id=\(CanonicalLedgerSchema.applicationID); INSERT INTO ledger_meta VALUES ('schema_version','\(CanonicalLedgerSchema.version)'), ('ledger_identity','ledger-atlas-canonical'), ('schema_fingerprint','\(CanonicalLedgerSchema.fingerprint)')",
       nil, nil, nil) == SQLITE_OK)
   let store = try LedgerStore(takingOwnershipOfValidatedCanonicalDatabase: database)
   let destination = LedgerApplication(store: store)
