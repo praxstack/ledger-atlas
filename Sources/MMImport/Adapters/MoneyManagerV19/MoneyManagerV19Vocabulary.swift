@@ -17,6 +17,28 @@ extension MoneyManagerV19Semantics {
     }
   }
 
+  /// Type 7 is a balance increase only when it carries the built-in balance-edit category.
+  /// Any other type-7 row keeps its unknown-type preservation.
+  static func reason(forType type: String, categoryUID: String?) -> MoneyManagerV19BlockReason? {
+    if type == balanceIncreaseType, categoryUID == balanceEditCategoryUID { return nil }
+    return reason(forType: type)
+  }
+
+  /// A balance edit has no category row; every other category must resolve.
+  static func categoryResolves(_ categoryUID: String, known: Set<String>) -> Bool {
+    categoryUID == balanceEditCategoryUID || known.contains(categoryUID)
+  }
+
+  /// The canonical kind for an admitted source type literal.
+  static func eventKind(forType type: String) -> MoneyManagerV19EventKind? {
+    switch type {
+    case "0": .income
+    case "1": .expense
+    case balanceIncreaseType: .adjustment
+    default: nil
+    }
+  }
+
   static func reconciliationReason(_ reason: MoneyManagerV19BlockReason) -> ReconciliationReasonCode
   {
     switch reason {

@@ -138,7 +138,7 @@ public enum MoneyManagerV19Adapter {
           eventID: StableCanonicalID.event(sourceRecordID: mapped.sourceRecordID, effectOrdinal: 0),
           accountID: StableCanonicalID.account(
             profileID: input.manifest.profileID, sourceAccountID: account.value),
-          kind: mapped.kind == .income ? .income : .expense,
+          kind: mapped.kind.canonical,
           amount: CurrencyAmount(
             unitCode: mapped.currency.value, amount: ExactDecimal(amount.value)),
           occurredAt: temporal, sourceRecordID: mapped.sourceRecordID,
@@ -586,7 +586,10 @@ public enum MoneyManagerV19Adapter {
     else {
       return preserve(.missingRequiredField)
     }
-    if let reason = MoneyManagerV19Vocabulary.reason(forType: type) {
+    let categoryLiteral = sourceField(
+      record, aliases: MoneyManagerV19Vocabulary.categoryAliases
+    ).flatMap(mappingLiteral)
+    if let reason = MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryLiteral) {
       return preserve(reason)
     }
     guard let account = sourceField(record, aliases: MoneyManagerV19Vocabulary.assetAliases),
@@ -606,11 +609,16 @@ public enum MoneyManagerV19Adapter {
       (try? CurrencyAmount(unitCode: mappingLiteral(currency) ?? currency.value, amount: decimal))
         != nil
     else { return preserve(.missingRequiredField) }
-    guard categoryUIDs.contains(categoryKey) else { return preserve(.unresolvedCategory) }
+    guard MoneyManagerV19Vocabulary.categoryResolves(categoryKey, known: categoryUIDs) else {
+      return preserve(.unresolvedCategory)
+    }
+    guard let kind = MoneyManagerV19Vocabulary.eventKind(forType: type) else {
+      return preserve(.unknownTransactionType)
+    }
     return .mapped(
       .init(
         sourceRecordID: record.sourceRecordID,
-        kind: type == "0" ? .income : .expense, account: account, amount: amount,
+        kind: kind, account: account, amount: amount,
         currency: currency,
         timestamp: .init(
           wdate: wdate, zdate: zdate, localDay: day, localEpochMilliseconds: localEpoch),
@@ -738,7 +746,17 @@ public struct MoneyManagerV19ObservedEntity: Equatable, Sendable {
   public let sourceRecordID: String
   public let fields: [MoneyManagerV19SourceField]
 }
-public enum MoneyManagerV19EventKind: String, Equatable, Sendable { case income, expense }
+public enum MoneyManagerV19EventKind: String, Equatable, Sendable {
+  case income, expense, adjustment
+
+  var canonical: CanonicalEventKind {
+    switch self {
+    case .income: .income
+    case .expense: .expense
+    case .adjustment: .adjustment
+    }
+  }
+}
 public struct MoneyManagerV19ObservedTimestamp: Equatable, Sendable {
   public let wdate, zdate: MoneyManagerV19SourceField
   public let localDay: SourceLocalDate

@@ -1024,8 +1024,11 @@ public struct SQLiteCanonicalCommitter: Sendable {
     for event in request.events {
       let sourceFields = fields(for: event.sourceRecordID)
       guard let categoryUID = nonEmpty(
-        literal(sourceFields, aliases: MoneyManagerV19Vocabulary.categoryAliases)),
-        categoryRecordIDsByUID[categoryUID] != nil
+        literal(sourceFields, aliases: MoneyManagerV19Vocabulary.categoryAliases))
+      else { throw CanonicalCommitError.unsafeMapping }
+      // A balance edit has no category row: the event stays uncategorized.
+      if categoryUID == MoneyManagerV19Vocabulary.balanceEditCategoryUID { continue }
+      guard categoryRecordIDsByUID[categoryUID] != nil
       else { throw CanonicalCommitError.unsafeMapping }
       let kind = event.kind == .income ? LedgerTransactionKind.income.rawValue
         : LedgerTransactionKind.expense.rawValue
@@ -1079,8 +1082,9 @@ public struct SQLiteCanonicalCommitter: Sendable {
 
     var eventCategoryIDs: [String: String] = [:]
     for event in request.events {
-      guard let categoryUID = categoryUIDByEventID[event.eventID],
-        let row = categoryRows.first(where: { $0.uid == categoryUID })
+      // The first pass throws for every event except balance edits, which stay uncategorized.
+      guard let categoryUID = categoryUIDByEventID[event.eventID] else { continue }
+      guard let row = categoryRows.first(where: { $0.uid == categoryUID })
       else { throw CanonicalCommitError.unsafeMapping }
       let compatible = (row.kind == .income && event.kind == .income)
         || (row.kind == .expense && event.kind == .expense)

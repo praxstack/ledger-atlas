@@ -16,11 +16,18 @@ enum MoneyManagerV19ObservedGraph {
       graph.fields.values.allSatisfy({ field in
         guard let record = graph.records[field.recordID] else { return false }
         guard recognizedTableIDs.contains(record.tableID) else { return true }
-        if field.storageClass == CanonicalFieldStorageClass.text.rawValue {
+        // Real backups carry NULLs and REAL copies (e.g. AMOUNT_ACCOUNT) on every row. They are
+        // preserved byte-exact and never read as mapping literals, so they only need a sound shape.
+        switch field.storageClass {
+        case CanonicalFieldStorageClass.text.rawValue:
           return String(data: field.payload, encoding: .utf8) != nil
+        case CanonicalFieldStorageClass.integer.rawValue, CanonicalFieldStorageClass.real.rawValue:
+          return field.payload.count == 8
+        case CanonicalFieldStorageClass.null.rawValue:
+          return field.payload.isEmpty
+        default:
+          return false
         }
-        return field.storageClass == CanonicalFieldStorageClass.integer.rawValue
-          && field.payload.count == 8
       })
     else { throw CanonicalCommitError.unsafeMapping }
 
@@ -115,7 +122,9 @@ enum MoneyManagerV19ObservedGraph {
         let type = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.doTypeAliases)),
         let wdate = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.wdateAliases)),
         let zdate = mappingLiteral(aliased(values, MoneyManagerV19Vocabulary.zdateAliases)),
-        accountUIDs.contains(accountUID), categoryUIDs.contains(categoryUID),
+        accountUIDs.contains(accountUID),
+        MoneyManagerV19Vocabulary.categoryResolves(categoryUID, known: categoryUIDs),
+        MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryUID) == nil,
         currencies[currencyUID] != nil
       else { throw CanonicalCommitError.unsafeMapping }
       for event in effects {
@@ -124,7 +133,7 @@ enum MoneyManagerV19ObservedGraph {
           event.accountID
             == (try? StableCanonicalID.account(
               profileID: request.expectedManifest.profileID, sourceAccountID: accountUID)),
-          (type == "0" && event.kind == .income) || (type == "1" && event.kind == .expense),
+          MoneyManagerV19Vocabulary.eventKind(forType: type)?.canonical == event.kind,
           event.occurredAt.precision == .millisecond,
           observedLocalDateTime(zdate) == event.occurredAt.localDateTime,
           observedDay(wdate) == event.occurredAt.localDay
