@@ -1365,6 +1365,9 @@ public final class LedgerStore {
       case "adjustment":
         kind = .adjustment
         direction = .increase
+      case "adjustment_debit":
+        kind = .adjustment
+        direction = .decrease
       default:
         throw Error.incompatibleCanonicalStore
       }

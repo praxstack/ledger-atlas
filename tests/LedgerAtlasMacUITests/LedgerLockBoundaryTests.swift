@@ -25,7 +25,7 @@ import Vision
   var storage: [String: Data] = [:]
   let reader: LedgerAppLock.Reader = { storage[$0] }
   let writer: LedgerAppLock.Writer = { storage[$0] = $1 }
-  let original = LedgerAppLock(reader: reader, writer: writer)
+  let original = LedgerAppLock(reader: reader, writer: writer, kdfIterations: 1_000)
   try original.setPasscode("synthetic-correct")
   original.lock()
   let summary = ImportReviewSummary(workspaceReviewJSON: Data("""
@@ -41,7 +41,7 @@ import Vision
     // must shield Settings and the injected content when a root is mounted.
     for restarted in [false, true] {
       let lock = restarted
-        ? LedgerAppLock(reader: reader, writer: writer, authenticate: { false }) : original
+        ? LedgerAppLock(reader: reader, writer: writer, authenticate: { false }, kdfIterations: 1_000) : original
       lock.lock()
       let view = LedgerAtlasRootView(
         initialSelection: destination, importReviewSummary: summary,
