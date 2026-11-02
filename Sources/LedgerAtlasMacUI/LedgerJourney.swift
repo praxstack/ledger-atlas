@@ -509,7 +509,9 @@ public final class LedgerJourney {
     }
   }
 
-  public func exportPortablePackage(to destination: URL) throws {
+  /// Returns true when the package carries imported Money Manager history.
+  @discardableResult
+  public func exportPortablePackage(to destination: URL) throws -> Bool {
     guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
       throw LedgerApplication.Error.invalidCommand
     }
@@ -521,6 +523,14 @@ public final class LedgerJourney {
     } catch {
       throw LedgerApplication.Error.invalidCommand
     }
+    let object = try? JSONSerialization.jsonObject(with: exported.payload) as? [String: Any]
+    return object?["importGraph"].map { !($0 is NSNull) } ?? false
+  }
+
+  package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
+    guard includesImportHistory else { return "Portable package exported." }
+    return
+      "Portable package exported with its imported Money Manager history. It restores only on a Mac that has this ledger's receipt key (iCloud Keychain carries it) and on this version of Ledger Atlas. Keep the original Money Manager backup (.mmbak) and an XLSX export as fallbacks."
   }
 
   // MARK: XLSX exchange (LA-040)
@@ -663,7 +673,30 @@ public final class LedgerJourney {
       adoptValidatedLedger(created.store, snapshot: snapshot, at: destination)
     } catch {
       _ = LedgerStoreLifecycle.discardCreated(created, at: destination)
-      throw LedgerApplication.Error.invalidCommand
+      switch error as? LedgerApplication.Error {
+      case .packageReceiptKeyMissing, .packageSchemaMismatch, .packageTampered:
+        throw error
+      default:
+        throw LedgerApplication.Error.invalidCommand
+      }
+    }
+  }
+
+  /// What to tell the person when a portable package could not be restored. Each imported
+  /// history failure points at the SQLite backup, which restores without these checks.
+  package static func packageRestoreFailureMessage(for error: any Swift.Error) -> String {
+    switch error as? LedgerApplication.Error {
+    case .packageReceiptKeyMissing:
+      return
+        "This package holds imported Money Manager history signed with a key this Mac doesn't have. Turn on iCloud Keychain on both Macs and try again, or restore the SQLite backup instead. Nothing was changed."
+    case .packageSchemaMismatch:
+      return
+        "This package's imported history was written by a different version of Ledger Atlas. Update Ledger Atlas on both Macs, or restore the SQLite backup instead. Nothing was changed."
+    case .packageTampered:
+      return
+        "This package's imported history doesn't match the ledger it was exported from, so it may be damaged or edited. Restore the SQLite backup instead. Nothing was changed."
+    default:
+      return "The portable package could not be imported without changing the source."
     }
   }
 
@@ -734,6 +767,10 @@ public final class LedgerJourney {
     if case LedgerMergeError.conflictingHistory(let revisions) = error {
       return
         "The backup and the open ledger edited \(revisions) of the same transactions in different ways, so nothing was merged. Restore the backup as a separate ledger instead."
+    }
+    if case LedgerMergeError.importedHistory = error {
+      return
+        "One of these ledgers holds imported Money Manager history, which can be restored but not merged. Restore the backup as a separate ledger instead. Nothing was changed."
     }
     return
       "This backup can't be merged. Merging needs ledgers made in Ledger Atlas; imported ledgers can be restored as a separate ledger. Nothing was changed."
