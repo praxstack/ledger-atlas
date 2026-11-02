@@ -2,6 +2,62 @@ import AppKit
 import CoreGraphics
 import Foundation
 import LedgerCore
+import LedgerStore
+
+/// A statement with one section per currency. Amounts in different currencies are never
+/// added together, because the ledger has no exchange rate to do it honestly.
+public struct LedgerStatement: Equatable, Sendable {
+  public let reports: [LedgerReport]
+
+  public init(reports: [LedgerReport]) {
+    self.reports = reports
+  }
+
+  /// One report for every currency that counts toward totals, in currency-code order.
+  public init(snapshot: LedgerStore.LedgerReadSnapshot) throws {
+    self.reports = try Self.unitCodes(in: snapshot).map {
+      try LedgerApplication.report(from: snapshot, unitCode: $0)
+    }
+  }
+
+  /// Currencies of open, visible accounts that count toward totals, plus any other currency
+  /// their transactions use. Falls back to a single currency so an empty ledger still shows
+  /// its record counts.
+  public static func unitCodes(in snapshot: LedgerStore.LedgerReadSnapshot) -> [String] {
+    let counted = snapshot.accounts.filter {
+      $0.lifecycle == .active && !$0.hidden && $0.includeInTotals
+    }
+    let countedIDs = Set(counted.map(\.id))
+    var units = Set(counted.map(\.currencyUnit))
+    for transaction in snapshot.transactions where transaction.currentRevision.lifecycle == .active {
+      for effect in transaction.currentRevision.draft.effects where countedIDs.contains(effect.accountID) {
+        units.insert(effect.amount.unitCode)
+      }
+    }
+    if units.isEmpty {
+      return [snapshot.accounts.first?.currencyUnit ?? "USD"]
+    }
+    return units.sorted()
+  }
+
+  /// Plain text for screen readers, the Statistics screen and the PDF.
+  public var text: String {
+    guard let first = reports.first else { return "" }
+    guard reports.count > 1 else { return first.accessibleTable }
+    let codes = reports.map(\.unitCode).joined(separator: ", ")
+    var lines = [
+      first.title,
+      "Shown separately by currency: \(codes). Amounts in different currencies are never added together.",
+    ]
+    for report in reports {
+      lines += ["", "\(report.unitCode)"] + report.currencyLines
+    }
+    if !first.inventoryLines.isEmpty {
+      lines += [""] + first.inventoryLines
+    }
+    return lines.joined(separator: "\n")
+  }
+}
 
 public enum LedgerPDFStatementExporter {
   public enum Error: Swift.Error, Equatable, Sendable {
@@ -10,9 +66,13 @@ public enum LedgerPDFStatementExporter {
   }
 
   public static func export(_ report: LedgerReport, to url: URL) throws {
+    try export(LedgerStatement(reports: [report]), to: url)
+  }
+
+  public static func export(_ statement: LedgerStatement, to url: URL) throws {
     let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
     guard url.isFileURL, !url.path.isEmpty, !isDirectory else { throw Error.invalidDestination }
-    let lines = report.accessibleTable.split(separator: "\n", omittingEmptySubsequences: false)
+    let lines = statement.text.split(separator: "\n", omittingEmptySubsequences: false)
       .map(String.init)
     var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
     let data = NSMutableData()

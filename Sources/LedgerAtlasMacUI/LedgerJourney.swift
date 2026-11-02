@@ -315,11 +315,7 @@ public final class LedgerJourney {
 
   public var insightTable: String {
     guard let snapshot else { return "" }
-    let unit =
-      snapshot.accounts.first?.currencyUnit
-      ?? snapshot.transactions.first?.currentRevision.draft.effects.first?.amount.unitCode
-      ?? "USD"
-    return (try? LedgerApplication.report(from: snapshot, unitCode: unit))?.accessibleTable ?? ""
+    return (try? LedgerStatement(snapshot: snapshot))?.text ?? ""
   }
 
   public func performCreateMacTransaction(amountLiteral: String, createdAt: UTCInstant) {
