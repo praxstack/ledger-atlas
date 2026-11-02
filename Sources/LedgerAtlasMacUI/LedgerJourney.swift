@@ -709,8 +709,19 @@ public final class LedgerJourney {
     _ rule: LedgerRecurrenceRule, through end: SourceLocalDate, createdAt: UTCInstant
   ) throws {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
+    defer { snapshot = (try? application.snapshot()) ?? snapshot }
+    guard !rule.paused, rule.lifecycle == .active else { return }
+    // LA-028: a long catch-up (a daily rule started years ago) runs as several bounded batches.
+    // Each batch is all-or-nothing and repeating one adds nothing, so a failure part-way can
+    // simply be retried.
+    let dates = try LedgerSchedule.dates(for: rule, through: end)
+    let batch = LedgerApplication.maximumOccurrencesPerBatch
+    var last = batch - 1
+    while last < dates.count - 1 {
+      _ = try application.generateOccurrences(rule, through: dates[last], createdAt: createdAt)
+      last += batch
+    }
     _ = try application.generateOccurrences(rule, through: end, createdAt: createdAt)
-    snapshot = try application.snapshot()
   }
 
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {

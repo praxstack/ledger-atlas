@@ -357,7 +357,8 @@ public struct LedgerApplication: LedgerClient {
       let amount = try CurrencyAmount(unitCode: plan.principal.unitCode, amount: portion)
       var date = occurredAt.localDateTime.date
       if index > 0 {
-        date = try advance(date, frequency: .monthly, interval: index, dayOfMonth: date.day)
+        date = try LedgerSchedule.occurrence(
+          index, from: date, frequency: .monthly, interval: 1, dayOfMonth: date.day)
       }
       let when = try SourceTemporal(
         resolving: SourceLocalDateTime(
@@ -410,35 +411,46 @@ public struct LedgerApplication: LedgerClient {
     _ rule: LedgerRecurrenceRule, through end: SourceLocalDate, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision] {
     guard !rule.paused, rule.lifecycle == .active else { return [] }
+    // Occurrences already generated are history: they are returned as stored and never
+    // rewritten, so a later rule edit applies only to dates not generated yet, and catching up
+    // twice adds nothing.
+    let history = Dictionary(
+      try snapshot().revisionHistory.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    var ordered: [LedgerTransactionRevision?] = []
     var requests: [LedgerStore.CreateTransactionRequest] = []
-    var cursor = rule.start
-    var index = 0
-    while !cursor.isAfter(end) {
-      if let until = rule.until, cursor.isAfter(until) { break }
-      guard index < 366 else { throw Error.invalidCommand }
-      if !rule.skippedDates.contains(cursor) {
-        let occurred = try SourceTemporal(
-          resolving: SourceLocalDateTime(date: cursor), in: rule.timeZone, precision: .day)
-        let draft = try LedgerTransactionDraft(
-          effects: [
-            try LedgerTransactionEffect(
-              accountID: rule.accountID,
-              direction: rule.kind == .income ? .increase : .decrease, amount: rule.amount)
-          ], categoryID: rule.categoryID, kind: rule.kind, occurredAt: occurred,
-          sourceLiterals: [try LedgerSourceLiteral(field: "recurrence.ruleID", literal: rule.id)],
-          origin: rule.origin)
-        let key = SHA256.hash(
-          data: Data("recurrence:\(rule.id):\(cursor.year)-\(cursor.month)-\(cursor.day)".utf8)
-        ).map { String(format: "%02x", $0) }.joined()
-        requests.append(.init(idempotencyKey: key, draft: draft, createdAt: createdAt))
+    for date in try LedgerSchedule.dates(for: rule, through: end) {
+      let key = SHA256.hash(
+        data: Data("recurrence:\(rule.id):\(date.year)-\(date.month)-\(date.day)".utf8)
+      ).map { String(format: "%02x", $0) }.joined()
+      let transactionID = try StableLedgerID.transaction(origin: rule.origin, localKey: key)
+      if let stored = history[try StableLedgerID.revision(transactionID: transactionID, revision: 1)] {
+        ordered.append(stored)
+        continue
       }
-      cursor = try advance(
-        cursor, frequency: rule.frequency, interval: rule.interval, dayOfMonth: rule.dayOfMonth)
-      index += 1
+      // Day-precision start of the local day, tolerant of DST gaps at midnight (LA-029).
+      let occurred = try SourceTemporal(startOf: date, in: rule.timeZone)
+      let draft = try LedgerTransactionDraft(
+        effects: [
+          try LedgerTransactionEffect(
+            accountID: rule.accountID,
+            direction: rule.kind == .income ? .increase : .decrease, amount: rule.amount)
+        ], categoryID: rule.categoryID, kind: rule.kind, occurredAt: occurred,
+        sourceLiterals: [try LedgerSourceLiteral(field: "recurrence.ruleID", literal: rule.id)],
+        origin: rule.origin)
+      requests.append(.init(idempotencyKey: key, draft: draft, createdAt: createdAt))
+      ordered.append(nil)
     }
-    guard !requests.isEmpty else { return [] }
-    return try store.createLinkedTransactions(requests, linkKind: .recurring).map(\.revision)
+    // One call writes at most one bounded, all-or-nothing batch; longer catch-ups run in
+    // several calls (see LedgerJourney.generateOccurrences).
+    guard requests.count <= Self.maximumOccurrencesPerBatch else { throw Error.invalidCommand }
+    var created = requests.isEmpty
+      ? [] : try store.createLinkedTransactions(requests, linkKind: .recurring).map(\.revision)
+    created.reverse()
+    return ordered.map { $0 ?? created.removeLast() }
   }
+
+  /// New occurrences one `generateOccurrences` call may write.
+  public static let maximumOccurrencesPerBatch = 366
 
   public func createBudget(_ budget: LedgerBudget) throws {
     try store.persistBudget(budget)
@@ -870,42 +882,6 @@ public struct IOSFacingLedgerClient: LedgerClient {
   }
 }
 
-extension SourceLocalDate {
-  fileprivate func isAfter(_ other: SourceLocalDate) -> Bool {
-    (year, month, day) > (other.year, other.month, other.day)
-  }
-}
-
-private func advance(
-  _ date: SourceLocalDate, frequency: LedgerRecurrenceFrequency, interval: Int, dayOfMonth: Int?
-) throws -> SourceLocalDate {
-  switch frequency {
-  case .daily:
-    return try addDays(date, interval)
-  case .weekly:
-    return try addDays(date, 7 * interval)
-  case .monthly, .yearly:
-    let monthDelta = frequency == .monthly ? interval : 0
-    let yearDelta = frequency == .yearly ? interval : 0
-    let total = date.year * 12 + (date.month - 1) + monthDelta + yearDelta * 12
-    let year = total / 12
-    let month = total % 12 + 1
-    let wanted = dayOfMonth ?? date.day
-    let last = lastDay(year: year, month: month)
-    return try SourceLocalDate(year: year, month: month, day: min(wanted, last))
-  }
-}
-
-private func addDays(_ date: SourceLocalDate, _ days: Int) throws -> SourceLocalDate {
-  var calendar = Calendar(identifier: .gregorian)
-  calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-  let components = DateComponents(year: date.year, month: date.month, day: date.day)
-  guard let value = calendar.date(from: components),
-    let next = calendar.date(byAdding: .day, value: days, to: value)
-  else { throw LedgerApplication.Error.invalidCommand }
-  let parts = calendar.dateComponents([.year, .month, .day], from: next)
-  return try SourceLocalDate(year: parts.year!, month: parts.month!, day: parts.day!)
-}
 
 private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
   let accountGroups = package.accountGroups.map {
@@ -1480,16 +1456,3 @@ private func jsonIntegerLiteral(_ row: [String: Any], _ key: String) throws -> S
   return number.stringValue
 }
 
-private func lastDay(year: Int, month: Int) -> Int {
-  switch month {
-  case 1, 3, 5, 7, 8, 10, 12:
-    return 31
-  case 4, 6, 9, 11:
-    return 30
-  case 2:
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-    return leap ? 29 : 28
-  default:
-    return 28
-  }
-}

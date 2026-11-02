@@ -1127,3 +1127,33 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
       rounding: .halfEven)
   }
 }
+
+@MainActor
+@Test func longRecurrenceCatchUpRunsInBoundedBatches() throws {
+  // LA-028: a daily rule started more than a year ago used to fail after 366 occurrences.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+  _ = try LedgerStoreLifecycle.create(at: canonical)
+  let journey = LedgerJourney()
+  try journey.beginEditing(canonical)
+  let origin = try LedgerOrigin.macNative()
+  let account = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: String(repeating: "4", count: 64)),
+    name: "Synthetic daily", currencyUnit: "USD", origin: origin)
+  try journey.createAccount(account)
+  let rule = try LedgerRecurrenceRule(
+    id: StableLedgerID.recurrenceRule(origin: origin, localKey: String(repeating: "5", count: 64)),
+    origin: origin, accountID: account.id, categoryID: nil, kind: .expense,
+    amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("1")), frequency: .daily,
+    interval: 1, timeZone: SourceTimeZone(fixedOffsetSeconds: 0),
+    start: SourceLocalDate(year: 2024, month: 1, day: 1))
+  try journey.createRecurrence(rule)
+  let end = try SourceLocalDate(year: 2026, month: 2, day: 4)  // 766 days
+  try journey.generateOccurrences(rule, through: end, createdAt: UTCInstant(epochMilliseconds: 1))
+  #expect(journey.snapshot?.transactions.count == 766)
+  let checksum = try journey.checksum()
+  try journey.generateOccurrences(rule, through: end, createdAt: UTCInstant(epochMilliseconds: 2))
+  #expect(try journey.checksum() == checksum)
+}

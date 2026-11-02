@@ -972,6 +972,10 @@ public struct LedgerAtlasRootView: View {
       BudgetsView(
         state: session.state, budgets: journey.snapshot?.budgets ?? [],
         categories: journey.snapshot?.categories ?? [], accounts: journey.snapshot?.accounts ?? [],
+        transactions: journey.snapshot?.transactions ?? [],
+        today: try? LedgerJourney.localDate(
+          for: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+          in: .current),
         isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         onCreate: { budget in
