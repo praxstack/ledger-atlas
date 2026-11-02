@@ -17,6 +17,10 @@ public struct LedgerAtlasRootView: View {
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
   @State private var productSettings: LedgerProductSettings
+  /// macOS Reduce Motion, or always on when Settings says so.
+  private var effectiveReduceMotion: Bool {
+    productSettings.reduceMotion(systemReduceMotion: reduceMotion)
+  }
   @State private var pendingIntent: LedgerIntentRequest?
   @State private var isChoosingImportSource = false
   @State private var lifecycleMessage: String?
@@ -80,7 +84,7 @@ public struct LedgerAtlasRootView: View {
       } else {
         destinationPreview
           .animation(
-            MotionPolicy.navigationAnimation(reduceMotion: reduceMotion),
+            MotionPolicy.navigationAnimation(reduceMotion: effectiveReduceMotion),
             value: selection
           )
       }
@@ -237,7 +241,8 @@ public struct LedgerAtlasRootView: View {
       }
       lifecycleMessage = outcome.message
       lifecycleRetryOperation = outcome.retryOperation
-      if [.opened, .upgraded].contains(outcome.kind) { selection = .ledger }
+      // Reopening at launch or after unlock lands on the start screen chosen in Settings.
+      if [.opened, .upgraded].contains(outcome.kind) { selection = productSettings.startScreen }
     }
   }
 
