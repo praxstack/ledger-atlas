@@ -884,6 +884,28 @@ public struct LedgerAtlasRootView: View {
           catch {
             journey.recordFailure("This transaction can't be saved as a template.")
           }
+        },
+        editSplit: { draft in
+          do {
+            _ = try journey.editSplit(
+              draft, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch {
+            journey.recordFailure(
+              LedgerJourney.editFailureMessage(
+                for: error,
+                otherwise: "Split purchase could not be saved. Lines must add up to the total."))
+          }
+        },
+        closeSplit: { purchaseID in
+          do {
+            try journey.closeSplit(
+              purchaseID: purchaseID,
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch {
+            journey.recordFailure(
+              LedgerJourney.editFailureMessage(
+                for: error, otherwise: "Split purchase could not be closed."))
+          }
         }
       )
       .id(selection)
@@ -1138,6 +1160,7 @@ public struct LedgerAtlasRootView: View {
         transaction.links.contains { $0.kind == .split }
       }.map(\.id)
     ).subtracting(listing?.unreadableTransactionIDs ?? [])
+      .subtracting(listing?.closedTransactionIDs ?? [])
   }
 
   private func lockApp() {

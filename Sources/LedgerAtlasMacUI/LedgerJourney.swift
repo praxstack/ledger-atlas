@@ -772,6 +772,33 @@ public final class LedgerJourney {
     }
   }
 
+  public func editSplit(
+    _ draft: LedgerSplitDraft, createdAt: UTCInstant
+  ) throws -> LedgerSplitPurchase {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    do {
+      let purchase = try application.editSplit(draft, createdAt: createdAt)
+      snapshot = try application.snapshot()
+      lastFailure = nil
+      return purchase
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
+  public func closeSplit(purchaseID: String, createdAt: UTCInstant) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    do {
+      try application.closeSplit(purchaseID: purchaseID, createdAt: createdAt)
+      snapshot = try application.snapshot()
+      lastFailure = nil
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
   public func createInstallmentPlan(
     _ plan: LedgerInstallmentPlan, occurredAt: SourceTemporal, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision] {

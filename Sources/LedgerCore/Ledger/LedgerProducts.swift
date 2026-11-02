@@ -171,14 +171,17 @@ public struct LedgerSplitPurchaseListing: Equatable, Sendable {
   public let purchases: [LedgerSplitPurchase]
   public let unreadableTransactionIDs: Set<String>
   public let unreadableGroupCount: Int
+  /// Lines of purchases closed as a whole. They no longer belong to any listed purchase.
+  public let closedTransactionIDs: Set<String>
 
   public init(
     purchases: [LedgerSplitPurchase], unreadableTransactionIDs: Set<String>,
-    unreadableGroupCount: Int
+    unreadableGroupCount: Int, closedTransactionIDs: Set<String> = []
   ) {
     self.purchases = purchases
     self.unreadableTransactionIDs = unreadableTransactionIDs
     self.unreadableGroupCount = unreadableGroupCount
+    self.closedTransactionIDs = closedTransactionIDs
   }
 
   /// User-facing notice when some split groups could not be read; nil when all were read.

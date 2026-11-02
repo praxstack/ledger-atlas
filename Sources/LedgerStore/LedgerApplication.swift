@@ -234,27 +234,101 @@ public struct LedgerApplication: LedgerClient {
     for draft: LedgerSplitDraft, createdAt: UTCInstant
   ) throws -> [LedgerStore.CreateTransactionRequest] {
     try draft.lines.map { line in
-      var literals = [
-        try LedgerSourceLiteral(field: "split.purchaseID", literal: draft.id),
-        try LedgerSourceLiteral(field: "split.lineID", literal: line.id),
-        try LedgerSourceLiteral(field: "split.lineOrder", literal: String(line.displayOrder)),
-      ]
-      if let note = draft.note {
-        literals.append(try LedgerSourceLiteral(field: "split.note", literal: note))
-      }
-      if let description = line.description {
-        literals.append(
-          try LedgerSourceLiteral(field: "split.description", literal: description))
-      }
-      let lineDraft = try LedgerTransactionDraft(
-        effects: [
-          try LedgerTransactionEffect(
-            accountID: draft.accountID, direction: .decrease, amount: line.amount)
-        ], categoryID: line.categoryID, kind: .expense, occurredAt: draft.occurredAt,
-        note: line.description ?? draft.note, sourceLiterals: literals, origin: draft.origin)
-      return LedgerStore.CreateTransactionRequest(
-        idempotencyKey: line.id, draft: lineDraft, createdAt: createdAt)
+      LedgerStore.CreateTransactionRequest(
+        idempotencyKey: line.id, draft: try splitLineDraft(line, of: draft), createdAt: createdAt)
     }
+  }
+
+  /// The transaction draft that stores one split line. `keeping` carries over literals that
+  /// are not split metadata (import receipt markers are never carried onto a correction).
+  private static func splitLineDraft(
+    _ line: LedgerSplitLine, of draft: LedgerSplitDraft, keeping: [LedgerSourceLiteral] = []
+  ) throws -> LedgerTransactionDraft {
+    var literals = keeping.filter {
+      !$0.field.hasPrefix("split.") && !$0.field.hasPrefix("import.")
+    }
+    literals += [
+      try LedgerSourceLiteral(field: "split.purchaseID", literal: draft.id),
+      try LedgerSourceLiteral(field: "split.lineID", literal: line.id),
+      try LedgerSourceLiteral(field: "split.lineOrder", literal: String(line.displayOrder)),
+    ]
+    if let note = draft.note {
+      literals.append(try LedgerSourceLiteral(field: "split.note", literal: note))
+    }
+    if let description = line.description {
+      literals.append(try LedgerSourceLiteral(field: "split.description", literal: description))
+    }
+    return try LedgerTransactionDraft(
+      effects: [
+        try LedgerTransactionEffect(
+          accountID: draft.accountID, direction: .decrease, amount: line.amount)
+      ], categoryID: line.categoryID, kind: .expense, occurredAt: draft.occurredAt,
+      note: line.description ?? draft.note, sourceLiterals: literals, origin: draft.origin)
+  }
+
+  /// Edits a split purchase in one step: line amounts, categories, descriptions and order,
+  /// plus the purchase's account, date and note. The total is the new sum of the lines. Every
+  /// changed line is corrected in a single database transaction, so a failure changes nothing.
+  /// The set of lines stays the same; repeating the same edit changes nothing.
+  public func editSplit(_ draft: LedgerSplitDraft, createdAt: UTCInstant) throws
+    -> LedgerSplitPurchase
+  {
+    let snapshot = try store.readSnapshot()
+    guard let group = Self.splitPurchaseGroups(from: snapshot).first(where: { group in
+      (try? group.read())?.id == draft.id
+    }), let existing = try? group.read()
+    else { throw Error.invalidCommand }
+    guard draft.origin == existing.origin,
+      Set(draft.lines.map(\.id)) == Set(existing.lines.map(\.id))
+    else { throw Error.invalidCommand }
+    let expected = try LedgerSplitPurchase(
+      id: draft.id, accountID: draft.accountID, parentAmount: draft.parentAmount,
+      lines: draft.lines, occurredAt: draft.occurredAt, note: draft.note, origin: draft.origin)
+    if existing == expected { return existing }
+
+    let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
+    var membersByLine: [String: LedgerTransactionSnapshot] = [:]
+    for memberID in group.memberIDs {
+      guard let member = transactions[memberID] else { throw Error.invalidCommand }
+      let lineID =
+        member.currentRevision.draft.sourceLiterals.first { $0.field == "split.lineID" }?.literal
+        ?? member.id
+      membersByLine[lineID] = member
+    }
+    var requests: [LedgerStore.CorrectTransactionRequest] = []
+    for line in draft.lines {
+      guard let member = membersByLine[line.id] else { throw Error.invalidCommand }
+      let current = member.currentRevision
+      let lineDraft = try Self.splitLineDraft(
+        line, of: draft, keeping: current.draft.sourceLiterals)
+      guard lineDraft != current.draft else { continue }
+      requests.append(
+        .init(
+          transactionID: member.id, expectedCurrentRevisionID: current.id, draft: lineDraft,
+          createdAt: max(createdAt, current.createdAt)))
+    }
+    if !requests.isEmpty { _ = try store.correctLinkedTransactions(requests) }
+    guard
+      let purchase = Self.splitPurchaseListing(from: try store.readSnapshot()).purchases.first(
+        where: { $0.id == draft.id })
+    else { throw Error.invalidCommand }
+    return purchase
+  }
+
+  /// Closes every line of a split purchase together. Its history stays; it leaves the ledger.
+  public func closeSplit(purchaseID: String, createdAt: UTCInstant) throws {
+    let snapshot = try store.readSnapshot()
+    guard let group = Self.splitPurchaseGroups(from: snapshot).first(where: { group in
+      (try? group.read())?.id == purchaseID
+    }) else { throw Error.invalidCommand }
+    let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
+    let requests = try group.memberIDs.map { id -> LedgerStore.TombstoneTransactionRequest in
+      guard let current = transactions[id]?.currentRevision else { throw Error.invalidCommand }
+      return .init(
+        transactionID: id, expectedCurrentRevisionID: current.id,
+        createdAt: max(createdAt, current.createdAt))
+    }
+    _ = try store.tombstoneLinkedTransactions(requests)
   }
 
   /// Reads every split group without failing: groups that parse become purchases, and the
@@ -265,8 +339,11 @@ public struct LedgerApplication: LedgerClient {
     var purchases: [LedgerSplitPurchase] = []
     var unreadableIDs: Set<String> = []
     var unreadableGroups = 0
+    var closedIDs: Set<String> = []
     for group in splitPurchaseGroups(from: snapshot) {
-      if let purchase = try? group.read() {
+      if group.isClosed {
+        closedIDs.formUnion(group.memberIDs)
+      } else if let purchase = try? group.read() {
         purchases.append(purchase)
       } else {
         unreadableIDs.formUnion(group.memberIDs)
@@ -275,18 +352,18 @@ public struct LedgerApplication: LedgerClient {
     }
     return LedgerSplitPurchaseListing(
       purchases: purchases, unreadableTransactionIDs: unreadableIDs,
-      unreadableGroupCount: unreadableGroups)
+      unreadableGroupCount: unreadableGroups, closedTransactionIDs: closedIDs)
   }
 
   public static func splitPurchases(
     from snapshot: LedgerStore.LedgerReadSnapshot
   ) throws -> [LedgerSplitPurchase] {
-    try splitPurchaseGroups(from: snapshot).map { try $0.read() }
+    try splitPurchaseGroups(from: snapshot).filter { !$0.isClosed }.map { try $0.read() }
   }
 
   private static func splitPurchaseGroups(
     from snapshot: LedgerStore.LedgerReadSnapshot
-  ) -> [(memberIDs: [String], read: () throws -> LedgerSplitPurchase)] {
+  ) -> [(memberIDs: [String], isClosed: Bool, read: () throws -> LedgerSplitPurchase)] {
     let transactions = Dictionary(uniqueKeysWithValues: snapshot.transactions.map { ($0.id, $0) })
     let links = snapshot.transactions.flatMap(\.links).filter { $0.kind == .split }
     let parentIDs = Set(links.map(\.fromTransactionID)).sorted()
@@ -294,7 +371,12 @@ public struct LedgerApplication: LedgerClient {
       let linkedIDs = [parentID]
         + links.filter { $0.fromTransactionID == parentID }.map(\.toTransactionID)
       let uniqueIDs = Array(Set(linkedIDs)).sorted()
-      return (uniqueIDs, {
+      // A purchase closed as a whole leaves the ledger; one with only some lines closed is
+      // unreadable as a purchase, so its lines are listed one by one.
+      let isClosed = uniqueIDs.allSatisfy {
+        transactions[$0]?.currentRevision.lifecycle == .tombstoned
+      }
+      return (uniqueIDs, isClosed, {
       guard uniqueIDs.count >= 2,
         let members = uniqueIDs.compactMap({ transactions[$0] }) as [LedgerTransactionSnapshot]?,
         members.count == uniqueIDs.count
@@ -317,6 +399,7 @@ public struct LedgerApplication: LedgerClient {
       var orderMetadataCount = 0
       for (index, member) in members.enumerated() {
         let draft = member.currentRevision.draft
+        guard member.currentRevision.lifecycle == .active else { throw Error.invalidCommand }
         guard draft.kind == .expense, draft.effects.count == 1,
           draft.occurredAt == firstDraft.occurredAt, draft.origin == firstDraft.origin
         else { throw Error.invalidCommand }
