@@ -125,7 +125,8 @@ extension MoneyManagerV19Semantics {
 
   static func blocksLosslessCertification(_ reason: MoneyManagerV19BlockReason) -> Bool {
     switch reason {
-    case .unknownTransactionType, .unsupportedTransactionType, .transferDirectionUnproven:
+    case .unknownTransactionType, .unsupportedTransactionType, .transferDirectionUnproven,
+      .flaggedDeleted:
       true
     default:
       false

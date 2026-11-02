@@ -148,6 +148,148 @@ struct ObservedV19FullSchemaImportTests {
     }
   }
 
+  @Test("a backup missing a core binding column is refused before anything is written")
+  func refusesMissingContractColumn() throws {
+    // Indexed columns lose their index first; SQLite cannot drop an indexed column.
+    let cases = [
+      "ALTER TABLE INOUTCOME DROP COLUMN ZMONEY;",
+      "DROP INDEX INOUTCOME_IDX3; ALTER TABLE INOUTCOME DROP COLUMN ZDATE;",
+      "DROP INDEX INOUTCOME_IDX4; ALTER TABLE INOUTCOME DROP COLUMN WDATE;",
+      "DROP INDEX INOUTCOME_IDX2; ALTER TABLE INOUTCOME DROP COLUMN DO_TYPE;",
+      "DROP INDEX INOUTCOME_IDX7; ALTER TABLE INOUTCOME DROP COLUMN assetUid;",
+      "DROP INDEX INOUTCOME_IDX8; ALTER TABLE INOUTCOME DROP COLUMN ctgUid;",
+      "DROP INDEX INOUTCOME_IDX9; ALTER TABLE INOUTCOME DROP COLUMN currencyUid;",
+      "DROP INDEX UNIQUE_IDX_INOUTCOME_UID; ALTER TABLE INOUTCOME DROP COLUMN uid;",
+      "ALTER TABLE CURRENCY DROP COLUMN ISO;",
+    ]
+    for sql in cases {
+      try withDirectory { directory in
+        let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+        try writeFullSchemaBackup(to: source)
+        try execute(at: source, sql: sql)
+        let canonical = directory.appendingPathComponent("canonical.sqlite")
+        let preparation = try ImportWorkspace().prepare(
+          .init(
+            sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+            canonicalDatabaseURL: canonical,
+            sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+        #expect(preparation.preparedHandle == nil, "\(sql)")
+        #expect(preparation.review.status == .classificationOnly, "\(sql)")
+        #expect(preparation.review.classificationStatus == .unsupported, "\(sql)")
+        #expect(preparation.review.diagnosticCodes == ["schema_drift"], "\(sql)")
+        #expect(!FileManager.default.fileExists(atPath: canonical.path), "\(sql)")
+      }
+    }
+  }
+
+  @Test("a transaction carrying a deletion flag is preserved, never imported")
+  func flaggedDeletedRowIsPreserved() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeFullSchemaBackup(to: source)
+      try execute(at: source, sql: "UPDATE INOUTCOME SET IS_DEL=1 WHERE uid='tx-expense';")
+      let canonical = directory.appendingPathComponent("canonical.sqlite")
+      let workspace = ImportWorkspace()
+      let preparation = try workspace.prepare(
+        .init(
+          sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+          canonicalDatabaseURL: canonical,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+      #expect(preparation.review.losslessCertificationBlocked == true)
+      let handle = try #require(preparation.preparedHandle)
+      let result = try workspace.commit(handle, approval: workspace.approve(handle))
+      #expect(result.eventCount == 7)
+    }
+  }
+
+  @Test("the contract column table matches the frozen v19 DDL")
+  func contractMatchesFrozenDDL() throws {
+    var database: OpaquePointer?
+    guard sqlite3_open(":memory:", &database) == SQLITE_OK, let database else {
+      throw FullSchemaTestError.sqlite
+    }
+    defer { sqlite3_close(database) }
+    guard sqlite3_exec(database, try frozenDDL(), nil, nil, nil) == SQLITE_OK else {
+      throw FullSchemaTestError.sqlite
+    }
+    var fromDDL: [String: [String]] = [:]
+    var tables: OpaquePointer?
+    guard sqlite3_prepare_v2(
+      database, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+      -1, &tables, nil) == SQLITE_OK, let tables
+    else { throw FullSchemaTestError.sqlite }
+    defer { sqlite3_finalize(tables) }
+    while sqlite3_step(tables) == SQLITE_ROW {
+      let name = String(cString: sqlite3_column_text(tables, 0))
+      var info: OpaquePointer?
+      guard sqlite3_prepare_v2(database, "PRAGMA table_info(\"\(name)\")", -1, &info, nil)
+        == SQLITE_OK, let info
+      else { throw FullSchemaTestError.sqlite }
+      var columns: [String] = []
+      while sqlite3_step(info) == SQLITE_ROW {
+        columns.append(String(cString: sqlite3_column_text(info, 1)))
+      }
+      sqlite3_finalize(info)
+      fromDDL[name] = columns
+    }
+    #expect(fromDDL == MoneyManagerV19Contract.androidTables)
+  }
+
+  @Test("ZDATE is a UTC instant: an early-morning IST row lands on its WDATE day")
+  func zdateIsUTCInstant() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeFullSchemaBackup(to: source)
+      // 2026-01-01T19:30Z is 01:00 on 2 January at +05:30, the day WDATE records.
+      try execute(
+        at: source,
+        sql: "UPDATE INOUTCOME SET ZDATE='1767295800000', WDATE='2026-01-02' WHERE uid='tx-expense';")
+      let canonical = directory.appendingPathComponent("canonical.sqlite")
+      let workspace = ImportWorkspace()
+      let preparation = try workspace.prepare(
+        .init(
+          sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+          canonicalDatabaseURL: canonical,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+      let handle = try #require(preparation.preparedHandle)
+      let result = try workspace.commit(handle, approval: workspace.approve(handle))
+      #expect(result.status == .committed)
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM economic_event WHERE instant_milliseconds=1767295800000 AND local_year=2026 AND local_month=1 AND local_day=2 AND local_hour=1 AND local_minute=0 AND resolved_offset_seconds=19800"
+        ) == 1)
+    }
+  }
+
+  @Test("replay accepts current UTC-instant events and legacy local-epoch events")
+  func replayAcceptsBothZDATEReadings() throws {
+    let ist = try SourceTimeZone(fixedOffsetSeconds: 19_800)
+    let current = try #require(
+      MoneyManagerV19Vocabulary.temporal(zdateEpochMilliseconds: 1_767_295_800_000, in: ist))
+    #expect(current.localDateTime.date == (try SourceLocalDate(year: 2026, month: 1, day: 2)))
+    #expect(current.localDateTime.hour == 1)
+    #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", current))
+    // An earlier build read the same literal as 19:30 local on 1 January.
+    let legacyLocal = try SourceLocalDateTime(
+      date: SourceLocalDate(year: 2026, month: 1, day: 1), hour: 19, minute: 30, second: 0,
+      millisecond: 0)
+    let legacy = try SourceTemporal(
+      resolving: legacyLocal, in: ist, precision: .millisecond, ambiguityPolicy: .reject)
+    #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", legacy))
+    #expect(!MoneyManagerV19Vocabulary.occurredMatches("1767295800001", current))
+    // A legacy wall time with an instant that is not that wall time in the zone is rejected,
+    // for an IANA zone as well as a fixed offset.
+    let kolkata = try SourceTimeZone(ianaIdentifier: "Asia/Kolkata")
+    let legacyKolkata = try SourceTemporal(
+      resolving: legacyLocal, in: kolkata, precision: .millisecond, ambiguityPolicy: .reject)
+    #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", legacyKolkata))
+    let wrongInstant = try SourceTemporal(
+      instant: UTCInstant(epochMilliseconds: 1_767_295_800_000), localDateTime: legacyLocal,
+      timeZone: kolkata, precision: .millisecond, resolvedOffsetSeconds: 0)
+    #expect(!MoneyManagerV19Vocabulary.occurredMatches("1767295800000", wrongInstant))
+  }
+
   @Test("balance edits and transfer legs map only with the expected category")
   func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
@@ -207,13 +349,16 @@ struct ObservedV19FullSchemaImportTests {
   }
 }
 
-private func writeFullSchemaBackup(to url: URL) throws {
+private func frozenDDL() throws -> String {
   let ddlURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent()
     .appendingPathComponent("docs/compatibility/money-manager-android-v19.schema.sql")
-  let ddl = try String(contentsOf: ddlURL, encoding: .utf8)
-  try execute(at: url, sql: ddl)
+  return try String(contentsOf: ddlURL, encoding: .utf8)
+}
+
+private func writeFullSchemaBackup(to url: URL) throws {
+  try execute(at: url, sql: try frozenDDL())
   try execute(
     at: url,
     sql: """
