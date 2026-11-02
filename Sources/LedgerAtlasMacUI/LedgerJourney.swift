@@ -566,11 +566,12 @@ public final class LedgerJourney {
   }
 
   public func createTransaction(
-    idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant
+    idempotencyKey: String, draft: LedgerTransactionDraft, createdAt: UTCInstant,
+    tags: LedgerTagLinks = .empty
   ) throws -> LedgerTransactionRevision {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
     let revision = try application.createTransaction(
-      idempotencyKey: idempotencyKey, draft: draft, createdAt: createdAt)
+      idempotencyKey: idempotencyKey, draft: draft, createdAt: createdAt, tags: tags)
     snapshot = try application.snapshot()
     return revision
   }
@@ -621,6 +622,66 @@ public final class LedgerJourney {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
     try application.tombstoneCategory(categoryID)
     snapshot = try application.snapshot()
+  }
+
+  public func createTag(_ tag: LedgerTag) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.createTag(tag)
+    snapshot = try application.snapshot()
+    lastFailure = nil
+  }
+
+  public func updateTag(_ tag: LedgerTag) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.updateTag(tag)
+    snapshot = try application.snapshot()
+    lastFailure = nil
+  }
+
+  public func saveTransactionTemplate(_ template: LedgerTransactionTemplate) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.saveTransactionTemplate(template)
+    snapshot = try application.snapshot()
+    lastFailure = nil
+  }
+
+  public func saveMemo(_ memo: LedgerMemo) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    try application.saveMemo(memo)
+    snapshot = try application.snapshot()
+    lastFailure = nil
+  }
+
+  /// Records one transaction from a template, dated today, carrying the template's tags.
+  /// The submission ID keys the write, so pressing Use twice records one transaction.
+  public func createTransaction(
+    fromTemplate templateID: String, createdAt: UTCInstant, submissionID: String
+  ) throws -> LedgerTransactionRevision {
+    guard application != nil, let snapshot,
+      let template = snapshot.transactionTemplates.first(where: { $0.id == templateID })
+    else { throw LedgerApplication.Error.invalidCommand }
+    let draft = try template.instantiate(
+      occurredAt: Self.nativeTemporal(for: createdAt), origin: LedgerOrigin.macNative())
+    let activeTagIDs = template.tags.tagIDs.filter { id in
+      snapshot.tags.contains { $0.id == id && $0.lifecycle == .active }
+    }
+    let key = SHA256.hash(data: Data("mac-native-template:\(submissionID)".utf8))
+      .map { String(format: "%02x", $0) }.joined()
+    let revision = try createTransaction(
+      idempotencyKey: key, draft: draft, createdAt: createdAt,
+      tags: LedgerTagLinks(activeTagIDs))
+    lastFailure = nil
+    return revision
+  }
+
+  /// Plain-language message for an annotation save that the store refused.
+  package static func annotationFailureMessage(for error: Error, otherwise message: String)
+    -> String
+  {
+    if case LedgerStore.Error.duplicateTagName = error {
+      return "Another tag already has that name."
+    }
+    return message
   }
 
   public func createTransfer(
@@ -839,6 +900,10 @@ public final class LedgerJourney {
       let preserved = Self.preservedRows(
         snapshot.preservedSource, tables: ["ZCATEGORY", "CATEGORY"], title: "Preserved category")
       return categories + preserved
+    case .tags:
+      return snapshot.tags.map {
+        SurfaceRow(id: $0.id, title: $0.name, detail: $0.lifecycle.rawValue)
+      }
     case .transfers:
       let transfers = snapshot.transactions.filter { $0.currentRevision.draft.kind == .transfer }
         .map {
