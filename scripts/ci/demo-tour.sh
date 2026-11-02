@@ -20,8 +20,12 @@ APP="$MOUNT/Ledger Atlas.app"
 LOG="$OUT/tour.log"
 LEDGER_ATLAS_DEMO_TOUR=1 "$APP/Contents/MacOS/LedgerAtlas" >"$LOG" 2>&1 &
 PID=$!
-# Best effort: one whole-screen frame while the ledger screen is up.
-sleep 12
+# Best effort: one whole-screen frame once the demo ledger is open.
+for _ in $(seq 1 60); do
+  grep -q "ledger opened" "$LOG" 2>/dev/null && break
+  sleep 1
+done
+sleep 2
 screencapture -x "$OUT/00-full-screen.png" 2>>"$LOG" || echo "screencapture unavailable" >>"$LOG"
 for _ in $(seq 1 120); do
   kill -0 "$PID" 2>/dev/null || break
@@ -31,7 +35,9 @@ kill "$PID" 2>/dev/null || true
 cat "$LOG"
 SRC=$(sed -n 's/^\[demo-tour\] output //p' "$LOG" | head -1)
 [ -n "$SRC" ] && [ -d "$SRC" ] || { echo "demo tour wrote no output"; exit 1; }
-cp "$SRC"/*.png "$SRC"/tour.txt "$OUT"/
+compgen -G "$SRC/*.png" >/dev/null || { echo "demo tour saved no screens"; exit 1; }
+cp "$SRC"/*.png "$OUT"/
+[ -f "$SRC/tour.txt" ] && cp "$SRC/tour.txt" "$OUT"/
 count=$(ls "$OUT"/[0-9][0-9]-*.png 2>/dev/null | grep -vc "/00-" || true)
 echo "demo tour: $count screens"
 grep -q "ledger opened" "$LOG" || { echo "demo ledger did not open"; exit 1; }
@@ -44,7 +50,14 @@ for f in "$OUT"/[0-9][0-9]-*.png; do
   if [ "$size" -lt 25000 ]; then echo "looks blank: $(basename "$f") ($size bytes)"; blank=$((blank + 1)); fi
 done
 [ "$blank" -eq 0 ] || { echo "$blank screens look blank"; exit 1; }
+# Every screen should look different; identical frames mean navigation did not happen.
+distinct=$(for f in "$OUT"/[0-9][0-9]-*.png; do
+  case "$(basename "$f")" in 00-*) ;; *) shasum -a 256 "$f" | cut -d' ' -f1 ;; esac
+done | sort -u | wc -l | tr -d ' ')
+echo "demo tour: $distinct distinct screens"
+[ "$distinct" -ge 10 ] || { echo "too few distinct screens"; exit 1; }
 # A walkthrough video: each screen for two seconds.
+# ffmpeg from Homebrew (unpinned; the video is optional, so a failed install only skips it).
 if ! command -v ffmpeg >/dev/null; then brew install ffmpeg >/dev/null 2>&1 || true; fi
 if command -v ffmpeg >/dev/null; then
   FRAMES=$(mktemp -d)

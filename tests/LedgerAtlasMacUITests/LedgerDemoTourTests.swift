@@ -43,3 +43,9 @@ import Testing
       .filter { !$0.hasPrefix(".") }.isEmpty)
   #expect(try LedgerDemoTour.demoLedgerURL(in: directory) != nil)
 }
+
+@Test func demoTourIsOffUnlessRequested() {
+  // CI and normal launches don't set the variable, so the tour never runs.
+  #expect(ProcessInfo.processInfo.environment["LEDGER_ATLAS_DEMO_TOUR"] == nil)
+  #expect(!LedgerDemoTour.isRequested)
+}
