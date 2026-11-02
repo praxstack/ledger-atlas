@@ -171,6 +171,72 @@ func currentV11RejectsLegacyReceiptGenerationDowngrade() throws {
   }
 }
 
+// The import-graph structure checks are set queries (GROUP BY joins and EXCEPT) so a real-size
+// ledger opens in minutes. Each test breaks exactly one of them and keeps every hash valid.
+
+@Test("a current-schema ledger rejects a binding its receipt does not list")
+func lifecycleRejectsBindingMissingFromReceipt() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_binding
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+        """,
+      overrides: fixture.digestOverrides())
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test("a current-schema ledger rejects a sidecar its receipt does not list")
+func lifecycleRejectsSidecarMissingFromReceipt() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let note = fixture.field(named: "NOTE").id(in: fixture)
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_sidecar
+          WHERE idempotency_key=\(quote(fixture.receiptID)) AND sidecar_id=\(quote(note));
+        """,
+      overrides: fixture.digestOverrides())
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test("a current-schema ledger rejects provenance that nothing references")
+func lifecycleRejectsUnreferencedProvenance() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    // Another artifact's identity, so only the "referenced somewhere" check can see it.
+    let orphan = String(repeating: "e", count: 64)
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        INSERT INTO provenance_reference VALUES (\(quote(orphan)),
+          \(quote(String(repeating: "f", count: 64))), 'other-profile', '1', NULL,
+          'OTHER', 'k', NULL, NULL);
+        """,
+      overrides: fixture.digestOverrides())
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
+@Test("a current-schema ledger rejects an event its receipt does not list")
+func lifecycleRejectsEventMissingFromReceipt() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        """
+        DELETE FROM receipt_binding WHERE idempotency_key=\(quote(fixture.receiptID));
+        DELETE FROM receipt_sidecar WHERE idempotency_key=\(quote(fixture.receiptID));
+        DELETE FROM receipt_event WHERE idempotency_key=\(quote(fixture.receiptID));
+        """)
+    }
+    try assertRejectedWithoutMutation(at: url)
+  }
+}
+
 @Test(
   "persisted v10 and current-schema reject kind bindings repointed to memo without mutation",
   arguments: [10, CanonicalLedgerSchema.version])
@@ -815,6 +881,7 @@ private func materializeCurrentV19Fixture(at url: URL, fixture: V19Fixture) thro
     try execute(database, "BEGIN IMMEDIATE;")
     for statement in CanonicalLedgerSchema.v10ToV11MigrationStatements
       + CanonicalLedgerSchema.v11ToV12MigrationStatements
+      + CanonicalLedgerSchema.v12ToV13MigrationStatements
     {
       try execute(database, statement)
     }
