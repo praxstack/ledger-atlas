@@ -4,8 +4,8 @@ import SwiftUI
 struct LocalAccessSurface: View {
   let accountCount: Int
   let transactionCount: Int
-  @State private var portal = LedgerLoopbackPortal()
-  @State private var portalURL: URL?
+  let ledgerURL: URL?
+  let portal: LedgerPortalController
   @State private var message: String?
   @State private var isStarting = false
 
@@ -14,7 +14,7 @@ struct LocalAccessSurface: View {
       Text("Local Web Access").font(.largeTitle.bold())
       Text("This is a temporary read-only status view on this Mac. It exposes no mutation route and contains no financial amounts, names, notes, or paths.")
         .foregroundStyle(.secondary)
-      if let portalURL {
+      if let portalURL = portal.url {
         Label("Portal running", systemImage: "network")
         Text(portalURL.absoluteString)
           .font(.caption.monospaced())
@@ -28,12 +28,11 @@ struct LocalAccessSurface: View {
           }
           Button("Stop portal", role: .destructive) {
             portal.stop()
-            self.portalURL = nil
             message = "Portal stopped."
           }
         }
       } else {
-        Text("Portal is stopped.").foregroundStyle(.secondary)
+        Text(Self.stoppedText(portal.lastStopReason)).foregroundStyle(.secondary)
         Button(isStarting ? "Starting…" : "Start read-only portal") { start() }
           .disabled(isStarting)
       }
@@ -42,10 +41,7 @@ struct LocalAccessSurface: View {
     }
     .padding(24)
     .navigationTitle("Local Web Access")
-    .onDisappear {
-      portal.stop()
-      portalURL = nil
-    }
+    .onDisappear { portal.stop() }
   }
 
   private func start() {
@@ -53,13 +49,24 @@ struct LocalAccessSurface: View {
     message = nil
     Task {
       do {
-        portalURL = try await portal.start(
+        _ = try await portal.start(
           projection: .init(
-            state: .ready, accountCount: accountCount, transactionCount: transactionCount))
+            state: ledgerURL == nil ? .empty : .ready, accountCount: accountCount,
+            transactionCount: transactionCount),
+          ledger: ledgerURL)
       } catch {
         message = "The local portal could not start."
       }
       isStarting = false
+    }
+  }
+
+  static func stoppedText(_ reason: LedgerPortalController.StopReason?) -> String {
+    switch reason {
+    case .locked: "Portal stopped because Ledger Atlas locked."
+    case .ledgerChanged: "Portal stopped because a different ledger opened."
+    case .stoppedByPortal: "Portal stopped after sleep or inactivity."
+    case .requested, nil: "Portal is stopped."
     }
   }
 }

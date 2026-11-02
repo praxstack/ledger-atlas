@@ -78,6 +78,18 @@ public struct LedgerApplication: LedgerClient {
     ).revision
   }
 
+  /// Plans importing an XLSX workbook into this ledger. Nothing is written.
+  public func planXLSXImport(_ content: LedgerXLSXExchange.Content) throws
+    -> LedgerXLSXImportPlan
+  {
+    LedgerXLSXImportPlan(content: content, existing: .init(snapshot: try snapshot()))
+  }
+
+  /// Applies a plan from `planXLSXImport` in one step: all of it is added, or nothing.
+  public func applyXLSXImport(_ plan: LedgerXLSXImportPlan, createdAt: UTCInstant) throws {
+    try store.applyXLSXImport(plan, createdAt: createdAt)
+  }
+
   public func createTag(_ tag: LedgerTag) throws {
     try store.createTag(tag)
   }

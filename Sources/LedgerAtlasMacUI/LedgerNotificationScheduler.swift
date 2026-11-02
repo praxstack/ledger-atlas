@@ -16,18 +16,24 @@ public enum LedgerNotificationScheduler {
       var components = DateComponents()
       components.hour = min(max(hour, 0), 23)
       components.minute = 0
-      let content = UNMutableNotificationContent()
-      content.title = "Ledger Atlas"
-      content.body = "Review your Ledger Atlas activity."
-      content.sound = .default
       let request = UNNotificationRequest(
         identifier: reminderIdentifier,
-        content: content,
+        content: reminderContent(),
         trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true))
       try await center.add(request)
       return true
     } catch {
       return false
     }
+  }
+
+  /// The reminder is the same fixed text every day, so it shows nothing from the ledger on a
+  /// lock screen or in Notification Center, whether or not the app is locked.
+  static func reminderContent() -> UNMutableNotificationContent {
+    let content = UNMutableNotificationContent()
+    content.title = "Ledger Atlas"
+    content.body = "Review your Ledger Atlas activity."
+    content.sound = .default
+    return content
   }
 }

@@ -20,6 +20,7 @@ public struct LedgerAtlasRootView: View {
     testingScopeStopper: { LedgerLocations.stopAccess($0) })
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
+  @State private var portal = LedgerPortalController()
   @State private var productSettings: LedgerProductSettings
   /// macOS Reduce Motion, or always on when Settings says so.
   private var effectiveReduceMotion: Bool {
@@ -149,12 +150,21 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: sourceTimeZone)
     }
     .task {
+      if LedgerDemoTour.isRequested {
+        await runDemoTour()
+        return
+      }
+      portal.lockDidChange(isLocked: appLock.isLocked)
       if appLock.isLocked { closeLockedLedger() } else { startSavedLedgerReopen() }
     }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
     }
+    .onChange(of: journey.ledgerURL) { _, ledger in
+      portal.ledgerDidChange(to: ledger)
+    }
     .onChange(of: appLock.isLocked) { _, locked in
+      portal.lockDidChange(isLocked: locked)
       if locked {
         closeLockedLedger()
       } else {
@@ -291,6 +301,57 @@ public struct LedgerAtlasRootView: View {
       if let pendingIntent { route(pendingIntent) }
       consumePendingIntentIfUnlocked()
     }
+  }
+
+  /// See `LedgerDemoTour`. Creates the synthetic demo ledger, opens it like Open Ledger does,
+  /// saves one PNG per screen, writes `tour.txt` and quits. Prints where the files are.
+  private func runDemoTour() async {
+    func log(_ line: String) {
+      FileHandle.standardOutput.write(Data("[demo-tour] \(line)\n".utf8))
+    }
+    do {
+      let output = try LedgerDemoTour.outputDirectory()
+      log("output \(output.path)")
+      guard !appLock.isLocked else {
+        log("refused: App Lock is on")
+        NSApplication.shared.terminate(nil)
+        return
+      }
+      guard let url = try LedgerDemoTour.demoLedgerURL(in: LedgerLocations.ledgersDirectory())
+      else {
+        log("refused: this Mac already has ledgers; the tour only runs on a fresh install")
+        NSApplication.shared.terminate(nil)
+        return
+      }
+      defer {
+        session.close()
+        journey.closeLedger()
+        bookmarkStore.clear()
+        LedgerDemoTour.removeDemoLedger(at: url)
+      }
+      try LedgerDemoTour.makeDemoLedger(at: url)
+      log("demo ledger created")
+      performLedgerSelection(.open, url: url)
+      for _ in 0..<100 where journey.snapshot == nil {
+        try await Task.sleep(for: .milliseconds(200))
+      }
+      log(journey.snapshot == nil ? "ledger did not open: \(journey.lastFailure ?? lifecycleMessage ?? "-")" : "ledger opened")
+      var lines: [String] = []
+      for (index, destination) in LedgerDemoTour.destinations.enumerated() {
+        selection = destination
+        try await Task.sleep(for: .milliseconds(1_500))
+        let name = String(format: "%02d-%@.png", index + 1, destination.rawValue)
+        let saved = LedgerDemoTour.capture(to: output.appendingPathComponent(name))
+        lines.append("\(name)\t\(destination.title)\t\(saved ? "ok" : "failed")")
+        log("\(destination.title): \(saved ? "saved" : "capture failed")")
+      }
+      try lines.joined(separator: "\n").write(
+        to: output.appendingPathComponent("tour.txt"), atomically: true, encoding: .utf8)
+      log("done")
+    } catch {
+      log("failed: \(error)")
+    }
+    NSApplication.shared.terminate(nil)
   }
 
   private func retryLedger(_ operation: LedgerLifecycleOperation) {
@@ -1047,7 +1108,8 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .localAccess {
       LocalAccessSurface(
         accountCount: journey.snapshot?.accounts.count ?? 0,
-        transactionCount: journey.snapshot?.transactions.count ?? 0)
+        transactionCount: journey.snapshot?.transactions.count ?? 0,
+        ledgerURL: journey.ledgerURL, portal: portal)
         .id(selection)
     } else if selection == .backupRestore {
       BackupSurface(
