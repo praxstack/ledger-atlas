@@ -80,7 +80,7 @@ struct TargetBoundReconciliationProof: Equatable, Sendable {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    token = hasher.finalize().lowercaseHex
+    token = CanonicalReceiptDigest.hex(hasher.finalize())
   }
 }
 
@@ -163,7 +163,7 @@ public struct ReconciliationEvidence: Equatable, Sendable {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().lowercaseHex
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   var targetProofToken: String { targetProof.token }
@@ -286,7 +286,7 @@ public struct ReconciliationReport: Encodable, Equatable, Sendable {
       update(&hasher, Data(entry.reasonCode.rawValue.utf8))
       update(&hasher, Data((entry.evidenceToken ?? "").utf8))
     }
-    return hasher.finalize().lowercaseHex
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   private static func update(_ hasher: inout SHA256, _ data: Data) {

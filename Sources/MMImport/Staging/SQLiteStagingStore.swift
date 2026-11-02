@@ -551,7 +551,7 @@ struct SQLiteStagingStore {
         }
       }
     }
-    return hasher.finalize().lowercaseHex
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   private func digestValue(_ statement: OpaquePointer, ordinal: Int32) throws -> Data {

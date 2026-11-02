@@ -48,6 +48,6 @@ public enum StableStagingID {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: component)
     }
-    return hasher.finalize().lowercaseHex
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 }

@@ -223,7 +223,7 @@ enum CanonicalCommitDigest {
 
   static func sidecarComponents(_ sidecar: CanonicalPersistedSidecar) -> [String] {
     let locator = sidecar.provenance.locator
-    let payloadHash = SHA256.hash(data: sidecar.payload).lowercaseHex
+    let payloadHash = CanonicalReceiptDigest.hex(SHA256.hash(data: sidecar.payload))
     var components = [
       sidecar.sidecarID, sidecar.provenance.deterministicID,
       String(sidecar.formatVersion),

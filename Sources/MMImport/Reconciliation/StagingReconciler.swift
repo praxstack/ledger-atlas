@@ -294,7 +294,7 @@ public struct StagingReconciler: Sendable {
         return "invalid-blob:"
       }
       return "invalid-blob:"
-        + Data(bytes: bytes, count: count).lowercaseHex
+        + CanonicalReceiptDigest.hex(Data(bytes: bytes, count: count))
     default:
       return "invalid-null"
     }
@@ -595,7 +595,7 @@ public struct StagingReconciler: Sendable {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: data)
     }
-    return hasher.finalize().lowercaseHex
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 }
 

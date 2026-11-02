@@ -347,11 +347,11 @@ package enum CanonicalLedgerHealth {
     let invalidQueries = [
       "SELECT 1 FROM import_receipt WHERE length(idempotency_key)<>64 OR idempotency_key GLOB '*[^0-9a-f]*' OR length(staging_digest)<>64 OR staging_digest GLOB '*[^0-9a-f]*' OR length(artifact_sha256)<>64 OR artifact_sha256 GLOB '*[^0-9a-f]*' OR length(reconciliation_hash)<>64 OR reconciliation_hash GLOB '*[^0-9a-f]*' OR length(event_set_hash)<>64 OR event_set_hash GLOB '*[^0-9a-f]*' OR event_count<0",
       "SELECT 1 FROM import_receipt r WHERE r.event_count<>(SELECT count(*) FROM receipt_event x WHERE x.idempotency_key=r.idempotency_key)",
-      "SELECT 1 FROM economic_event e WHERE (SELECT count(*) FROM receipt_event r WHERE r.event_id=e.event_id)<>1",
+      "SELECT 1 FROM economic_event e LEFT JOIN (SELECT event_id, count(*) n FROM receipt_event GROUP BY event_id) r ON r.event_id=e.event_id WHERE coalesce(r.n,0)<>1",
       "SELECT 1 FROM economic_event e WHERE (SELECT count(*) FROM event_source_binding b WHERE b.event_id=e.event_id)<>5 OR EXISTS (SELECT 1 FROM (SELECT 'amount' semantic UNION ALL SELECT 'currency' UNION ALL SELECT 'occurred_at' UNION ALL SELECT 'account' UNION ALL SELECT 'kind') required WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.event_id=e.event_id AND b.semantic=required.semantic))",
-      "SELECT 1 FROM event_source_binding b WHERE (SELECT count(*) FROM receipt_binding r WHERE r.event_id=b.event_id AND r.semantic=b.semantic AND r.provenance_id=b.provenance_id)<>1",
+      "SELECT 1 FROM event_source_binding b LEFT JOIN (SELECT event_id, semantic, provenance_id, count(*) n FROM receipt_binding GROUP BY event_id, semantic, provenance_id) r ON r.event_id=b.event_id AND r.semantic=b.semantic AND r.provenance_id=b.provenance_id WHERE coalesce(r.n,0)<>1",
       "SELECT 1 FROM receipt_binding b WHERE NOT EXISTS (SELECT 1 FROM receipt_event e WHERE e.idempotency_key=b.idempotency_key AND e.event_id=b.event_id)",
-      "SELECT 1 FROM sidecar_reference s WHERE (SELECT count(*) FROM receipt_sidecar r WHERE r.sidecar_id=s.sidecar_id AND r.event_id=s.event_id AND r.provenance_id=s.provenance_id)<>1",
+      "SELECT 1 FROM sidecar_reference s LEFT JOIN (SELECT sidecar_id, event_id, provenance_id, count(*) n FROM receipt_sidecar GROUP BY sidecar_id, event_id, provenance_id) r ON r.sidecar_id=s.sidecar_id AND r.event_id=s.event_id AND r.provenance_id=s.provenance_id WHERE coalesce(r.n,0)<>1",
       "SELECT 1 FROM receipt_sidecar s WHERE NOT EXISTS (SELECT 1 FROM receipt_event e WHERE e.idempotency_key=s.idempotency_key AND e.event_id=s.event_id)",
       "SELECT 1 FROM sidecar_reference WHERE provenance_id<>sidecar_id OR format_version<>1 OR length(coalesce(declared_type,''))>1024 OR length(payload)>67108864 OR (storage_class='null' AND length(payload)<>0) OR (storage_class IN ('integer','real') AND length(payload)<>8)",
       "SELECT 1 FROM receipt_preservation_payload WHERE provenance_id<>source_subject_id OR format_version<>1 OR length(coalesce(declared_type,''))>1024 OR length(payload)>67108864 OR (storage_class='null' AND length(payload)<>0) OR (storage_class IN ('integer','real') AND length(payload)<>8)",
@@ -366,7 +366,7 @@ package enum CanonicalLedgerHealth {
       "SELECT a.anchor_id FROM receipt_preservation_anchor a LEFT JOIN receipt_preservation_membership m ON m.idempotency_key=a.idempotency_key AND m.anchor_id=a.anchor_id AND m.source_subject_id=a.source_subject_id AND m.payload_id IS NULL GROUP BY a.anchor_id HAVING count(m.idempotency_key)<>1",
       "SELECT p.payload_id FROM receipt_preservation_payload p LEFT JOIN receipt_preservation_membership m ON m.idempotency_key=p.idempotency_key AND m.payload_id=p.payload_id AND m.source_subject_id=p.source_subject_id GROUP BY p.payload_id HAVING count(m.idempotency_key)<>1",
       "SELECT 1 FROM import_receipt r WHERE r.event_count=0 AND NOT EXISTS (SELECT 1 FROM receipt_preservation_membership m WHERE m.idempotency_key=r.idempotency_key)",
-      "SELECT 1 FROM provenance_reference p WHERE NOT EXISTS (SELECT 1 FROM event_source_binding b WHERE b.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM sidecar_reference s WHERE s.provenance_id=p.provenance_id) AND NOT EXISTS (SELECT 1 FROM receipt_preservation_payload x WHERE x.provenance_id=p.provenance_id)",
+      "SELECT 1 FROM (SELECT provenance_id FROM provenance_reference EXCEPT SELECT provenance_id FROM event_source_binding EXCEPT SELECT provenance_id FROM sidecar_reference EXCEPT SELECT provenance_id FROM receipt_preservation_payload) LIMIT 1",
     ]
     for query in invalidQueries where try !rows(database, query, { _ in () }).isEmpty {
       throw HealthError.invalid
@@ -501,9 +501,11 @@ package enum CanonicalLedgerHealth {
       guard
         eventSourceRecordIDs.contains(sourceRecordID) || preservedRecordIDs.contains(sourceRecordID)
       else { continue }
+      // sidecar_id always equals provenance_id (table CHECK), so the sidecar_id prefix lets
+      // SQLite use the primary key instead of scanning every sidecar for each field.
       let represented = try !rows(
         database,
-        "SELECT 1 FROM sidecar_reference WHERE provenance_id='\(field.text(0))' UNION ALL SELECT 1 FROM receipt_preservation_payload WHERE idempotency_key='\(receipt)' AND provenance_id='\(field.text(0))' LIMIT 1",
+        "SELECT 1 FROM sidecar_reference WHERE sidecar_id='\(field.text(0))' AND provenance_id='\(field.text(0))' UNION ALL SELECT 1 FROM receipt_preservation_payload WHERE idempotency_key='\(receipt)' AND provenance_id='\(field.text(0))' LIMIT 1",
         { _ in true }
       ).isEmpty
       guard represented else { throw HealthError.invalid }
@@ -513,6 +515,9 @@ package enum CanonicalLedgerHealth {
       "SELECT e.event_id, e.account_id, e.event_kind, e.amount_literal, e.currency_unit, e.instant_milliseconds, e.local_year, e.local_month, e.local_day, e.local_hour, e.local_minute, e.local_second, e.local_millisecond, e.timezone_kind, e.timezone_value, e.temporal_precision, e.resolved_offset_seconds, e.source_record_id, e.provenance_id FROM receipt_event r JOIN economic_event e ON e.event_id=r.event_id WHERE r.idempotency_key='\(receipt)' ORDER BY e.event_id",
       { $0 })
     let hasTransferTable = try transferTableExists(database)
+    // This receipt's events by source record, so per-record checks below don't scan every event.
+    let eventIDsBySource = Dictionary(grouping: events, by: { $0.text(17) })
+      .mapValues { $0.map { "'\($0.text(0))'" }.joined(separator: ",") }
     for event in events {
       let eventID = event.text(0)
       // A paired transfer leg's commitments live on its transfer's revision, under field names
@@ -615,11 +620,13 @@ package enum CanonicalLedgerHealth {
       if !hasAnchor { continue }
       let missingPreservation = try rows(
         database,
-        "SELECT 1 FROM sidecar_reference s JOIN receipt_event r ON r.event_id=s.event_id LEFT JOIN event_source_binding b ON b.event_id=s.event_id AND b.provenance_id=s.provenance_id LEFT JOIN receipt_preservation_payload p ON p.idempotency_key=r.idempotency_key AND p.source_subject_id=s.provenance_id WHERE r.idempotency_key='\(receipt)' AND s.event_id IN (SELECT event_id FROM economic_event WHERE source_record_id='\(sourceRecordID)') AND b.provenance_id IS NULL AND (p.payload_id IS NULL OR p.format_version<>s.format_version OR p.declared_type IS NOT s.declared_type OR p.storage_class<>s.storage_class OR p.payload<>s.payload) LIMIT 1",
+        "SELECT 1 FROM sidecar_reference s JOIN receipt_event r ON r.event_id=s.event_id LEFT JOIN event_source_binding b ON b.event_id=s.event_id AND b.provenance_id=s.provenance_id LEFT JOIN receipt_preservation_payload p ON p.idempotency_key=r.idempotency_key AND p.source_subject_id=s.provenance_id WHERE r.idempotency_key='\(receipt)' AND s.event_id IN (\(eventIDsBySource[sourceRecordID] ?? "''")) AND b.provenance_id IS NULL AND (p.payload_id IS NULL OR p.format_version<>s.format_version OR p.declared_type IS NOT s.declared_type OR p.storage_class<>s.storage_class OR p.payload<>s.payload) LIMIT 1",
         { _ in true })
+      // Starts from the record's anchor and looks sidecars up by key (sidecar_id equals
+      // provenance_id by table CHECK); otherwise SQLite scans every payload for each record.
       let missingSidecar = try rows(
         database,
-        "SELECT 1 FROM receipt_preservation_payload p JOIN receipt_preservation_anchor a ON a.idempotency_key=p.idempotency_key AND a.anchor_id=p.anchor_id LEFT JOIN sidecar_reference s ON s.provenance_id=p.provenance_id LEFT JOIN receipt_event r ON r.idempotency_key=p.idempotency_key AND r.event_id=s.event_id LEFT JOIN event_source_binding b ON b.event_id=s.event_id AND b.provenance_id=s.provenance_id WHERE p.idempotency_key='\(receipt)' AND a.source_subject_id='\(sourceRecordID)' AND s.sidecar_id IS NULL AND b.provenance_id IS NULL LIMIT 1",
+        "SELECT 1 FROM receipt_preservation_anchor a CROSS JOIN receipt_preservation_payload p ON p.idempotency_key=a.idempotency_key AND p.anchor_id=a.anchor_id LEFT JOIN sidecar_reference s ON s.sidecar_id=p.provenance_id AND s.provenance_id=p.provenance_id LEFT JOIN receipt_event r ON r.idempotency_key=p.idempotency_key AND r.event_id=s.event_id LEFT JOIN event_source_binding b ON b.event_id=s.event_id AND b.provenance_id=s.provenance_id WHERE p.idempotency_key='\(receipt)' AND a.source_subject_id='\(sourceRecordID)' AND s.sidecar_id IS NULL AND b.provenance_id IS NULL LIMIT 1",
         { _ in true })
       guard missingPreservation.isEmpty, missingSidecar.isEmpty else { throw HealthError.invalid }
     }

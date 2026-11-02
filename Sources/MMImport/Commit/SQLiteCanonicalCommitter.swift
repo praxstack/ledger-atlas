@@ -2348,7 +2348,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
     }
     for payload in preservation.payloads {
       let locator = payload.provenance.locator
-      let payloadHash = SHA256.hash(data: payload.payload).lowercaseHex
+      let payloadHash = CanonicalReceiptDigest.hex(SHA256.hash(data: payload.payload))
       components.append(contentsOf: [
         payload.payloadID, payload.receiptID, payload.anchorID, payload.sourceSubjectID,
         String(payload.formatVersion),
