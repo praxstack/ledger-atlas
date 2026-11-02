@@ -66,13 +66,16 @@ package enum CanonicalLedgerHealth {
   /// The replay of a large import is most of the time it takes to open it, and its result
   /// depends only on the rows it reads, the receipt trust key and the code doing the check.
   /// A stamp is an HMAC, under the ledger's Keychain trust key, of exactly those rows plus the
-  /// schema and the running build. So a later open of the same import graph, with the same key
+  /// replay's revision, the schema and the running build. So a later open of the same import graph, with the same key
   /// and the same app build, can skip the replay; any other change gets the full replay.
   ///
   /// Stamps are not secret, and they can't be forged without the trust key, which never comes
-  /// from the ledger file. They are kept in the app's defaults; losing them only costs time.
+  /// from the ledger file. The app keeps them in its defaults; losing them only costs time.
   package final class VerifiedImportGraphs: @unchecked Sendable {
-    package static let shared = VerifiedImportGraphs(defaults: .standard)
+    /// Only the app itself keeps stamps between runs. Tests and command-line tools remember them
+    /// in memory, so a replay changed during development is never skipped by an old stamp.
+    package static let shared = VerifiedImportGraphs(
+      defaults: Bundle.main.bundleIdentifier == "com.praxstack.ledgeratlas" ? .standard : nil)
     static let defaultsKey = "LedgerAtlas.verifiedImportGraphs.v1"
     static let limit = 16
 
@@ -163,14 +166,22 @@ package enum CanonicalLedgerHealth {
     let digest = Data(hasher.finalize())
     let message =
       Data(
-        ["ledger-atlas/import-graph-verified/v1", CanonicalLedgerSchema.fingerprint, buildIdentity, ""]
+        [
+          "ledger-atlas/import-graph-verified/v1", "replay-revision=\(replayRevision)",
+          CanonicalLedgerSchema.fingerprint, buildIdentity, "",
+        ]
           .joined(separator: "\n").utf8) + digest
     let code = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: trustKey))
     return Data(code).map { String(format: "%02x", $0) }.joined()
   }
 
+  /// Bump this whenever `validateImportGraph`, or anything it calls, changes what it accepts.
+  /// Stamps made under another revision no longer match, so every import is replayed once.
+  static let replayRevision = 1
+
   /// Which build of the checking code made a stamp: the bundle version plus the executable's
-  /// size and modification time, so any rebuild re-checks once.
+  /// size and modification time, so a new app build also re-checks once. `replayRevision` is
+  /// the guarantee; this is a backstop.
   static let buildIdentity: String = {
     let info = Bundle.main.infoDictionary ?? [:]
     var parts = [
