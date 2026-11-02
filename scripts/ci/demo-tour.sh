@@ -9,8 +9,9 @@ OUT=${OUT_DIR:-dist/demo-tour}
 mkdir -p "$OUT"
 MOUNT=$(mktemp -d)
 hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+PID=
 cleanup() {
-  pkill -x LedgerAtlas 2>/dev/null || true
+  [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
   sleep 2
   hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true
 }
@@ -35,6 +36,14 @@ count=$(ls "$OUT"/[0-9][0-9]-*.png 2>/dev/null | grep -vc "/00-" || true)
 echo "demo tour: $count screens"
 grep -q "ledger opened" "$LOG" || { echo "demo ledger did not open"; exit 1; }
 [ "$count" -ge 10 ] || { echo "too few screens captured"; exit 1; }
+# A blank or single-colour window compresses to a few KB; a real screen is far larger.
+blank=0
+for f in "$OUT"/[0-9][0-9]-*.png; do
+  case "$(basename "$f")" in 00-*) continue ;; esac
+  size=$(stat -f%z "$f")
+  if [ "$size" -lt 25000 ]; then echo "looks blank: $(basename "$f") ($size bytes)"; blank=$((blank + 1)); fi
+done
+[ "$blank" -eq 0 ] || { echo "$blank screens look blank"; exit 1; }
 # A walkthrough video: each screen for two seconds.
 if ! command -v ffmpeg >/dev/null; then brew install ffmpeg >/dev/null 2>&1 || true; fi
 if command -v ffmpeg >/dev/null; then

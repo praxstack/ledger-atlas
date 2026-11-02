@@ -312,8 +312,23 @@ public struct LedgerAtlasRootView: View {
     do {
       let output = try LedgerDemoTour.outputDirectory()
       log("output \(output.path)")
-      let ledgers = try LedgerLocations.ledgersDirectory()
-      let url = LedgerLocations.availableURL(named: "Demo Household", in: ledgers)
+      guard !appLock.isLocked else {
+        log("refused: App Lock is on")
+        NSApplication.shared.terminate(nil)
+        return
+      }
+      guard let url = try LedgerDemoTour.demoLedgerURL(in: LedgerLocations.ledgersDirectory())
+      else {
+        log("refused: this Mac already has ledgers; the tour only runs on a fresh install")
+        NSApplication.shared.terminate(nil)
+        return
+      }
+      defer {
+        session.close()
+        journey.closeLedger()
+        bookmarkStore.clear()
+        LedgerDemoTour.removeDemoLedger(at: url)
+      }
       try LedgerDemoTour.makeDemoLedger(at: url)
       log("demo ledger created")
       performLedgerSelection(.open, url: url)

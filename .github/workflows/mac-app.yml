@@ -120,20 +120,6 @@ jobs:
           DMG_PATH: ${{ steps.package.outputs.dmg }}
         run: ./scripts/ci/smoke-launch.sh "$DMG_PATH"
 
-      - name: Demo tour (screens of the real app with a synthetic ledger)
-        env:
-          DMG_PATH: ${{ steps.package.outputs.dmg }}
-        run: ./scripts/ci/demo-tour.sh "$DMG_PATH"
-
-      - name: Upload demo tour
-        if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: demo-tour-${{ steps.version.outputs.version }}
-          path: dist/demo-tour
-          retention-days: 30
-          if-no-files-found: ignore
-
       - name: Upload DMG
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
@@ -143,6 +129,24 @@ jobs:
             dist/*.sha256
           retention-days: 30
           if-no-files-found: error
+
+      - name: Demo tour (screens of the real app with a synthetic ledger)
+        # After the DMG upload, so a tour problem never holds back the DMG itself, and never
+        # blocks publishing a tagged release.
+        continue-on-error: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        id: tour
+        env:
+          DMG_PATH: ${{ steps.package.outputs.dmg }}
+        run: ./scripts/ci/demo-tour.sh "$DMG_PATH"
+
+      - name: Upload demo tour
+        if: always() && steps.package.outcome == 'success'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: demo-tour-${{ steps.version.outputs.version }}
+          path: dist/demo-tour
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload build log on failure
         if: failure()

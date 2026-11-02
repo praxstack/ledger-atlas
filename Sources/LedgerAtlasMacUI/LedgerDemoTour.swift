@@ -21,6 +21,25 @@ package enum LedgerDemoTour {
     .importReview,
   ]
 
+  /// The tour only runs where no ledger exists yet (a fresh CI runner), so it can never touch
+  /// a person's ledgers. Returns the demo ledger's URL in app storage.
+  package static func demoLedgerURL(in ledgers: URL) throws -> URL? {
+    let existing = try FileManager.default.contentsOfDirectory(atPath: ledgers.path)
+      .filter { !$0.hasPrefix(".") }
+    guard existing.isEmpty else { return nil }
+    return ledgers.appendingPathComponent("Demo Household.sqlite")
+  }
+
+  /// Removes the demo ledger and everything SQLite kept beside it.
+  package static func removeDemoLedger(at url: URL) {
+    let directory = url.deletingLastPathComponent()
+    let stem = url.lastPathComponent
+    for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    where name.hasPrefix(stem) {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+  }
+
   package static func outputDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
       "LedgerAtlasDemoTour", isDirectory: true)
@@ -87,12 +106,16 @@ package enum LedgerDemoTour {
         in: zone, precision: .minute, ambiguityPolicy: .reject)
     }
     func inr(_ value: String) throws -> CurrencyAmount {
-      CurrencyAmount(unitCode: "INR", amount: try ExactDecimal(value))
+      try CurrencyAmount(unitCode: "INR", amount: try ExactDecimal(value))
     }
     var sequence = 0
+    let tags = try ["Household", "Weekend", "Work"].map {
+      try LedgerTag(id: key("tag-\($0)"), name: $0, origin: origin)
+    }
+    for tag in tags { try app.createTag(tag) }
     func add(
       _ kind: LedgerTransactionKind, _ account: LedgerAccount, _ category: LedgerCategory?,
-      _ amount: String, _ month: Int, _ day: Int, note: String? = nil
+      _ amount: String, _ month: Int, _ day: Int, note: String? = nil, tag: LedgerTag? = nil
     ) throws {
       sequence += 1
       let draft = try LedgerTransactionDraft(
@@ -104,7 +127,8 @@ package enum LedgerDemoTour {
         note: note, origin: origin)
       _ = try app.createTransaction(
         idempotencyKey: key("demo-\(sequence)"), draft: draft,
-        createdAt: UTCInstant(epochMilliseconds: 1_790_000_000_000 + Int64(sequence)))
+        createdAt: UTCInstant(epochMilliseconds: 1_790_000_000_000 + Int64(sequence)),
+        tags: try LedgerTagLinks(tag.map { [$0.id] } ?? []))
     }
     let spending: [(LedgerCategory, LedgerAccount, [String])] = [
       (food, card, ["420.00", "185.50", "640.00", "312.25", "275.00"]),
@@ -117,7 +141,9 @@ package enum LedgerDemoTour {
       try add(.expense, bank, rent, "24000.00", month, 3, note: "Flat rent")
       for (index, (category, account, amounts)) in spending.enumerated() {
         for (offset, amount) in amounts.enumerated() {
-          try add(.expense, account, category, amount, month, 4 + index * 6 + offset)
+          try add(
+            .expense, account, category, amount, month, 4 + index * 6 + offset,
+            tag: [tags[0], tags[1], nil][(offset + index) % 3])
         }
       }
       _ = try app.createTransfer(
@@ -126,6 +152,24 @@ package enum LedgerDemoTour {
         destinationAmount: try inr("3000.00"), conversion: nil, fee: nil, feeAccountID: nil,
         occurredAt: try when(month, 15), origin: origin,
         createdAt: UTCInstant(epochMilliseconds: 1_790_100_000_000 + Int64(month)))
+    }
+    // A currency transfer: 41,625 INR left the bank and 500 USD arrived in the travel wallet.
+    let sent = try inr("41625.00")
+    let received = try CurrencyAmount(unitCode: "USD", amount: try ExactDecimal("500.00"))
+    _ = try app.createTransfer(
+      idempotencyKey: key("demo-fx"), sourceAccountID: bank.id, destinationAccountID: travel.id,
+      sourceAmount: sent, destinationAmount: received,
+      conversion: try LedgerConversion(
+        sourceAmount: sent, convertedAmount: received,
+        rate: try LedgerConversion.impliedRate(sourceAmount: sent, convertedAmount: received, scale: 4),
+        rateScale: 4, rounding: .halfEven),
+      fee: try inr("150.00"), feeAccountID: bank.id, occurredAt: try when(9, 20),
+      origin: origin, createdAt: UTCInstant(epochMilliseconds: 1_790_200_000_000))
+    for (index, body) in ["Pay electricity before the 10th", "Trip budget: 500 USD"].enumerated() {
+      try app.saveMemo(
+        LedgerMemo(
+          id: key("memo-\(index)"), body: body,
+          date: try SourceLocalDate(year: 2026, month: 9 + index, day: 5), origin: origin))
     }
     let rule = try LedgerRecurrenceRule(
       id: StableLedgerID.recurrenceRule(origin: origin, localKey: key("rule-rent")),
