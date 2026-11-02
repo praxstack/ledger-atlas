@@ -1060,7 +1060,7 @@ public final class LedgerStore {
       }),
       !package.revisions.contains(where: { revision in
         revision.draft.sourceLiterals.contains {
-          $0.provenanceID != nil || $0.field == "import.eventID"
+          $0.provenanceID != nil || $0.field.hasPrefix("import.")
         }
       })
     else { throw Error.incompatibleCanonicalStore }
@@ -1199,18 +1199,49 @@ public final class LedgerStore {
           sql: "SELECT transaction_id FROM main.ledger_transaction", on: database, map: { $0[0] }))
     }
     let events = try loadEconomicEvents(on: database)
-    for event in events where !existingTransactions.contains(event.id) {
-      if !knownAccounts.contains(event.accountID) {
-        try run(
-          "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
-          values: [
-            .text(event.accountID),
-            .text((try? sourceAccountUID(eventID: event.id, on: database)) ?? event.accountID),
-            .text(event.unitCode),
-            .text(origin.id), .text(LedgerLifecycleState.active.rawValue),
-          ], on: database)
-        knownAccounts.insert(event.accountID)
-      }
+    let pairs = try importedTransferPairs(events: events, on: database)
+    func ensureAccount(for event: ImportedEconomicEvent) throws {
+      guard !knownAccounts.contains(event.accountID) else { return }
+      try run(
+        "INSERT INTO main.ledger_account(account_id, name, currency_unit, origin_id, lifecycle) VALUES (?, ?, ?, ?, ?)",
+        values: [
+          .text(event.accountID),
+          .text((try? sourceAccountUID(eventID: event.id, on: database)) ?? event.accountID),
+          .text(event.unitCode),
+          .text(origin.id), .text(LedgerLifecycleState.active.rawValue),
+        ], on: database)
+      knownAccounts.insert(event.accountID)
+    }
+    // Each paired transfer shows as one transaction named by its transfer ID.
+    for pair in pairs where !existingTransactions.contains(pair.id) {
+      guard !existingTransactions.contains(pair.debit.id),
+        !existingTransactions.contains(pair.credit.id)
+      else { throw Error.incompatibleCanonicalStore }
+      try ensureAccount(for: pair.debit)
+      try ensureAccount(for: pair.credit)
+      let revision = try LedgerTransactionRevision(
+        id: StableLedgerID.revision(transactionID: pair.id, revision: 1),
+        transactionID: pair.id, revision: 1, predecessorID: nil,
+        draft: LedgerTransactionDraft(
+          effects: [
+            try LedgerTransactionEffect(
+              accountID: pair.debit.accountID, direction: .decrease, amount: pair.debit.amount),
+            try LedgerTransactionEffect(
+              accountID: pair.credit.accountID, direction: .increase, amount: pair.credit.amount),
+          ], categoryID: nil, kind: .transfer, occurredAt: pair.debit.occurredAt,
+          sourceLiterals: [
+            try LedgerSourceLiteral(field: "import.eventID.debit", literal: pair.debit.id),
+            try LedgerSourceLiteral(field: "import.eventID.credit", literal: pair.credit.id),
+          ], origin: origin),
+        createdAt: UTCInstant(epochMilliseconds: pair.debit.occurredAt.instant.epochMilliseconds))
+      try run(
+        "INSERT INTO main.ledger_transaction(transaction_id, current_revision_id) VALUES (?, ?)",
+        values: [.text(pair.id), .text(revision.id)], on: database)
+      try insert(revision, on: database)
+    }
+    for event in events
+    where event.kind != .transfer && !existingTransactions.contains(event.id) {
+      try ensureAccount(for: event)
       let categoryID = categoryIDsByTransactionID[event.id]
       if let categoryID {
         guard Self.categoryIsActive(
@@ -1350,6 +1381,38 @@ public final class LedgerStore {
         occurrenceCount: try requireInt(row[6]), completedCount: try requireInt(row[7]),
         lifecycle: try requireRaw(LedgerInstallmentPlan.Lifecycle.self, row[8]))
     }
+  }
+
+  private struct ImportedTransferPair {
+    let id: String
+    let debit: ImportedEconomicEvent
+    let credit: ImportedEconomicEvent
+  }
+
+  /// Every imported transfer leg must belong to exactly one pair: a debit leg and a credit leg
+  /// in two different accounts. A leg without its partner, or a pair inside one account,
+  /// cannot be shown as a transfer honestly, so the store refuses it.
+  private static func importedTransferPairs(
+    events: [ImportedEconomicEvent], on database: OpaquePointer
+  ) throws -> [ImportedTransferPair] {
+    let eventsByID = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
+    let pairs = try load(
+      sql:
+        "SELECT transfer_id, debit_event_id, credit_event_id FROM main.economic_event_transfer ORDER BY transfer_id",
+      on: database
+    ) { row -> ImportedTransferPair in
+      guard CanonicalIdentifier.isValid(row[0]),
+        let debit = eventsByID[row[1]], debit.kind == .transfer, debit.direction == .decrease,
+        let credit = eventsByID[row[2]], credit.kind == .transfer,
+        credit.direction == .increase, debit.accountID != credit.accountID
+      else { throw Error.incompatibleCanonicalStore }
+      return ImportedTransferPair(id: row[0], debit: debit, credit: credit)
+    }
+    let pairedEventIDs = Set(pairs.flatMap { [$0.debit.id, $0.credit.id] })
+    guard events.allSatisfy({ $0.kind != .transfer || pairedEventIDs.contains($0.id) }),
+      !pairs.contains(where: { eventsByID[$0.id] != nil })
+    else { throw Error.incompatibleCanonicalStore }
+    return pairs
   }
 
   private struct ImportedEconomicEvent {

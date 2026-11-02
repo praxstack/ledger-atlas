@@ -1041,6 +1041,124 @@ private func makeStoreWithAccountForRevisionTests() throws
   #expect(draft.effects.map(\.direction) == [.increase])
 }
 
+@Test func pairedImportedTransferLegsBecomeOneTransfer() throws {
+  let database = try makeCanonicalDatabase()
+  defer { sqlite3_close(database) }
+  let cash = String(repeating: "1", count: 64)
+  let bank = String(repeating: "2", count: 64)
+  let debit = String(repeating: "a", count: 64)
+  let credit = String(repeating: "b", count: 64)
+  let transfer = String(repeating: "c", count: 64)
+  let income = String(repeating: "d", count: 64)
+  try insertImportedEvent(debit, account: cash, kind: "transfer_debit", amount: "10.00", into: database)
+  try insertImportedEvent(credit, account: bank, kind: "transfer_credit", amount: "830.50", unit: "INR", milliseconds: 5_000, into: database)
+  try insertImportedEvent(income, account: bank, kind: "income", amount: "3", into: database)
+  try execute(database, "INSERT INTO economic_event_transfer VALUES ('\(transfer)', '\(debit)', '\(credit)')")
+
+  try LedgerStore.materializeImportedEvents(on: database)
+
+  #expect(
+    try rows(database, "SELECT transaction_id FROM ledger_transaction ORDER BY transaction_id")
+      == [[transfer], [income]])
+  let revision = try StableLedgerID.revision(transactionID: transfer, revision: 1)
+  #expect(
+    try rows(
+      database,
+      "SELECT account_id, direction, amount_literal, currency_unit FROM ledger_transaction_effect WHERE revision_id='\(revision)' ORDER BY account_id")
+      == [[cash, "decrease", "10.00", "USD"], [bank, "increase", "830.50", "INR"]])
+  #expect(
+    try rows(
+      database,
+      "SELECT kind, instant_milliseconds FROM ledger_transaction_revision WHERE revision_id='\(revision)'")
+      == [["transfer", "0"]])
+  #expect(
+    try rows(
+      database,
+      "SELECT ordinal, field, literal FROM ledger_transaction_source_literal WHERE revision_id='\(revision)' ORDER BY ordinal")
+      == [["0", "import.eventID.credit", credit], ["1", "import.eventID.debit", debit]])
+
+  // Running again adds nothing.
+  try LedgerStore.materializeImportedEvents(on: database)
+  #expect(try rows(database, "SELECT count(*) FROM ledger_transaction") == [["2"]])
+}
+
+@Test func unpairedOrMismatchedImportedTransferLegsAreRefused() throws {
+  let cash = String(repeating: "1", count: 64)
+  let bank = String(repeating: "2", count: 64)
+  let debit = String(repeating: "a", count: 64)
+  let credit = String(repeating: "b", count: 64)
+  let transfer = String(repeating: "c", count: 64)
+  func refuses(_ setUp: (OpaquePointer) throws -> Void) throws {
+    let database = try makeCanonicalDatabase()
+    defer { sqlite3_close(database) }
+    try setUp(database)
+    #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+      try LedgerStore.materializeImportedEvents(on: database)
+    }
+    #expect(try rows(database, "SELECT count(*) FROM ledger_transaction") == [["0"]])
+  }
+  // A leg with no partner.
+  try refuses { database in
+    try insertImportedEvent(debit, account: cash, kind: "transfer_debit", amount: "1", into: database)
+  }
+  // Legs swapped: the debit column names a credit leg.
+  try refuses { database in
+    try insertImportedEvent(debit, account: cash, kind: "transfer_debit", amount: "1", into: database)
+    try insertImportedEvent(credit, account: bank, kind: "transfer_credit", amount: "1", into: database)
+    try execute(database, "INSERT INTO economic_event_transfer VALUES ('\(transfer)', '\(credit)', '\(debit)')")
+  }
+  // A pair inside one account.
+  try refuses { database in
+    try insertImportedEvent(debit, account: cash, kind: "transfer_debit", amount: "1", into: database)
+    try insertImportedEvent(credit, account: cash, kind: "transfer_credit", amount: "1", into: database)
+    try execute(database, "INSERT INTO economic_event_transfer VALUES ('\(transfer)', '\(debit)', '\(credit)')")
+  }
+  // A pair that names a non-transfer event.
+  try refuses { database in
+    try insertImportedEvent(debit, account: cash, kind: "expense", amount: "1", into: database)
+    try insertImportedEvent(credit, account: bank, kind: "transfer_credit", amount: "1", into: database)
+    try execute(database, "INSERT INTO economic_event_transfer VALUES ('\(transfer)', '\(debit)', '\(credit)')")
+  }
+}
+
+private func insertImportedEvent(
+  _ eventID: String, account: String, kind: String, amount: String, unit: String = "USD",
+  milliseconds: Int64 = 0, into database: OpaquePointer
+) throws {
+  let provenance = String(repeating: "f", count: 63) + String(eventID.prefix(1))
+  try execute(
+    database,
+    """
+    INSERT OR IGNORE INTO provenance_reference VALUES ('\(provenance)', '\(String(repeating: "0", count: 64))', 'synthetic-profile', 'synthetic-adapter-v1', NULL, 'INOUTCOME', '\(eventID)', 0, 'c0');
+    INSERT INTO economic_event(
+      event_id, account_id, event_kind, amount_literal, currency_unit,
+      instant_milliseconds, local_year, local_month, local_day, local_hour, local_minute,
+      local_second, local_millisecond, timezone_kind, timezone_value, temporal_precision,
+      resolved_offset_seconds, source_record_id, provenance_id
+    ) VALUES (
+      '\(eventID)', '\(account)', '\(kind)', '\(amount)', '\(unit)',
+      \(milliseconds), 1970, 1, 1, 0, 0, \(milliseconds / 1_000), 0, 'fixed', '0', 'millisecond',
+      0, '\(eventID)', '\(provenance)'
+    );
+    """)
+}
+
+private func rows(_ database: OpaquePointer, _ sql: String) throws -> [[String]] {
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+    throw TestError.sqlite
+  }
+  defer { sqlite3_finalize(statement) }
+  var result: [[String]] = []
+  while sqlite3_step(statement) == SQLITE_ROW {
+    result.append(
+      (0..<sqlite3_column_count(statement)).map {
+        sqlite3_column_text(statement, $0).map { String(cString: $0) } ?? ""
+      })
+  }
+  return result
+}
+
 private func makeStoreWithImportedEvent(kind: String, localMonth: Int = 1) throws -> LedgerStore {
   let database = try makeCanonicalDatabase()
   let accountID = String(repeating: "d", count: 64)
