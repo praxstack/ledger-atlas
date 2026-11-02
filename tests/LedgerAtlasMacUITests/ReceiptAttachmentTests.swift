@@ -150,3 +150,44 @@ private func withDirectory(_ body: (URL) async throws -> Void) async throws {
     #expect(throws: LedgerApplication.Error.invalidCommand) { try journey.receiptAttachments() }
   }
 }
+
+@MainActor
+@Test func ledgersWithReceiptsRefusePackagesAndMergesWithAClearReason() async throws {
+  try await withDirectory { directory in
+    let ledgerURL = directory.appendingPathComponent("ledger.sqlite")
+    let journey = try await editableLedger(at: ledgerURL)
+    let image = directory.appendingPathComponent("picked.png")
+    try png.write(to: image)
+    _ = try journey.addReceipt(from: image, createdAt: UTCInstant(epochMilliseconds: 1))
+
+    let package = directory.appendingPathComponent("out.ledgerpackage")
+    #expect(throws: ReceiptAttachmentError.receiptsCannotTravelInPackages) {
+      try journey.exportPortablePackage(to: package)
+    }
+    #expect(!FileManager.default.fileExists(atPath: package.path))
+    #expect(
+      LedgerJourney.packageExportFailureMessage(
+        for: ReceiptAttachmentError.receiptsCannotTravelInPackages
+      ).contains("can't carry receipts"))
+
+    // A backup holding receipts can't be read in as a merge source either.
+    let backup = directory.appendingPathComponent("backup.sqlite")
+    try journey.backupCanonicalLedger(to: backup)
+    #expect(throws: ReceiptAttachmentError.receiptsCannotTravelInPackages) {
+      _ = try LedgerJourney.incomingPackage(from: backup)
+    }
+    #expect(
+      LedgerJourney.mergeFailureMessage(for: ReceiptAttachmentError.receiptsCannotTravelInPackages)
+        .contains("holds receipts"))
+    #expect(LedgerAtlasRootView.resetExplanation.contains("receipts"))
+  }
+}
+
+@Test func linkSearchReturnsAtMostTwentyMatchesAndNothingForAnEmptySearch() {
+  let rows = (0..<500).map {
+    LedgerJourney.SurfaceRow(id: "\($0)", title: "Synthetic \($0)", detail: "INR \($0)")
+  }
+  #expect(ReceiptSurface.matches("  ", in: rows).isEmpty)
+  #expect(ReceiptSurface.matches("synthetic", in: rows).count == 20)
+  #expect(ReceiptSurface.matches("INR 499", in: rows).map(\.id) == ["499"])
+}

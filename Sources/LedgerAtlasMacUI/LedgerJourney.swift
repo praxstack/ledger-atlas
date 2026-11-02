@@ -515,6 +515,7 @@ public final class LedgerJourney {
     guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
       throw LedgerApplication.Error.invalidCommand
     }
+    try refuseWhenReceiptsArePresent()
     let exported = try exportPackage()
     let data = try LedgerPortablePackageFile.encode(
       manifest: exported.manifest, payload: exported.payload)
@@ -525,6 +526,14 @@ public final class LedgerJourney {
     }
     let object = try? JSONSerialization.jsonObject(with: exported.payload) as? [String: Any]
     return object?["importGraph"].map { !($0 is NSNull) } ?? false
+  }
+
+  package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
+    if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
+      return
+        "Portable packages can't carry receipts yet, so this ledger wasn't exported. Use Save 1:1 backup to keep a full copy with its receipts."
+    }
+    return "Portable package export failed."
   }
 
   package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
@@ -706,6 +715,7 @@ public final class LedgerJourney {
     -> (manifest: LedgerExportManifest, payload: Data)
   {
     if let store = try? LedgerStore.openReadOnly(at: source) {
+      guard try store.receiptAttachments().isEmpty else { throw ReceiptAttachmentError.receiptsCannotTravelInPackages }
       return try LedgerApplication(store: store).exportPackage()
     }
     let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
@@ -724,7 +734,17 @@ public final class LedgerJourney {
   public func previewMerge(
     _ incoming: (manifest: LedgerExportManifest, payload: Data)
   ) throws -> LedgerMergeSummary {
-    try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming).summary
+    try refuseWhenReceiptsArePresent()
+    return try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming)
+      .summary
+  }
+
+  /// Receipts don't travel in portable packages yet, so a ledger holding any can't be
+  /// exported as a package or merged.
+  private func refuseWhenReceiptsArePresent() throws {
+    if let store = mutableStore ?? openedStore, try !store.receiptAttachments().isEmpty {
+      throw ReceiptAttachmentError.receiptsCannotTravelInPackages
+    }
   }
 
   /// Merges `incoming` into a copy of the open ledger at `destination` and switches to it.
@@ -733,6 +753,7 @@ public final class LedgerJourney {
   public func mergeIntoNewLedger(
     _ incoming: (manifest: LedgerExportManifest, payload: Data), at destination: URL
   ) throws -> LedgerMergeSummary {
+    try refuseWhenReceiptsArePresent()
     let merged = try LedgerApplication.mergedPackage(
       current: try exportPackage(), incoming: incoming)
     try createLedger(from: (merged.manifest, merged.payload), at: destination)
@@ -767,6 +788,10 @@ public final class LedgerJourney {
     if case LedgerMergeError.conflictingHistory(let revisions) = error {
       return
         "The backup and the open ledger edited \(revisions) of the same transactions in different ways, so nothing was merged. Restore the backup as a separate ledger instead."
+    }
+    if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
+      return
+        "One of these ledgers holds receipts, which can be restored but not merged for now. Restore the backup as a separate ledger instead. Nothing was changed."
     }
     if case LedgerMergeError.importedHistory = error {
       return
@@ -930,7 +955,11 @@ public final class LedgerJourney {
       amountLiteral: amountLiteral.trimmingCharacters(in: .whitespacesAndNewlines),
       kind: .expense, accountID: accountID, categoryID: categoryID, note: nil,
       createdAt: createdAt, submissionID: "receipt:\(submissionID)")
-    try store.linkReceipt(receiptID, to: revision.transactionID)
+    do {
+      try store.linkReceipt(receiptID, to: revision.transactionID)
+    } catch {
+      throw ReceiptAttachmentError.expenseRecordedButNotLinked
+    }
     lastFailure = nil
     return revision
   }

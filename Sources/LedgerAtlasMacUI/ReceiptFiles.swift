@@ -49,13 +49,19 @@ public enum ReceiptAttachmentError: Error, Equatable, Sendable {
   case unreadableSource
   case unsupportedImage
   case ocrFailed
+  /// Portable packages can't carry receipts yet, so a ledger holding any can't be exported as
+  /// a package or merged. A SQLite backup keeps them.
+  case receiptsCannotTravelInPackages
+  /// The expense was recorded but linking the receipt to it failed. Confirming again with the
+  /// same form links it without recording a second expense.
+  case expenseRecordedButNotLinked
 }
 
 /// Reads picked receipt files and runs text recognition locally. Receipt bytes are kept in the
 /// ledger itself (see `LedgerStore.addReceipt`), never in a separate folder.
 public enum ReceiptFiles {
   /// Largest image area text recognition will decode, to bound memory on hostile files.
-  public static let maximumPixels = 100_000_000
+  public static let maximumPixels = 50_000_000
 
   /// Reads a picked file once, without following a symlink. Only a regular file within the
   /// receipt limit is read, and the limit applies to the bytes actually read. Its type is

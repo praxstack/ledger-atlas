@@ -47,10 +47,11 @@ package enum CanonicalLedgerHealth {
       database,
       "SELECT attachment_id, sha256, media_type, origin_id, bytes FROM ledger_receipt_attachment ORDER BY attachment_id"
     ) { row -> Bool in
+      // Check the column types before reading, so this never relies on the queries above.
+      guard row.blobColumns([4]), row.textColumns([0, 1, 2, 3]) else { return false }
       let bytes = row.blob(4)
       let origin = try LedgerOrigin(id: row.text(3), label: "receipt-check")
-      return row.blobColumns([4])
-        && LedgerReceiptAttachment.digest(bytes) == row.text(1)
+      return LedgerReceiptAttachment.digest(bytes) == row.text(1)
         && LedgerReceiptAttachment.MediaType(sniffing: bytes)?.rawValue == row.text(2)
         && LedgerReceiptAttachment.id(origin: origin, sha256: row.text(1)) == row.text(0)
     }

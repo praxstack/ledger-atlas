@@ -13,6 +13,10 @@ struct ReceiptSurface: View {
   @State private var selectedID: String?
   @State private var draft: ReceiptOCRDraft?
   @State private var linkTarget: String?
+  @State private var linkSearch = ""
+  /// Built once per ledger change, so a large ledger isn't re-listed on every redraw.
+  @State private var transactionRows: [LedgerJourney.SurfaceRow] = []
+  @State private var rowsByID: [String: LedgerJourney.SurfaceRow] = [:]
   @State private var amount = ""
   @State private var accountID = ""
   @State private var categoryID: String?
@@ -28,7 +32,7 @@ struct ReceiptSurface: View {
     VStack(alignment: .leading, spacing: 14) {
       Text("Receipts").font(.largeTitle.bold())
       Text(
-        "Receipts are stored inside the open ledger, so backups carry them. Text recognition runs on this Mac and only suggests values; nothing is recorded until you confirm."
+        "Receipts are stored inside the open ledger, so backups carry them. Images are kept as picked, including any location data they carry. Text recognition runs on this Mac and only suggests values; nothing is recorded until you confirm."
       )
       .foregroundStyle(.secondary)
       if journey.isEditing {
@@ -75,15 +79,10 @@ struct ReceiptSurface: View {
         .font(.caption.monospaced())
         .foregroundStyle(.secondary)
       if receipt.lifecycle == .tombstoned {
-        Text("Removed. Its bytes stay in this ledger and its backups.")
+        Text("Removed. It can't be linked or added again; its bytes stay in this ledger and its backups.")
           .foregroundStyle(.secondary)
       } else if journey.isEditing {
-        Picker("Linked transaction", selection: $linkTarget) {
-          Text("Not linked").tag(String?.none)
-          ForEach(journey.rows(for: .ledger), id: \.id) { row in
-            Text("\(row.title) · \(row.detail)").tag(Optional(row.id))
-          }
-        }
+        linkChooser
         Button("Save link") { saveLink(receipt) }
           .disabled(isWorking || linkTarget == receipt.transactionID)
 
@@ -100,9 +99,52 @@ struct ReceiptSurface: View {
 
         Divider()
         Button("Remove receipt", role: .destructive) { remove(receipt) }
+          .accessibilityHint("Permanent: a removed receipt can't be linked or added again.")
           .disabled(isWorking)
       }
     }
+  }
+
+  /// Search instead of one long menu: the real ledger has thousands of transactions.
+  private var linkChooser: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text("Linked transaction: \(label(for: linkTarget))")
+      HStack {
+        TextField("Search transactions", text: $linkSearch)
+          .accessibilityLabel("Search transactions to link")
+        Button("Not linked") { linkTarget = nil }
+      }
+      let matches = Self.matches(linkSearch, in: transactionRows)
+      if !matches.isEmpty {
+        ForEach(matches, id: \.id) { row in
+          Button("\(row.title) · \(row.detail)") { linkTarget = row.id }
+            .buttonStyle(.link)
+        }
+      }
+    }
+  }
+
+  /// At most 20 rows whose title or detail contains the search text.
+  static func matches(_ search: String, in rows: [LedgerJourney.SurfaceRow])
+    -> [LedgerJourney.SurfaceRow]
+  {
+    let needle = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !needle.isEmpty else { return [] }
+    var found: [LedgerJourney.SurfaceRow] = []
+    for row in rows
+    where row.title.localizedCaseInsensitiveContains(needle)
+      || row.detail.localizedCaseInsensitiveContains(needle)
+    {
+      found.append(row)
+      if found.count == 20 { break }
+    }
+    return found
+  }
+
+  private func label(for transactionID: String?) -> String {
+    guard let transactionID else { return "none" }
+    guard let row = rowsByID[transactionID] else { return "a transaction" }
+    return "\(row.title) · \(row.detail)"
   }
 
   @ViewBuilder
@@ -113,10 +155,10 @@ struct ReceiptSurface: View {
       let candidates = draft.amountCandidates
       if !candidates.isEmpty {
         HStack {
-          Text("Amounts found:")
+          Text("Amounts found (pick the total):")
           ForEach(candidates, id: \.self) { candidate in
             Button(candidate) { amount = candidate }
-              .accessibilityHint("Fills the amount. Nothing is recorded until you confirm.")
+              .accessibilityHint("Uses this as the amount. Nothing is recorded until you confirm.")
           }
         }
       }
@@ -154,9 +196,7 @@ struct ReceiptSurface: View {
   private func linkText(for receipt: LedgerReceiptAttachment) -> String {
     if receipt.lifecycle == .tombstoned { return "Removed" }
     guard let transactionID = receipt.transactionID else { return "Not linked" }
-    guard let row = journey.rows(for: .ledger).first(where: { $0.id == transactionID }) else {
-      return "Linked"
-    }
+    guard let row = rowsByID[transactionID] else { return "Linked" }
     return "Linked to \(row.title) · \(row.detail)"
   }
 
@@ -174,6 +214,8 @@ struct ReceiptSurface: View {
 
   private func reload() {
     receipts = (try? journey.receiptAttachments()) ?? []
+    transactionRows = journey.rows(for: .ledger)
+    rowsByID = Dictionary(transactionRows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     if let selectedID, !receipts.contains(where: { $0.id == selectedID }) {
       self.selectedID = nil
     }
@@ -185,6 +227,7 @@ struct ReceiptSurface: View {
     amount = ""
     categoryID = nil
     submissionID = UUID().uuidString
+    linkSearch = ""
     linkTarget = selected?.transactionID
   }
 
@@ -235,9 +278,9 @@ struct ReceiptSurface: View {
       }.value
       switch result {
       case .success(let suggestions):
+        // The largest number is often cash tendered, not the total, so nothing is pre-filled.
         draft = suggestions
-        if amount.isEmpty, let first = suggestions.amountCandidates.first { amount = first }
-        status = "Suggestions are ready. Check them, then confirm to record an expense."
+        status = "Suggestions are ready. Pick the total or type it, then confirm to record an expense."
       case .failure(let error as ReceiptAttachmentError) where error == .unsupportedImage:
         status = "This image can't be read for text."
       case .failure:
@@ -263,7 +306,11 @@ struct ReceiptSurface: View {
         fromReceipt: receipt.id, amountLiteral: amount, accountID: accountID,
         categoryID: categoryID, createdAt: Self.now, submissionID: submissionID)
       reload()
+      resetForm()
       status = "Expense recorded and the receipt linked to it."
+    } catch ReceiptAttachmentError.expenseRecordedButNotLinked {
+      status =
+        "The expense was recorded, but the receipt couldn't be linked to it. Confirm again to retry the link; no second expense is recorded."
     } catch {
       status = LedgerJourney.editFailureMessage(
         for: error, otherwise: "The expense could not be recorded. Check the amount.")
@@ -274,7 +321,7 @@ struct ReceiptSurface: View {
     do {
       try journey.removeReceipt(receipt.id)
       reload()
-      status = "Receipt removed. Its bytes stay in this ledger and its backups."
+      status = "Receipt removed. It can't be linked or added again; its bytes stay in this ledger and its backups."
     } catch {
       status = "The receipt could not be removed."
     }

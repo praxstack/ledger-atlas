@@ -518,7 +518,7 @@ public struct LedgerAtlasRootView: View {
       lifecycleMessage = LedgerJourney.packageExportSuccessMessage(
         includesImportHistory: includesImportHistory)
     } catch {
-      journey.recordFailure("Portable package export failed.")
+      journey.recordFailure(LedgerJourney.packageExportFailureMessage(for: error))
     }
   }
 
@@ -666,7 +666,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   package static let resetExplanation =
-    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans and memos. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
+    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans, memos and receipts. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
 
   package static func currentLedgerName(_ journey: LedgerJourney) -> String {
     journey.ledgerURL?.deletingPathExtension().lastPathComponent ?? "Ledger"
