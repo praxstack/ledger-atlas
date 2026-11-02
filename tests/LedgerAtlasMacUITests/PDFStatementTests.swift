@@ -128,3 +128,39 @@ private func snapshot(
   #expect(text.hasPrefix("Activity by kind"))
   #expect(!text.contains("Shown separately by currency"))
 }
+
+@Test func pdfExportWritesOnlyThePickedFileAndReplacesAnExistingOne() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("statement.pdf")
+  try Data("older statement".utf8).write(to: url)
+  let report = LedgerReport(title: "Activity by kind", rows: [], totalLiteral: "0", unitCode: "USD")
+
+  try LedgerPDFStatementExporter.export(report, to: url)
+
+  // The App Sandbox allows only the picked file: no temporary or backup file beside it.
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["statement.pdf"])
+  #expect(try Data(contentsOf: url).starts(with: Data("%PDF".utf8)))
+  let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
+  #expect((permissions as? NSNumber)?.intValue == 0o600)
+}
+
+@Test func pdfExportNeverReplacesAFolderOrALink() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let target = directory.appendingPathComponent("target.txt")
+  try Data("keep me".utf8).write(to: target)
+  let link = directory.appendingPathComponent("link.pdf")
+  try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+  let report = LedgerReport(title: "Activity by kind", rows: [], totalLiteral: "0", unitCode: "USD")
+
+  #expect(throws: LedgerPDFStatementExporter.Error.invalidDestination) {
+    try LedgerPDFStatementExporter.export(report, to: link)
+  }
+  #expect(try Data(contentsOf: target) == Data("keep me".utf8))
+  #expect(throws: LedgerPDFStatementExporter.Error.invalidDestination) {
+    try LedgerPDFStatementExporter.export(report, to: directory)
+  }
+}

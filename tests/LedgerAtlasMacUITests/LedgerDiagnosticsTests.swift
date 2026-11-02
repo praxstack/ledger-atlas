@@ -19,4 +19,8 @@ import Testing
   #expect(throws: CocoaError(.fileWriteFileExists)) {
     try LedgerDiagnosticsWriter.write(.init(snapshot: snapshot), to: destination)
   }
+  // The App Sandbox allows only the picked file: no temporary file beside it.
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["diagnostics.json"])
+  let permissions = try FileManager.default.attributesOfItem(atPath: destination.path)[.posixPermissions]
+  #expect((permissions as? NSNumber)?.intValue == 0o600)
 }

@@ -99,7 +99,10 @@ public enum LedgerPDFStatementExporter {
     }
     context.closePDF()
     do {
-      try data.write(to: url, options: .atomic)
+      // The save panel has already asked before replacing an existing file.
+      try SavedFile.write(data as Data, to: url, replacing: true)
+    } catch SavedFile.Error.notAFile {
+      throw Error.invalidDestination
     } catch {
       throw Error.writeFailed
     }
