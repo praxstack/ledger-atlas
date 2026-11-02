@@ -77,43 +77,37 @@ import Testing
   defer { defaults.removePersistentDomain(forName: suite) }
   let selected = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
   var writes = 0
-  var starts = 0
-  var stops = 0
   let store = SecurityScopedBookmarkStore(
     defaults: defaults,
     makeBookmark: { _ in writes += 1; return Data("renewed".utf8) },
-    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) },
-    scopeStarter: { _ in starts += 1; return true },
-    scopeStopper: { _ in stops += 1 })
+    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) })
 
   try store.save(selected, for: .canonicalLedger)
 
+  // Resolving reports staleness but writes nothing: renewal is the caller's save after a
+  // validated open (LA-031).
   #expect(store.reopen(.canonicalLedger) == .stale(selected))
   #expect(writes == 1)
-  #expect(starts == 0)
-  #expect(stops == 0)
+  #expect(store.reopenURL() == nil)
   #expect(store.reopen(.importSource) == .missing)
 }
 
-@Test func staleBookmarkResolutionDefersScopeAndPreservesTheOriginal() throws {
+@Test func staleBookmarkResolutionPreservesTheOriginal() throws {
   let suite = "LedgerAtlasMacUITests.bookmark.\(UUID().uuidString)"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
   let selected = URL(fileURLWithPath: "/synthetic/ledger.sqlite")
-  var starts = 0
-  var stops = 0
+  let key = "\(SecurityScopedBookmarkStore.defaultKey).canonicalLedger"
   let store = SecurityScopedBookmarkStore(
     defaults: defaults,
     makeBookmark: { Data($0.path.utf8) },
-    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) },
-    scopeStarter: { _ in starts += 1; return false },
-    scopeStopper: { _ in stops += 1 })
+    resolveBookmarkResult: { _ in .init(url: selected, isStale: true) })
   try store.save(selected)
+  let original = try #require(defaults.data(forKey: key))
 
   #expect(store.reopen(.canonicalLedger) == .stale(selected))
-  #expect(starts == 0)
-  #expect(stops == 0)
   #expect(store.reopen(.canonicalLedger) == .stale(selected))
+  #expect(defaults.data(forKey: key) == original)
 }
 
 @Test func widgetProjectionPublisherWritesOnlyFixedRuntimeStates() throws {

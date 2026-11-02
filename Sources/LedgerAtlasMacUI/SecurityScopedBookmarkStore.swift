@@ -13,12 +13,16 @@ public final class SecurityScopedBookmarkStore {
     }
   }
 
+  /// What a saved bookmark resolves to.
+  ///
+  /// A stale bookmark still points at the ledger, but macOS wants it re-created. The store does
+  /// not rewrite it here: the caller opens and validates the ledger first, then calls ``save(_:)``
+  /// while it holds the security scope, which renews the bookmark (LA-031). A ledger that fails
+  /// to open keeps its original bookmark.
   public enum ReopenOutcome: Equatable, Sendable {
     case missing
     case resolved(URL)
-    case renewed(URL)
     case stale(URL)
-    case denied(URL)
     case corrupt
   }
 
@@ -43,9 +47,7 @@ public final class SecurityScopedBookmarkStore {
           resolvingBookmarkData: data, options: .withSecurityScope,
           relativeTo: nil, bookmarkDataIsStale: &stale)
         return .init(url: url, isStale: stale)
-      },
-      scopeStarter: { $0.startAccessingSecurityScopedResource() },
-      scopeStopper: { $0.stopAccessingSecurityScopedResource() })
+      })
   }
 
   public convenience init(
@@ -55,24 +57,18 @@ public final class SecurityScopedBookmarkStore {
   ) {
     self.init(
       defaults: defaults, key: key, makeBookmark: makeBookmark,
-      resolveBookmarkResult: { try .init(url: resolveBookmark($0), isStale: false) },
-      scopeStarter: { $0.startAccessingSecurityScopedResource() },
-      scopeStopper: { $0.stopAccessingSecurityScopedResource() })
+      resolveBookmarkResult: { try .init(url: resolveBookmark($0), isStale: false) })
   }
 
   public init(
     defaults: UserDefaults, key: String = "LedgerAtlas.selectedLedgerBookmark",
     makeBookmark: @escaping (URL) throws -> Data,
-    resolveBookmarkResult: @escaping (Data) throws -> ResolvedBookmark,
-    scopeStarter: @escaping (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
-    scopeStopper: @escaping (URL) -> Void = { $0.stopAccessingSecurityScopedResource() }
+    resolveBookmarkResult: @escaping (Data) throws -> ResolvedBookmark
   ) {
     self.defaults = defaults
     keyPrefix = key
     self.makeBookmark = makeBookmark
     resolveBookmark = resolveBookmarkResult
-    _ = scopeStarter
-    _ = scopeStopper
   }
 
   public func save(_ url: URL) throws { try save(url, for: .canonicalLedger) }
@@ -83,8 +79,8 @@ public final class SecurityScopedBookmarkStore {
 
   public func reopenURL() -> URL? {
     switch reopen(.canonicalLedger) {
-    case .resolved(let url), .renewed(let url): url
-    case .missing, .stale, .denied, .corrupt: nil
+    case .resolved(let url): url
+    case .missing, .stale, .corrupt: nil
     }
   }
 
