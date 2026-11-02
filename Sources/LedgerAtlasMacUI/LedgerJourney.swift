@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import LedgerCore
 import LedgerStore
@@ -508,10 +509,13 @@ public final class LedgerJourney {
     }
   }
 
-  public func exportPortablePackage(to destination: URL) throws {
+  /// Returns true when the package carries imported Money Manager history.
+  @discardableResult
+  public func exportPortablePackage(to destination: URL) throws -> Bool {
     guard destination.isFileURL, !FileManager.default.fileExists(atPath: destination.path) else {
       throw LedgerApplication.Error.invalidCommand
     }
+    try refuseWhenReceiptsArePresent()
     let exported = try exportPackage()
     let data = try LedgerPortablePackageFile.encode(
       manifest: exported.manifest, payload: exported.payload)
@@ -520,6 +524,122 @@ public final class LedgerJourney {
     } catch {
       throw LedgerApplication.Error.invalidCommand
     }
+    let object = try? JSONSerialization.jsonObject(with: exported.payload) as? [String: Any]
+    return object?["importGraph"].map { !($0 is NSNull) } ?? false
+  }
+
+  package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
+    if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
+      return
+        "Portable packages can't carry receipts yet, so this ledger wasn't exported. Use Save 1:1 backup to keep a full copy with its receipts."
+    }
+    switch error as? LedgerApplication.Error {
+    case .packageTooLarge:
+      return
+        "This ledger's imported Money Manager history is too large for a portable package. Use Save 1:1 backup instead; it keeps everything. Nothing was exported."
+    default:
+      return "Portable package export failed."
+    }
+  }
+
+  package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
+    guard includesImportHistory else { return "Portable package exported." }
+    return
+      "Portable package exported with its imported Money Manager history. It restores only on a Mac that has this ledger's receipt key (iCloud Keychain carries it) and on this version of Ledger Atlas. Keep the original Money Manager backup (.mmbak) and an XLSX export as fallbacks."
+  }
+
+  // MARK: XLSX exchange (LA-040)
+
+  /// Largest workbook the import reads, matching the archive reader's total limit.
+  static let maximumXLSXImportBytes = 256 << 20
+
+  /// Writes the open ledger as an XLSX workbook, deleted records included and marked.
+  /// The save panel has already asked before replacing an existing file.
+  public func exportXLSX(to destination: URL) throws {
+    guard destination.isFileURL,
+      let snapshot = try application?.snapshot() ?? (mutableStore ?? openedStore)?.readSnapshot()
+    else { throw LedgerApplication.Error.invalidCommand }
+    let data = try LedgerXLSXExchange.xlsxData(LedgerXLSXExchange.Content(snapshot: snapshot))
+    try SavedFile.write(data, to: destination, replacing: true)
+    lastFailure = nil
+  }
+
+  /// Reads and checks a workbook, then works out what importing it would add. Nothing is
+  /// written. Throws `LedgerXLSXExchange.Error.invalid` with the problems a person can fix.
+  public func planXLSXImport(from source: URL) throws -> LedgerXLSXImportPlan {
+    // Planning only reads, so it works on a ledger that is open but not yet being edited.
+    guard source.isFileURL, let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data = try Self.readRegularFile(source, maximumBytes: Self.maximumXLSXImportBytes)
+    return try (application ?? LedgerApplication(store: store))
+      .planXLSXImport(LedgerXLSXExchange.content(fromXLSX: data))
+  }
+
+  /// Reads a picked file without following a symlink, refusing anything that is not a regular
+  /// file. The size limit applies to the bytes actually read, so a file that grows after it
+  /// was chosen is still refused.
+  nonisolated package static func readRegularFile(_ url: URL, maximumBytes: Int) throws -> Data {
+    let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+    guard descriptor >= 0 else { throw LedgerApplication.Error.invalidCommand }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    var info = Darwin.stat()
+    guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data: Data
+    do { data = try handle.read(upToCount: maximumBytes + 1) ?? Data() } catch {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    guard data.count <= maximumBytes else { throw LedgerApplication.Error.invalidCommand }
+    return data
+  }
+
+  /// Adds everything in the plan in one step, or nothing.
+  public func applyXLSXImport(_ plan: LedgerXLSXImportPlan, createdAt: UTCInstant) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    do {
+      try application.applyXLSXImport(plan, createdAt: createdAt)
+      snapshot = try application.snapshot()
+      lastFailure = nil
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
+  /// Counts only, for the confirmation before an import.
+  nonisolated public static func xlsxImportPreview(_ plan: LedgerXLSXImportPlan) -> String {
+    if !plan.canApply {
+      let shown = plan.conflicts.prefix(5).map { "• \($0.message)" }
+      let more = plan.conflicts.count > shown.count
+        ? ["…and \(plan.conflicts.count - shown.count) more."] : []
+      return (["Nothing was imported. This workbook differs from the open ledger:"] + shown + more)
+        .joined(separator: "\n")
+    }
+    if plan.isEmpty {
+      return "Everything in this workbook is already in the open ledger. Nothing to add."
+    }
+    func count(_ value: Int, _ one: String, _ many: String? = nil) -> String? {
+      value == 0 ? nil : "\(value) \(value == 1 ? one : many ?? one + "s")"
+    }
+    let parts = [
+      count(plan.transactions.count, "transaction"), count(plan.accounts.count, "account"),
+      count(plan.accountGroups.count, "account group"),
+      count(plan.categories.count, "category", "categories"), count(plan.tags.count, "tag"),
+    ].compactMap { $0 }
+    var lines = ["Importing adds " + parts.joined(separator: ", ") + "."]
+    let unchanged = plan.summary.values.reduce(0) { $0 + $1.unchanged }
+    if unchanged > 0 { lines.append("\(unchanged) already in this ledger and skipped.") }
+    if plan.skippedDeletedTransactions > 0 {
+      let skipped = plan.skippedDeletedTransactions
+      lines.append(
+        skipped == 1
+          ? "1 deleted transaction is not imported."
+          : "\(skipped) deleted transactions are not imported.")
+    }
+    lines.append("Existing records are never changed.")
+    return lines.joined(separator: " ")
   }
 
   public func restoreCanonicalBackup(from source: URL, to destination: URL) throws {
@@ -568,7 +688,30 @@ public final class LedgerJourney {
       adoptValidatedLedger(created.store, snapshot: snapshot, at: destination)
     } catch {
       _ = LedgerStoreLifecycle.discardCreated(created, at: destination)
-      throw LedgerApplication.Error.invalidCommand
+      switch error as? LedgerApplication.Error {
+      case .packageReceiptKeyMissing, .packageSchemaMismatch, .packageTampered:
+        throw error
+      default:
+        throw LedgerApplication.Error.invalidCommand
+      }
+    }
+  }
+
+  /// What to tell the person when a portable package could not be restored. Each imported
+  /// history failure points at the SQLite backup, which restores without these checks.
+  package static func packageRestoreFailureMessage(for error: any Swift.Error) -> String {
+    switch error as? LedgerApplication.Error {
+    case .packageReceiptKeyMissing:
+      return
+        "This package holds imported Money Manager history signed with a key this Mac doesn't have. Turn on iCloud Keychain on both Macs and try again, or restore the SQLite backup instead. Nothing was changed."
+    case .packageSchemaMismatch:
+      return
+        "This package's imported history was written by a different version of Ledger Atlas. Update Ledger Atlas on both Macs, or restore the SQLite backup instead. Nothing was changed."
+    case .packageTampered:
+      return
+        "This package's imported history doesn't match the ledger it was exported from, so it may be damaged or edited. Restore the SQLite backup instead. Nothing was changed."
+    default:
+      return "The portable package could not be imported without changing the source."
     }
   }
 
@@ -578,6 +721,9 @@ public final class LedgerJourney {
     -> (manifest: LedgerExportManifest, payload: Data)
   {
     if let store = try? LedgerStore.openReadOnly(at: source) {
+      guard try store.receiptAttachments().isEmpty else {
+        throw ReceiptAttachmentError.receiptsCannotTravelInPackages
+      }
       return try LedgerApplication(store: store).exportPackage()
     }
     let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
@@ -596,7 +742,17 @@ public final class LedgerJourney {
   public func previewMerge(
     _ incoming: (manifest: LedgerExportManifest, payload: Data)
   ) throws -> LedgerMergeSummary {
-    try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming).summary
+    try refuseWhenReceiptsArePresent()
+    return try LedgerApplication.mergedPackage(current: try exportPackage(), incoming: incoming)
+      .summary
+  }
+
+  /// Receipts don't travel in portable packages yet, so a ledger holding any can't be
+  /// exported as a package or merged.
+  private func refuseWhenReceiptsArePresent() throws {
+    if let store = mutableStore ?? openedStore, try !store.receiptAttachments().isEmpty {
+      throw ReceiptAttachmentError.receiptsCannotTravelInPackages
+    }
   }
 
   /// Merges `incoming` into a copy of the open ledger at `destination` and switches to it.
@@ -605,6 +761,7 @@ public final class LedgerJourney {
   public func mergeIntoNewLedger(
     _ incoming: (manifest: LedgerExportManifest, payload: Data), at destination: URL
   ) throws -> LedgerMergeSummary {
+    try refuseWhenReceiptsArePresent()
     let merged = try LedgerApplication.mergedPackage(
       current: try exportPackage(), incoming: incoming)
     try createLedger(from: (merged.manifest, merged.payload), at: destination)
@@ -639,6 +796,14 @@ public final class LedgerJourney {
     if case LedgerMergeError.conflictingHistory(let revisions) = error {
       return
         "The backup and the open ledger edited \(revisions) of the same transactions in different ways, so nothing was merged. Restore the backup as a separate ledger instead."
+    }
+    if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
+      return
+        "One of these ledgers holds receipts, which can be restored but not merged for now. Restore the backup as a separate ledger instead. Nothing was changed."
+    }
+    if case LedgerMergeError.importedHistory = error {
+      return
+        "One of these ledgers holds imported Money Manager history, which can be restored but not merged. Restore the backup as a separate ledger instead. Nothing was changed."
     }
     return
       "This backup can't be merged. Merging needs ledgers made in Ledger Atlas; imported ledgers can be restored as a separate ledger. Nothing was changed."
@@ -729,6 +894,82 @@ public final class LedgerJourney {
     try application.saveMemo(memo)
     snapshot = try application.snapshot()
     lastFailure = nil
+  }
+
+  // MARK: Receipts
+
+  /// The open ledger's receipts, newest first. Metadata only; bytes load on demand.
+  public func receiptAttachments() throws -> [LedgerReceiptAttachment] {
+    guard let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try store.receiptAttachments().sorted {
+      ($0.createdAt.epochMilliseconds, $0.id) > ($1.createdAt.epochMilliseconds, $1.id)
+    }
+  }
+
+  /// One receipt's bytes, checked against its stored digest.
+  public func receiptBytes(_ receiptID: String) throws -> Data {
+    guard let store = mutableStore ?? openedStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try store.receiptBytes(receiptID)
+  }
+
+  /// Copies a picked file into the ledger. The same image added twice is one receipt.
+  @discardableResult
+  public func addReceipt(
+    from source: URL, linkedTo transactionID: String? = nil, createdAt: UTCInstant
+  ) throws -> LedgerReceiptAttachment {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let data = try ReceiptFiles.read(source)
+    return try store.addReceipt(
+      data, origin: LedgerOrigin.macNative(), linkedTo: transactionID, createdAt: createdAt)
+  }
+
+  /// Links a receipt to a transaction, or unlinks it with nil.
+  public func linkReceipt(_ receiptID: String, to transactionID: String?) throws {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    try store.linkReceipt(receiptID, to: transactionID)
+  }
+
+  /// Removes a receipt from the app. Its bytes stay in the ledger, so older backups and this
+  /// ledger's history still match; deleting forever is not part of v1.
+  public func removeReceipt(_ receiptID: String) throws {
+    guard application != nil, let store = mutableStore else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    try store.tombstoneReceipt(receiptID)
+  }
+
+  /// The only path from a receipt to ledger data. The person reviews the amount, account and
+  /// category (text recognition may have suggested the amount) and confirms. This records one
+  /// expense and links the receipt to it. The submission ID keys the write, so confirming
+  /// twice records one expense.
+  public func createExpense(
+    fromReceipt receiptID: String, amountLiteral: String, accountID: String,
+    categoryID: String?, createdAt: UTCInstant, submissionID: String
+  ) throws -> LedgerTransactionRevision {
+    guard application != nil, let store = mutableStore,
+      try store.receiptAttachments().contains(where: {
+        $0.id == receiptID && $0.lifecycle == .active
+      })
+    else { throw LedgerApplication.Error.invalidCommand }
+    let revision = try createNativeTransaction(
+      amountLiteral: amountLiteral.trimmingCharacters(in: .whitespacesAndNewlines),
+      kind: .expense, accountID: accountID, categoryID: categoryID, note: nil,
+      createdAt: createdAt, submissionID: "receipt:\(submissionID)")
+    do {
+      try store.linkReceipt(receiptID, to: revision.transactionID)
+    } catch {
+      throw ReceiptAttachmentError.expenseRecordedButNotLinked
+    }
+    lastFailure = nil
+    return revision
   }
 
   /// Records one transaction from a template, dated today, carrying the template's tags.

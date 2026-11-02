@@ -75,7 +75,7 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
     var summary: [String: Summary] = [:]
 
     func split<T: Equatable>(
-      _ records: [T], sheet: String, id: (T) -> String, name: (T) -> String,
+      _ records: [T], sheet: String, id: (T) -> String,
       existing: [String: T]
     ) -> [T] {
       var added: [T] = []
@@ -88,7 +88,7 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
             conflicts.append(
               LedgerXLSXExchange.Issue(
                 sheet: sheet, column: "id",
-                message: "“\(name(record))” already exists in this ledger with different details. Import never changes existing records."))
+                message: "The record with id \(id(record).prefix(8))… already exists in this ledger with different details. Import never changes existing records."))
           }
         } else {
           added.append(record)
@@ -101,15 +101,15 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
 
     accountGroups = split(
       content.accountGroups, sheet: LedgerXLSXExchange.Sheet.accountGroups, id: \.id,
-      name: \.name, existing: existing.accountGroups)
+      existing: existing.accountGroups)
     accounts = split(
-      content.accounts, sheet: LedgerXLSXExchange.Sheet.accounts, id: \.id, name: \.name,
+      content.accounts, sheet: LedgerXLSXExchange.Sheet.accounts, id: \.id,
       existing: existing.accounts)
     let newCategories = split(
-      content.categories, sheet: LedgerXLSXExchange.Sheet.categories, id: \.id, name: \.name,
+      content.categories, sheet: LedgerXLSXExchange.Sheet.categories, id: \.id,
       existing: existing.categories)
     tags = split(
-      content.tags, sheet: LedgerXLSXExchange.Sheet.tags, id: \.id, name: \.name,
+      content.tags, sheet: LedgerXLSXExchange.Sheet.tags, id: \.id,
       existing: existing.tags)
     categories = Self.parentsFirst(newCategories)
 
@@ -194,16 +194,16 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
   ) -> String? {
     for effect in transaction.draft.effects {
       if let account = existing.accounts[effect.accountID], account.lifecycle != .active {
-        return "account “\(account.name)”"
+        return "account \(account.id.prefix(8))…"
       }
     }
     if let id = transaction.draft.categoryID, let category = existing.categories[id],
       category.lifecycle != .active
     {
-      return "category “\(category.name)”"
+      return "category \(category.id.prefix(8))…"
     }
     for id in transaction.tags.tagIDs {
-      if let tag = existing.tags[id], tag.lifecycle != .active { return "tag “\(tag.name)”" }
+      if let tag = existing.tags[id], tag.lifecycle != .active { return "tag \(tag.id.prefix(8))…" }
     }
     return nil
   }

@@ -14,6 +14,15 @@ public struct LedgerApplication: LedgerClient {
   public enum Error: Swift.Error, Equatable, Sendable {
     case invalidCommand
     case ledgerUnchanged
+    /// The package holds imported history signed with a receipt key this Mac does not have.
+    case packageReceiptKeyMissing
+    /// The package's imported history comes from a different canonical schema.
+    case packageSchemaMismatch
+    /// The package's imported history does not rebuild the ledger it was exported from.
+    case packageTampered
+    /// The ledger's imported history is too large for a portable package. Nothing was written;
+    /// the exact SQLite backup carries it.
+    case packageTooLarge
   }
 
   private let store: LedgerStore
@@ -826,16 +835,21 @@ public struct LedgerApplication: LedgerClient {
   }
 
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {
-    let export = try store.portablePackageExportSnapshot()
+    let export = try store.portablePackageExportSnapshot(
+      maximumPayloadBytes: maximumPortablePackageBytes)
     let snapshot = export.ledger
-    guard export.isRepresentable,
-      snapshot.undisplayedImportedEventCount == 0, !export.hasImportHistory,
-      snapshot.preservedSource.isEmpty,
-      !hasUnsupportedPortableProvenance(snapshot)
-    else {
-      // The portable package cannot yet encode the canonical receipt/provenance graph.
-      // Imported ledgers must use the exact canonical SQLite backup instead of losing it.
-      throw Error.invalidCommand
+    guard export.isRepresentable else { throw Error.invalidCommand }
+    guard !export.importGraphTooLarge else { throw Error.packageTooLarge }
+    if export.hasImportHistory {
+      // The import graph travels verbatim, preserved source included, so every imported event
+      // must already be shown.
+      guard export.importGraph != nil, export.unmaterializedEventCount == 0 else {
+        throw Error.invalidCommand
+      }
+    } else {
+      guard snapshot.undisplayedImportedEventCount == 0, snapshot.preservedSource.isEmpty,
+        !hasUnsupportedPortableProvenance(snapshot)
+      else { throw Error.invalidCommand }
     }
     var links: [String: LedgerTransactionLink] = [:]
     for link in snapshot.transactions.flatMap(\.links) {
@@ -850,9 +864,12 @@ public struct LedgerApplication: LedgerClient {
       links: links.values.sorted { $0.id < $1.id }, recurrenceRules: snapshot.recurrenceRules,
       budgets: snapshot.budgets, installmentPlans: snapshot.installmentPlans,
       tags: snapshot.tags, transactionTemplates: snapshot.transactionTemplates,
-      memos: snapshot.memos, revisionTags: snapshot.revisionTags)
+      memos: snapshot.memos, revisionTags: snapshot.revisionTags,
+      importGraph: export.hasImportHistory ? export.importGraph : nil)
     let payload = try encode(package)
-    guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
+    guard payload.count <= maximumPortablePackageBytes else {
+      throw export.hasImportHistory ? Error.packageTooLarge : Error.invalidCommand
+    }
     let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
     let manifest = LedgerExportManifest(
       formatVersion: LedgerPortablePackageFormat.version,
@@ -873,8 +890,18 @@ public struct LedgerApplication: LedgerClient {
     guard try store.isEmptyForPortablePackageImport() else { throw Error.invalidCommand }
     let existing = try store.readSnapshot()
     guard !snapshotHasProductRows(existing) else { throw Error.invalidCommand }
+    let package: LedgerCanonicalPackage
+    do { package = try decodePackage(payload, manifest: manifest) } catch {
+      throw Error.invalidCommand
+    }
     do {
-      try store.applyExport(try decodePackage(payload, manifest: manifest))
+      try store.applyExport(package)
+    } catch LedgerStore.Error.importGraphKeyMissing {
+      throw Error.packageReceiptKeyMissing
+    } catch LedgerStore.Error.importGraphSchemaMismatch {
+      throw Error.packageSchemaMismatch
+    } catch LedgerStore.Error.importGraphMismatch {
+      throw Error.packageTampered
     } catch {
       throw Error.invalidCommand
     }
@@ -892,6 +919,8 @@ private func snapshotHasProductRows(_ snapshot: LedgerStore.LedgerReadSnapshot) 
 private func supportedPackageManifest(_ manifest: LedgerExportManifest) -> Bool {
   (manifest.formatVersion == LedgerPortablePackageFormat.version
     && manifest.formatFingerprint == LedgerPortablePackageFormat.fingerprint)
+    || (manifest.formatVersion == LedgerPortablePackageFormat.legacyV3Version
+      && manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV3Fingerprint)
     || (manifest.formatVersion == LedgerPortablePackageFormat.legacyV2Version
       && manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV2Fingerprint)
     || (manifest.formatVersion == LedgerPortablePackageFormat.legacyV1Version
@@ -1030,7 +1059,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
   let accounts = package.accounts.map {
     [
       "id": $0.id, "name": $0.name, "currencyUnit": $0.currencyUnit, "originID": $0.origin.id,
-      "originLabel": $0.origin.label, "lifecycle": $0.lifecycle.rawValue,
+      "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any, "lifecycle": $0.lifecycle.rawValue,
       "groupID": $0.groupID as Any, "displayOrder": $0.displayOrder, "hidden": $0.hidden,
       "includeInTotals": $0.includeInTotals, "variant": $0.variant.rawValue,
     ] as [String: Any]
@@ -1038,7 +1067,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
   let categories = package.categories.map {
     [
       "id": $0.id, "name": $0.name, "kind": $0.kind.rawValue, "originID": $0.origin.id,
-      "originLabel": $0.origin.label, "lifecycle": $0.lifecycle.rawValue,
+      "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any, "lifecycle": $0.lifecycle.rawValue,
       "parentID": $0.parentID as Any, "displayOrder": $0.displayOrder, "hidden": $0.hidden,
     ] as [String: Any]
   }
@@ -1057,7 +1086,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
       "note": draft.note as Any,
       "roundingPolicy": draft.roundingPolicy?.rawValue as Any,
       "originID": draft.origin.id,
-      "originLabel": draft.origin.label,
+      "originLabel": draft.origin.label, "originProvenanceID": draft.origin.provenanceID as Any,
       "occurredAt": try JSONSerialization.jsonObject(
         with: JSONEncoder().encode(draft.occurredAt)),
       "effects": draft.effects.map {
@@ -1067,7 +1096,8 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
         ]
       },
       "literals": draft.sourceLiterals.map {
-        ["field": $0.field, "literal": $0.literal]
+        ["field": $0.field, "literal": $0.literal, "provenanceID": $0.provenanceID as Any]
+          as [String: Any]
       },
     ])
   }
@@ -1087,7 +1117,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
     "links": links,
     "recurrenceRules": package.recurrenceRules.map { rule -> [String: Any] in
       var row: [String: Any] = [
-        "id": rule.id, "originID": rule.origin.id, "originLabel": rule.origin.label,
+        "id": rule.id, "originID": rule.origin.id, "originLabel": rule.origin.label, "originProvenanceID": rule.origin.provenanceID as Any,
         "accountID": rule.accountID, "kind": rule.kind.rawValue,
         "categoryID": rule.categoryID as Any, "dayOfMonth": rule.dayOfMonth as Any,
         "amount": rule.amount.amount.rawLiteral, "unit": rule.amount.unitCode,
@@ -1111,7 +1141,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
     },
     "budgets": package.budgets.map {
       [
-        "id": $0.id, "originID": $0.origin.id, "originLabel": $0.origin.label, "name": $0.name,
+        "id": $0.id, "originID": $0.origin.id, "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any, "name": $0.name,
         "categoryID": $0.categoryID, "amount": $0.amount.amount.rawLiteral,
         "unit": $0.amount.unitCode, "period": $0.period.rawValue, "rollover": $0.rollover,
         "startYear": $0.start.year, "startMonth": $0.start.month, "startDay": $0.start.day,
@@ -1120,7 +1150,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
     },
     "installmentPlans": package.installmentPlans.map {
       [
-        "id": $0.id, "originID": $0.origin.id, "originLabel": $0.origin.label,
+        "id": $0.id, "originID": $0.origin.id, "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any,
         "accountID": $0.accountID, "categoryID": $0.categoryID as Any,
         "principal": $0.principal.amount.rawLiteral, "unit": $0.principal.unitCode,
         "occurrenceCount": $0.occurrenceCount, "completedCount": $0.completedCount,
@@ -1136,7 +1166,7 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
     },
     "tags": package.tags.map {
       [
-        "id": $0.id, "name": $0.name, "originID": $0.origin.id, "originLabel": $0.origin.label,
+        "id": $0.id, "name": $0.name, "originID": $0.origin.id, "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any,
         "lifecycle": $0.lifecycle.rawValue,
       ]
     },
@@ -1146,20 +1176,21 @@ private func encode(_ package: LedgerCanonicalPackage) throws -> Data {
         "categoryID": $0.categoryID as Any, "amount": $0.amount.amount.rawLiteral,
         "unit": $0.amount.unitCode, "note": $0.note as Any, "accountID": $0.accountID,
         "counterAccountID": $0.counterAccountID as Any, "tagIDs": $0.tags.tagIDs,
-        "originID": $0.origin.id, "originLabel": $0.origin.label,
+        "originID": $0.origin.id, "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any,
         "lifecycle": $0.lifecycle.rawValue,
       ] as [String: Any]
     },
     "memos": package.memos.map {
       [
         "id": $0.id, "body": $0.body, "year": $0.date.year, "month": $0.date.month,
-        "day": $0.date.day, "originID": $0.origin.id, "originLabel": $0.origin.label,
+        "day": $0.date.day, "originID": $0.origin.id, "originLabel": $0.origin.label, "originProvenanceID": $0.origin.provenanceID as Any,
         "lifecycle": $0.lifecycle.rawValue,
       ] as [String: Any]
     },
     "revisionTags": package.revisionTags.keys.sorted().map {
       ["revisionID": $0, "tagIDs": package.revisionTags[$0]?.tagIDs ?? []] as [String: Any]
     },
+    "importGraph": package.importGraph.map(encodeImportGraph) ?? NSNull(),
   ]
   return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
 }
@@ -1171,6 +1202,13 @@ private func decodePackage(_ data: Data, manifest: LedgerExportManifest) throws
     manifest.formatFingerprint == LedgerPortablePackageFormat.fingerprint
   {
     return try decodeCurrentPackage(data, manifest: manifest)
+  }
+  if manifest.formatVersion == LedgerPortablePackageFormat.legacyV3Version,
+    manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV3Fingerprint
+  {
+    return try decodePackageShape(
+      data, manifest: manifest, versionKey: "formatVersion", fingerprintKey: "formatFingerprint",
+      includeOrganization: true, includeAnnotations: true)
   }
   if manifest.formatVersion == LedgerPortablePackageFormat.legacyV2Version,
     manifest.formatFingerprint == LedgerPortablePackageFormat.legacyV2Fingerprint
@@ -1197,7 +1235,7 @@ private func decodeCurrentPackage(_ data: Data, manifest: LedgerExportManifest) 
 {
   try decodePackageShape(
     data, manifest: manifest, versionKey: "formatVersion", fingerprintKey: "formatFingerprint",
-    includeOrganization: true, includeAnnotations: true)
+    includeOrganization: true, includeAnnotations: true, includeProvenance: true)
 }
 
 private func decodeLegacyV1Package(_ data: Data, manifest: LedgerExportManifest) throws
@@ -1218,7 +1256,7 @@ private func decodeLegacyV10Package(_ data: Data, manifest: LedgerExportManifest
 
 private func decodePackageShape(
   _ data: Data, manifest: LedgerExportManifest, versionKey: String, fingerprintKey: String,
-  includeOrganization: Bool, includeAnnotations: Bool = false
+  includeOrganization: Bool, includeAnnotations: Bool = false, includeProvenance: Bool = false
 ) throws -> LedgerCanonicalPackage {
   guard hasOnlyUniqueJSONKeys(data),
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -1226,7 +1264,25 @@ private func decodePackageShape(
     throw LedgerApplication.Error.invalidCommand
   }
   func exactKeys(_ row: [String: Any], _ keys: Set<String>) throws {
+    var keys = keys
+    // v4 adds provenance to every origin and every source literal.
+    if includeProvenance, keys.contains("originID") { keys.insert("originProvenanceID") }
+    if includeProvenance, keys == ["field", "literal"] { keys.insert("provenanceID") }
     guard Set(row.keys) == keys else { throw LedgerApplication.Error.invalidCommand }
+  }
+  func optionalProvenance(_ row: [String: Any], _ key: String) throws -> String? {
+    guard includeProvenance else { return nil }
+    guard let value = row[key] else { throw LedgerApplication.Error.invalidCommand }
+    if value is NSNull { return nil }
+    guard let value = value as? String else { throw LedgerApplication.Error.invalidCommand }
+    return value
+  }
+  func origin(_ row: [String: Any]) throws -> LedgerOrigin {
+    guard let id = row["originID"] as? String, let label = row["originLabel"] as? String else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    return try LedgerOrigin(
+      id: id, label: label, provenanceID: optionalProvenance(row, "originProvenanceID"))
   }
   func maps(_ key: String) throws -> [[String: Any]] {
     guard let rows = object[key] as? [[String: Any]] else {
@@ -1275,6 +1331,7 @@ private func decodePackageShape(
   if includeAnnotations {
     topLevelKeys.formUnion(["tags", "transactionTemplates", "memos", "revisionTags"])
   }
+  if includeProvenance { topLevelKeys.insert("importGraph") }
   try exactKeys(object, topLevelKeys)
   guard try jsonInt(object, versionKey) == manifest.formatVersion,
     try string(object, fingerprintKey) == manifest.formatFingerprint
@@ -1301,7 +1358,7 @@ private func decodePackageShape(
       return try LedgerAccount(
         id: string(row, "id"), name: string(row, "name"),
         currencyUnit: string(row, "currencyUnit"),
-        origin: LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel")),
+        origin: origin(row),
         lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self),
         groupID: optionalString(row, "groupID"), displayOrder: jsonInt(row, "displayOrder"),
         hidden: boolean(row, "hidden"), includeInTotals: boolean(row, "includeInTotals"),
@@ -1312,7 +1369,7 @@ private func decodePackageShape(
     return try LedgerAccount(
       id: string(row, "id"), name: string(row, "name"),
       currencyUnit: string(row, "currencyUnit"),
-      origin: LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel")),
+      origin: origin(row),
       lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self))
   }
   let categories = try maps("categories").map { row in
@@ -1326,7 +1383,7 @@ private func decodePackageShape(
       return try LedgerCategory(
         id: string(row, "id"), name: string(row, "name"),
         kind: try requiredEnum(string(row, "kind"), as: LedgerCategoryKind.self),
-        origin: LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel")),
+        origin: origin(row),
         lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self),
         parentID: optionalString(row, "parentID"), displayOrder: jsonInt(row, "displayOrder"),
         hidden: boolean(row, "hidden"))
@@ -1336,7 +1393,7 @@ private func decodePackageShape(
     return try LedgerCategory(
       id: string(row, "id"), name: string(row, "name"),
       kind: try requiredEnum(string(row, "kind"), as: LedgerCategoryKind.self),
-      origin: LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel")),
+      origin: origin(row),
       lifecycle: try requiredEnum(string(row, "lifecycle"), as: LedgerLifecycleState.self))
   }
   var revisions: [LedgerTransactionRevision] = []
@@ -1348,8 +1405,7 @@ private func decodePackageShape(
         "categoryID", "note", "roundingPolicy", "originID", "originLabel", "occurredAt",
         "effects", "literals",
       ])
-    let origin = try LedgerOrigin(
-      id: string(row, "originID"), label: string(row, "originLabel"))
+    let rowOrigin = try origin(row)
     let occurredObject = try value(row, "occurredAt")
     let occurredData = try JSONSerialization.data(
       withJSONObject: occurredObject, options: [.sortedKeys])
@@ -1371,7 +1427,8 @@ private func decodePackageShape(
     let literals = try dictionaries(row, "literals").map {
       try exactKeys($0, ["field", "literal"])
       return try LedgerSourceLiteral(
-        field: string($0, "field"), literal: string($0, "literal"))
+        field: string($0, "field"), literal: string($0, "literal"),
+        provenanceID: optionalProvenance($0, "provenanceID"))
     }
     let draft = try LedgerTransactionDraft(
       effects: effects, categoryID: optionalString(row, "categoryID"),
@@ -1380,7 +1437,7 @@ private func decodePackageShape(
       roundingPolicy: try optionalString(row, "roundingPolicy").map {
         try requiredEnum($0, as: RoundingPolicy.self)
       }, sourceLiterals: literals,
-      origin: origin)
+      origin: rowOrigin)
     revisions.append(
       try LedgerTransactionRevision(
         id: string(row, "id"), transactionID: string(row, "transactionID"),
@@ -1406,8 +1463,7 @@ private func decodePackageShape(
         "startMonth", "startDay", "untilYear", "untilMonth", "untilDay", "paused", "skipped",
         "lifecycle",
       ])
-    let origin = try LedgerOrigin(
-      id: string(row, "originID"), label: string(row, "originLabel"))
+    let rowOrigin = try origin(row)
     let start = try SourceLocalDate(
       year: jsonInt(row, "startYear"), month: jsonInt(row, "startMonth"),
       day: jsonInt(row, "startDay"))
@@ -1442,7 +1498,7 @@ private func decodePackageShape(
       throw LedgerApplication.Error.invalidCommand
     }
     return try LedgerRecurrenceRule(
-      id: string(row, "id"), origin: origin, accountID: string(row, "accountID"),
+      id: string(row, "id"), origin: rowOrigin, accountID: string(row, "accountID"),
       categoryID: optionalString(row, "categoryID"),
       kind: try requiredEnum(string(row, "kind"), as: LedgerTransactionKind.self),
       amount: CurrencyAmount(
@@ -1464,8 +1520,7 @@ private func decodePackageShape(
       ])
     return try LedgerBudget(
       id: string(row, "id"),
-      origin: LedgerOrigin(
-        id: string(row, "originID"), label: string(row, "originLabel")),
+      origin: origin(row),
       name: string(row, "name"), categoryID: string(row, "categoryID"),
       amount: CurrencyAmount(
         unitCode: string(row, "unit"), amount: ExactDecimal(string(row, "amount"))),
@@ -1485,8 +1540,7 @@ private func decodePackageShape(
       ])
     return try LedgerInstallmentPlan(
       id: string(row, "id"),
-      origin: LedgerOrigin(
-        id: string(row, "originID"), label: string(row, "originLabel")),
+      origin: origin(row),
       accountID: string(row, "accountID"), categoryID: optionalString(row, "categoryID"),
       principal: CurrencyAmount(
         unitCode: string(row, "unit"), amount: ExactDecimal(string(row, "principal"))),
@@ -1509,9 +1563,6 @@ private func decodePackageShape(
   func tagLinks(_ row: [String: Any]) throws -> LedgerTagLinks {
     guard let ids = row["tagIDs"] as? [String] else { throw LedgerApplication.Error.invalidCommand }
     return try LedgerTagLinks(ids)
-  }
-  func origin(_ row: [String: Any]) throws -> LedgerOrigin {
-    try LedgerOrigin(id: string(row, "originID"), label: string(row, "originLabel"))
   }
   var tags: [LedgerTag] = []
   var transactionTemplates: [LedgerTransactionTemplate] = []
@@ -1565,7 +1616,95 @@ private func decodePackageShape(
     accounts: accounts, accountGroups: accountGroups, categories: categories, revisions: revisions, links: links,
     recurrenceRules: recurrenceRules, budgets: budgets, installmentPlans: installmentPlans,
     preservedSource: preservedSource, tags: tags, transactionTemplates: transactionTemplates,
-    memos: memos, revisionTags: revisionTags)
+    memos: memos, revisionTags: revisionTags,
+    importGraph: includeProvenance ? try decodeImportGraph(value: object["importGraph"]) : nil)
+}
+
+private func encodeImportGraph(_ graph: LedgerImportGraph) -> [String: Any] {
+  [
+    "schemaVersion": graph.schemaVersion,
+    "schemaFingerprint": graph.schemaFingerprint,
+    "canonicalChecksum": graph.canonicalChecksum,
+    "tables": graph.tables.map { table -> [String: Any] in
+      [
+        "name": table.name,
+        "columns": table.columns,
+        // Typed cells, with integers and reals as strings so no JSON number can round them.
+        "rows": table.rows.map { row in
+          row.map { cell -> [String] in
+            switch cell {
+            case .null: return ["n"]
+            case .integer(let value): return ["i", String(value)]
+            case .real(let value): return ["r", String(value.bitPattern, radix: 16)]
+            case .text(let value): return ["t", value]
+            case .blob(let value): return ["b", value.base64EncodedString()]
+            }
+          }
+        },
+      ]
+    },
+  ]
+}
+
+private func decodeImportGraph(value: Any?) throws -> LedgerImportGraph? {
+  guard let value else { throw LedgerApplication.Error.invalidCommand }
+  if value is NSNull { return nil }
+  guard let object = value as? [String: Any],
+    Set(object.keys) == ["schemaVersion", "schemaFingerprint", "canonicalChecksum", "tables"],
+    let fingerprint = object["schemaFingerprint"] as? String,
+    let checksum = object["canonicalChecksum"] as? String, checksum.count == 64,
+    let tableObjects = object["tables"] as? [[String: Any]]
+  else { throw LedgerApplication.Error.invalidCommand }
+  let schemaVersion = try jsonInt(object, "schemaVersion")
+  // An older release has fewer graph tables. An unknown schema is checked against today's list
+  // and then refused by the store with its own reason.
+  let expectedNames =
+    LedgerImportGraph.release(schemaVersion: schemaVersion, schemaFingerprint: fingerprint)
+    .map(LedgerImportGraph.tableNames(in:)) ?? LedgerImportGraph.tableNames
+  guard tableObjects.count == expectedNames.count else {
+    throw LedgerApplication.Error.invalidCommand
+  }
+  var rowCount = 0
+  let tables = try zip(tableObjects, expectedNames).map {
+    tableObject, expectedName -> LedgerImportGraph.Table in
+    guard Set(tableObject.keys) == ["name", "columns", "rows"],
+      tableObject["name"] as? String == expectedName,
+      let columns = tableObject["columns"] as? [String], !columns.isEmpty,
+      Set(columns).count == columns.count,
+      let rawRows = tableObject["rows"] as? [[[String]]]
+    else { throw LedgerApplication.Error.invalidCommand }
+    rowCount += rawRows.count
+    guard rowCount <= LedgerStore.maximumImportGraphRows else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    let rows = try rawRows.map { rawRow -> [LedgerImportGraph.Value] in
+      guard rawRow.count == columns.count else { throw LedgerApplication.Error.invalidCommand }
+      return try rawRow.map { cell -> LedgerImportGraph.Value in
+        switch (cell.first ?? "", cell.count) {
+        case ("n", 1): return .null
+        case ("i", 2):
+          guard let value = Int64(cell[1]), String(value) == cell[1] else { break }
+          return .integer(value)
+        case ("r", 2):
+          guard let bits = UInt64(cell[1], radix: 16), String(bits, radix: 16) == cell[1]
+          else { break }
+          return .real(Double(bitPattern: bits))
+        case ("t", 2): return .text(cell[1])
+        case ("b", 2):
+          guard let data = Data(base64Encoded: cell[1]),
+            data.base64EncodedString() == cell[1]
+          else { break }
+          return .blob(data)
+        default: break
+        }
+        throw LedgerApplication.Error.invalidCommand
+      }
+    }
+    return .init(name: expectedName, columns: columns, rows: rows)
+  }
+  return .init(
+    schemaVersion: schemaVersion, schemaFingerprint: fingerprint,
+    canonicalChecksum: checksum, tables: tables)
 }
 
 private struct JSONKeyScope {
@@ -1714,6 +1853,9 @@ public enum LedgerMergeError: Swift.Error, Equatable, Sendable {
   /// The same transaction revision differs between the two ledgers, so they edited the same
   /// history in different ways. Nothing is merged.
   case conflictingHistory(revisions: Int)
+  /// One of the ledgers holds imported Money Manager history. That history is proved against
+  /// the exact ledger it came from, so it can be restored but never merged. Nothing is merged.
+  case importedHistory
 }
 
 extension LedgerApplication {
@@ -1750,6 +1892,9 @@ extension LedgerApplication {
       other = try decodePackage(incoming.payload, manifest: incoming.manifest)
     } catch {
       throw Error.invalidCommand
+    }
+    guard base.importGraph == nil, other.importGraph == nil else {
+      throw LedgerMergeError.importedHistory
     }
     var revisionsByID = Dictionary(base.revisions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     var conflicts = 0

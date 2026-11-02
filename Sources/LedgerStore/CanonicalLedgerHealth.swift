@@ -10,9 +10,52 @@ package enum CanonicalLedgerHealth {
     (try? validate(database, trustKey: trustKey)) != nil
   }
 
-  static func validate(_ database: OpaquePointer, trustKey: Data? = nil) throws {
+  /// `verifyingReceiptImages` re-hashes every stored receipt image. Opening, restoring and
+  /// backing up do that; a write skips it, since receipt bytes can't change after insert and
+  /// the store hashes them when they go in.
+  static func validate(
+    _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true
+  ) throws {
     try validateImportGraph(database, trustKey: trustKey)
+    try validateReceiptAttachments(database, verifyingImages: verifyingReceiptImages)
     _ = try readSnapshot(database)
+  }
+
+  /// Receipt attachments (schema v13). Absent before v13.
+  private static func validateReceiptAttachments(_ database: OpaquePointer, verifyingImages: Bool)
+    throws
+  {
+    guard
+      !(try rows(
+        database,
+        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='ledger_receipt_attachment'",
+        { _ in () })).isEmpty
+    else { return }
+    let invalidQueries = [
+      "SELECT 1 FROM ledger_receipt_attachment WHERE typeof(bytes)<>'blob' OR byte_count<>length(bytes) OR attachment_id GLOB '*[^0-9a-f]*' OR sha256 GLOB '*[^0-9a-f]*' OR transaction_id GLOB '*[^0-9a-f]*'",
+      // A link may point at a deleted transaction, but never at nothing.
+      "SELECT 1 FROM ledger_receipt_attachment r WHERE r.transaction_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ledger_transaction t WHERE t.transaction_id=r.transaction_id) AND NOT EXISTS (SELECT 1 FROM economic_event e WHERE e.event_id=r.transaction_id) AND NOT EXISTS (SELECT 1 FROM economic_event_transfer x WHERE x.transfer_id=r.transaction_id)",
+      "SELECT 1 WHERE (SELECT coalesce(sum(length(bytes)),0) FROM ledger_receipt_attachment)>\(LedgerReceiptAttachment.maximumTotalBytes)",
+    ]
+    for query in invalidQueries where try !rows(database, query, { _ in () }).isEmpty {
+      throw HealthError.invalid
+    }
+    guard verifyingImages else { return }
+    // One statement, stepped one row at a time: each image is checked and dropped before the
+    // next is read, so memory stays at a single receipt. No values are spliced into the SQL.
+    let checked = try rows(
+      database,
+      "SELECT attachment_id, sha256, media_type, origin_id, bytes FROM ledger_receipt_attachment ORDER BY attachment_id"
+    ) { row -> Bool in
+      // Check the column types before reading, so this never relies on the queries above.
+      guard row.blobColumns([4]), row.textColumns([0, 1, 2, 3]) else { return false }
+      let bytes = row.blob(4)
+      let origin = try LedgerOrigin(id: row.text(3), label: "receipt-check")
+      return LedgerReceiptAttachment.digest(bytes) == row.text(1)
+        && LedgerReceiptAttachment.MediaType(sniffing: bytes)?.rawValue == row.text(2)
+        && LedgerReceiptAttachment.id(origin: origin, sha256: row.text(1)) == row.text(0)
+    }
+    guard checked.allSatisfy({ $0 }) else { throw HealthError.invalid }
   }
 
   static func readSnapshot(_ database: OpaquePointer) throws -> LedgerStore.LedgerReadSnapshot {

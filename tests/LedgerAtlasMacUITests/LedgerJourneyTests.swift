@@ -347,7 +347,7 @@ import Testing
   try journey.beginEditing(source)
   let expectedChecksum = try journey.checksum()
   let packageURL = directory.appendingPathComponent("native.ledgerpackage")
-  try journey.exportPortablePackage(to: packageURL)
+  #expect(try journey.exportPortablePackage(to: packageURL) == false)
   #expect(chmod(packageURL.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
 
   let restoredURL = directory.appendingPathComponent("restored.sqlite")
@@ -356,6 +356,22 @@ import Testing
   #expect(restored.phase == .imported)
   #expect(restored.ledgerURL == restoredURL)
   #expect(try restored.checksum() == expectedChecksum)
+}
+
+@Test func packageExportMessageNamesFallbacksForImportedHistory() {
+  #expect(
+    LedgerJourney.packageExportSuccessMessage(includesImportHistory: false)
+      == "Portable package exported.")
+  let imported = LedgerJourney.packageExportSuccessMessage(includesImportHistory: true)
+  #expect(imported.contains("receipt key"))
+  #expect(imported.contains(".mmbak"))
+  #expect(imported.contains("XLSX"))
+  #expect(
+    LedgerJourney.packageExportFailureMessage(for: LedgerApplication.Error.packageTooLarge)
+      .contains("Save 1:1 backup"))
+  #expect(
+    LedgerJourney.packageExportFailureMessage(for: LedgerApplication.Error.invalidCommand)
+      == "Portable package export failed.")
 }
 
 @MainActor

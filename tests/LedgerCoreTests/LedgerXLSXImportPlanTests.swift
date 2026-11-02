@@ -192,7 +192,10 @@ private func edited(_ transaction: LedgerXLSXExchange.Transaction, note: String)
   #expect(!plan.canApply)
   #expect(plan.conflicts.count == 1)
   #expect(plan.conflicts[0].sheet == "Accounts")
-  #expect(plan.conflicts[0].message.contains("Wallet"))
+  // The record is named by its id, never by its name.
+  #expect(plan.conflicts[0].message.contains(String(fixture.wallet.id.prefix(8))))
+  #expect(!plan.conflicts[0].message.contains("Wallet"))
+  #expect(!plan.conflicts[0].message.contains("Old wallet"))
 }
 
 @Test func newRowsOnAnAccountDeletedHereBlockTheImport() throws {

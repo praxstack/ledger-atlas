@@ -47,12 +47,17 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.lifecycleLegacyRelease(
         version: 10, fingerprint: CanonicalLedgerSchema.legacyV10Fingerprint))
     #expect(v10 == CanonicalLedgerSchema.legacyV10Release)
-    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v10)?.count == 2)
+    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v10)?.count == 3)
     let v11 = try #require(
       CanonicalLedgerSchema.lifecycleLegacyRelease(
         version: 11, fingerprint: CanonicalLedgerSchema.legacyV11Fingerprint))
     #expect(v11 == CanonicalLedgerSchema.legacyV11Release)
-    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v11)?.count == 1)
+    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v11)?.count == 2)
+    let v12 = try #require(
+      CanonicalLedgerSchema.lifecycleLegacyRelease(
+        version: 12, fingerprint: CanonicalLedgerSchema.legacyV12Fingerprint))
+    #expect(v12 == CanonicalLedgerSchema.legacyV12Release)
+    #expect(CanonicalLedgerSchema.lifecycleUpgradePath(from: v12)?.count == 1)
     #expect(
       CanonicalLedgerSchema.lifecycleLegacyRelease(
         version: 10, fingerprint: CanonicalLedgerSchema.legacyV8Fingerprint) == nil)
@@ -72,7 +77,7 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.legacyV8Fingerprint
         == "f5526a4621eeb0e780851c3b50444d0c387f48ea953f1c1860da3204c8db91dc")
     #expect(CanonicalLedgerSchema.legacyV8Fingerprint != CanonicalLedgerSchema.fingerprint)
-    #expect(CanonicalLedgerSchema.version == 12)
+    #expect(CanonicalLedgerSchema.version == 13)
     #expect(
       CanonicalLedgerSchema.legacyV10Fingerprint
         == "aca9d078dd357cd64a6fe209e04fb7e3ac724525cf15b8c313e0b8177d2b6926")
@@ -87,8 +92,15 @@ struct CanonicalPersistenceModelsTests {
       CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV11Objects)
         == CanonicalLedgerSchema.legacyV11Fingerprint)
     #expect(CanonicalLedgerSchema.legacyV11Objects.count == 35)
-    #expect(CanonicalLedgerSchema.expectedObjects.count == 43)
-    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 43)
+    #expect(
+      CanonicalLedgerSchema.legacyV12Fingerprint
+        == "c6b67526e3c6d26c430e9dbfbdcdb39bd0517172a0a50369e86ea94eb13b5355")
+    #expect(
+      CanonicalLedgerSchema.schemaFingerprint(for: CanonicalLedgerSchema.legacyV12Objects)
+        == CanonicalLedgerSchema.legacyV12Fingerprint)
+    #expect(CanonicalLedgerSchema.legacyV12Objects.count == 43)
+    #expect(CanonicalLedgerSchema.expectedObjects.count == 47)
+    #expect(Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).count == 47)
     #expect(
       Set(CanonicalLedgerSchema.expectedObjects.map(\.name)).isSuperset(of: [
         "receipt_preservation_anchor", "receipt_preservation_payload",
@@ -126,7 +138,14 @@ struct CanonicalPersistenceModelsTests {
     #expect(
       CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 11)
         == CanonicalLedgerSchema.v11ToV12MigrationStatements)
-    #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 12) == [])
+    #expect(CanonicalLedgerSchema.v12ToV13MigrationStatements.count == 4)
+    #expect(
+      CanonicalLedgerSchema.v12ToV13MigrationStatements.first?.hasPrefix(
+        "CREATE TABLE ledger_receipt_attachment") == true)
+    #expect(
+      CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 12)
+        == CanonicalLedgerSchema.v12ToV13MigrationStatements)
+    #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 13) == [])
     #expect(CanonicalLedgerSchema.additiveMigrationStatements(fromVersion: 7) == nil)
     #expect(migration.allSatisfy { $0.localizedCaseInsensitiveContains("CREATE") })
     #expect(migration.allSatisfy { !$0.localizedCaseInsensitiveContains("ALTER TABLE") })

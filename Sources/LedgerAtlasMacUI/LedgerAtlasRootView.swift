@@ -381,6 +381,91 @@ public struct LedgerAtlasRootView: View {
     }
   }
 
+  private static let xlsxType = UTType(filenameExtension: "xlsx") ?? .data
+
+  private func exportXLSXWorkbook() {
+    guard journey.snapshot != nil else {
+      journey.recordFailure("Open a ledger before exporting a workbook.")
+      return
+    }
+    guard Self.confirmPlaintextExport() else { return }
+    let panel = NSSavePanel()
+    panel.title = "Export XLSX workbook"
+    panel.prompt = "Export"
+    panel.allowedContentTypes = [Self.xlsxType]
+    panel.nameFieldStringValue = "ledger-atlas.xlsx"
+    panel.message = "Receipt images aren't included in the workbook. Save 1:1 backup keeps them."
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try journey.exportXLSX(to: url)
+      lifecycleMessage = "Workbook exported."
+    } catch {
+      journey.recordFailure("The workbook could not be saved.")
+    }
+  }
+
+  private func importXLSXWorkbook() {
+    guard journey.snapshot != nil else {
+      journey.recordFailure("Open a ledger before importing a workbook.")
+      return
+    }
+    let openPanel = NSOpenPanel()
+    openPanel.title = "Choose an XLSX workbook"
+    openPanel.allowedContentTypes = [Self.xlsxType]
+    openPanel.allowsMultipleSelection = false
+    openPanel.canChooseDirectories = false
+    guard openPanel.runModal() == .OK, let source = openPanel.url else { return }
+    let scoped = source.startAccessingSecurityScopedResource()
+    defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+
+    let plan: LedgerXLSXImportPlan
+    do {
+      plan = try journey.planXLSXImport(from: source)
+    } catch LedgerXLSXExchange.Error.invalid(let issues) {
+      let alert = NSAlert()
+      alert.messageText = "This workbook can't be imported"
+      alert.informativeText =
+        (issues.prefix(8).map { "• \($0.description)" }
+        + (issues.count > 8 ? ["…and \(issues.count - 8) more."] : []))
+        .joined(separator: "\n")
+      alert.runModal()
+      return
+    } catch {
+      journey.recordFailure("The workbook could not be read. Choose an XLSX file exported from a spreadsheet app.")
+      return
+    }
+
+    let alert = NSAlert()
+    alert.informativeText = LedgerJourney.xlsxImportPreview(plan)
+    guard plan.canApply, !plan.isEmpty else {
+      alert.messageText = plan.canApply ? "Nothing to import" : "This workbook can't be imported"
+      alert.runModal()
+      return
+    }
+    alert.messageText = "Import this workbook into the open ledger?"
+    alert.addButton(withTitle: "Import")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    // Editing starts only once the person has confirmed, so cancelling leaves the ledger as it
+    // was. The plan is checked again inside the write, so reopening for editing is safe.
+    if !journey.isEditing {
+      do {
+        try journey.performBeginEditing()
+      } catch {
+        journey.recordFailure("This ledger can't be edited, so the workbook wasn't imported.")
+        return
+      }
+    }
+    do {
+      try journey.applyXLSXImport(
+        plan, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+      lifecycleMessage = "Workbook imported. Nothing that was already in the ledger changed."
+    } catch {
+      journey.recordFailure(
+        "The workbook was not imported and the ledger is unchanged. If the ledger changed while you were choosing, try again.")
+    }
+  }
+
   private func restoreBackup() {
     let openPanel = NSOpenPanel()
     openPanel.title = "Choose a Ledger Atlas backup"
@@ -430,11 +515,11 @@ public struct LedgerAtlasRootView: View {
     panel.nameFieldStringValue = "ledger-atlas.ledgerpackage"
     guard panel.runModal() == .OK, let destination = panel.url else { return }
     do {
-      try journey.exportPortablePackage(to: destination)
-      lifecycleMessage =
-        "Portable package exported. Imported ledgers require the exact SQLite backup."
+      let includesImportHistory = try journey.exportPortablePackage(to: destination)
+      lifecycleMessage = LedgerJourney.packageExportSuccessMessage(
+        includesImportHistory: includesImportHistory)
     } catch {
-      journey.recordFailure("Portable package export failed.")
+      journey.recordFailure(LedgerJourney.packageExportFailureMessage(for: error))
     }
   }
 
@@ -479,8 +564,7 @@ public struct LedgerAtlasRootView: View {
       performLedgerSelection(.open, url: destination)
       lifecycleMessage = "Portable package imported as a new ledger."
     } catch {
-      journey.recordFailure(
-        "The portable package could not be imported without changing the source.")
+      journey.recordFailure(LedgerJourney.packageRestoreFailureMessage(for: error))
     }
   }
 
@@ -583,7 +667,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   package static let resetExplanation =
-    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans and memos. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
+    "Erase transactions only keeps your accounts, categories, tags and templates, and removes transactions, budgets, recurring rules, installment plans, memos and receipts. Erase everything starts an empty ledger. Your current ledger file is kept, so you can reopen it from Open Ledger."
 
   package static func currentLedgerName(_ journey: LedgerJourney) -> String {
     journey.ledgerURL?.deletingPathExtension().lastPathComponent ?? "Ledger"
@@ -1103,7 +1187,7 @@ public struct LedgerAtlasRootView: View {
       )
       .id(selection)
     } else if selection == .receipts {
-      ReceiptSurface()
+      ReceiptSurface(journey: journey)
         .id(selection)
     } else if selection == .localAccess {
       LocalAccessSurface(
@@ -1135,7 +1219,9 @@ public struct LedgerAtlasRootView: View {
         restoreBackup: restoreBackup,
         exportPackage: exportPortablePackage,
         restorePackage: restorePortablePackage,
-        reset: journey.snapshot.map { _ in resetLedger }
+        reset: journey.snapshot.map { _ in resetLedger },
+        exportXLSX: journey.snapshot.map { _ in exportXLSXWorkbook },
+        importXLSX: journey.snapshot.map { _ in importXLSXWorkbook }
       )
       .id(selection)
     } else if selection == .transfers {
