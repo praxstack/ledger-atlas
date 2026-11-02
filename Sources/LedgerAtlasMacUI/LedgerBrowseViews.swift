@@ -29,6 +29,10 @@ struct LedgerBrowseList: View {
   @State private var totals: [LedgerBrowseTotal] = []
   @State private var calendarMonth: (year: Int, month: Int)?
   @State private var calendarDays: [LedgerBrowseDay] = []
+  /// True until the first index of this ledger is built; large ledgers build off the main thread.
+  @State private var isLoading = true
+  /// Bumped on every rebuild so a slower, older build never replaces a newer one.
+  @State private var buildGeneration = 0
 
   private var accountNames: [String: String] {
     Dictionary(accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
@@ -204,64 +208,82 @@ struct LedgerBrowseList: View {
   // MARK: Entries
 
   @ViewBuilder private var content: some View {
-    if let page, page.matchCount == 0, filter.isActive || mode == .note {
+    let state = LedgerBrowseContent.state(
+      isLoading: isLoading, entryCount: browser.entries.count + splitPurchases.count,
+      matchCount: page?.matchCount, filterActive: filter.isActive, mode: mode)
+    switch state {
+    case .loading:
+      ProgressView("Loading ledger…")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Loading ledger")
+    case .emptyLedger:
+      ContentUnavailableView(
+        "No transactions yet", systemImage: "tray",
+        description: Text("Add income, an expense or a transfer and it appears here."))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    case .noNotes, .noMatches:
       VStack(spacing: 12) {
         ContentUnavailableView(
-          mode == .note && !filter.isActive ? "No notes" : "No matching transactions",
+          state == .noNotes ? "No notes" : "No matching transactions",
           systemImage: "line.3.horizontal.decrease.circle",
           description: Text(
-            mode == .note && !filter.isActive
+            state == .noNotes
               ? "Transactions with a note appear here."
               : "Nothing matches these filters."))
         if filter.isActive {
           Button("Clear filters") { filter = LedgerBrowseFilter() }
+            .keyboardShortcut(.escape, modifiers: [])
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else {
-      ScrollViewReader { proxy in
-        List(selection: $selectedID) {
-          ForEach(page?.sections ?? []) { section in
-            Section {
-              ForEach(section.entries) { entry in
-                row(entry)
-                  .tag(entry.id)
-                  .id(entry.id)
-                  .contextMenu {
-                    Button("Copy transaction") { copy(entry.id) }
-                    if let editTags, entry.lifecycle == .active {
-                      Button("Edit tags…") { editTags(entry.id) }
-                    }
-                    if let saveAsTemplate, entry.lifecycle == .active {
-                      Button("Save as template…") { saveAsTemplate(entry.id) }
-                    }
-                    Button("Close transaction", role: .destructive) { tombstone(entry.id) }
+    case .entries:
+      entryList
+    }
+  }
+
+  private var entryList: some View {
+    ScrollViewReader { proxy in
+      List(selection: $selectedID) {
+        ForEach(page?.sections ?? []) { section in
+          Section {
+            ForEach(section.entries) { entry in
+              row(entry)
+                .tag(entry.id)
+                .id(entry.id)
+                .contextMenu {
+                  Button("Copy transaction") { copy(entry.id) }
+                  if let editTags, entry.lifecycle == .active {
+                    Button("Edit tags…") { editTags(entry.id) }
                   }
-              }
-            } header: {
-              sectionHeader(section)
+                  if let saveAsTemplate, entry.lifecycle == .active {
+                    Button("Save as template…") { saveAsTemplate(entry.id) }
+                  }
+                  Button("Close transaction", role: .destructive) { tombstone(entry.id) }
+                }
             }
+          } header: {
+            sectionHeader(section)
           }
-          if !splitPurchases.isEmpty, page?.pageIndex == 0 {
-            Section("Split purchases") {
-              ForEach(splitPurchases, id: \.id) { purchase in
-                splitRow(purchase)
-                  .contextMenu {
-                    if let editSplit {
-                      Button("Edit split…") { editSplit(purchase) }
-                    }
-                    if let closeSplit {
-                      Button("Close purchase", role: .destructive) { closeSplit(purchase) }
-                    }
+        }
+        if !splitPurchases.isEmpty, page?.pageIndex == 0 {
+          Section("Split purchases") {
+            ForEach(splitPurchases, id: \.id) { purchase in
+              splitRow(purchase)
+                .contextMenu {
+                  if let editSplit {
+                    Button("Edit split…") { editSplit(purchase) }
                   }
-              }
+                  if let closeSplit {
+                    Button("Close purchase", role: .destructive) { closeSplit(purchase) }
+                  }
+                }
             }
           }
         }
-        .onChange(of: page) { _, _ in
-          if let selectedID, page?.entries.contains(where: { $0.id == selectedID }) == true {
-            proxy.scrollTo(selectedID)
-          }
+      }
+      .onChange(of: page) { _, _ in
+        if let selectedID, page?.entries.contains(where: { $0.id == selectedID }) == true {
+          proxy.scrollTo(selectedID)
         }
       }
     }
@@ -362,10 +384,38 @@ struct LedgerBrowseList: View {
   // MARK: State
 
   /// New snapshot (after an edit, copy or close): re-sort and keep the selection on screen.
+  /// Small ledgers index at once. Large ones index off the main thread, so the window stays
+  /// responsive; the previous index stays on screen (or "Loading ledger…" the first time).
   private func rebuild() {
-    browser = LedgerBrowser(
-      transactions: transactions, hiding: hiddenIDs, accountNames: accountNames,
-      categoryNames: categoryNames, revisionTags: revisionTags, tagNames: tagNames)
+    let transactions = transactions
+    let hiddenIDs = hiddenIDs
+    let accountNames = accountNames
+    let categoryNames = categoryNames
+    let revisionTags = revisionTags
+    let tagNames = tagNames
+    let build: @Sendable () -> LedgerBrowser = {
+      LedgerBrowser(
+        transactions: transactions, hiding: hiddenIDs, accountNames: accountNames,
+        categoryNames: categoryNames, revisionTags: revisionTags, tagNames: tagNames)
+    }
+    buildGeneration += 1
+    guard transactions.count > Self.backgroundIndexThreshold else {
+      apply(build())
+      return
+    }
+    let generation = buildGeneration
+    Task {
+      let built = await Task.detached(priority: .userInitiated) { build() }.value
+      guard generation == buildGeneration else { return }
+      apply(built)
+    }
+  }
+
+  static let backgroundIndexThreshold = 5_000
+
+  private func apply(_ built: LedgerBrowser) {
+    browser = built
+    isLoading = false
     if calendarMonth == nil, let newest = browser.entries.first?.occurredAt.date {
       calendarMonth = (newest.year, newest.month)
     }
@@ -428,5 +478,22 @@ struct LedgerBrowseList: View {
     case .transfer: "transfer"
     case .conversion: "currency conversion"
     }
+  }
+}
+
+/// What the ledger's entry area shows. Pure, so each operational state is testable.
+package enum LedgerBrowseContent: Equatable {
+  case loading, emptyLedger, noNotes, noMatches, entries
+
+  package static func state(
+    isLoading: Bool, entryCount: Int, matchCount: Int?, filterActive: Bool,
+    mode: LedgerBrowseMode
+  ) -> LedgerBrowseContent {
+    if isLoading { return .loading }
+    if entryCount == 0 && !filterActive { return .emptyLedger }
+    if let matchCount, matchCount == 0, filterActive || mode == .note {
+      return mode == .note && !filterActive ? .noNotes : .noMatches
+    }
+    return .entries
   }
 }
