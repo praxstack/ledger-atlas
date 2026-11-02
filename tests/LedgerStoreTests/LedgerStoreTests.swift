@@ -487,7 +487,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   var reachedValidatedTemporary = false
 
   do {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterTemporaryFileValidated else { return }
       reachedValidatedTemporary = true
       #expect(!FileManager.default.fileExists(atPath: destination.path))
@@ -511,6 +511,38 @@ private func makeStoreWithAccountForRevisionTests() throws
   #expect(
     try LedgerStore.openReadOnly(at: destination).semanticChecksum()
       == store.semanticChecksum())
+}
+
+@Test func backupCreatesNothingBesideTheDestination() throws {
+  // The App Sandbox lets the app write only the file the person picked, so the backup must
+  // stage its temporary copy elsewhere and never touch the destination's folder otherwise.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  let ledgerDirectory = directory.appendingPathComponent("ledger")
+  let pickedDirectory = directory.appendingPathComponent("picked")
+  let stagingDirectory = directory.appendingPathComponent("staging")
+  for folder in [ledgerDirectory, pickedDirectory, stagingDirectory] {
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  }
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let fixture = try makeFileBackedMutationFixture(in: ledgerDirectory)
+  let destination = pickedDirectory.appendingPathComponent("backup.sqlite")
+  let store = try LedgerStore.openReadOnly(at: fixture.url)
+  var sawStagedTemporary = false
+
+  try store.backupCanonicalDatabase(to: destination, staging: stagingDirectory) { phase in
+    if phase == .afterTemporaryFileValidated {
+      let staged = try FileManager.default.contentsOfDirectory(atPath: stagingDirectory.path)
+      sawStagedTemporary = staged.contains(where: { $0.hasPrefix(".ledger-atlas-backup-") })
+    }
+    let picked = try FileManager.default.contentsOfDirectory(atPath: pickedDirectory.path)
+    #expect(picked.allSatisfy { $0 == "backup.sqlite" })
+  }
+
+  #expect(sawStagedTemporary)
+  #expect(try FileManager.default.contentsOfDirectory(atPath: pickedDirectory.path) == ["backup.sqlite"])
+  #expect(try FileManager.default.contentsOfDirectory(atPath: stagingDirectory.path).isEmpty)
+  #expect(
+    try LedgerStore.openReadOnly(at: destination).semanticChecksum() == store.semanticChecksum())
 }
 
 @Test func backupIsOwnerOnlyAndReportsTheChecksumOfItsExactBytes() throws {
@@ -548,7 +580,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   let store = try LedgerStore.openReadOnly(at: fixture.url)
 
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .beforeDestinationPublication else { return }
       let temporary = try #require(
         FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -576,7 +608,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   let store = try LedgerStore.openReadOnly(at: fixture.url)
 
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterDestinationCopyBeforeValidation else { return }
       let descriptor = Darwin.open(destination.path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW)
       guard descriptor >= 0 else { throw TestError.injected }
@@ -627,7 +659,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   var reachedPublishedDestination = false
 
   #expect(throws: LedgerStore.Error.backupPublicationCompleted) {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterDestinationPublished else { return }
       reachedPublishedDestination = true
       throw TestError.injected
@@ -653,7 +685,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   var racedLeaf: URL?
 
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterTemporaryFileCreated else { return }
       let temporary = try #require(
         FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -690,7 +722,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   var racedLeaf: URL?
 
   #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterTemporaryFileValidated else { return }
       let temporary = try #require(
         FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -726,7 +758,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   var parkedBytes = Data()
 
   do {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterTemporaryFileValidated else { return }
       let temporary = try #require(
         FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -757,7 +789,7 @@ private func makeStoreWithAccountForRevisionTests() throws
   var expectedPrefix = Data()
 
   do {
-    try store.backupCanonicalDatabase(to: destination) { phase in
+    try store.backupCanonicalDatabase(to: destination, staging: directory) { phase in
       guard phase == .afterTemporaryFileValidated else { return }
       let temporary = try #require(
         FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)

@@ -1732,6 +1732,10 @@ public final class LedgerStore {
   }
 
   /// Publish an exact plaintext copy of the ledger with mode 0600.
+  ///
+  /// The copy is assembled and validated in the app's temporary folder, then written to
+  /// `destination` with an exclusive create. Nothing else is created next to `destination`,
+  /// because the App Sandbox only lets the app write the one file the person picked.
   /// - Returns: the lowercase SHA-256 hex digest of the published bytes.
   @discardableResult
   public func backupCanonicalDatabase(to destination: URL) throws -> String {
@@ -1740,9 +1744,15 @@ public final class LedgerStore {
 
   @discardableResult
   package func backupCanonicalDatabase(
-    to destination: URL, testing backupTestHook: BackupTestHook?
+    to destination: URL, staging stagingDirectory: URL? = nil,
+    testing backupTestHook: BackupTestHook?
   ) throws -> String {
     guard destination.isFileURL, destination.path.hasPrefix("/") else {
+      throw Error.incompatibleCanonicalStore
+    }
+    let stagingURL = (stagingDirectory ?? FileManager.default.temporaryDirectory)
+      .resolvingSymlinksInPath()
+    guard stagingURL.isFileURL, stagingURL.path.hasPrefix("/") else {
       throw Error.incompatibleCanonicalStore
     }
     try validateBoundPath()
@@ -1775,9 +1785,13 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     defer { Darwin.close(parentDescriptor) }
+    let stagingDescriptor = Darwin.open(
+      stagingURL.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+    guard stagingDescriptor >= 0 else { throw Error.incompatibleCanonicalStore }
+    defer { Darwin.close(stagingDescriptor) }
     let temporaryLeaf = ".ledger-atlas-backup-\(UUID().uuidString).tmp"
     let descriptor = Darwin.openat(
-      parentDescriptor, temporaryLeaf,
+      stagingDescriptor, temporaryLeaf,
       O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
       mode_t(S_IRUSR | S_IWUSR))
     guard descriptor >= 0, fchmod(descriptor, mode_t(S_IRUSR | S_IWUSR)) == 0 else {
@@ -1793,23 +1807,23 @@ public final class LedgerStore {
     defer {
       if !published,
         Self.backupTemporaryIsBound(
-          descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          descriptor, createdIdentity: createdIdentity, parentDescriptor: stagingDescriptor,
           temporaryLeaf: temporaryLeaf),
         Self.matchesSerializedPrefix(
           descriptor, serialized: serialized, serializedCount: Int(byteCount)),
         Self.backupTemporaryIsBound(
-          descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          descriptor, createdIdentity: createdIdentity, parentDescriptor: stagingDescriptor,
           temporaryLeaf: temporaryLeaf)
       {
         _ = ftruncate(descriptor, 0)
         _ = fsync(descriptor)
         if Self.backupTemporaryIsBound(
-          descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          descriptor, createdIdentity: createdIdentity, parentDescriptor: stagingDescriptor,
           temporaryLeaf: temporaryLeaf)
         {
-          _ = unlinkat(parentDescriptor, temporaryLeaf, 0)
+          _ = unlinkat(stagingDescriptor, temporaryLeaf, 0)
         }
-        _ = fsync(parentDescriptor)
+        _ = fsync(stagingDescriptor)
       }
       Darwin.close(descriptor)
     }
@@ -1818,7 +1832,7 @@ public final class LedgerStore {
     var emptyAtPath = stat()
     guard fstat(descriptor, &retainedEmptyIdentity) == 0,
       Self.sameFile(createdIdentity, retainedEmptyIdentity),
-      fstatat(parentDescriptor, temporaryLeaf, &emptyAtPath, AT_SYMLINK_NOFOLLOW) == 0,
+      fstatat(stagingDescriptor, temporaryLeaf, &emptyAtPath, AT_SYMLINK_NOFOLLOW) == 0,
       Self.sameFile(retainedEmptyIdentity, emptyAtPath),
       Self.isSafeCanonicalFile(retainedEmptyIdentity)
     else { throw Error.incompatibleCanonicalStore }
@@ -1857,22 +1871,22 @@ public final class LedgerStore {
     guard fstat(descriptor, &retainedValidatedIdentity) == 0,
       Self.sameFile(createdIdentity, retainedValidatedIdentity),
       retainedValidatedIdentity.st_size == byteCount,
-      fstatat(parentDescriptor, temporaryLeaf, &validatedAtPath, AT_SYMLINK_NOFOLLOW) == 0,
+      fstatat(stagingDescriptor, temporaryLeaf, &validatedAtPath, AT_SYMLINK_NOFOLLOW) == 0,
       Self.sameFile(retainedValidatedIdentity, validatedAtPath),
       Self.matchesSerializedPrefix(
         descriptor, serialized: serialized, serializedCount: Int(byteCount))
     else { throw Error.incompatibleCanonicalStore }
     try backupTestHook?(.beforeDestinationPublication)
     let publishedIdentity = try Self.publishBackupCopy(
-      descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
-      temporaryLeaf: temporaryLeaf, destinationLeaf: leaf,
+      descriptor, createdIdentity: createdIdentity, stagingDescriptor: stagingDescriptor,
+      parentDescriptor: parentDescriptor, temporaryLeaf: temporaryLeaf, destinationLeaf: leaf,
       serialized: serialized, serializedCount: Int(byteCount), testing: backupTestHook)
     guard
       Self.backupTemporaryIsBound(
-        descriptor, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+        descriptor, createdIdentity: createdIdentity, parentDescriptor: stagingDescriptor,
         temporaryLeaf: temporaryLeaf)
     else { throw Error.backupPublicationCompleted }
-    guard unlinkat(parentDescriptor, temporaryLeaf, 0) == 0, fsync(parentDescriptor) == 0 else {
+    guard unlinkat(stagingDescriptor, temporaryLeaf, 0) == 0, fsync(stagingDescriptor) == 0 else {
       throw Error.backupPublicationCompleted
     }
     published = true
@@ -1915,13 +1929,13 @@ public final class LedgerStore {
   /// Publish a backup by copying bytes from the authenticated temporary descriptor. The final
   /// destination never consumes a replacement that appeared at the temporary pathname.
   private static func publishBackupCopy(
-    _ source: Int32, createdIdentity: stat, parentDescriptor: Int32,
+    _ source: Int32, createdIdentity: stat, stagingDescriptor: Int32, parentDescriptor: Int32,
     temporaryLeaf: String, destinationLeaf: String, serialized: UnsafePointer<UInt8>,
     serializedCount: Int, testing backupTestHook: BackupTestHook?
   ) throws -> stat {
     guard
       backupTemporaryIsBound(
-        source, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+        source, createdIdentity: createdIdentity, parentDescriptor: stagingDescriptor,
         temporaryLeaf: temporaryLeaf)
     else { throw Error.incompatibleCanonicalStore }
     let destination = Darwin.openat(
@@ -1961,7 +1975,7 @@ public final class LedgerStore {
       }
       guard fsync(destination) == 0,
         backupTemporaryIsBound(
-          source, createdIdentity: createdIdentity, parentDescriptor: parentDescriptor,
+          source, createdIdentity: createdIdentity, parentDescriptor: stagingDescriptor,
           temporaryLeaf: temporaryLeaf)
       else { throw Error.incompatibleCanonicalStore }
       try backupTestHook?(.afterDestinationCopyBeforeValidation)

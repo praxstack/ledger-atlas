@@ -75,6 +75,50 @@ record("granted folder: sqlite with journal") {
     }
   }
 }
+// The store's backup publication uses these calls. `fresh*` paths are granted but do not exist
+// yet, like a save panel's new file.
+let parent = granted.deletingLastPathComponent()
+record("open the granted file's folder (O_DIRECTORY)") {
+  let fd = open(parent.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+  guard fd >= 0 else { throw Failure(description: "errno \(errno)") }
+  close(fd)
+}
+record("openat(folder, new granted leaf, O_CREAT|O_EXCL)") {
+  let dir = open(parent.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+  guard dir >= 0 else { throw Failure(description: "dir errno \(errno)") }
+  defer { close(dir) }
+  let fd = openat(dir, "fresh-openat.sqlite", O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+  guard fd >= 0 else { throw Failure(description: "errno \(errno)") }
+  close(fd)
+}
+record("open(new granted path, O_CREAT|O_EXCL) then fsync") {
+  let fd = open(parent.appendingPathComponent("fresh-open.sqlite").path,
+    O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+  guard fd >= 0 else { throw Failure(description: "errno \(errno)") }
+  defer { close(fd) }
+  guard fsync(fd) == 0 else { throw Failure(description: "fsync errno \(errno)") }
+}
+record("rename an app-storage temp onto a new granted path") {
+  let temp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("probe-rename.tmp")
+  try Data("z".utf8).write(to: temp)
+  guard rename(temp.path, parent.appendingPathComponent("fresh-rename.sqlite").path) == 0 else {
+    throw Failure(description: "errno \(errno)")
+  }
+}
+record("app storage: sqlite with journal in Application Support") {
+  let support = try FileManager.default.url(
+    for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+  var db: OpaquePointer?
+  let path = support.appendingPathComponent("probe.sqlite").path
+  guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK
+  else { throw Failure(description: "open: \(String(cString: sqlite3_errmsg(db)))") }
+  defer { sqlite3_close(db) }
+  for sql in ["CREATE TABLE IF NOT EXISTS t(x)", "BEGIN", "INSERT INTO t VALUES(1)", "COMMIT"] {
+    guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+      throw Failure(description: "\(sql): \(String(cString: sqlite3_errmsg(db)))")
+    }
+  }
+}
 record("control: write outside any grant is denied") {
   let outside = NSHomeDirectory() + "/../../../probe-outside-\(getpid())"
   do { try create(outside) } catch { return }

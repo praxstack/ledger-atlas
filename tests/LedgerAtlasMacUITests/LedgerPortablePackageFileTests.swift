@@ -48,3 +48,34 @@ import Testing
   }
   #expect(!FileManager.default.fileExists(atPath: destination.path))
 }
+
+@Test func publishWritesOnlyTheChosenFileOwnerOnly() throws {
+  // The App Sandbox lets the app create the picked file but nothing beside it.
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let destination = directory.appendingPathComponent("ledger.ledgerpackage")
+  let bytes = Data((0..<200_000).map { UInt8(truncatingIfNeeded: $0) })
+
+  try LedgerPortablePackageFile.publish(bytes, to: destination)
+
+  #expect(try Data(contentsOf: destination) == bytes)
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["ledger.ledgerpackage"])
+  var published = stat()
+  #expect(lstat(destination.path, &published) == 0)
+  #expect((published.st_mode & mode_t(0o777)) == mode_t(S_IRUSR | S_IWUSR))
+}
+
+@Test func publishNeverOverwritesAnExistingFile() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let destination = directory.appendingPathComponent("ledger.ledgerpackage")
+  let original = Data("keep me".utf8)
+  try original.write(to: destination)
+
+  #expect(throws: LedgerPortablePackageFile.Error.destinationExists) {
+    try LedgerPortablePackageFile.publish(Data("new".utf8), to: destination)
+  }
+  #expect(try Data(contentsOf: destination) == original)
+}

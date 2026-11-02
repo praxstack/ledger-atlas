@@ -511,15 +511,9 @@ public final class LedgerJourney {
     let exported = try exportPackage()
     let data = try LedgerPortablePackageFile.encode(
       manifest: exported.manifest, payload: exported.payload)
-    let temporary = destination.deletingLastPathComponent().appendingPathComponent(
-      ".ledger-package-\(UUID().uuidString).tmp", isDirectory: false)
     do {
-      try data.write(to: temporary, options: .atomic)
-      try FileManager.default.setAttributes(
-        [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: temporary.path)
-      try FileManager.default.moveItem(at: temporary, to: destination)
+      try LedgerPortablePackageFile.publish(data, to: destination)
     } catch {
-      try? FileManager.default.removeItem(at: temporary)
       throw LedgerApplication.Error.invalidCommand
     }
   }
