@@ -885,6 +885,7 @@ public struct LedgerAtlasRootView: View {
       AccountsView(
         state: session.state, rows: journey.rows(for: .accounts),
         accounts: journey.snapshot?.accounts ?? [], groups: journey.snapshot?.accountGroups ?? [],
+        transactions: journey.snapshot?.transactions ?? [],
         isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         saveAccount: { account in
