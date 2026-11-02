@@ -65,10 +65,11 @@ struct TransferSurface: View {
     }
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
+    .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
   }
 
   private func presentIntentIfNeeded() {
-    guard intentRequest?.kind == .addTransfer, !showingForm else { return }
+    guard intentRequest?.kind == .addTransfer, !showingForm, accounts.count >= 2 else { return }
     showingForm = true
   }
 }

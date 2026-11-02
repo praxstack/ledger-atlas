@@ -162,6 +162,14 @@ public struct LedgerAtlasRootView: View {
         consumePendingIntentIfUnlocked()
       }
     }
+    .onChange(of: journey.snapshotGeneration) { _, _ in
+      // Keep the widget's counts current after every edit. A failed refresh is reported but
+      // doesn't close the ledger.
+      guard !appLock.isLocked, journey.snapshot != nil else { return }
+      Self.publishWidget(
+        .ready, publisher: widgetProjectionPublisher, journey: journey, session: session,
+        closeLedgerOnFailure: false)
+    }
     .onDisappear { lifecycleTask?.cancel() }
     .frame(minWidth: 720, minHeight: 480)
   }
@@ -278,6 +286,10 @@ public struct LedgerAtlasRootView: View {
       lifecycleRetryOperation = outcome.retryOperation
       // Reopening at launch or after unlock lands on the start screen chosen in Settings.
       if [.opened, .upgraded].contains(outcome.kind) { selection = productSettings.startScreen }
+      // A Shortcuts request that launched the app was queued before this view listened, so it
+      // is taken here, once the ledger is back. Its screen wins over the start screen.
+      if let pendingIntent { route(pendingIntent) }
+      consumePendingIntentIfUnlocked()
     }
   }
 
@@ -544,7 +556,7 @@ public struct LedgerAtlasRootView: View {
       return false
     }
     do {
-      try publisher.publish(state)
+      try publisher.publish(widgetProjection(for: state, journey: journey))
       return true
     } catch {
       journey.recordFailure("Widget status could not be published.")
@@ -554,6 +566,15 @@ public struct LedgerAtlasRootView: View {
       }
       return false
     }
+  }
+
+  /// A ready state carries the open ledger's redacted summary; every other state is bare.
+  static func widgetProjection(
+    for state: RedactedWidgetProjection.State, journey: LedgerJourney, now: Date = Date()
+  ) -> RedactedWidgetProjection {
+    guard state == .ready, let snapshot = journey.snapshot else { return .init(state: state) }
+    return .ready(
+      snapshot: snapshot, today: LedgerPeriodRule.today(in: .current, now: now))
   }
 
   private func recordFlowFailure(
@@ -1286,19 +1307,30 @@ public struct LedgerAtlasRootView: View {
     lifecycleGeneration &+= 1
     session.close()
     journey.closeLedger()
-    _ = publishWidget(.reopenRequired)
+    _ = publishWidget(.locked)
   }
 
   private func consumePendingIntentIfUnlocked() {
+    // A request the ledger never showed (no ledger open, for example) expires instead of
+    // blocking the next one.
+    if let pendingIntent,
+      pendingIntent.isExpired(atMilliseconds: LedgerIntentBridge.nowMilliseconds())
+    {
+      self.pendingIntent = nil
+    }
     guard !appLock.isLocked, pendingIntent == nil,
       let request = intentConsumer()
     else { return }
+    route(request)
+  }
+
+  private func route(_ request: LedgerIntentRequest) {
     switch request.kind {
     case .addExpense, .addIncome:
       pendingIntent = request
       selection = .ledger
     case .addTransfer:
-      lifecycleMessage = "Transfer request received. Open Transfers and choose New transfer to review it."
+      pendingIntent = request
       selection = .transfers
     case .createBackup:
       lifecycleMessage = "Backup request received. Choose a destination to create it."

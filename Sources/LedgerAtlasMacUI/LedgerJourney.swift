@@ -25,7 +25,11 @@ public final class LedgerJourney {
   public private(set) var phase: Phase = .idle
   private var review: ImportWorkspace.Review?
   public private(set) var summary: ImportReviewSummary = .awaitingSyntheticMetadata
-  public private(set) var snapshot: LedgerStore.LedgerReadSnapshot?
+  public private(set) var snapshot: LedgerStore.LedgerReadSnapshot? {
+    didSet { snapshotGeneration &+= 1 }
+  }
+  /// Changes whenever `snapshot` is replaced, so views can react without comparing snapshots.
+  public private(set) var snapshotGeneration = 0
   public private(set) var ledgerURL: URL?
   public private(set) var searchQuery = LedgerSearchQuery()
   public private(set) var lastFailure: String?
