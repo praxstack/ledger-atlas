@@ -4,6 +4,18 @@ import Testing
 
 @Suite("Canonical persistence models")
 struct CanonicalPersistenceModelsTests {
+  @Test("receipt digests keep their frozen length-prefixed encoding")
+  func receiptDigestEncodingIsFrozen() {
+    // Values computed independently (SHA-256 over an 8-byte big-endian length plus UTF-8 bytes
+    // per component). Stored receipts depend on this exact encoding.
+    #expect(
+      CanonicalReceiptDigest.hash(["", "ledger-atlas", "₹ 1,250.00", "naïve 🧾"])
+        == "01854d68f6ec1bdcd89195520d596e2944239fa550f93cfad7aef1f94aa6ba75")
+    #expect(
+      CanonicalReceiptDigest.sha256(Data("receipt".utf8))
+        == "6f32860910ca0fb2a20c7fda143666b09dbf8db5238195c90a586fb542ff0cad")
+  }
+
   @Test("stable event identifiers are deterministic and effect-specific")
   func stableEventIdentifiers() throws {
     let sourceRecordID = String(repeating: "a", count: 64)

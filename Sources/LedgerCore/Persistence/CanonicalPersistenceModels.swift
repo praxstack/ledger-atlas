@@ -9,12 +9,29 @@ package enum CanonicalReceiptDigest {
   package static func hash(_ components: [String]) -> String {
     var hasher = SHA256()
     for component in components {
-      let data = Data(component.utf8)
-      var length = UInt64(data.count).bigEndian
-      withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
-      hasher.update(data: data)
+      // Hashes the UTF-8 bytes in place. Health recomputes hundreds of thousands of these for a
+      // real import, so copying each string into `Data` first was a large share of open time.
+      var component = component
+      component.withUTF8 { bytes in
+        var length = UInt64(bytes.count).bigEndian
+        withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
+        hasher.update(bufferPointer: UnsafeRawBufferPointer(bytes))
+      }
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return hex(hasher.finalize())
+  }
+
+  private static let hexDigits = Array("0123456789abcdef".utf8)
+
+  /// Lowercase hex, the same text `String(format: "%02x")` gives, without a formatter per byte.
+  package static func hex<Bytes: Sequence>(_ bytes: Bytes) -> String where Bytes.Element == UInt8 {
+    var utf8: [UInt8] = []
+    utf8.reserveCapacity(64)
+    for byte in bytes {
+      utf8.append(hexDigits[Int(byte >> 4)])
+      utf8.append(hexDigits[Int(byte & 0x0f)])
+    }
+    return String(decoding: utf8, as: UTF8.self)
   }
 
   package static func optionalComponents(_ value: String?) -> [String] {
@@ -22,7 +39,7 @@ package enum CanonicalReceiptDigest {
   }
 
   package static func sha256(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    hex(SHA256.hash(data: data))
   }
 }
 
