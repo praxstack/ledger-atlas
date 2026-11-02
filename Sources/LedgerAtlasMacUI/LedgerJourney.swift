@@ -565,7 +565,7 @@ public final class LedgerJourney {
   }
 
   /// Counts only, for the confirmation before an import.
-  public static func xlsxImportPreview(_ plan: LedgerXLSXImportPlan) -> String {
+  nonisolated public static func xlsxImportPreview(_ plan: LedgerXLSXImportPlan) -> String {
     if !plan.canApply {
       let shown = plan.conflicts.prefix(5).map { "• \($0.message)" }
       let more = plan.conflicts.count > shown.count
