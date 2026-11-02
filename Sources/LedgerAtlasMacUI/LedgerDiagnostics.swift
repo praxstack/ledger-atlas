@@ -34,16 +34,10 @@ public enum LedgerDiagnosticsWriter {
       throw CocoaError(.fileWriteFileExists)
     }
     let data = try JSONEncoder.output.encode(diagnostics)
-    let temporary = destination.deletingLastPathComponent().appendingPathComponent(
-      ".ledger-atlas-diagnostics-\(UUID().uuidString).tmp")
     do {
-      try data.write(to: temporary, options: .atomic)
-      try FileManager.default.setAttributes(
-        [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: temporary.path)
-      try FileManager.default.moveItem(at: temporary, to: destination)
-    } catch {
-      try? FileManager.default.removeItem(at: temporary)
-      throw error
+      try SavedFile.write(data, to: destination, replacing: false)
+    } catch SavedFile.Error.exists {
+      throw CocoaError(.fileWriteFileExists)
     }
   }
 }
