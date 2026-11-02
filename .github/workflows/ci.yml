@@ -100,4 +100,13 @@ jobs:
       - name: swift test
         run: swift test --no-parallel
         timeout-minutes: 30
+        env:
+          LEDGER_ATLAS_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
+      - name: Upload test captures on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: swift-test-captures
+          path: ${{ runner.temp }}/test-artifacts
+          if-no-files-found: ignore
       - run: swift run mmctl
