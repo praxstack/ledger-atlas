@@ -176,3 +176,41 @@ private func expense(_ app: LedgerApplication) throws -> LedgerTransactionRevisi
   try store.tombstoneReceipt(receipt.id)
   #expect(throws: LedgerApplication.Error.invalidCommand) { try app.exportPackage() }
 }
+
+@Test func addingTheSameImageWithANewLinkRelinksIt() throws {
+  let (store, _) = try memoryStore()
+  let app = LedgerApplication(store: store)
+  let transaction = try expense(app)
+  let receipt = try store.addReceipt(png, origin: origin, createdAt: at)
+  let relinked = try store.addReceipt(
+    png, origin: origin, linkedTo: transaction.transactionID, createdAt: at)
+  #expect(relinked.id == receipt.id)
+  #expect(relinked.transactionID == transaction.transactionID)
+  #expect(try store.receiptAttachments().map(\.transactionID) == [transaction.transactionID])
+}
+
+@Test func removingAReceiptTwiceIsUnchanged() throws {
+  let (store, _) = try memoryStore()
+  let receipt = try store.addReceipt(png, origin: origin, createdAt: at)
+  try store.tombstoneReceipt(receipt.id)
+  let checksum = try store.semanticChecksum()
+  try store.tombstoneReceipt(receipt.id)
+  #expect(try store.semanticChecksum() == checksum)
+  #expect(try store.receiptAttachments().map(\.lifecycle) == [.tombstoned])
+}
+
+/// Opening, backing up and restoring a ledger re-hashes every receipt. This pins the cost for
+/// about 200 MB of receipts so a slow change shows up here.
+@Test func checkingTwoHundredMegabytesOfReceiptsStaysQuick() throws {
+  let (store, database) = try memoryStore()
+  let size = LedgerReceiptAttachment.maximumBytes
+  for index in 0..<8 {
+    var bytes = Data(repeating: UInt8(index), count: size)
+    bytes.replaceSubrange(0..<4, with: [0xFF, 0xD8, 0xFF, 0xE0])
+    try store.addReceipt(bytes, origin: origin, createdAt: at)
+  }
+  let clock = ContinuousClock()
+  let elapsed = try clock.measure { try CanonicalLedgerHealth.validate(database) }
+  print("Receipt health check for 200 MiB took \(elapsed)")
+  #expect(elapsed < .seconds(10))
+}

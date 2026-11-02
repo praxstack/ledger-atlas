@@ -3198,10 +3198,11 @@ extension LedgerStore {
       }) {
         guard existing.lifecycle == .active else { throw Error.receiptRemoved }
         stored = existing
-        if let transactionID, existing.transactionID != transactionID {
-          stored = try Self.relinkReceipt(existing, to: transactionID, on: database)
+        guard let transactionID, existing.transactionID != transactionID else {
+          return try Self.placeholderResult(origin: origin, status: .unchanged)
         }
-        return try Self.placeholderResult(origin: origin, status: .unchanged)
+        stored = try Self.relinkReceipt(existing, to: transactionID, on: database)
+        return try Self.placeholderResult(origin: origin)
       }
       if let transactionID { try Self.ensureReceiptTarget(transactionID, on: database) }
       try Self.ensureOrigin(origin, on: database)
@@ -3309,13 +3310,22 @@ extension LedgerStore {
   private static func ensureReceiptTarget(_ transactionID: String, on database: OpaquePointer)
     throws
   {
-    guard CanonicalIdentifier.isValid(transactionID),
-      !hasNoRows(
+    guard CanonicalIdentifier.isValid(transactionID) else {
+      throw Error.incompatibleCanonicalStore
+    }
+    var statement: OpaquePointer?
+    guard
+      sqlite3_prepare_v2(
+        database,
         """
-        SELECT 1 FROM main.ledger_transaction WHERE transaction_id='\(transactionID)'
-        UNION ALL SELECT 1 FROM main.economic_event WHERE event_id='\(transactionID)'
-        UNION ALL SELECT 1 FROM main.economic_event_transfer WHERE transfer_id='\(transactionID)'
-        """, on: database)
+        SELECT 1 FROM main.ledger_transaction WHERE transaction_id=?1
+        UNION ALL SELECT 1 FROM main.economic_event WHERE event_id=?1
+        UNION ALL SELECT 1 FROM main.economic_event_transfer WHERE transfer_id=?1
+        """, -1, &statement, nil) == SQLITE_OK, let statement
+    else { throw Error.incompatibleCanonicalStore }
+    defer { sqlite3_finalize(statement) }
+    guard bind(.text(transactionID), to: statement, at: 1),
+      sqlite3_step(statement) == SQLITE_ROW
     else { throw Error.incompatibleCanonicalStore }
   }
 

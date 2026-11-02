@@ -41,24 +41,20 @@ package enum CanonicalLedgerHealth {
       throw HealthError.invalid
     }
     guard verifyingImages else { return }
-    let ids = try rows(
-      database, "SELECT attachment_id FROM ledger_receipt_attachment ORDER BY attachment_id",
-      { $0.text(0) })
-    // One image at a time keeps memory to a single receipt.
-    for id in ids {
-      let checked = try rows(
-        database,
-        "SELECT attachment_id, sha256, media_type, origin_id, bytes FROM ledger_receipt_attachment WHERE attachment_id='\(id)'"
-      ) { row -> Bool in
-        let bytes = row.blob(4)
-        let origin = try LedgerOrigin(id: row.text(3), label: "receipt-check")
-        return row.blobColumns([4])
-          && LedgerReceiptAttachment.digest(bytes) == row.text(1)
-          && LedgerReceiptAttachment.MediaType(sniffing: bytes)?.rawValue == row.text(2)
-          && LedgerReceiptAttachment.id(origin: origin, sha256: row.text(1)) == row.text(0)
-      }
-      guard checked == [true] else { throw HealthError.invalid }
+    // One statement, stepped one row at a time: each image is checked and dropped before the
+    // next is read, so memory stays at a single receipt. No values are spliced into the SQL.
+    let checked = try rows(
+      database,
+      "SELECT attachment_id, sha256, media_type, origin_id, bytes FROM ledger_receipt_attachment ORDER BY attachment_id"
+    ) { row -> Bool in
+      let bytes = row.blob(4)
+      let origin = try LedgerOrigin(id: row.text(3), label: "receipt-check")
+      return row.blobColumns([4])
+        && LedgerReceiptAttachment.digest(bytes) == row.text(1)
+        && LedgerReceiptAttachment.MediaType(sniffing: bytes)?.rawValue == row.text(2)
+        && LedgerReceiptAttachment.id(origin: origin, sha256: row.text(1)) == row.text(0)
     }
+    guard checked.allSatisfy({ $0 }) else { throw HealthError.invalid }
   }
 
   static func readSnapshot(_ database: OpaquePointer) throws -> LedgerStore.LedgerReadSnapshot {

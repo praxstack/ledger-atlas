@@ -147,3 +147,25 @@ private func expense(on accountID: String, _ app: LedgerApplication) throws -> S
     #expect(try reopened.store.semanticChecksum() != checksum)
   }
 }
+
+@Test func addingTheSameImageWithANewLinkIsSavedAcrossReopen() throws {
+  try withReceiptDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    let receiptID: String
+    let transactionID: String
+    do {
+      let created = try LedgerStoreLifecycle.create(at: url)
+      let account = try LedgerAccount(
+        id: String(repeating: "4", count: 64), name: "Synthetic", currencyUnit: "INR",
+        origin: origin)
+      try created.store.createAccount(account)
+      transactionID = try expense(on: account.id, LedgerApplication(store: created.store))
+      receiptID = try created.store.addReceipt(png, origin: origin, createdAt: at).id
+      let again = try created.store.addReceipt(
+        png, origin: origin, linkedTo: transactionID, createdAt: at)
+      #expect(again.id == receiptID)
+    }
+    let reopened = try LedgerStoreLifecycle.open(at: url)
+    #expect(try reopened.store.receiptAttachments().map(\.transactionID) == [transactionID])
+  }
+}
