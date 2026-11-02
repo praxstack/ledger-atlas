@@ -152,6 +152,10 @@ cases stay preserved as source records instead:
 Time zone (observed): in both snapshots, every `WDATE` equals the local date of `ZDATE`
 at UTC+05:30. The importer must not assume this offset; it should derive and confirm
 the offset per backup (the checker reports every offset consistent with all rows).
+The importer reads `ZDATE` as the UTC instant and derives the wall time in the chosen
+source time zone; the derived day must equal `WDATE`. Reading `ZDATE` as a local
+wall-clock epoch fails for 1,231 of 7,393 real rows (entries made 00:00–05:29 IST).
+Replay still accepts events written by earlier builds that used that reading.
 
 ### ASSETS: accounts
 

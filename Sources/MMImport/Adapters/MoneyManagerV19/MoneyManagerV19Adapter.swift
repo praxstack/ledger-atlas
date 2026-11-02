@@ -188,20 +188,18 @@ public enum MoneyManagerV19Adapter {
       declaredType: field.declaredType, storageClass: field.storageClass)
   }
 
+  /// ZDATE is a true UTC epoch (observed: WDATE equals ZDATE's civil day at the device's
+  /// offset for every row of the real backup). The local wall time is the instant seen in the
+  /// source time zone, and its day must equal WDATE.
   private static func canonicalTemporal(
     _ observed: MoneyManagerV19ObservedTimestamp, sourceTimeZone: SourceTimeZone
   ) throws -> SourceTemporal {
-    let civil = GregorianCivil.components(epochMilliseconds: observed.localEpochMilliseconds)
     guard
-      observed.localDay
-        == (try? SourceLocalDate(year: civil.year, month: civil.month, day: civil.day))
+      let temporal = MoneyManagerV19Vocabulary.temporal(
+        zdateEpochMilliseconds: observed.localEpochMilliseconds, in: sourceTimeZone),
+      temporal.localDateTime.date == observed.localDay
     else { throw MoneyManagerV19AdapterError.semanticBindingRequired }
-    let local = try SourceLocalDateTime(
-      date: observed.localDay, hour: civil.hour, minute: civil.minute, second: civil.second,
-      millisecond: civil.millisecond)
-    return try SourceTemporal(
-      resolving: local, in: sourceTimeZone, precision: .millisecond,
-      ambiguityPolicy: .reject)
+    return temporal
   }
 
   private static func reconciliationDecisions(

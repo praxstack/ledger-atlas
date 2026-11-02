@@ -231,15 +231,58 @@ public enum MoneyManagerV19Semantics {
         || (kindLiteral == balanceDecreaseType && event.kind == .adjustmentDebit)
         || (kindLiteral == transferDebitType && event.kind == .transferDebit)
         || (kindLiteral == transferCreditType && event.kind == .transferCredit),
-      let observedLocal = observedLocalDateTime(occurredLiteral),
-      observedLocal == event.occurredAt.localDateTime,
-      event.occurredAt.timeZone.fixedOffsetSeconds == nil
-        || (try? SourceTemporal(
-          resolving: observedLocal, in: event.occurredAt.timeZone,
-          precision: event.occurredAt.precision, ambiguityPolicy: .reject)) == event.occurredAt,
+      occurredMatches(occurredLiteral, event.occurredAt),
       observedDay(wdateLiteral) == event.occurredAt.localDateTime.date
     else { return .invalid }
     return .valid
+  }
+
+  /// The canonical temporal for a ZDATE epoch: ZDATE is the UTC instant, and the local wall
+  /// time is that instant in `zone`.
+  public static func temporal(zdateEpochMilliseconds milliseconds: Int64, in zone: SourceTimeZone)
+    -> SourceTemporal?
+  {
+    let offset: Int
+    if let fixed = zone.fixedOffsetSeconds {
+      offset = fixed
+    } else if let identifier = zone.ianaIdentifier, let foundation = TimeZone(identifier: identifier)
+    {
+      let (seconds, _) = milliseconds.dividedReportingOverflow(by: 1_000)
+      offset = foundation.secondsFromGMT(for: Date(timeIntervalSince1970: Double(seconds)))
+    } else {
+      return nil
+    }
+    let (shifted, overflow) = milliseconds.addingReportingOverflow(Int64(offset) * 1_000)
+    guard !overflow else { return nil }
+    let civil = GregorianCivil.components(epochMilliseconds: shifted)
+    guard let date = try? SourceLocalDate(year: civil.year, month: civil.month, day: civil.day),
+      let local = try? SourceLocalDateTime(
+        date: date, hour: civil.hour, minute: civil.minute, second: civil.second,
+        millisecond: civil.millisecond)
+    else { return nil }
+    return try? SourceTemporal(
+      instant: UTCInstant(epochMilliseconds: milliseconds), localDateTime: local, timeZone: zone,
+      precision: .millisecond, resolvedOffsetSeconds: offset)
+  }
+
+  /// True when a persisted event's time is what ZDATE says. Current imports read ZDATE as the
+  /// UTC instant. Ledgers written by earlier adapter builds read it as a local wall-clock
+  /// epoch; they stay valid so an upgrade never invalidates an existing ledger.
+  public static func occurredMatches(_ zdateLiteral: String, _ occurredAt: SourceTemporal) -> Bool {
+    if let milliseconds = Int64(zdateLiteral),
+      occurredAt.instant.epochMilliseconds == milliseconds,
+      temporal(zdateEpochMilliseconds: milliseconds, in: occurredAt.timeZone)?.localDateTime
+        == occurredAt.localDateTime
+    {
+      return true
+    }
+    guard let legacyLocal = observedLocalDateTime(zdateLiteral),
+      legacyLocal == occurredAt.localDateTime
+    else { return false }
+    return occurredAt.timeZone.fixedOffsetSeconds == nil
+      || (try? SourceTemporal(
+        resolving: legacyLocal, in: occurredAt.timeZone,
+        precision: occurredAt.precision, ambiguityPolicy: .reject)) == occurredAt
   }
 
   public static func mappingLiteral(storageClass: CanonicalFieldStorageClass, payload: Data)

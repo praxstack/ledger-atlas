@@ -150,7 +150,10 @@ enum MoneyManagerV19ObservedGraph {
               profileID: request.expectedManifest.profileID, sourceAccountID: accountUID)),
           MoneyManagerV19Vocabulary.eventKind(forType: type)?.canonical == event.kind,
           event.occurredAt.precision == .millisecond,
-          observedLocalDateTime(zdate) == event.occurredAt.localDateTime,
+          Int64(zdate).flatMap({
+            MoneyManagerV19Vocabulary.temporal(
+              zdateEpochMilliseconds: $0, in: event.occurredAt.timeZone)
+          }) == event.occurredAt,
           observedDay(wdate) == event.occurredAt.localDay
         else { throw CanonicalCommitError.unsafeMapping }
         if let commonZone {

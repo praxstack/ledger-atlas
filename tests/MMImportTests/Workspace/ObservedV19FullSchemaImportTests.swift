@@ -204,6 +204,51 @@ struct ObservedV19FullSchemaImportTests {
     #expect(fromDDL == MoneyManagerV19Contract.androidTables)
   }
 
+  @Test("ZDATE is a UTC instant: an early-morning IST row lands on its WDATE day")
+  func zdateIsUTCInstant() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeFullSchemaBackup(to: source)
+      // 2026-01-01T19:30Z is 01:00 on 2 January at +05:30, the day WDATE records.
+      try execute(
+        at: source,
+        sql: "UPDATE INOUTCOME SET ZDATE='1767295800000', WDATE='2026-01-02' WHERE uid='tx-expense';")
+      let canonical = directory.appendingPathComponent("canonical.sqlite")
+      let workspace = ImportWorkspace()
+      let preparation = try workspace.prepare(
+        .init(
+          sourceURL: source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+          canonicalDatabaseURL: canonical,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800)))
+      let handle = try #require(preparation.preparedHandle)
+      let result = try workspace.commit(handle, approval: workspace.approve(handle))
+      #expect(result.status == .committed)
+      #expect(
+        try scalar(
+          at: canonical,
+          "SELECT count(*) FROM economic_event WHERE instant_milliseconds=1767295800000 AND local_year=2026 AND local_month=1 AND local_day=2 AND local_hour=1 AND local_minute=0 AND resolved_offset_seconds=19800"
+        ) == 1)
+    }
+  }
+
+  @Test("replay accepts current UTC-instant events and legacy local-epoch events")
+  func replayAcceptsBothZDATEReadings() throws {
+    let ist = try SourceTimeZone(fixedOffsetSeconds: 19_800)
+    let current = try #require(
+      MoneyManagerV19Vocabulary.temporal(zdateEpochMilliseconds: 1_767_295_800_000, in: ist))
+    #expect(current.localDateTime.date == (try SourceLocalDate(year: 2026, month: 1, day: 2)))
+    #expect(current.localDateTime.hour == 1)
+    #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", current))
+    // An earlier build read the same literal as 19:30 local on 1 January.
+    let legacyLocal = try SourceLocalDateTime(
+      date: SourceLocalDate(year: 2026, month: 1, day: 1), hour: 19, minute: 30, second: 0,
+      millisecond: 0)
+    let legacy = try SourceTemporal(
+      resolving: legacyLocal, in: ist, precision: .millisecond, ambiguityPolicy: .reject)
+    #expect(MoneyManagerV19Vocabulary.occurredMatches("1767295800000", legacy))
+    #expect(!MoneyManagerV19Vocabulary.occurredMatches("1767295800001", current))
+  }
+
   @Test("balance edits and transfer legs map only with the expected category")
   func balanceIncreaseNeedsBuiltInCategory() throws {
     #expect(MoneyManagerV19Vocabulary.reason(forType: "7", categoryUID: "-4") == nil)
