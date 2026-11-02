@@ -1254,11 +1254,24 @@ private func makeApplicationStore(seedSQL: String? = nil) throws -> LedgerStore 
       origin: origin, accountID: account.id, categoryID: category.id,
       principal: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("9.00")), occurrenceCount: 2),
     occurredAt: occurred, createdAt: UTCInstant(epochMilliseconds: 1))
+  let generated = try app.generateOccurrences(
+    rule, through: SourceLocalDate(year: 2026, month: 6, day: 1),
+    createdAt: UTCInstant(epochMilliseconds: 2))
+  #expect(generated.map { $0.draft.occurredAt.localDateTime.date.month } == [4, 6])
 
   let exported = try app.exportPackage()
   let destination = LedgerApplication(store: try makeApplicationStore())
   try destination.importPackage(manifest: exported.manifest, payload: exported.payload)
   let restored = try destination.snapshot()
+  // MACV2-11: catching up after a restore adds only the missing dates, exactly once.
+  let caughtUp = try destination.generateOccurrences(
+    rule, through: until, createdAt: UTCInstant(epochMilliseconds: 3))
+  #expect(caughtUp.map { $0.draft.occurredAt.localDateTime.date.month } == [4, 6, 7, 8])
+  #expect(Array(caughtUp.prefix(2)) == generated)
+  let afterCatchUp = try destination.checksum()
+  _ = try destination.generateOccurrences(
+    rule, through: until, createdAt: UTCInstant(epochMilliseconds: 4))
+  #expect(try destination.checksum() == afterCatchUp)
   let restoredRule = try #require(restored.recurrenceRules.first)
   #expect(restoredRule.id == rule.id)
   #expect(restoredRule.amount.amount.rawLiteral == "2.50")
