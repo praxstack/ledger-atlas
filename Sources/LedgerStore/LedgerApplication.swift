@@ -1541,7 +1541,7 @@ private func hasUnsupportedPortableProvenance(_ snapshot: LedgerStore.LedgerRead
   }
     || snapshot.revisionHistory.contains { revision in
       revision.draft.sourceLiterals.contains {
-        $0.provenanceID != nil || $0.field == "import.eventID"
+        $0.provenanceID != nil || $0.field.hasPrefix("import.")
       }
     }
 }
