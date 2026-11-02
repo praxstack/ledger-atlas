@@ -7,7 +7,7 @@ import Testing
   let data = try JSONEncoder().encode(projection)
   let json = try #require(String(data: data, encoding: .utf8))
 
-  #expect(projection.schemaVersion == 1)
+  #expect(projection.schemaVersion == 2)
   #expect(projection.state == .permissionDenied)
   #expect(!json.localizedCaseInsensitiveContains("amount"))
   #expect(!json.localizedCaseInsensitiveContains("name"))
@@ -37,6 +37,7 @@ import Testing
     (.permissionDenied, "Ledger Atlas. Allow access in Ledger Atlas to continue."),
     (.ready, "Ledger Atlas. Ledger Atlas is ready."),
     (.reopenRequired, "Ledger Atlas. Open Ledger Atlas to continue."),
+    (.locked, "Ledger Atlas. Ledger Atlas is locked."),
   ]
 
   for (state, label) in expected {
@@ -148,4 +149,60 @@ import Testing
   #expect(store.reopen(.canonicalLedger) == .corrupt)
   #expect(store.reopen(.canonicalLedger) == .corrupt)
   #expect(store.reopen(.importSource) == .resolved(URL(fileURLWithPath: "/synthetic/import.mmbak")))
+}
+
+@Test func widgetSummaryCarriesOnlyTwoCoarseFactsAndOnlyWhenReady() throws {
+  let summary = RedactedWidgetProjection.Summary(entriesThisMonth: 12, budgets: .nearLimit)
+  let ready = RedactedWidgetProjection(state: .ready, summary: summary)
+  let data = try JSONEncoder().encode(ready)
+  let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+  #expect(Set(object.keys) == ["schemaVersion", "state", "summary"])
+  let inner = try #require(object["summary"] as? [String: Any])
+  #expect(Set(inner.keys) == ["entriesThisMonth", "budgets"])
+  #expect(try JSONDecoder().decode(RedactedWidgetProjection.self, from: data) == ready)
+  #expect(ready.summaryLines == ["12 entries this month", "A budget is near its limit"])
+  #expect(
+    ready.accessibilityLabel
+      == "Ledger Atlas. Ledger Atlas is ready. 12 entries this month. A budget is near its limit.")
+
+  // A locked or closed ledger never carries a summary, even if one is passed.
+  #expect(RedactedWidgetProjection(state: .locked, summary: summary).summary == nil)
+  let leaked = Data(
+    #"{"schemaVersion":2,"state":"locked","summary":{"entriesThisMonth":1,"budgets":"none"}}"#.utf8)
+  #expect(throws: (any Error).self) {
+    try JSONDecoder().decode(RedactedWidgetProjection.self, from: leaked)
+  }
+  let extra = Data(
+    #"{"schemaVersion":2,"state":"ready","summary":{"entriesThisMonth":1,"budgets":"none","total":"9"}}"#
+      .utf8)
+  #expect(throws: (any Error).self) {
+    try JSONDecoder().decode(RedactedWidgetProjection.self, from: extra)
+  }
+}
+
+@Test func widgetReadsVersionOneFilesFromEarlierBuilds() throws {
+  let v1 = Data(#"{"schemaVersion":1,"state":"ready"}"#.utf8)
+  let decoded = try JSONDecoder().decode(RedactedWidgetProjection.self, from: v1)
+  #expect(decoded.state == .ready && decoded.summary == nil && decoded.schemaVersion == 2)
+  #expect(throws: (any Error).self) {
+    try JSONDecoder().decode(
+      RedactedWidgetProjection.self, from: Data(#"{"schemaVersion":3,"state":"ready"}"#.utf8))
+  }
+}
+
+@Test func theWidgetsReadNeverWritesTheSharedFile() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let store = RedactedWidgetProjectionStore(containerURL: directory)
+
+  #expect(store.readOnly() == .reopenRequired)
+  #expect(!FileManager.default.fileExists(atPath: store.url.path))
+  let damaged = Data("not json".utf8)
+  try damaged.write(to: store.url)
+  #expect(store.readOnly() == .reopenRequired)
+  #expect(try Data(contentsOf: store.url) == damaged)
+
+  try store.write(.locked)
+  #expect(store.readOnly() == .locked)
 }

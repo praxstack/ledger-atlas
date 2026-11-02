@@ -246,10 +246,13 @@ struct LedgerView: View {
     }
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
+    .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
   }
 
+  /// Opens the form for a Shortcuts request once the ledger's accounts have loaded, so the
+  /// form never opens empty on a cold launch.
   private func presentIntentIfNeeded() {
-    guard let intentRequest, !showingTransactionForm else { return }
+    guard let intentRequest, !showingTransactionForm, !accounts.isEmpty else { return }
     guard intentRequest.kind == .addExpense || intentRequest.kind == .addIncome else { return }
     showingTransactionForm = true
   }
