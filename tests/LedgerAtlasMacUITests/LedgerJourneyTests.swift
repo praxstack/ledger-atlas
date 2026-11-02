@@ -832,6 +832,68 @@ import Testing
   #expect(try journey.checksum() == before)
 }
 
+@MainActor
+@Test func nativeEntryIsIdempotentPerSubmissionAndRejectsFormattedDisplayStrings() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try journey.approveAndOpen(
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"))
+  try journey.performBeginEditing()
+  let account = try #require(journey.snapshot?.accounts.first)
+  let before = try #require(journey.snapshot).transactions.count
+  let now = UTCInstant.currentEpochMilliseconds()
+
+  // Pressing Save twice sends the same submission a moment apart: one transaction.
+  let submission = UUID().uuidString
+  let first = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: now), submissionID: submission)
+  let second = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: now + 3), submissionID: submission)
+  #expect(second == first)
+  #expect(journey.snapshot?.transactions.count == before + 1)
+
+  // A new form is a new submission, even with the same content.
+  _ = try journey.createNativeTransaction(
+    amountLiteral: "4.00", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: now + 5), submissionID: UUID().uuidString)
+  #expect(journey.snapshot?.transactions.count == before + 2)
+
+  // Display formatting never becomes canonical money: these are rejected, nothing is written.
+  let checksum = try journey.checksum()
+  for formatted in ["1,234.50", "$4.00", "4.00 USD", "4,00", "\u{0664}", "1e3", "4.00\u{00A0}"] {
+    #expect(throws: (any Error).self) {
+      try journey.createNativeTransaction(
+        amountLiteral: formatted, kind: .expense, accountID: account.id, categoryID: nil,
+        note: nil, createdAt: UTCInstant(epochMilliseconds: now + 7),
+        submissionID: UUID().uuidString)
+    }
+  }
+  #expect(try journey.checksum() == checksum)
+  #expect(journey.snapshot?.transactions.count == before + 2)
+}
+
+@MainActor
+@Test func staleEditsReportAConflictInsteadOfAGenericFailure() {
+  #expect(
+    LedgerJourney.editFailureMessage(
+      for: LedgerStore.Error.revisionConflict, otherwise: "Amount could not be saved.")
+      .contains("changed since you opened it"))
+  #expect(
+    LedgerJourney.editFailureMessage(
+      for: LedgerStore.Error.incompatibleCanonicalStore, otherwise: "Amount could not be saved.")
+      == "Amount could not be saved.")
+}
+
 private func writeSyntheticV19(to url: URL) throws {
   var database: OpaquePointer?
   guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {

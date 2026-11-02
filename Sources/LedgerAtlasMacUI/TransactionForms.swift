@@ -9,8 +9,12 @@ struct NativeTransactionForm: View {
   let accounts: [LedgerAccount]
   let categories: [LedgerCategory]
   let intent: LedgerIntentRequest?
-  let onSave: (String, LedgerTransactionKind, String, String?, String?) -> Void
+  /// (submission ID, amount literal, kind, account ID, category ID, note).  The submission ID is
+  /// fixed for the life of the form, so a repeated Save is the same submission, not a new entry.
+  let onSave: (String, String, LedgerTransactionKind, String, String?, String?) -> Void
   @Environment(\.dismiss) private var dismiss
+  @State private var submissionID = UUID().uuidString
+  @State private var isSaving = false
   @State private var amount = ""
   @State private var kind: LedgerTransactionKind = .expense
   @State private var accountID = ""
@@ -19,7 +23,7 @@ struct NativeTransactionForm: View {
 
   init(
     accounts: [LedgerAccount], categories: [LedgerCategory], intent: LedgerIntentRequest? = nil,
-    onSave: @escaping (String, LedgerTransactionKind, String, String?, String?) -> Void
+    onSave: @escaping (String, String, LedgerTransactionKind, String, String?, String?) -> Void
   ) {
     self.accounts = accounts
     self.categories = categories
@@ -64,7 +68,9 @@ struct NativeTransactionForm: View {
           Button("Cancel", role: .cancel) { dismiss() }
           Spacer()
           Button("Save") { save() }
-            .disabled(amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || accountID.isEmpty)
+            .disabled(
+              isSaving || amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || accountID.isEmpty)
         }
       }
     }
@@ -82,9 +88,12 @@ struct NativeTransactionForm: View {
   }
 
   private func save() {
+    guard !isSaving else { return }
+    isSaving = true
     let cleanAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
     let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-    onSave(cleanAmount, kind, accountID, categoryID, cleanNote.isEmpty ? nil : cleanNote)
+    onSave(
+      submissionID, cleanAmount, kind, accountID, categoryID, cleanNote.isEmpty ? nil : cleanNote)
     dismiss()
   }
 }

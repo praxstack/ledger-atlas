@@ -192,8 +192,16 @@ public final class LedgerJourney {
       try correctAmount(
         transactionID: transactionID, amountLiteral: amountLiteral, createdAt: createdAt)
     } catch {
-      failClosed(message: "Amount could not be saved.")
+      failClosed(message: Self.editFailureMessage(for: error, otherwise: "Amount could not be saved."))
     }
+  }
+
+  /// A stale edit is not a failure of the ledger: say what happened and show the latest version.
+  package static func editFailureMessage(for error: Error, otherwise message: String) -> String {
+    if case LedgerStore.Error.revisionConflict = error {
+      return "This transaction changed since you opened it. The latest version is shown; edit it again."
+    }
+    return message
   }
 
   public func checksum() throws -> String {
@@ -271,9 +279,14 @@ public final class LedgerJourney {
     guard let application,
       let current = snapshot?.transactions.first(where: { $0.id == transactionID })?.currentRevision
     else { throw LedgerApplication.Error.invalidCommand }
-    _ = try application.tombstoneTransaction(
-      transactionID: transactionID, expectedCurrentRevisionID: current.id, createdAt: createdAt)
-    snapshot = try application.snapshot()
+    do {
+      _ = try application.tombstoneTransaction(
+        transactionID: transactionID, expectedCurrentRevisionID: current.id, createdAt: createdAt)
+      snapshot = try application.snapshot()
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
   }
 
   public func copyTransaction(transactionID: String, createdAt: UTCInstant) throws
@@ -331,7 +344,7 @@ public final class LedgerJourney {
 
   public func createNativeTransaction(
     amountLiteral: String, kind: LedgerTransactionKind, accountID: String,
-    categoryID: String?, note: String?, createdAt: UTCInstant
+    categoryID: String?, note: String?, createdAt: UTCInstant, submissionID: String? = nil
   ) throws -> LedgerTransactionRevision {
     guard application != nil, let snapshot,
       let account = snapshot.accounts.first(where: { $0.id == accountID }),
@@ -341,10 +354,12 @@ public final class LedgerJourney {
     let amount = try CurrencyAmount(
       unitCode: account.currencyUnit, amount: ExactDecimal(amountLiteral))
     let when = try Self.nativeTemporal(for: createdAt)
-    let key = SHA256.hash(
-      data: Data(
-        "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")".utf8)
-    ).map { String(format: "%02x", $0) }.joined()
+    // A form submission keys on its own ID, so pressing Save twice records one transaction.
+    let keyMaterial =
+      submissionID.map { "mac-native-submission:\($0)" }
+      ?? "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")"
+    let key = SHA256.hash(data: Data(keyMaterial.utf8)).map { String(format: "%02x", $0) }
+      .joined()
     let draft = try LedgerTransactionDraft(
       effects: [
         try LedgerTransactionEffect(
