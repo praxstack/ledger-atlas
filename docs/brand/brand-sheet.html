@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ledger Atlas brand sheet</title>
+<!-- Source for docs/brand/brand-sheet.png. Render at 1600 px wide. -->
+<style>
+  :root {
+    --bg: #fbfbfa; --ink: #1d1d1f; --ink-2: #6e6e73; --line: #e5e5e3;
+    --dbg: #1c1c1e; --dink: #f5f5f7; --dink-2: #98989d; --dline: #2c2c2e;
+    --teal: #0a7c86;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1600px; background: var(--bg); color: var(--ink);
+    font-family: "SF Pro Text", -apple-system, Inter, sans-serif; font-feature-settings: "tnum"; }
+  .band { padding: 56px 72px; }
+  .dark { background: var(--dbg); color: var(--dink); }
+  .head { display: flex; justify-content: space-between; align-items: end; border-bottom: 1px solid var(--line); padding-bottom: 28px; }
+  .head img { height: 72px; }
+  .eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 20px; font-weight: 600; }
+  .dark .eyebrow { color: var(--dink-2); }
+  .meta { font-size: 14px; color: var(--ink-2); text-align: right; line-height: 1.6; }
+  .row { display: flex; align-items: end; gap: 56px; }
+  figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  figcaption { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .dark figcaption { color: var(--dink-2); }
+  .px { image-rendering: auto; }
+  .zoom { image-rendering: pixelated; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; }
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; }
+  .sw { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #fff; }
+  .sw .chip { height: 72px; display: grid; grid-template-columns: 1fr 1fr; }
+  .sw .chip span { display: block; }
+  .sw p { margin: 0; padding: 12px 14px; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+  .sw b { display: block; color: var(--ink); font-size: 13px; font-weight: 600; }
+  .type { display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: end; }
+  .num { font-family: "SF Pro Display", -apple-system, "Inter Display", Inter, sans-serif; font-size: 72px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .num small { font-size: 32px; color: var(--ink-2); font-weight: 500; }
+  .in { color: #1f8a55; } .over { color: #c2412d; }
+  .ledger { font-size: 15px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
+  .ledger div { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <!-- inline copies of the mark and menu icon so they can be tinted with currentColor -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="sym-mark" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="sym-mark-la-mark-disc"><circle cx="32" cy="32" r="27"/></clipPath>
+    <mask id="sym-mark-la-mark-halo" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect x="0" y="0" width="64" height="64" fill="#ffffff"/>
+      <circle cx="44.5" cy="22" r="9" fill="#000000"/>
+    </mask>
+  </defs>
+  <g mask="url(#sym-mark-la-mark-halo)">
+    <circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width="4"/>
+    <g clip-path="url(#sym-mark-la-mark-disc)" fill="currentColor">
+      <rect x="0" y="10.75" width="64" height="2.5"/>
+      <rect x="0" y="20.75" width="64" height="2.5"/>
+      <rect x="0" y="30.75" width="64" height="2.5"/>
+      <rect x="0" y="40.75" width="64" height="2.5"/>
+      <rect x="0" y="50.75" width="64" height="2.5"/>
+      <path d="M32 5A13.5 27 0 0 1 32 59" fill="none" stroke="currentColor" stroke-width="3.5"/>
+    </g>
+  </g>
+  <circle cx="44.5" cy="22" r="5.5" fill="currentColor"/>
+</symbol><symbol id="sym-menu" viewBox="0 0 32 32">
+  <defs>
+    <clipPath id="sym-menu-ledger-atlas-menu-disc"><circle cx="16" cy="16" r="13"/></clipPath>
+    <mask id="sym-menu-ledger-atlas-menu-halo" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect x="0" y="0" width="32" height="32" fill="#ffffff"/>
+      <circle cx="22.5" cy="16" r="4.5" fill="#000000"/>
+    </mask>
+  </defs>
+  <g mask="url(#sym-menu-ledger-atlas-menu-halo)">
+    <circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" stroke-width="2"/>
+    <g clip-path="url(#sym-menu-ledger-atlas-menu-disc)" fill="currentColor">
+      <rect x="0" y="9" width="32" height="2"/>
+      <rect x="0" y="15" width="32" height="2"/>
+      <rect x="0" y="21" width="32" height="2"/>
+      <path d="M16 4A6.5 12 0 0 1 16 28" fill="none" stroke="currentColor" stroke-width="2"/>
+    </g>
+  </g>
+  <circle cx="22.5" cy="16" r="3" fill="currentColor"/>
+</symbol></svg>
+  <section class="band">
+    <div class="head">
+      <img src="../../Assets/Brand/ledger-atlas-wordmark.svg" alt="Ledger Atlas wordmark">
+      <div class="meta">Brand sheet · v1<br>Local-first personal finance for macOS</div>
+    </div>
+  </section>
+
+  <section class="band" style="padding-top:8px">
+    <p class="eyebrow">App icon · light</p>
+    <div class="row">
+      <figure><img class="px" src="../../Assets/Brand/ledger-atlas-app-icon-1024.png" width="360" height="360" alt=""><figcaption>1024 (shown at 360)</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_256x256.png" width="256" height="256" alt=""><figcaption>256</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_32x32@2x.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_32x32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_16x16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+      <figure><img class="zoom" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_16x16.png" width="128" height="128" alt=""><figcaption>16, pixels ×8</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="band dark">
+    <p class="eyebrow">App icon · on dark, and dark appearance</p>
+    <div class="row">
+      <figure><img class="px" src="../../Assets/Brand/ledger-atlas-app-icon-dark-1024.png" width="360" height="360" alt=""><figcaption>Dark appearance 1024</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_256x256.png" width="256" height="256" alt=""><figcaption>Default on dark · 256</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_32x32@2x.png" width="64" height="64" alt=""><figcaption>64</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_32x32.png" width="32" height="32" alt=""><figcaption>32</figcaption></figure>
+      <figure><img class="px" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_16x16.png" width="16" height="16" alt=""><figcaption>16</figcaption></figure>
+      <figure><img class="zoom" src="../../Assets/AppIcon.xcassets/AppIcon.appiconset/icon_32x32.png" width="128" height="128" alt=""><figcaption>32, pixels ×4</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="split">
+    <div class="band">
+      <p class="eyebrow">Mark, wordmark, menu bar · light</p>
+      <div class="row" style="gap:40px">
+        <figure><svg width="64" height="64" style="color:#1d1d1f"><use href="#sym-mark"/></svg><figcaption>Mark · ink</figcaption></figure>
+        <figure><svg width="64" height="64" style="color:#0a7c86"><use href="#sym-mark"/></svg><figcaption>Mark · teal</figcaption></figure>
+        <figure><svg width="32" height="32" style="color:#000"><use href="#sym-menu"/></svg><figcaption>Menu template</figcaption></figure>
+      </div>
+      <div style="margin-top:40px"><img src="../../Assets/Brand/ledger-atlas-wordmark.svg" height="64" alt=""></div>
+    </div>
+    <div class="band dark">
+      <p class="eyebrow">Mark, wordmark, menu bar · dark</p>
+      <div class="row" style="gap:40px">
+        <figure><svg width="64" height="64" style="color:#f5f5f7"><use href="#sym-mark"/></svg><figcaption>Mark · ink</figcaption></figure>
+        <figure><svg width="64" height="64" style="color:#4fc3ce"><use href="#sym-mark"/></svg><figcaption>Mark · teal</figcaption></figure>
+        <figure><svg width="32" height="32" style="color:#fff"><use href="#sym-menu"/></svg><figcaption>Menu template</figcaption></figure>
+      </div>
+      <div style="margin-top:40px"><img src="../../Assets/Brand/ledger-atlas-wordmark-dark.svg" height="64" alt=""></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <p class="eyebrow">Palette · light / dark</p>
+    <div class="swatches">
+      <div class="sw"><div class="chip"><span style="background:#fbfbfa"></span><span style="background:#1c1c1e"></span></div><p><b>Window</b>#fbfbfa / #1c1c1e</p></div>
+      <div class="sw"><div class="chip"><span style="background:#1d1d1f"></span><span style="background:#f5f5f7"></span></div><p><b>Text</b>#1d1d1f / #f5f5f7</p></div>
+      <div class="sw"><div class="chip"><span style="background:#0a7c86"></span><span style="background:#4fc3ce"></span></div><p><b>Accent · Atlas teal</b>#0a7c86 / #4fc3ce</p></div>
+      <div class="sw"><div class="chip"><span style="background:#1f8a55"></span><span style="background:#4cc985"></span></div><p><b>Money in</b>#1f8a55 / #4cc985</p></div>
+      <div class="sw"><div class="chip"><span style="background:#c2412d"></span><span style="background:#ff7a66"></span></div><p><b>Over budget</b>#c2412d / #ff7a66</p></div>
+      <div class="sw"><div class="chip"><span style="background:linear-gradient(#14959f,#065c64)"></span><span style="background:linear-gradient(#3a3a3d,#151516)"></span></div><p><b>Icon field</b>#14959f→#065c64 / #3a3a3d→#151516</p></div>
+    </div>
+  </section>
+
+  <section class="band" style="padding-top:8px">
+    <p class="eyebrow">Type · SF Pro, tabular figures</p>
+    <div class="type">
+      <div class="num">$12,480.<small>36</small></div>
+      <div class="ledger">
+        <div><span>Salary</span><span class="in">+4,200.00</span></div>
+        <div><span>Groceries</span><span>−318.42</span></div>
+        <div><span>Dining · over budget</span><span class="over">−96.10</span></div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>
