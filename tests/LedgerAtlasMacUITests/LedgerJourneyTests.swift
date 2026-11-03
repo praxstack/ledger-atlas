@@ -1298,12 +1298,13 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   try writeSyntheticV19(to: source)
 
   let journey = LedgerJourney()
+  let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
   let session = LedgerSession()
   #expect(journey.backgroundWork == nil)
   await journey.selectSourceInBackground(
     source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
     canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
-    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+    sourceTimeZone: utc)
   #expect(journey.backgroundWork == nil)
   #expect(journey.lastFailure == nil)
   #expect(journey.phase == .reviewing)
@@ -1330,10 +1331,11 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   let source = directory.appendingPathComponent("not-a-backup.sqlite")
   try Data("not sqlite".utf8).write(to: source)
   let journey = LedgerJourney()
+  let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
   await journey.selectSourceInBackground(
     source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
     canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
-    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+    sourceTimeZone: utc)
   #expect(journey.backgroundWork == nil)
   #expect(journey.phase == .blocked)
   await journey.approveInBackground(into: LedgerSession())
@@ -1358,10 +1360,11 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
 
   // Closed while the backup is being read: the review is not adopted.
   let journey = LedgerJourney()
+  let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
   let preparing = Task {
     await journey.selectSourceInBackground(
       source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
-      canonicalDatabaseURL: canonical, sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+      canonicalDatabaseURL: canonical, sourceTimeZone: utc)
   }
   try await waitForBackgroundWork(.preparingImport, in: journey)
   journey.closeLedger()
@@ -1373,7 +1376,7 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   // Closed while importing: the new ledger isn't adopted or shown, and the caller learns it.
   await journey.selectSourceInBackground(
     source, stagingDatabaseURL: directory.appendingPathComponent("stage2.sqlite"),
-    canonicalDatabaseURL: canonical, sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+    canonicalDatabaseURL: canonical, sourceTimeZone: utc)
   #expect(journey.phase == .reviewing)
   let session = LedgerSession()
   let importing = Task { await journey.approveInBackground(into: session) }
