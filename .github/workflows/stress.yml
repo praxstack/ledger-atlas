@@ -51,10 +51,12 @@ jobs:
         run: |
           case "$REPEAT" in ''|*[!0-9]*) echo "repeat must be a number"; exit 2;; esac
           failures=0
+          mkdir -p "$RUNNER_TEMP/stress-failures"
           for run in $(seq 1 "$REPEAT"); do
             if ! swift test --skip-build --no-parallel --filter "$FILTER" > run.log 2>&1; then
               failures=$((failures + 1))
               echo "== run $run failed"
+              cp run.log "$RUNNER_TEMP/stress-failures/run-$run.log"
               grep -E "✘|recorded an issue|Caught error|sqliteFailure" run.log | head -40
             fi
           done
@@ -63,3 +65,10 @@ jobs:
         env:
           FILTER: ${{ inputs.filter || 'LedgerJourneyTests' }}
           REPEAT: ${{ inputs.repeat || '25' }}
+      - name: Upload failing run logs
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: stress-failures
+          path: ${{ runner.temp }}/stress-failures
+          if-no-files-found: ignore
