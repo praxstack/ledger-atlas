@@ -1,0 +1,507 @@
+import AppKit
+import ApplicationServices
+import Foundation
+import LedgerCore
+import LedgerStore
+import SwiftUI
+import Testing
+
+@testable import LedgerAtlasMacUI
+
+// Synthetic data only: every capture shows the made-up demo ledger.
+
+/// #57 (MACV2-21): one capture of the real app for each of the 25 screenshot traceability
+/// records, in light and dark, plus key states (empty, loaded, edit sheet, an error, the lock
+/// screen). Each capture is checked: it isn't blank, light and dark differ, the screen shows
+/// what the record is about, and no home-folder path is on screen. The PNGs and an index go to
+/// `$LEDGER_ATLAS_TEST_ARTIFACTS/ui-captures`, which CI uploads as an artifact.
+@MainActor
+@Test func everyTraceabilityRecordHasASyntheticCapture() async throws {
+  let records = try traceabilityRecords()
+  #expect(records.count == 25)
+  let missing = records.filter { capturePlan[$0.key] == nil }.map(\.key)
+  #expect(missing.isEmpty, "no capture planned for \(missing)")
+  for record in records {
+    #expect(
+      record.manifestPath == "ui-captures/" + record.fileName(.light),
+      "the manifest points record \(record.number) at \(record.manifestPath ?? "nothing")")
+  }
+
+  let output = try captureDirectory()
+  var index: [[String: String]] = []
+
+  // Screens: one window per screen (and editing mode), every record on it, both appearances.
+  let screens = records.compactMap { record -> (CaptureRecord, CaptureShot.ScreenShot)? in
+    guard case .screen(let shot) = capturePlan[record.key]?.shot else { return nil }
+    return (record, shot)
+  }
+  for (screen, group) in Dictionary(grouping: screens, by: { ScreenKey($0.1) })
+    .sorted(by: { $0.value[0].0.number < $1.value[0].0.number })
+  {
+    let root = try await MountedRoot(showing: screen.destination)
+    defer { root.close() }
+    #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
+    if screen.editing {
+      #expect(root.pressButton(named: "Begin editing accounts"), "no Begin editing button")
+      try await root.settle()
+    }
+    for (record, shot) in group.sorted(by: { $0.0.number < $1.0.number }) {
+      let plan = try #require(capturePlan[record.key])
+      var pair: [Data] = []
+      for appearance in CaptureAppearance.allCases {
+        root.window.appearance = NSAppearance(named: appearance.name)
+        scroll(root.window, to: shot.scroll)
+        pump(0.6)
+        let png = try #require(pngData(of: root.window), "\(record.key) could not be captured")
+        let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+        expectUsable(png, text: text, expecting: plan.expects, for: record.key)
+        let name = record.fileName(appearance)
+        try png.write(to: output.appendingPathComponent(name))
+        index.append(record.indexEntry(file: name, appearance: appearance, plan: plan))
+        pair.append(png)
+      }
+      #expect(pair[0] != pair[1], "\(record.key): light and dark captures are identical")
+    }
+  }
+
+  // Sheets: the real sheet views, hosted with the demo ledger's accounts and groups.
+  let snapshot = try demoSnapshot()
+  for record in records {
+    guard let plan = capturePlan[record.key], case .sheet(let sheet) = plan.shot else { continue }
+    var pair: [Data] = []
+    for appearance in CaptureAppearance.allCases {
+      let png = try await capture(sheet.view(snapshot), appearance: appearance, size: sheet.size)
+      expectUsable(png.data, text: png.text, expecting: plan.expects, for: record.key)
+      let name = record.fileName(appearance)
+      try png.data.write(to: output.appendingPathComponent(name))
+      index.append(record.indexEntry(file: name, appearance: appearance, plan: plan))
+      pair.append(png.data)
+    }
+    #expect(pair[0] != pair[1], "\(record.key): light and dark captures are identical")
+  }
+
+  index += try await captureKeyStates(into: output)
+  let data = try JSONSerialization.data(
+    withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
+  try data.write(to: output.appendingPathComponent("index.json"))
+  print("CAPTURES \(index.count) files in \(output.path)")
+  #expect(index.count == 25 * 2 + 3 * 2)
+}
+
+/// The empty state, the lock screen and a refused passcode, in light and dark. (Loaded and the
+/// edit sheet are records 1 and 14 above.)
+@MainActor
+private func captureKeyStates(into output: URL) async throws -> [[String: String]] {
+  var index: [[String: String]] = []
+  func save(_ png: Data, _ name: String, _ appearance: CaptureAppearance, _ note: String) throws {
+    let file = "key-\(name)-\(appearance.rawValue).png"
+    try png.write(to: output.appendingPathComponent(file))
+    index.append(["file": file, "state": name, "appearance": appearance.rawValue, "note": note])
+  }
+
+  let empty = try await MountedRoot(showing: .ledger, withLedger: false)
+  defer { empty.close() }
+  for appearance in CaptureAppearance.allCases {
+    empty.window.appearance = NSAppearance(named: appearance.name)
+    pump(0.6)
+    let png = try #require(pngData(of: empty.window))
+    let text = empty.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    expectUsable(png, text: text, expecting: ["Open a ledger"], for: "empty")
+    try save(png, "empty", appearance, "No ledger open yet: the first-run prompt.")
+  }
+
+  let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
+  try lock.setPasscode("2468")
+  lock.lock()
+  let locked = try await MountedRoot(showing: .ledger, appLock: lock)
+  defer { locked.close() }
+  for appearance in CaptureAppearance.allCases {
+    locked.window.appearance = NSAppearance(named: appearance.name)
+    pump(0.6)
+    let png = try #require(pngData(of: locked.window))
+    let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    expectUsable(png, text: text, expecting: ["Ledger Atlas is locked"], for: "lock")
+    #expect(!text.contains { $0.contains("Everyday Bank") }, "the lock screen shows ledger content")
+    try save(png, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
+  }
+  // An error: Unlock with no passcode is refused.
+  #expect(locked.pressButton(named: "Unlock"), "no Unlock button")
+  pump(0.6)
+  for appearance in CaptureAppearance.allCases {
+    locked.window.appearance = NSAppearance(named: appearance.name)
+    pump(0.6)
+    let png = try #require(pngData(of: locked.window))
+    let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    expectUsable(png, text: text, expecting: ["That passcode was not accepted."], for: "error")
+    try save(png, "error", appearance, "A refused passcode, shown in words as well as colour.")
+  }
+  return index
+}
+
+// MARK: - The plan: which app state stands for each traceability record
+
+/// A traceability record from docs/specifications/screenshot-traceability-v1.json.
+struct CaptureRecord: Sendable {
+  let number: Int
+  let route: String
+  let state: String
+  /// Where the manifest says this record's light capture is.
+  let manifestPath: String?
+  var key: String { "\(route)/\(state)" }
+
+  func fileName(_ appearance: CaptureAppearance) -> String {
+    String(format: "%02d-%@-%@-%@.png", number, route, state, appearance.rawValue)
+  }
+
+  func indexEntry(
+    file: String, appearance: CaptureAppearance, plan: CapturePlan
+  ) -> [String: String] {
+    [
+      "file": file, "record": String(number), "route_id": route, "state_id": state,
+      "appearance": appearance.rawValue, "ledger_atlas": plan.shot.description,
+      "note": plan.note ?? "",
+    ]
+  }
+}
+
+enum CaptureAppearance: String, CaseIterable, Sendable {
+  case light, dark
+  var name: NSAppearance.Name { self == .light ? .aqua : .darkAqua }
+}
+
+enum CaptureScroll: String, Sendable { case top, middle, bottom }
+
+enum CaptureShot: CustomStringConvertible, Sendable {
+  struct ScreenShot: Sendable {
+    let destination: AppDestination
+    var scroll: CaptureScroll = .top
+    var editing = false
+  }
+  case screen(ScreenShot)
+  case sheet(CaptureSheet)
+
+  static func screen(
+    _ destination: AppDestination, _ scroll: CaptureScroll = .top, editing: Bool = false
+  ) -> CaptureShot {
+    .screen(ScreenShot(destination: destination, scroll: scroll, editing: editing))
+  }
+
+  var description: String {
+    switch self {
+    case .screen(let shot):
+      "\(shot.destination.title) screen\(shot.editing ? " (editing)" : ""), scrolled to \(shot.scroll.rawValue)"
+    case .sheet(let sheet): sheet.title
+    }
+  }
+}
+
+struct ScreenKey: Hashable, Sendable {
+  let destination: AppDestination
+  let editing: Bool
+  init(_ shot: CaptureShot.ScreenShot) {
+    destination = shot.destination
+    editing = shot.editing
+  }
+}
+
+enum CaptureSheet: Sendable {
+  case newAccount, editAccount(String), setPasscode
+
+  var title: String {
+    switch self {
+    case .newAccount: "New account sheet"
+    case .editAccount(let name): "Edit account sheet for \(name)"
+    case .setPasscode: "Set passcode sheet"
+    }
+  }
+
+  var size: NSSize {
+    switch self {
+    case .setPasscode: NSSize(width: 460, height: 260)
+    default: NSSize(width: 520, height: 420)
+    }
+  }
+
+  @MainActor
+  func view(_ snapshot: LedgerStore.LedgerReadSnapshot) throws -> AnyView {
+    switch self {
+    case .newAccount:
+      return AnyView(AccountForm(groups: snapshot.accountGroups, onSave: { _ in }))
+    case .editAccount(let name):
+      let account = try #require(snapshot.accounts.first { $0.name == name })
+      return AnyView(AccountEditForm(account: account, groups: snapshot.accountGroups) { _ in })
+    case .setPasscode:
+      return AnyView(PasscodeForm(mode: .set, save: { _, _ in nil }))
+    }
+  }
+}
+
+struct CapturePlan: Sendable {
+  let shot: CaptureShot
+  /// Text that must be on screen, so a capture of the wrong state fails.
+  let expects: [String]
+  /// How the Ledger Atlas state differs from the recorded Android one, if it does.
+  var note: String? = nil
+}
+
+/// Ledger Atlas is a Mac app, not a copy of the Android one, so each record maps to the screen
+/// that does the same job. Notes say where the Mac app has no exact counterpart.
+let capturePlan: [String: CapturePlan] = [
+  "transactions.daily/dark.populated.root": .init(
+    shot: .screen(.ledger), expects: ["Monthly salary"]),
+  "statistics.overview/monthly.expense": .init(
+    shot: .screen(.insights), expects: ["Accessible table"],
+    note: "Insights shows every period in one table instead of a month/year toggle."),
+  "statistics.overview/annual.expense": .init(
+    shot: .screen(.insights, .middle), expects: ["Accessible table"],
+    note: "Insights shows every period in one table instead of a month/year toggle."),
+  "statistics.overview/annual.income.scrolled": .init(
+    shot: .screen(.insights, .bottom), expects: ["Export PDF statement"]),
+  "statistics.category_detail/annual.income.category": .init(
+    shot: .screen(.categories), expects: ["Salary"]),
+  "statistics.category_detail/annual.income.capture_anomaly": .init(
+    shot: .screen(.categories, .middle), expects: ["Salary"],
+    note: "The anomaly was in the source app's capture; the synthetic ledger has none."),
+  "statistics.category_detail/annual.expense.subcategory": .init(
+    shot: .screen(.categories, .bottom), expects: ["Groceries"]),
+  "statistics.total_balance/monthly.trend": .init(
+    shot: .screen(.budgets), expects: ["Groceries"],
+    note: "Monthly progress is shown by budgets; there is no separate balance-trend chart."),
+  "accounts.overview/upper.cards.totals": .init(
+    shot: .screen(.accounts), expects: ["Everyday Bank"]),
+  "accounts.overview/cards.savings.groups": .init(
+    shot: .screen(.accounts, .middle), expects: ["Savings & Investments"]),
+  "accounts.overview/lower.groups.active_scroll": .init(
+    shot: .screen(.accounts, .bottom), expects: ["Travel Wallet"]),
+  "accounts.overview/restored.chrome": .init(
+    shot: .screen(.accounts), expects: ["Everyday Bank"],
+    note: "Mac windows keep their chrome; this is the top of Accounts again."),
+  "accounts.overview/investments.others.boundary": .init(
+    shot: .screen(.accounts, .bottom), expects: ["Index Fund"]),
+  "accounts.account_info/existing.edit": .init(
+    shot: .sheet(.editAccount("Everyday Bank")), expects: ["Everyday Bank", "Save"]),
+  "settings.configuration/index": .init(
+    shot: .screen(.settings), expects: ["Appearance"]),
+  "settings.accounts/index": .init(
+    shot: .screen(.accounts, editing: true), expects: ["New account"]),
+  "settings.account_groups/edit.reorder.protected": .init(
+    shot: .screen(.accounts, .middle, editing: true), expects: ["New account group"]),
+  "settings.account_list/upper.hidden_variant": .init(
+    shot: .screen(.accounts, editing: true), expects: ["Old Wallet"]),
+  "settings.account_list/tail": .init(
+    shot: .screen(.accounts, .bottom, editing: true), expects: ["Travel Wallet"]),
+  "accounts.add/group_picker.open": .init(
+    shot: .sheet(.newAccount), expects: ["Group"],
+    note: "Shows the group picker closed; an open menu is a separate window."),
+  "accounts.add/name.focused": .init(shot: .sheet(.newAccount), expects: ["Save"]),
+  "accounts.account_info/savings.edit": .init(
+    shot: .sheet(.editAccount("Emergency Savings")), expects: ["Emergency Savings"]),
+  "security.set_passcode/first_entry.empty": .init(
+    shot: .sheet(.setPasscode), expects: ["New passcode"]),
+  "local_web_access.idle/passcode_off.service_stopped": .init(
+    shot: .screen(.localAccess), expects: ["Start read-only portal"]),
+  "backup.hub/all_entries": .init(
+    shot: .screen(.backupRestore), expects: ["Save 1:1 backup…"]),
+]
+
+// MARK: - Helpers
+
+private func traceabilityRecords() throws -> [CaptureRecord] {
+  let manifest = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("docs/specifications/screenshot-traceability-v1.json")
+  let json = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
+  let captures = try #require(json?["captures"] as? [[String: Any]])
+  return captures.enumerated().map {
+    CaptureRecord(
+      number: $0.offset + 1, route: $0.element["route_id"] as? String ?? "",
+      state: $0.element["state_id"] as? String ?? "",
+      manifestPath: $0.element["synthetic_capture_path"] as? String)
+  }
+}
+
+private func captureDirectory() throws -> URL {
+  let base =
+    ProcessInfo.processInfo.environment["LEDGER_ATLAS_TEST_ARTIFACTS"].map {
+      URL(fileURLWithPath: $0)
+    } ?? FileManager.default.temporaryDirectory.appendingPathComponent("ledger-atlas-\(UUID())")
+  let url = base.appendingPathComponent("ui-captures", isDirectory: true)
+  try? FileManager.default.removeItem(at: url)
+  try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+  return url
+}
+
+private func demoSnapshot() throws -> LedgerStore.LedgerReadSnapshot {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "capture-\(UUID().uuidString)")
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("Demo Household.sqlite")
+  try LedgerDemoTour.makeDemoLedger(at: url)
+  return try LedgerStoreLifecycle.open(at: url).store.readSnapshot()
+}
+
+/// Not blank, not tiny, the expected text on screen, and no home-folder path.
+private func expectUsable(_ png: Data, text: [String], expecting: [String], for key: String) {
+  #expect(png.count > 20_000, "\(key): capture is only \(png.count) bytes; it looks blank")
+  if let image = NSBitmapImageRep(data: png) {
+    #expect(distinctColours(in: image) > 8, "\(key): capture is almost one colour")
+  }
+  let joined = text.joined(separator: "\n")
+  for expected in expecting {
+    #expect(joined.contains(expected), "\(key): \"\(expected)\" is not on screen")
+  }
+  #expect(!joined.contains("/Users/"), "\(key): a home-folder path is on screen")
+}
+
+private func distinctColours(in image: NSBitmapImageRep) -> Int {
+  var seen = Set<UInt32>()
+  let step = max(1, min(image.pixelsWide, image.pixelsHigh) / 40)
+  for x in stride(from: 0, to: image.pixelsWide, by: step) {
+    for y in stride(from: 0, to: image.pixelsHigh, by: step) {
+      guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+      let r = UInt32(colour.redComponent * 255), g = UInt32(colour.greenComponent * 255)
+      let b = UInt32(colour.blueComponent * 255)
+      seen.insert(r << 16 | g << 8 | b)
+    }
+  }
+  return seen.count
+}
+
+@MainActor
+private func pngData(of window: NSWindow) -> Data? {
+  window.contentView?.layoutSubtreeIfNeeded()
+  guard let view = window.contentView?.superview ?? window.contentView,
+    let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+  else { return nil }
+  view.cacheDisplay(in: view.bounds, to: rep)
+  return rep.representation(using: .png, properties: [:])
+}
+
+/// Hosts a view in its own window, as a sheet is, and captures it with its on-screen text.
+@MainActor
+private func capture(
+  _ view: AnyView, appearance: CaptureAppearance, size: NSSize
+) async throws -> (data: Data, text: [String]) {
+  let identifier = "capture-sheet-\(UUID().uuidString)"
+  let window = NSWindow(
+    contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
+    backing: .buffered, defer: false)
+  window.isReleasedWhenClosed = false
+  window.setAccessibilityIdentifier(identifier)
+  window.appearance = NSAppearance(named: appearance.name)
+  window.contentView = NSHostingView(rootView: view.padding(20).frame(width: size.width))
+  window.makeKeyAndOrderFront(nil)
+  defer {
+    window.orderOut(nil)
+    window.contentView = nil
+    window.close()
+  }
+  pump(0.8)
+  let data = try #require(pngData(of: window))
+  let text = readTree(windowIdentifier: identifier).map { "\($0.spokenName) \($0.value)" }
+  return (data, text)
+}
+
+/// Scrolls the main content (the widest scroll view, not the sidebar) to the top, middle or
+/// bottom.
+@MainActor
+private func scroll(_ window: NSWindow, to position: CaptureScroll) {
+  func scrollViews(in view: NSView) -> [NSScrollView] {
+    ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+  }
+  guard let content = window.contentView,
+    let main = scrollViews(in: content).max(by: { $0.frame.width < $1.frame.width }),
+    let document = main.documentView
+  else { return }
+  let clip = main.contentView
+  let travel = max(0, document.frame.height - clip.bounds.height)
+  let fraction: CGFloat =
+    switch position {
+    case .top: 0
+    case .middle: 0.5
+    case .bottom: 1
+    }
+  let y = document.isFlipped ? travel * fraction : travel * (1 - fraction)
+  clip.scroll(to: NSPoint(x: 0, y: y))
+  main.reflectScrolledClipView(clip)
+}
+
+private func pump(_ seconds: TimeInterval) {
+  RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+}
+
+/// Reads a window's Accessibility tree off the main thread while the main run loop answers.
+@MainActor
+private func readTree(windowIdentifier: String) -> [SpokenElement] {
+  let pid = ProcessInfo.processInfo.processIdentifier
+  let result = TreeBox()
+  Thread.detachNewThread {
+    result.finish(accessibilityTree(of: pid, windowIdentifier: windowIdentifier))
+  }
+  let deadline = Date().addingTimeInterval(20)
+  while !result.isDone, Date() < deadline {
+    RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+  }
+  return result.elements
+}
+
+extension MountedRoot {
+  /// Presses a button the way VoiceOver does, by its spoken name. Returns false if there is no
+  /// such button.
+  func pressButton(named name: String) -> Bool {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let identifier = identifier
+    let result = PressBox()
+    Thread.detachNewThread {
+      result.finish(pressAccessibilityButton(pid: pid, windowIdentifier: identifier, named: name))
+    }
+    let deadline = Date().addingTimeInterval(20)
+    while !result.isDone, Date() < deadline {
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    pump(0.3)
+    return result.pressed
+  }
+}
+
+private final class PressBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var done = false
+  private var didPress = false
+  var isDone: Bool { lock.withLock { done } }
+  var pressed: Bool { lock.withLock { didPress } }
+  func finish(_ pressed: Bool) { lock.withLock { didPress = pressed; done = true } }
+}
+
+private func pressAccessibilityButton(
+  pid: pid_t, windowIdentifier: String, named name: String
+) -> Bool {
+  let app = AXUIElementCreateApplication(pid)
+  AXUIElementSetMessagingTimeout(app, 5)
+  func attribute(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, key as CFString, &value) == .success ? value : nil
+  }
+  func find(_ element: AXUIElement, depth: Int) -> AXUIElement? {
+    guard depth < 80 else { return nil }
+    if attribute(element, kAXRoleAttribute) as? String == kAXButtonRole,
+      [kAXDescriptionAttribute, kAXTitleAttribute].contains(where: {
+        attribute(element, $0) as? String == name
+      })
+    {
+      return element
+    }
+    for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+      if let found = find(child, depth: depth + 1) { return found }
+    }
+    return nil
+  }
+  for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+  where attribute(window, kAXIdentifierAttribute) as? String == windowIdentifier {
+    if let button = find(window, depth: 0) {
+      return AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
+    }
+  }
+  return false
+}

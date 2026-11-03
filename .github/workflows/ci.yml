@@ -117,6 +117,16 @@ jobs:
             echo "== $f"
             python3 scripts/ci/print-crash.py "$f" || head -c 20000 "$f"
           done
+      # MACV2-21 (#57): the synthetic UI captures for the 25 screenshot traceability records
+      # and key states, light and dark. Uploaded even when a check fails, to see what went wrong.
+      - name: Upload UI captures
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: ui-captures
+          path: ${{ runner.temp }}/test-artifacts/ui-captures
+          retention-days: 30
+          if-no-files-found: ignore
       - name: Upload test captures on failure
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5

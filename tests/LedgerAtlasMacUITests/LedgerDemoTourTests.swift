@@ -13,14 +13,18 @@ import Testing
   try LedgerDemoTour.makeDemoLedger(at: url)
 
   let snapshot = try LedgerStoreLifecycle.open(at: url).store.readSnapshot()
-  #expect(snapshot.accounts.count == 4)
+  #expect(snapshot.accounts.count == 7)
+  #expect(snapshot.accountGroups.count == 3)
+  #expect(snapshot.accounts.filter(\.hidden).count == 1)
+  #expect(snapshot.categories.filter { $0.parentID != nil }.count == 1)
   #expect(snapshot.categories.count == 6)
   #expect(snapshot.tags.count == 3)
   #expect(snapshot.memos.count == 2)
   #expect(snapshot.recurrenceRules.count == 1)
   #expect(snapshot.budgets.count == 1)
-  // Three months of 16 entries and a transfer, then a currency transfer and its fee.
-  #expect(snapshot.transactions.count == 3 * 17 + 2)
+  // Two opening balances, three months of 16 entries and a transfer, then a currency
+  // transfer and its fee.
+  #expect(snapshot.transactions.count == 3 * 17 + 2 + 2)
   #expect(
     snapshot.transactions.contains {
       $0.currentRevision.draft.sourceLiterals.contains { $0.field == "conversion.rate" }

@@ -263,13 +263,16 @@ final class MountedRoot {
   let window: NSWindow
   private let directory: URL
   private let suite: String
-  private let identifier = "a11y-window-\(UUID().uuidString)"
+  let identifier = "a11y-window-\(UUID().uuidString)"
   /// Set when an Accessibility read ran out of time; its reader thread may still be running.
   private(set) var readTimedOut = false
   /// The empty-ledger prompt is showing instead of the screen.
   private(set) var showsNoLedgerPrompt = false
 
-  init(showing destination: AppDestination) async throws {
+  /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
+  init(
+    showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil
+  ) async throws {
     Self.launchOnce()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
@@ -278,14 +281,15 @@ final class MountedRoot {
     defer { if !mounted { try? FileManager.default.removeItem(at: directory) } }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let ledger = directory.appendingPathComponent("Demo Household.sqlite")
-    try LedgerDemoTour.makeDemoLedger(at: ledger)
+    if withLedger { try LedgerDemoTour.makeDemoLedger(at: ledger) }
     suite = "LedgerAtlasMacUITests.a11y.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     let bookmarks = SecurityScopedBookmarkStore(
       defaults: defaults, makeBookmark: { Data($0.path.utf8) },
       resolveBookmark: { URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)) })
-    try bookmarks.save(ledger, for: .canonicalLedger)
-    let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
+    if withLedger { try bookmarks.save(ledger, for: .canonicalLedger) }
+    let lock =
+      appLock ?? LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
     let root = LedgerAtlasRootView(
       initialSelection: destination, appLock: lock,
       productSettings: .init(startScreen: destination), bookmarkStore: bookmarks,
