@@ -44,7 +44,7 @@ import Testing
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
       log("clicking Begin editing")
-    #expect(root.clickButton(titled: "Begin editing"), "no Begin editing button")
+    #expect(root.click(named: "Begin editing accounts"), "no Begin editing button")
       try await root.settle()
     }
     // What the screen says, read once before scrolling: SwiftUI drops a scrolled list's rows
@@ -69,19 +69,33 @@ import Testing
     }
   }
 
-  // Sheets: the real sheet views, hosted with the demo ledger's accounts and groups.
-  let snapshot = try demoSnapshot()
+  // Sheets: opened in the real app window the way a person opens them, then the sheet
+  // window itself is captured.
   for record in records {
     guard let plan = capturePlan[record.key], case .sheet(let sheet) = plan.shot else { continue }
+    log("sheet \(record.number) \(record.key)")
+    let root = try await MountedRoot(
+      showing: sheet.destination, size: captureSize, appWindow: true)
+    defer { root.close() }
+    guard let sheetWindow = try await sheet.open(in: root) else {
+      Issue.record("\(record.key): the \(sheet.title) did not open")
+      continue
+    }
+    sheetWindow.setAccessibilityIdentifier("capture-sheet-\(record.number)")
+    pump(0.6)
+    let text = readTree(windowIdentifier: "capture-sheet-\(record.number)")
+      .map { "\($0.spokenName) \($0.value)" }
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
-      log("sheet \(record.number) \(record.key) \(appearance)")
-      let png = try await capture(sheet.view(snapshot), appearance: appearance, size: sheet.size)
-      expectUsable(png.data, text: png.text, expecting: plan.expects, for: record.key)
+      root.window.appearance = NSAppearance(named: appearance.name)
+      sheetWindow.appearance = NSAppearance(named: appearance.name)
+      pump(0.6)
+      let png = try #require(windowPNG(sheetWindow), "\(record.key) could not be captured")
+      expectUsable(png, text: text, expecting: plan.expects, for: record.key)
       let name = record.fileName(appearance)
-      try png.data.write(to: output.appendingPathComponent(name))
+      try png.write(to: output.appendingPathComponent(name))
       index.append(record.indexEntry(file: name, appearance: appearance, plan: plan))
-      pair.append(png.data)
+      pair.append(png)
     }
     #expect(pair[0] != pair[1], "\(record.key): light and dark captures are identical")
   }
@@ -216,36 +230,41 @@ struct ScreenKey: Hashable, Sendable {
 }
 
 enum CaptureSheet: Sendable {
-  case newAccount, editAccount(String), setPasscode
+  case newAccount, editAccount(row: Int, name: String), setPasscode
 
   var title: String {
     switch self {
     case .newAccount: "New account sheet"
-    case .editAccount(let name): "Edit account sheet for \(name)"
+    case .editAccount(_, let name): "Edit account sheet for \(name)"
     case .setPasscode: "Set passcode sheet"
     }
   }
 
-  var size: NSSize {
-    switch self {
-    case .setPasscode: NSSize(width: 460, height: 260)
-    default: NSSize(width: 520, height: 420)
-    }
-  }
+  var destination: AppDestination { self == .setPasscode ? .settings : .accounts }
 
+  /// Opens the sheet with clicks and menus in the mounted window. Returns the sheet window.
   @MainActor
-  func view(_ snapshot: LedgerStore.LedgerReadSnapshot) throws -> AnyView {
+  func open(in root: MountedRoot) async throws -> NSWindow? {
     switch self {
     case .newAccount:
-      return AnyView(AccountForm(groups: snapshot.accountGroups, onSave: { _ in }))
-    case .editAccount(let name):
-      let account = try #require(snapshot.accounts.first { $0.name == name })
-      return AnyView(AccountEditForm(account: account, groups: snapshot.accountGroups) { _ in })
+      guard root.click(named: "Begin editing accounts") else { return nil }
+      try await root.settle()
+      guard root.click(named: "New account") else { return nil }
+    case .editAccount(let row, _):
+      // Each account row has an Actions pop-up; rows are in screen order, top to bottom.
+      guard root.chooseMenuItem("Edit account", fromPopUpAt: row) else { return nil }
     case .setPasscode:
-      return AnyView(PasscodeForm(mode: .set, save: { _, _ in nil }))
+      guard root.click(named: "Set passcode…") else { return nil }
     }
+    for _ in 0..<20 {
+      pump(0.2)
+      if let sheet = root.window.attachedSheet { return sheet }
+    }
+    return nil
   }
 }
+
+extension CaptureSheet: Equatable {}
 
 struct CapturePlan: Sendable {
   let shot: CaptureShot
@@ -290,7 +309,7 @@ let capturePlan: [String: CapturePlan] = [
   "accounts.overview/investments.others.boundary": .init(
     shot: .screen(.accounts, .bottom), expects: ["Index Fund"]),
   "accounts.account_info/existing.edit": .init(
-    shot: .sheet(.editAccount("Everyday Bank")), expects: ["Everyday Bank", "Save"]),
+    shot: .sheet(.editAccount(row: 1, name: "Everyday Bank")), expects: ["Everyday Bank", "Save"]),
   "settings.configuration/index": .init(
     shot: .screen(.settings), expects: ["Appearance"]),
   "settings.accounts/index": .init(
@@ -306,13 +325,14 @@ let capturePlan: [String: CapturePlan] = [
     note: "Shows the group picker closed; an open menu is a separate window."),
   "accounts.add/name.focused": .init(shot: .sheet(.newAccount), expects: ["Save"]),
   "accounts.account_info/savings.edit": .init(
-    shot: .sheet(.editAccount("Emergency Savings")), expects: ["Emergency Savings"]),
+    shot: .sheet(.editAccount(row: 4, name: "Emergency Savings")),
+    expects: ["Emergency Savings"]),
   "security.set_passcode/first_entry.empty": .init(
     shot: .sheet(.setPasscode), expects: ["New passcode"]),
   "local_web_access.idle/passcode_off.service_stopped": .init(
     shot: .screen(.localAccess), expects: ["Start read-only portal"]),
   "backup.hub/all_entries": .init(
-    shot: .screen(.backupRestore), expects: ["Save 1:1 backup…"]),
+    shot: .screen(.backupRestore), expects: ["Save 1:1 backup"]),
 ]
 
 // MARK: - Helpers
@@ -340,16 +360,6 @@ private func captureDirectory() throws -> URL {
   try? FileManager.default.removeItem(at: url)
   try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
   return url
-}
-
-private func demoSnapshot() throws -> LedgerStore.LedgerReadSnapshot {
-  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-    "capture-\(UUID().uuidString)")
-  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-  defer { try? FileManager.default.removeItem(at: directory) }
-  let url = directory.appendingPathComponent("Demo Household.sqlite")
-  try LedgerDemoTour.makeDemoLedger(at: url)
-  return try LedgerStoreLifecycle.open(at: url).store.readSnapshot()
 }
 
 /// Not blank, not tiny, the expected text on screen, and no home-folder path.
@@ -423,31 +433,6 @@ private func pngData(of window: NSWindow) -> Data? {
   return rep.representation(using: .png, properties: [:])
 }
 
-/// Hosts a view in its own window, as a sheet is, and captures it with its on-screen text.
-@MainActor
-private func capture(
-  _ view: AnyView, appearance: CaptureAppearance, size: NSSize
-) async throws -> (data: Data, text: [String]) {
-  let identifier = "capture-sheet-\(UUID().uuidString)"
-  let window = NSWindow(
-    contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
-    backing: .buffered, defer: false)
-  window.isReleasedWhenClosed = false
-  window.setAccessibilityIdentifier(identifier)
-  window.appearance = NSAppearance(named: appearance.name)
-  window.contentView = NSHostingView(rootView: view.padding(20).frame(width: size.width))
-  window.makeKeyAndOrderFront(nil)
-  defer {
-    window.orderOut(nil)
-    window.contentView = nil
-    window.close()
-  }
-  pump(0.8)
-  let data = try #require(windowPNG(window))
-  let text = readTree(windowIdentifier: identifier).map { "\($0.spokenName) \($0.value)" }
-  return (data, text)
-}
-
 /// Scrolls the main content (the widest scroll view, not the sidebar) to the top, middle or
 /// bottom.
 @MainActor
@@ -492,22 +477,106 @@ private func readTree(windowIdentifier: String) -> [SpokenElement] {
 }
 
 extension MountedRoot {
-  /// Clicks the AppKit button SwiftUI made for a button with this title, as a mouse click
-  /// would. Returns false if there is no such button.
-  func clickButton(titled title: String) -> Bool {
-    func buttons(in view: NSView) -> [NSButton] {
-      ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+  /// Clicks a control the way the mouse does: finds it by its spoken name in the
+  /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
+  /// Returns false if there is no such control.
+  func click(named name: String) -> Bool {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let identifier = identifier
+    let result = FrameBox()
+    Thread.detachNewThread {
+      result.finish(accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name))
     }
-    guard let content = window.contentView,
-      let button = buttons(in: content).first(where: {
-        $0.title == title || $0.accessibilityLabel() == title
-      })
-    else {
-      log("no NSButton titled \(title); found \(window.contentView.map { buttons(in: $0).map(\.title) } ?? [])")
+    let deadline = Date().addingTimeInterval(20)
+    while !result.isDone, Date() < deadline {
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    guard let frame = result.frame, let screen = NSScreen.screens.first else {
+      log("nothing named \(name) to click")
       return false
     }
-    button.performClick(nil)
+    // Accessibility frames are in screen points from the top left; AppKit's from the bottom left.
+    let centre = NSPoint(x: frame.midX, y: screen.frame.maxY - frame.midY)
+    let location = window.convertPoint(fromScreen: centre)
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+      guard
+        let event = NSEvent.mouseEvent(
+          with: type, location: location, modifierFlags: [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+          context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+      else { return false }
+      window.sendEvent(event)
+      pump(0.05)
+    }
     pump(0.5)
     return true
   }
+
+  /// Picks an item from the n-th pop-up button (top to bottom), as choosing it with the mouse
+  /// would, without opening the menu.
+  func chooseMenuItem(_ title: String, fromPopUpAt row: Int) -> Bool {
+    func popUps(in view: NSView) -> [NSPopUpButton] {
+      ((view as? NSPopUpButton).map { [$0] } ?? []) + view.subviews.flatMap(popUps)
+    }
+    guard let content = window.contentView else { return false }
+    let ordered = popUps(in: content).sorted {
+      $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY
+    }
+    guard ordered.indices.contains(row), let menu = ordered[row].menu,
+      let index = menu.items.firstIndex(where: { $0.title == title })
+    else {
+      log("no pop-up \(row) with \(title); \(ordered.count) pop-ups")
+      return false
+    }
+    menu.performActionForItem(at: index)
+    pump(0.5)
+    return true
+  }
+}
+
+private final class FrameBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var done = false
+  private var found: CGRect?
+  var isDone: Bool { lock.withLock { done } }
+  var frame: CGRect? { lock.withLock { found } }
+  func finish(_ frame: CGRect?) { lock.withLock { found = frame; done = true } }
+}
+
+/// The screen frame of the first element in the window whose spoken name is `name`.
+private func accessibilityFrame(pid: pid_t, windowIdentifier: String, named name: String) -> CGRect? {
+  let app = AXUIElementCreateApplication(pid)
+  AXUIElementSetMessagingTimeout(app, 5)
+  func attribute(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, key as CFString, &value) == .success ? value : nil
+  }
+  func frame(of element: AXUIElement) -> CGRect? {
+    guard let position = attribute(element, kAXPositionAttribute),
+      let size = attribute(element, kAXSizeAttribute),
+      CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID()
+    else { return nil }
+    var origin = CGPoint.zero
+    var extent = CGSize.zero
+    AXValueGetValue(unsafeDowncast(position, to: AXValue.self), .cgPoint, &origin)
+    AXValueGetValue(unsafeDowncast(size, to: AXValue.self), .cgSize, &extent)
+    return CGRect(origin: origin, size: extent)
+  }
+  func find(_ element: AXUIElement, depth: Int) -> CGRect? {
+    guard depth < 80 else { return nil }
+    if [kAXDescriptionAttribute, kAXTitleAttribute].contains(where: {
+      attribute(element, $0) as? String == name
+    }), let found = frame(of: element) {
+      return found
+    }
+    for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+      if let found = find(child, depth: depth + 1) { return found }
+    }
+    return nil
+  }
+  for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+  where attribute(window, kAXIdentifierAttribute) as? String == windowIdentifier {
+    if let found = find(window, depth: 0) { return found }
+  }
+  return nil
 }
