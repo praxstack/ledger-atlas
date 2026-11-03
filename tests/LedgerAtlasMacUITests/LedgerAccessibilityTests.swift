@@ -107,8 +107,15 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
       break
     }
     if visited.contains(where: { $0.id == id }) { continue }
+    // SwiftUI puts placeholder key views (`KeyViewProxy`) into the window's key loop, off
+    // screen and outside the Accessibility tree, to hand focus between its hosting views. They
+    // aren't controls, so they're counted but not checked.
+    if String(describing: type(of: responder)).contains("KeyViewProxy") {
+      visited.append((id, "(SwiftUI key-view placeholder)"))
+      continue
+    }
     let name = focusName(of: responder)
-    visited.append((id, name))
+    visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name))
     if let view = responder as? NSView {
       let frame = view.convert(view.bounds, to: nil)
       #expect(
@@ -136,7 +143,33 @@ private func focusName(of responder: NSResponder) -> String {
   {
     return focusName(of: field)
   }
-  let element = responder as NSObject
+  if let name = ownName(of: responder as NSObject) { return name }
+  // A form control is often named by the label next to it, as VoiceOver reads it.
+  if let titleElement = inProcessProperty(responder, "accessibilityTitleUIElement") as? NSObject,
+    let name = ownName(of: titleElement) ?? (inProcessProperty(titleElement, "accessibilityValue") as? String)
+  {
+    return name
+  }
+  if let button = responder as? NSButton, !button.title.isEmpty { return button.title }
+  if let table = responder as? NSTableView {
+    return "list of \(table.numberOfRows) rows"
+  }
+  // A scroll bar is a standard AppKit control; VoiceOver names it by its role.
+  if responder is NSScroller { return "scroll bar" }
+  // A hosting view that takes focus for a SwiftUI control: VoiceOver reads the control inside.
+  var queue = (inProcessProperty(responder, "accessibilityChildren") as? [NSObject]) ?? []
+  var looked = 0
+  while !queue.isEmpty, looked < 40 {
+    let element = queue.removeFirst()
+    looked += 1
+    if let name = ownName(of: element) { return name }
+    queue += (inProcessProperty(element, "accessibilityChildren") as? [NSObject]) ?? []
+  }
+  return ""
+}
+
+@MainActor
+private func ownName(of element: NSObject) -> String? {
   for getter in ["accessibilityLabel", "accessibilityTitle", "accessibilityPlaceholderValue"] {
     if let text = inProcessProperty(element, getter) as? String,
       !text.trimmingCharacters(in: .whitespaces).isEmpty
@@ -144,10 +177,7 @@ private func focusName(of responder: NSResponder) -> String {
       return text
     }
   }
-  if let table = responder as? NSTableView {
-    return "list of \(table.numberOfRows) rows"
-  }
-  return ""
+  return nil
 }
 
 /// Visible focus: the app never turns off the system focus ring, so whatever has keyboard
@@ -673,10 +703,17 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
   var rows: [String] = []
   func visit(_ element: AXUIElement, depth: Int) {
     guard depth < 80 else { return }
-    if text(element, kAXRoleAttribute) == kAXRowRole {
-      // A row scrolled out of view has no cells until it comes back into view (VoiceOver
-      // scrolls it there first), so only rows with content are read.
-      if !children(element).isEmpty { rows.append(spoken(element, depth: 0)) }
+    let role = text(element, kAXRoleAttribute)
+    // A row scrolled out of view has empty cells until it comes back into view (VoiceOver
+    // scrolls it there first), so a list's rows are read as the list shows them.
+    if role == kAXTableRole || role == kAXOutlineRole,
+      let visible = attribute(element, kAXVisibleRowsAttribute) as? [AXUIElement], !visible.isEmpty
+    {
+      rows += visible.map { spoken($0, depth: 0) }
+      return
+    }
+    if role == kAXRowRole {
+      rows.append(spoken(element, depth: 0))
       return
     }
     for child in children(element) { visit(child, depth: depth + 1) }
