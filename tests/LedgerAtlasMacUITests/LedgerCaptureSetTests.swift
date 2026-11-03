@@ -81,10 +81,9 @@ import Testing
       Issue.record("\(record.key): the \(sheet.title) did not open")
       continue
     }
-    sheetWindow.setAccessibilityIdentifier("capture-sheet-\(record.number)")
     pump(0.6)
-    let text = readTree(windowIdentifier: "capture-sheet-\(record.number)")
-      .map { "\($0.spokenName) \($0.value)" }
+    // A sheet is read as part of its parent window, as VoiceOver reads it.
+    let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
       root.window.appearance = NSAppearance(named: appearance.name)
@@ -148,9 +147,9 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     #expect(!text.contains { $0.contains("Everyday Bank") }, "the lock screen shows ledger content")
     try save(png, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
   }
-  // An error: Unlock (the default button, so Return) with no passcode is refused.
-  log("pressing Return to unlock with no passcode")
-  locked.press("\r", keyCode: 36)
+  // An error: Unlock with no passcode is refused.
+  log("clicking Unlock with no passcode")
+  #expect(locked.click(named: "Unlock"), "no Unlock button")
   pump(0.6)
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
@@ -461,21 +460,6 @@ private func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
-/// Reads a window's Accessibility tree off the main thread while the main run loop answers.
-@MainActor
-private func readTree(windowIdentifier: String) -> [SpokenElement] {
-  let pid = ProcessInfo.processInfo.processIdentifier
-  let result = TreeBox()
-  Thread.detachNewThread {
-    result.finish(accessibilityTree(of: pid, windowIdentifier: windowIdentifier))
-  }
-  let deadline = Date().addingTimeInterval(20)
-  while !result.isDone, Date() < deadline {
-    RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
-  }
-  return result.elements
-}
-
 extension MountedRoot {
   /// Clicks a control the way the mouse does: finds it by its spoken name in the
   /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
@@ -522,10 +506,15 @@ extension MountedRoot {
     let ordered = popUps(in: content).sorted {
       $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY
     }
-    guard ordered.indices.contains(row), let menu = ordered[row].menu,
-      let index = menu.items.firstIndex(where: { $0.title == title })
-    else {
-      log("no pop-up \(row) with \(title); \(ordered.count) pop-ups")
+    guard ordered.indices.contains(row), let menu = ordered[row].menu else {
+      log("no pop-up \(row); \(ordered.count) pop-ups")
+      return false
+    }
+    // SwiftUI fills a menu just before it opens.
+    menu.delegate?.menuNeedsUpdate?(menu)
+    menu.update()
+    guard let index = menu.items.firstIndex(where: { $0.title == title }) else {
+      log("pop-up \(row) has \(menu.items.map(\.title)), not \(title)")
       return false
     }
     menu.performActionForItem(at: index)

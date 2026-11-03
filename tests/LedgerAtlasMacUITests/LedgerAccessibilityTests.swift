@@ -294,6 +294,10 @@ final class MountedRoot {
     let root = LedgerAtlasRootView(
       initialSelection: destination, appLock: lock,
       productSettings: .init(startScreen: destination), bookmarkStore: bookmarks,
+      // A widget store in the test folder, as the app has its App Group container. Without
+      // one every screen reports "Widget status could not be published".
+      widgetProjectionPublisher: RedactedWidgetProjectionPublisher(
+        store: .init(containerURL: directory)),
       scopeStarter: { _ in true }, scopeStopper: { _ in })
     // `appWindow` builds the window the way the app's WindowGroup does (full-size content
     // under a hosting controller), so the detail column starts beside the sidebar instead of
