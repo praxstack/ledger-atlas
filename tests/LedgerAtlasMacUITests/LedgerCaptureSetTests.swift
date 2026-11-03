@@ -85,7 +85,9 @@ import Testing
     withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
-  #expect(index.count == 25 * 2 + 3 * 2)
+  // 25 records and 3 key states, each in light and dark.
+  let expectedFiles: Int = 56
+  #expect(index.count == expectedFiles)
 }
 
 /// The empty state, the lock screen and a refused passcode, in light and dark. (Loaded and the
