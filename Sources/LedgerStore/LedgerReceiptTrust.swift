@@ -17,6 +17,11 @@ package enum LedgerReceiptTrust {
     let identity = persistedReceiptIdentity(at: url) ?? stableIdentity ?? "empty-ledger"
     let currentAccount = account(for: identity, namespace: currentNamespace)
     if let value = try read(account: currentAccount, synchronizable: true) { return value }
+    if let fileValue = try LedgerReceiptKeyFile.read(
+      account: currentAccount, in: keyDirectory())
+    {
+      return fileValue
+    }
     if let localValue = try read(account: currentAccount, synchronizable: false) {
       // A current local-only key can only be accepted by the unsigned package-test fallback. A
       // signed production build must never publish a backup whose trust root cannot migrate.
@@ -33,7 +38,7 @@ package enum LedgerReceiptTrust {
     // device-only record.
     let legacyAccount = account(for: identity, namespace: legacyNamespace)
     if let legacyValue = try read(account: legacyAccount, synchronizable: nil) {
-      do { return try store(legacyValue, account: currentAccount) } catch {
+      do { return try storeNew(legacyValue, account: currentAccount) } catch {
         #if DEBUG
           return legacyValue
         #else
@@ -50,7 +55,21 @@ package enum LedgerReceiptTrust {
     guard randomStatus == errSecSuccess else {
       throw LedgerReceiptTrustError.keychain(randomStatus)
     }
-    return try store(value, account: currentAccount)
+    return try storeNew(value, account: currentAccount)
+  }
+
+  /// Where keys go when the Keychain can't hold them. Replaceable for tests only.
+  nonisolated(unsafe) package static var keyDirectory: () throws -> URL =
+    LedgerReceiptKeyFile.defaultDirectory
+
+  /// Stores a new key in iCloud Keychain when the build may use it. The free ad-hoc signed app
+  /// may not (errSecMissingEntitlement), so the key goes to a private file instead.
+  private static func storeNew(_ value: Data, account: String) throws -> Data {
+    do {
+      return try store(value, account: account)
+    } catch LedgerReceiptTrustError.keychain(let status) where status == errSecMissingEntitlement {
+      return try LedgerReceiptKeyFile.store(value, account: account, in: keyDirectory())
+    }
   }
 
   private static func account(for identity: String, namespace: String) -> String {
@@ -82,10 +101,8 @@ package enum LedgerReceiptTrust {
     }
     var item: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &item)
-    if status == errSecItemNotFound { return nil }
-    #if DEBUG
-      if status == errSecMissingEntitlement { return nil }
-    #endif
+    // A build without the Keychain entitlement can hold no item there, so there is none to read.
+    if status == errSecItemNotFound || status == errSecMissingEntitlement { return nil }
     guard status == errSecSuccess else { throw LedgerReceiptTrustError.keychain(status) }
     guard let value = item as? Data, value.count == 32 else {
       throw LedgerReceiptTrustError.invalidKey
@@ -206,4 +223,5 @@ package enum LedgerReceiptTrustError: Error, Equatable, Sendable {
   case keychain(OSStatus)
   case invalidKey
   case nonSynchronizableKey
+  case file(Int32)
 }

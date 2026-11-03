@@ -1427,3 +1427,44 @@ private func execute(_ database: OpaquePointer, _ sql: String) throws {
 }
 
 private enum TestError: Swift.Error { case sqlite, injected }
+
+@Test("a receipt key file keeps the first key, is owner-only, and refuses links and bad sizes")
+func receiptKeyFileKeepsTheFirstKeyAndRefusesTampering() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("receipt-keys-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let account = String(repeating: "ab", count: 32)
+  let first = Data(repeating: 1, count: 32)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == nil)
+  #expect(try LedgerReceiptKeyFile.store(first, account: account, in: directory) == first)
+  // A second store never replaces the key a ledger was signed with.
+  #expect(
+    try LedgerReceiptKeyFile.store(Data(repeating: 2, count: 32), account: account, in: directory)
+      == first)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == first)
+  let file = directory.appendingPathComponent(account + ".key")
+  let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+  #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+  let folder = try FileManager.default.attributesOfItem(atPath: directory.path)
+  #expect((folder[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+  // No temporary files are left behind.
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == [account + ".key"])
+
+  let short = String(repeating: "cd", count: 32)
+  try Data(repeating: 3, count: 31).write(to: directory.appendingPathComponent(short + ".key"))
+  #expect(throws: LedgerReceiptTrustError.invalidKey) {
+    try LedgerReceiptKeyFile.read(account: short, in: directory)
+  }
+  let linked = String(repeating: "ef", count: 32)
+  try FileManager.default.createSymbolicLink(
+    at: directory.appendingPathComponent(linked + ".key"), withDestinationURL: file)
+  #expect(throws: (any Error).self) {
+    try LedgerReceiptKeyFile.read(account: linked, in: directory)
+  }
+  #expect(throws: LedgerReceiptTrustError.invalidKey) {
+    try LedgerReceiptKeyFile.store(first, account: "../escape", in: directory)
+  }
+  #expect(throws: LedgerReceiptTrustError.invalidKey) {
+    try LedgerReceiptKeyFile.store(Data(repeating: 1, count: 16), account: account, in: directory)
+  }
+}
