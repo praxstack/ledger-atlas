@@ -215,6 +215,7 @@ struct SettingsSurface: View {
         .focused($focusedField, equals: .timeZoneIdentifier)
         fieldError(.timeZoneIdentifier)
         Picker("Amount colours", selection: $draft.amountColors) {
+          Text("Income green").tag(LedgerProductSettings.AmountColors.incomeGreen)
           Text("Income green, expense red").tag(LedgerProductSettings.AmountColors.incomeGreenExpenseRed)
           Text("Income blue, expense red").tag(LedgerProductSettings.AmountColors.incomeBlueExpenseRed)
           Text("No colour").tag(LedgerProductSettings.AmountColors.monochrome)
