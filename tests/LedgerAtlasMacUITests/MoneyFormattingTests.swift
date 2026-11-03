@@ -60,3 +60,21 @@ import Testing
   #expect(!LedgerProductSettings.AmountColors.incomeGreen.tintsSpending)
   #expect(LedgerProductSettings.AmountColors.incomeGreenExpenseRed.tintsSpending)
 }
+
+@Test func chartAxesUseLakhAndCroreForRupees() {
+  let formatter = LedgerDisplayFormatter(locale: Locale(identifier: "en_US"))
+  #expect(formatter.compactAxis(450_000, unitCode: "INR") == "₹4.5L")
+  #expect(formatter.compactAxis(12_000_000, unitCode: "INR") == "₹1.2Cr")
+  #expect(formatter.compactAxis(2_000_000, unitCode: "INR") == "₹20L")
+  #expect(formatter.compactAxis(-150_000, unitCode: "INR") == "\u{2212}₹1.5L")
+  #expect(formatter.compactAxis(450_000, unitCode: "USD") == "$450K")
+  #expect(formatter.compactAxis(1_000_000, unitCode: "USD") == "$1M")
+  #expect(formatter.compactAxis(0, unitCode: "USD") == "$0")
+}
+
+@Test func monthLabelsFollowTheLocale() throws {
+  let formatter = LedgerDisplayFormatter(locale: Locale(identifier: "en_US"))
+  let november = try SourceLocalDate(year: 2026, month: 11, day: 1)
+  #expect(formatter.shortMonth(november) == "Nov")
+  #expect(formatter.monthTitle(november) == "November 2026")
+}

@@ -1283,6 +1283,9 @@ public struct LedgerAtlasRootView: View {
         }
       }
       .id(selection)
+    } else if selection == .overview {
+      OverviewSurface(
+        snapshot: journey.snapshot, settings: productSettings, show: { selection = $0 })
     } else if selection == .ledger {
       let listing = splitListing
       LedgerView(

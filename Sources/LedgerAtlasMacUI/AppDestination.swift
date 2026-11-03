@@ -1,4 +1,5 @@
 public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case overview
   case onboarding
   case importReview
   case accounts
@@ -16,12 +17,14 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
   case backupRestore
   case settings
 
-  public static let defaultSelection: AppDestination = .ledger
+  public static let defaultSelection: AppDestination = .overview
 
   public var id: Self { self }
 
   public var title: String {
     switch self {
+    case .overview:
+      "Overview"
     case .onboarding:
       "Onboarding"
     case .importReview:
@@ -81,7 +84,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
 
     public var destinations: [AppDestination] {
       switch self {
-      case .money: [.ledger, .accounts, .budgets, .insights, .recurrence]
+      case .money: [.overview, .ledger, .accounts, .budgets, .insights, .recurrence]
       case .organise: [.categories, .tags, .transfers, .installments, .receipts, .search]
       case .ledger: [.importReview, .backupRestore, .localAccess, .onboarding, .settings]
       }
@@ -90,6 +93,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
 
   public var accessibilityHint: String {
     switch self {
+    case .overview:
+      "Show net worth, cash flow, spending and budgets at a glance."
     case .onboarding:
       "Start a local Ledger Atlas workspace."
     case .importReview:
@@ -127,6 +132,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
 
   var systemImageName: String {
     switch self {
+    case .overview:
+      "square.grid.2x2"
     case .onboarding:
       "hand.wave"
     case .importReview:
@@ -164,6 +171,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
 
   var emptyStateMessage: String {
     switch self {
+    case .overview:
+      "Net worth, cash flow and budgets appear after a successful import or ledger open."
     case .onboarding:
       "Choose a Money Manager backup or an existing ledger to begin."
     case .importReview:

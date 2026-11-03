@@ -95,6 +95,51 @@ public struct LedgerDisplayFormatter: Sendable {
     return formatter.string(from: Self.instant(atNoonOf: date))
   }
 
+  /// "Nov" for chart axes, in the display locale.
+  public func shortMonth(_ date: SourceLocalDate) -> String {
+    templated("MMM", date)
+  }
+
+  /// "November 2026" for screen subtitles.
+  public func monthTitle(_ date: SourceLocalDate) -> String {
+    templated("MMMMyyyy", date)
+  }
+
+  private func templated(_ template: String, _ date: SourceLocalDate) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = locale
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = Self.utc
+    formatter.setLocalizedDateFormatFromTemplate(template)
+    return formatter.string(from: Self.instant(atNoonOf: date))
+  }
+
+  /// A short axis label: lakh and crore for rupees ("₹4.5L", "₹1.2Cr"), thousands and
+  /// millions otherwise ("$450K", "$1.2M"). Only for chart axes; figures use `parts`.
+  public func compactAxis(_ value: Double, unitCode: String) -> String {
+    let symbol = currencySymbol(for: unitCode)
+    let sign = value < 0 ? "\u{2212}" : ""
+    let magnitude = abs(value)
+    let steps: [(Double, String)] =
+      unitCode == "INR" ? [(1e7, "Cr"), (1e5, "L"), (1e3, "K")] : [(1e9, "B"), (1e6, "M"), (1e3, "K")]
+    for (size, suffix) in steps where magnitude >= size {
+      let scaled = magnitude / size
+      let text = scaled >= 10 ? String(Int(scaled.rounded())) : String(format: "%.1f", scaled)
+      return sign + symbol + text.replacingOccurrences(of: ".0", with: "") + suffix
+    }
+    return sign + symbol + String(Int(magnitude.rounded()))
+  }
+
+  /// The currency symbol the formatter uses for `unitCode` ("₹", "$", "€").
+  public func currencySymbol(for unitCode: String) -> String {
+    guard let amount = try? CurrencyAmount(unitCode: unitCode, amount: ExactDecimal("0")) else {
+      return unitCode
+    }
+    let parts = parts(amount, sign: .never)
+    let symbol = parts.leading.isEmpty ? parts.trailing : parts.leading
+    return symbol.trimmingCharacters(in: .whitespaces)
+  }
+
   private static let utc = TimeZone(identifier: "UTC")!
 
   private static func instant(atNoonOf date: SourceLocalDate) -> Date {

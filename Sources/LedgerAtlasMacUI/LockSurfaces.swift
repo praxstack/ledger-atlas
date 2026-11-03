@@ -221,7 +221,7 @@ struct SettingsSurface: View {
           Text("No colour").tag(LedgerProductSettings.AmountColors.monochrome)
         }
         Picker("Start screen", selection: $draft.startScreen) {
-          ForEach(LedgerProductSettings.startScreenChoices) { Text($0.title).tag($0) }
+          ForEach(LedgerProductSettings.startScreenChoices) { Text($0.sidebarTitle).tag($0) }
         }
         .focused($focusedField, equals: .startScreen)
         fieldError(.startScreen)

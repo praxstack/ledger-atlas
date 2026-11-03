@@ -1378,6 +1378,13 @@ public final class LedgerJourney {
   public func rows(for destination: AppDestination) -> [SurfaceRow] {
     guard let snapshot else { return [] }
     switch destination {
+    case .overview:
+      return [
+        SurfaceRow(
+          id: "overview", title: "Overview",
+          detail:
+            "\(snapshot.accounts.count) accounts · \(snapshot.transactions.count) transactions")
+      ]
     case .accounts:
       let accounts = snapshot.accounts.map {
         SurfaceRow(

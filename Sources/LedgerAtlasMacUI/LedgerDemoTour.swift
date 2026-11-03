@@ -26,7 +26,7 @@ package enum LedgerDemoTour {
   /// Screens shown in the tour, in order. Onboarding and import review come last because they
   /// describe the empty and import states rather than the open ledger.
   package static let destinations: [AppDestination] = [
-    .ledger, .accounts, .categories, .tags, .transfers, .recurrence, .installments, .budgets,
+    .overview, .ledger, .accounts, .categories, .tags, .transfers, .recurrence, .installments, .budgets,
     .insights, .search, .receipts, .backupRestore, .localAccess, .settings, .onboarding,
     .importReview,
   ]

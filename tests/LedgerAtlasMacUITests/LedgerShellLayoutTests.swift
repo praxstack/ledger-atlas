@@ -10,7 +10,7 @@ private let origin = try! LedgerOrigin(id: String(repeating: "6", count: 64), la
   let listed = AppDestination.SidebarSection.allCases.flatMap(\.destinations)
   #expect(listed.count == Set(listed).count, "a screen is listed twice")
   #expect(Set(listed) == Set(AppDestination.allCases), "a screen is missing from the sidebar")
-  #expect(AppDestination.SidebarSection.money.destinations.first == .ledger)
+  #expect(AppDestination.SidebarSection.money.destinations.first == .overview)
 }
 
 @Test func sidebarSpeaksPlainNamesAndKeepsStableTitles() {
