@@ -97,10 +97,12 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
   defer { mounted.close() }
   print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(fullKeyboardAccess)")
   let sidebar = mounted.sidebarList()
+  let sidebarFrame = sidebar.flatMap { list in
+    list.window?.convertToScreen(list.convert(list.bounds, to: nil))
+  }
   mounted.window.makeFirstResponder(nil)
-  var visited: [(id: ObjectIdentifier, name: String, isPlaceholder: Bool)] = []
+  var visited: [(id: ObjectIdentifier, name: String, isProxy: Bool)] = []
   var cycled = false
-  var placeholdersInARow = 0
   for _ in 0..<60 {
     mounted.press("\t", keyCode: 48)
     guard let responder = mounted.window.firstResponder, responder !== mounted.window else { continue }
@@ -110,40 +112,40 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
       break
     }
     if visited.contains(where: { $0.id == id }) { continue }
-    // SwiftUI puts placeholder key views (`KeyViewProxy`) into the window's key loop, off
-    // screen and outside the Accessibility tree, to hand focus between its hosting views. They
-    // aren't controls, so they're counted but not checked.
-    // A few in a row are normal (one per hosting view); a long run would be a dead stretch of
-    // Tab presses where nothing visible takes focus.
-    if String(describing: type(of: responder)).contains("KeyViewProxy") {
-      visited.append((id, "(SwiftUI key-view placeholder)", true))
-      placeholdersInARow += 1
-      #expect(placeholdersInARow <= 8, "\(destination.rawValue): \(placeholdersInARow) Tab presses in a row reach nothing")
-      continue
+    // A SwiftUI control drawn by SwiftUI itself (a Button, say) has no view of its own: AppKit's
+    // key loop holds a `KeyViewProxy` for it, and SwiftUI moves the Accessibility focus onto the
+    // control. So for a proxy, the control is what the system Accessibility API reports as focused.
+    let isProxy = String(describing: type(of: responder)).contains("KeyViewProxy")
+    var name = isProxy ? "" : focusName(of: responder)
+    var frame: NSRect?
+    if let view = responder as? NSView, !isProxy {
+      frame = view.window?.convertToScreen(view.convert(view.bounds, to: nil))
+      #expect(!view.isHiddenOrHasHiddenAncestor, "\(destination.rawValue): Tab landed on hidden \(type(of: responder))")
     }
-    placeholdersInARow = 0
-    var name = focusName(of: responder)
-    // Some SwiftUI form controls (a Picker's popup, a Stepper) carry their label only in the
-    // system Accessibility tree, so ask the system what VoiceOver hears for the focused element,
-    // and use it only when the system's focused element sits where this responder is.
-    if name.isEmpty, let view = responder as? NSView, let window = view.window {
-      let onScreen = window.convertToScreen(view.convert(view.bounds, to: nil))
-      name = mounted.systemFocusedName(matching: onScreen)
+    if name.isEmpty {
+      // A Picker's popup or a Stepper carries its label only in the system tree. The system's
+      // name counts only if its focused element is the one Tab reached: the same place on screen
+      // as the responder, or, for a proxy, anywhere in this window.
+      // A proxy whose Accessibility focus is still on the sidebar reached nothing.
+      let focus = mounted.systemFocus()
+      if let focused = focus.frame,
+        frame.map({ focused.insetBy(dx: -2, dy: -2).intersects($0) }) ?? !(sidebarFrame?.intersects(focused) ?? false)
+      {
+        name = focus.name
+        if frame == nil { frame = focused }
+      }
     }
-    visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name, false))
-    if let view = responder as? NSView {
-      let frame = view.convert(view.bounds, to: nil)
-      #expect(
-        !view.isHiddenOrHasHiddenAncestor && frame.width > 0 && frame.height > 0
-          && mounted.window.contentView?.frame.intersects(frame) == true,
-        "\(destination.rawValue): Tab landed on \(name), which isn't on screen")
-    }
+    visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name, isProxy))
+    let windowFrame = mounted.window.frame
+    #expect(
+      frame.map { $0.width > 0 && $0.height > 0 && windowFrame.intersects($0) } == true,
+      "\(destination.rawValue): Tab landed on \(name.isEmpty ? "\(type(of: responder))" : name), which isn't on screen (\(String(describing: frame)))")
     #expect(!name.isEmpty, "\(destination.rawValue): Tab landed on a control with no name: \(type(of: responder))")
   }
   print("A11Y KEYBOARD \(destination.rawValue) tab order: \(visited.map(\.name))")
   #expect(cycled, "\(destination.rawValue): Tab never came back round to the first control")
   if fullKeyboardAccess {
-    let outsideSidebar = visited.filter { !$0.isPlaceholder && $0.id != sidebar.map { ObjectIdentifier($0) } }
+    let outsideSidebar = visited.filter { !$0.name.hasPrefix("<unnamed") && $0.id != sidebar.map { ObjectIdentifier($0) } }
     #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
   }
 }
@@ -217,8 +219,11 @@ func everyListRowOnEveryScreenIsSpoken(_ destination: AppDestination) async thro
   defer { mounted.close() }
   let sidebarRows = mounted.sidebarList()?.numberOfRows ?? 0
   let rows = mounted.accessibilityRows()
-  // "Says something" means at least one word, not only punctuation or a lone number.
-  let silent = rows.filter { $0.range(of: #"\p{L}{2,}"#, options: .regularExpression) == nil }
+  // "Says something" means at least one word or a date (a day's section header), not only
+  // punctuation or a lone number.
+  let silent = rows.filter {
+    $0.range(of: #"\p{L}{2,}|\d{4}-\d{2}-\d{2}"#, options: .regularExpression) == nil
+  }
   print("A11Y ROWS \(destination.rawValue): \(rows.count) rows (\(sidebarRows) in the sidebar), \(silent.count) silent")
   #expect(!rows.isEmpty, "\(destination.rawValue): no list rows at all (not even the sidebar)")
   #expect(silent.isEmpty, "\(destination.rawValue): \(silent.count) of \(rows.count) rows say nothing: \(silent)")
@@ -679,23 +684,26 @@ final class MountedRoot {
     return result.rows
   }
 
-  /// The name the system Accessibility API gives the focused element, read off the main thread.
-  func systemFocusedName(matching frame: NSRect) -> String {
+  /// The element the system Accessibility API reports as focused (what VoiceOver follows): its
+  /// name, and its frame in AppKit screen coordinates. Read off the main thread.
+  func systemFocus() -> (name: String, frame: NSRect?) {
     let pid = ProcessInfo.processInfo.processIdentifier
-    // The system API measures from the top of the main screen; AppKit from the bottom.
-    let screenHeight = NSScreen.screens.first?.frame.height ?? 0
-    let expected = CGRect(
-      x: frame.minX, y: screenHeight - frame.maxY, width: frame.width, height: frame.height)
     let result = RowsBox()
     Thread.detachNewThread {
-      result.finish([accessibilityFocusedName(of: pid, within: expected)])
+      result.finish(accessibilityFocus(of: pid))
     }
     let deadline = Date().addingTimeInterval(10)
     while !result.isDone, Date() < deadline {
       RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
     }
     if !result.isDone { readTimedOut = true }
-    return result.rows.first ?? ""
+    let parts = result.rows
+    guard parts.count == 5, let x = Double(parts[1]), let y = Double(parts[2]), let w = Double(parts[3]),
+      let h = Double(parts[4])
+    else { return (parts.first ?? "", nil) }
+    // The system API measures from the top of the main screen; AppKit from the bottom.
+    let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+    return (parts[0], NSRect(x: x, y: screenHeight - y - h, width: w, height: h))
   }
 
   private func systemAccessibilityElements() -> [SpokenElement] {
@@ -773,7 +781,9 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
 }
 
 /// What VoiceOver names the focused element: its description or title, else the label next to it.
-func accessibilityFocusedName(of pid: pid_t, within expected: CGRect) -> String {
+/// The focused element's name (its description or title, else the label next to it) and its
+/// frame, as [name, x, y, width, height] in the system's top-left screen coordinates.
+func accessibilityFocus(of pid: pid_t) -> [String] {
   let app = AXUIElementCreateApplication(pid)
   AXUIElementSetMessagingTimeout(app, 5)
   func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -799,18 +809,13 @@ func accessibilityFocusedName(of pid: pid_t, within expected: CGRect) -> String 
     else { return nil }
     return CGRect(origin: origin, size: size)
   }
-  // The name counts only if the system's focused element is the responder the test focused:
-  // its frame must overlap the responder's.
-  guard let element = axElement(attribute(app, kAXFocusedUIElementAttribute)),
-    let focusedFrame = frame(element), focusedFrame.insetBy(dx: -2, dy: -2).intersects(expected)
-  else { return "" }
-  if let own = name(element) { return own }
-  if let labelElement = axElement(attribute(element, kAXTitleUIElementAttribute)) {
-    if let text = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String), !text.isEmpty {
-      return text
-    }
+  guard let element = axElement(attribute(app, kAXFocusedUIElementAttribute)) else { return [""] }
+  var spoken = name(element) ?? ""
+  if spoken.isEmpty, let labelElement = axElement(attribute(element, kAXTitleUIElementAttribute)) {
+    spoken = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String) ?? ""
   }
-  return ""
+  guard let box = frame(element) else { return [spoken] }
+  return [spoken] + [box.minX, box.minY, box.width, box.height].map { String(Double($0)) }
 }
 
 /// Hands the tree from the reader thread back to the main thread.
