@@ -1363,7 +1363,7 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
       source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
       canonicalDatabaseURL: canonical, sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
   }
-  while journey.backgroundWork != .preparingImport { await Task.yield() }
+  try await waitForBackgroundWork(.preparingImport, in: journey)
   journey.closeLedger()
   await preparing.value
   #expect(journey.phase == .idle)
@@ -1377,11 +1377,24 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   #expect(journey.phase == .reviewing)
   let session = LedgerSession()
   let importing = Task { await journey.approveInBackground(into: session) }
-  while journey.backgroundWork != .importing { await Task.yield() }
+  try await waitForBackgroundWork(.importing, in: journey)
   journey.closeLedger()
   #expect(await importing.value == false)
   #expect(journey.phase == .idle)
   #expect(journey.ledgerURL == nil)
   #expect(journey.snapshot == nil)
   #expect(session.screen == .noLedger)
+}
+
+/// Yields until the journey reports `work`, failing (not hanging) if it never does, for example
+/// because the step already finished.
+@MainActor
+private func waitForBackgroundWork(
+  _ work: LedgerJourney.BackgroundWork, in journey: LedgerJourney
+) async throws {
+  let deadline = Date().addingTimeInterval(10)
+  while journey.backgroundWork != work {
+    try #require(Date() < deadline, "background work \(work) never started")
+    await Task.yield()
+  }
 }
