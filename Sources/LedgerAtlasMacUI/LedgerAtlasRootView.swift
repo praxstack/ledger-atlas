@@ -31,7 +31,9 @@ public struct LedgerAtlasRootView: View {
   @State private var lifecycleRetryOperation: LedgerLifecycleOperation?
   @State private var lifecycleGeneration = 0
   @State private var lifecycleTask: Task<Void, Never>?
-  @State private var sourceTimeZoneIdentifier = ""
+  /// Starts as this Mac's zone, which is where a phone backup was usually made; the import
+  /// screen shows it and it can be changed before the backup is read.
+  @State private var sourceTimeZoneIdentifier = TimeZone.current.identifier
   private let bookmarkStore: SecurityScopedBookmarkStore
   private let intentConsumer: () -> LedgerIntentRequest?
   private let widgetProjectionPublisher: RedactedWidgetProjectionPublisher?
