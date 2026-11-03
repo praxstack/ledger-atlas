@@ -57,7 +57,36 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
     }
   }
 
-  public var accessibilityLabel: String { title }
+  public var accessibilityLabel: String { sidebarTitle }
+
+  /// The name in the sidebar and screen headers. `title` stays the stable identity name that
+  /// tests and the capture manifest use; the sidebar speaks the way people do.
+  public var sidebarTitle: String {
+    switch self {
+    case .ledger: "Transactions"
+    case .recurrence: "Recurring"
+    case .onboarding: "Get Started"
+    case .backupRestore: "Backup & Restore"
+    case .localAccess: "Local Access"
+    default: title
+    }
+  }
+
+  /// The sidebar's sections, in order. Accounts with their balances sit between the first
+  /// two (see `LedgerSidebar`).
+  public enum SidebarSection: String, CaseIterable, Sendable {
+    case money = "Money"
+    case organise = "Organise"
+    case ledger = "Ledger"
+
+    public var destinations: [AppDestination] {
+      switch self {
+      case .money: [.ledger, .accounts, .budgets, .insights, .recurrence]
+      case .organise: [.categories, .tags, .transfers, .installments, .receipts, .search]
+      case .ledger: [.importReview, .backupRestore, .localAccess, .onboarding, .settings]
+      }
+    }
+  }
 
   public var accessibilityHint: String {
     switch self {
