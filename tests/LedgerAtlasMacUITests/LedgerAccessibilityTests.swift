@@ -138,3 +138,35 @@ private final class FullSizeTestWindow: NSWindow {
     frameRect
   }
 }
+
+/// Reduce Motion: every animation in the app goes through `MotionPolicy`, which drops it when
+/// Reduce Motion is on (`MotionPolicyTests`). A new animation added without it fails here.
+@Test func everyAnimationInTheAppGoesThroughMotionPolicy() throws {
+  let sources = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Sources")
+  let animationAPIs = [
+    "withAnimation", ".animation(", ".transition(", "repeatForever", ".symbolEffect(",
+    ".contentTransition(", "matchedGeometryEffect", ".phaseAnimator", ".keyframeAnimator",
+  ]
+  var checked = 0
+  var offenders: [String] = []
+  let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+  while let file = files?.nextObject() as? URL {
+    guard file.pathExtension == "swift", file.lastPathComponent != "MotionPolicy.swift" else {
+      continue
+    }
+    let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
+    for (index, line) in lines.enumerated()
+    where animationAPIs.contains(where: line.contains) && !line.contains("//") {
+      checked += 1
+      // The animation value must come from MotionPolicy on the same or the next two lines.
+      let window = lines[index..<min(index + 3, lines.count)].joined(separator: " ")
+      if !window.contains("MotionPolicy.") {
+        offenders.append("\(file.lastPathComponent):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
+      }
+    }
+  }
+  #expect(checked > 0, "no animations found; is the Sources path right?")
+  #expect(offenders.isEmpty, "\(offenders)")
+}
