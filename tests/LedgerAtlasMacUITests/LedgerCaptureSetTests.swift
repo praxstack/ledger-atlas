@@ -39,7 +39,7 @@ import Testing
     .sorted(by: { $0.value[0].0.number < $1.value[0].0.number })
   {
     log("screen \(screen.destination) editing=\(screen.editing)")
-    let root = try await MountedRoot(showing: screen.destination, size: captureSize)
+    let root = try await MountedRoot(showing: screen.destination, size: captureSize, appWindow: true)
     defer { root.close() }
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
@@ -108,7 +108,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   }
 
   log("empty state")
-  let empty = try await MountedRoot(showing: .ledger, withLedger: false, size: captureSize)
+  let empty = try await MountedRoot(showing: .ledger, withLedger: false, size: captureSize, appWindow: true)
   defer { empty.close() }
   for appearance in CaptureAppearance.allCases {
     empty.window.appearance = NSAppearance(named: appearance.name)
@@ -123,7 +123,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   try lock.setPasscode("2468")
   lock.lock()
   log("lock screen")
-  let locked = try await MountedRoot(showing: .ledger, appLock: lock, size: captureSize)
+  let locked = try await MountedRoot(showing: .ledger, appLock: lock, size: captureSize, appWindow: true)
   defer { locked.close() }
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)

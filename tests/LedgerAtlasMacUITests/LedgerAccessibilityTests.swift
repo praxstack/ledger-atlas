@@ -272,7 +272,7 @@ final class MountedRoot {
   /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
   init(
     showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
-    size: NSSize = NSSize(width: 1100, height: 900)
+    size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false
   ) async throws {
     Self.launchOnce()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -295,12 +295,23 @@ final class MountedRoot {
       initialSelection: destination, appLock: lock,
       productSettings: .init(startScreen: destination), bookmarkStore: bookmarks,
       scopeStarter: { _ in true }, scopeStopper: { _ in })
+    // `appWindow` builds the window the way the app's WindowGroup does (full-size content
+    // under a hosting controller), so the detail column starts beside the sidebar instead of
+    // under it. Captures need that; the Accessibility checks don't.
     window = FullSizeTestWindow(
       contentRect: NSRect(origin: .zero, size: size),
-      styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+      styleMask: appWindow
+        ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        : [.titled, .closable, .resizable],
+      backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.setAccessibilityIdentifier(identifier)
-    window.contentView = NSHostingView(rootView: root)
+    if appWindow {
+      window.contentViewController = NSHostingController(rootView: root)
+      window.setContentSize(size)
+    } else {
+      window.contentView = NSHostingView(rootView: root)
+    }
     window.makeKeyAndOrderFront(nil)
     mounted = true
     do { try await settle() } catch { close(); throw error }
