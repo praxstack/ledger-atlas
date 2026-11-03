@@ -1346,3 +1346,42 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(65)) == "1 min 05 s")
   #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(-3)) == "0 s")
 }
+
+@MainActor
+@Test func backgroundImportResultIsDroppedWhenTheLedgerIsClosedMeanwhile() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+
+  // Closed while the backup is being read: the review is not adopted.
+  let journey = LedgerJourney()
+  let preparing = Task {
+    await journey.selectSourceInBackground(
+      source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+      canonicalDatabaseURL: canonical, sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  }
+  while journey.backgroundWork != .preparingImport { await Task.yield() }
+  journey.closeLedger()
+  await preparing.value
+  #expect(journey.phase == .idle)
+  #expect(journey.lastFailure == nil)
+  #expect(journey.backgroundWork == nil)
+
+  // Closed while importing: the new ledger isn't adopted or shown, and the caller learns it.
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage2.sqlite"),
+    canonicalDatabaseURL: canonical, sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  #expect(journey.phase == .reviewing)
+  let session = LedgerSession()
+  let importing = Task { await journey.approveInBackground(into: session) }
+  while journey.backgroundWork != .importing { await Task.yield() }
+  journey.closeLedger()
+  #expect(await importing.value == false)
+  #expect(journey.phase == .idle)
+  #expect(journey.ledgerURL == nil)
+  #expect(journey.snapshot == nil)
+  #expect(session.screen == .noLedger)
+}

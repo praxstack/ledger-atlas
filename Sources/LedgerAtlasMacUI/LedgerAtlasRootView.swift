@@ -1030,8 +1030,7 @@ public struct LedgerAtlasRootView: View {
   /// Commits the reviewed import in the background, then keeps the new ledger's access and
   /// shows it.
   private func approveImport() async {
-    await journey.approveInBackground(into: session)
-    guard journey.lastFailure == nil else { return }
+    guard await journey.approveInBackground(into: session) else { return }
     if let url = journey.ledgerURL {
       do {
         try bookmarkStore.save(url, for: .canonicalLedger)

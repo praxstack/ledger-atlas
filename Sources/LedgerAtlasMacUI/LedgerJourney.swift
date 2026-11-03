@@ -32,6 +32,9 @@ public final class LedgerJourney {
 
   public private(set) var phase: Phase = .idle
   public private(set) var backgroundWork: BackgroundWork?
+  /// Bumped whenever the journey lets go of its ledger or import. Background work started under
+  /// an older value finished for a journey that has moved on, so its result is dropped.
+  private var generation = 0
   private var review: ImportWorkspace.Review?
   public private(set) var summary: ImportReviewSummary = .awaitingSyntheticMetadata
   public private(set) var snapshot: LedgerStore.LedgerReadSnapshot? {
@@ -79,6 +82,9 @@ public final class LedgerJourney {
     lastFailure = nil
     backgroundWork = .preparingImport
     defer { backgroundWork = nil }
+    let started = generation
+    let activity = Self.beginImportActivity("Reading a Money Manager backup")
+    defer { ProcessInfo.processInfo.endActivity(activity) }
     let workspace = workspace
     let request = ImportWorkspace.Request(
       sourceURL: sourceURL, stagingDatabaseURL: stagingDatabaseURL,
@@ -87,11 +93,21 @@ public final class LedgerJourney {
       let preparation = try await Task.detached(priority: .userInitiated) {
         try workspace.prepare(request)
       }.value
+      guard generation == started else { return }
       try adopt(
         preparation, canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone)
     } catch {
+      guard generation == started else { return }
       failClosed(message: "Import could not be prepared.")
     }
+  }
+
+  /// Keeps the Mac awake and stops a quick quit from cutting off a long import step. A step cut
+  /// off anyway is safe: the commit is one SQLite transaction, so it rolls back, and choosing
+  /// the backup again prepares a fresh ledger file.
+  private static func beginImportActivity(_ reason: String) -> NSObjectProtocol {
+    ProcessInfo.processInfo.beginActivity(
+      options: [.userInitiated, .suddenTerminationDisabled], reason: reason)
   }
 
   private func adopt(
@@ -153,15 +169,20 @@ public final class LedgerJourney {
 
   /// `approveAndOpen` with the commit and the first read off the main thread. On a real
   /// backup the commit takes minutes, which froze the window when it ran on the main thread.
-  package func approveInBackground(into session: LedgerSession) async {
-    guard backgroundWork == nil else { return }
+  /// Returns true only when this call imported the ledger and opened it in `session`.
+  @discardableResult
+  package func approveInBackground(into session: LedgerSession) async -> Bool {
+    guard backgroundWork == nil else { return false }
     guard let prepared, let canonicalURL else {
       failClosed(message: "Import could not be approved.")
-      return
+      return false
     }
     lastFailure = nil
     backgroundWork = .importing
     defer { backgroundWork = nil }
+    let started = generation
+    let activity = Self.beginImportActivity("Importing a Money Manager backup")
+    defer { ProcessInfo.processInfo.endActivity(activity) }
     let workspace = workspace
     do {
       let opened = try await Task.detached(priority: .userInitiated) {
@@ -169,6 +190,9 @@ public final class LedgerJourney {
         let store = try LedgerStore.openReadOnly(at: canonicalURL)
         return OpenedImport(store: store, snapshot: try store.readSnapshot())
       }.value
+      // The ledger was closed, replaced or locked while this ran. The new file stays in the
+      // ledgers folder, where Open Ledger finds it, but this journey doesn't adopt it.
+      guard generation == started else { return false }
       // The handle is spent; approving again must not import a second time.
       self.prepared = nil
       application = nil
@@ -180,8 +204,11 @@ public final class LedgerJourney {
       phase = .imported
       // Present the snapshot just read instead of loading the ledger again (#143).
       session.openValidated(canonicalURL, snapshot: opened.snapshot)
+      return true
     } catch {
+      guard generation == started else { return false }
       failClosed(message: "Import could not be approved.")
+      return false
     }
   }
 
@@ -305,6 +332,7 @@ public final class LedgerJourney {
   }
 
   private func disconnectLedger() {
+    generation &+= 1
     phase = .idle
     prepared = nil
     review = nil
@@ -1471,8 +1499,10 @@ public final class LedgerJourney {
   }
 }
 
-/// A store and its first snapshot, handed from the background import to the main actor. The
-/// store isn't used by the background task once it's returned.
+/// A store and its first snapshot, handed from the background import to the main actor.
+/// Invariant that makes the unchecked conformance sound: the detached task creates the store,
+/// reads the snapshot and returns; nothing on that task touches the store afterwards, so only
+/// the main actor uses it from then on.
 private struct OpenedImport: @unchecked Sendable {
   let store: LedgerStore
   let snapshot: LedgerStore.LedgerReadSnapshot
