@@ -1806,7 +1806,11 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
         }
       }
     }
-    for index in 0..<150 {
+    // Save at least 150 times, and keep saving until a read has landed in between: fast saves
+    // can otherwise all finish before either reader gets one full read (seen after #152).
+    var index = 0
+    while index < 150 || (!opened.isSet && index < 5_000) {
+      defer { index += 1 }
       let renamed = try LedgerAccount(
         id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
         origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
@@ -1822,7 +1826,7 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
     readers.wait()
     #expect(failures.all.isEmpty, "\(failures.all.prefix(5))")
     #expect(opened.isSet, "no read-only load ever opened the file, so nothing overlapped")
-    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save 149")
+    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save \(index - 1)")
   }
 }
 
