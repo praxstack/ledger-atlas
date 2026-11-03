@@ -152,8 +152,8 @@ final class MountedRoot {
   /// The same tree walked in process, for comparison in the log.
   func inProcessCount() -> Int {
     func count(_ element: Any, _ depth: Int) -> Int {
-      guard depth < 80, let node = element as? NSAccessibilityProtocol else { return 0 }
-      let children = (node.accessibilityChildren?() ?? nil) ?? []
+      guard depth < 80, let node = element as? NSObject else { return 0 }
+      let children = node.value(forKey: "accessibilityChildren") as? [Any] ?? []
       return 1 + children.reduce(0) { $0 + count($1, depth + 1) }
     }
     return count(window, 0)
