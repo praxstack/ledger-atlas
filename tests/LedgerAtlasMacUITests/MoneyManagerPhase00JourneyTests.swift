@@ -80,9 +80,9 @@ struct MoneyManagerPhase00JourneyTests {
     #expect(afterInsights.contains { $0.title == "Imported" && $0.detail.contains("2") })
     #expect(afterInsights.contains { $0.title == "Mac-native" && $0.detail.contains("1") })
 
-    #expect(throws: LedgerApplication.Error.invalidCommand) {
-      _ = try journey.exportPackage()
-    }
+    // Imported ledgers export a v4 package that carries their import history.
+    let package = try journey.exportPackage()
+    #expect(!package.payload.isEmpty)
 
     let backupURL = directory.appendingPathComponent("ledger-1to1.sqlite")
     try journey.backupCanonicalLedger(to: backupURL)
@@ -121,9 +121,9 @@ struct MoneyManagerPhase00JourneyTests {
     journey.performCreateMacTransaction(
       amountLiteral: "1.25", createdAt: UTCInstant(epochMilliseconds: 1_738_547_201_000))
     #expect(journey.lastFailure == nil)
-    #expect(throws: LedgerApplication.Error.invalidCommand) {
-      _ = try journey.exportPackage()
-    }
+    // Imported ledgers export a v4 package that carries their import history.
+    let package = try journey.exportPackage()
+    #expect(!package.payload.isEmpty)
     let backupURL = directory.appendingPathComponent("ios-canonical-backup.sqlite")
     try journey.backupCanonicalLedger(to: backupURL)
     let restored = LedgerJourney()

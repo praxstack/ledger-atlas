@@ -132,7 +132,7 @@ private func expectNoRowContent(_ text: String, sourceLocation: SourceLocation =
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
   let origin = try LedgerOrigin.macNative()
-  let accountID = try StableLedgerID.account(origin: origin, localKey: key("z"))
+  let accountID = try StableLedgerID.account(origin: origin, localKey: key("c"))
   let now = UTCInstant(epochMilliseconds: 1_790_000_000_000)
 
   let source = try await editableLedger(at: directory.appendingPathComponent("source.sqlite"))
@@ -190,7 +190,7 @@ private func expectNoRowContent(_ text: String, sourceLocation: SourceLocation =
   let journey = try await editableLedger(at: directory.appendingPathComponent("ledger.sqlite"))
   let origin = try LedgerOrigin.macNative()
   let account = try LedgerAccount(
-    id: try StableLedgerID.account(origin: origin, localKey: key("z")), name: distinctiveName,
+    id: try StableLedgerID.account(origin: origin, localKey: key("c")), name: distinctiveName,
     currencyUnit: "INR", origin: origin)
   // The effect's currency doesn't match its account, so reading the workbook reports it.
   let draft = try LedgerTransactionDraft(
@@ -207,7 +207,7 @@ private func expectNoRowContent(_ text: String, sourceLocation: SourceLocation =
   try LedgerXLSXExchange.xlsxData(
     LedgerXLSXExchange.Content(
       accounts: [account],
-      transactions: [LedgerXLSXExchange.Transaction(id: key("t"), draft: draft)])
+      transactions: [LedgerXLSXExchange.Transaction(id: key("e"), draft: draft)])
   ).write(to: workbook)
 
   do {
@@ -228,7 +228,7 @@ private func expectNoRowContent(_ text: String, sourceLocation: SourceLocation =
   let origin = try LedgerOrigin.macNative()
   let workbook = directory.appendingPathComponent("accounts.xlsx")
   let wallet = try LedgerAccount(
-    id: try StableLedgerID.account(origin: origin, localKey: key("w")), name: "Wallet",
+    id: try StableLedgerID.account(origin: origin, localKey: key("d")), name: "Wallet",
     currencyUnit: "INR", origin: origin)
   try LedgerXLSXExchange.xlsxData(LedgerXLSXExchange.Content(accounts: [wallet]))
     .write(to: workbook)
