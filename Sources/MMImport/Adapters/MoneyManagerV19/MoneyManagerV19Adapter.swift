@@ -504,12 +504,17 @@ public enum MoneyManagerV19Adapter {
       }
     }
     var invokedReadSeam = false
+    var rowsSinceIdentityCheck = 0
     while sqlite3_step(statement) == SQLITE_ROW {
       if !invokedReadSeam {
         invokedReadSeam = true
         try testingMutation?(.duringStagedRecords)
       }
-      try validateIdentity()
+      // Re-check the staging file's identity every 1,024 rows rather than on every row: each
+      // check is four stat calls, which were a quarter of preparing a real backup. The caller
+      // checks again once all rows are read, so a swap is still caught before any row is used.
+      if rowsSinceIdentityCheck == 0 { try validateIdentity() }
+      rowsSinceIdentityCheck = (rowsSinceIdentityCheck + 1) % 1_024
       guard let tableID = text(statement, 0), let table = text(statement, 1),
         let recordID = text(statement, 2), let key = text(statement, 3)
       else { throw MoneyManagerV19AdapterError.invalidStagingInventory }

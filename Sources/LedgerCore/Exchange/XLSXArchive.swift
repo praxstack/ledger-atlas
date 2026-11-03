@@ -195,7 +195,7 @@ public enum XLSXArchive {
 
   /// Relative, forward-slash names with no `..`, empty or absolute parts.
   static func isSafe(_ name: String) -> Bool {
-    guard !name.isEmpty, !name.hasPrefix("/"), !name.contains("\\"), !name.contains("\u{0}")
+    guard !name.isEmpty, !name.hasPrefix("/"), !name.contains("\\"), !name.utf8.contains(0)
     else { return false }
     return !name.split(separator: "/", omittingEmptySubsequences: false).contains {
       $0.isEmpty || $0 == "." || $0 == ".."

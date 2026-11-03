@@ -408,6 +408,6 @@ public enum StableLedgerID {
 
 enum LedgerValidation {
   static func text(_ value: String, maximum: Int) -> Bool {
-    !value.isEmpty && value.utf8.count <= maximum && !value.contains("\u{0}")
+    !value.isEmpty && value.utf8.count <= maximum && !value.utf8.contains(0)
   }
 }

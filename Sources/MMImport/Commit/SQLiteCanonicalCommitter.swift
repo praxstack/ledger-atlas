@@ -175,7 +175,9 @@ public struct SQLiteCanonicalCommitter: Sendable {
       for: request.canonicalDatabaseURL, create: requestedV19,
       stableIdentity: requestedV19 ? request.expectedManifest.stagingID : nil)
     var transactionOpen = true
+    CommitStatementCache.begin(database)
     defer {
+      CommitStatementCache.end(database)
       if transactionOpen { _ = execute(database, "ROLLBACK") }
       let isInitial = canonicalStateIsInitial(database)
       sqlite3_close(database)
@@ -1017,7 +1019,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
       return value
     }
     func validText(_ value: String, maximum: Int) -> Bool {
-      !value.isEmpty && value.utf8.count <= maximum && !value.contains("\u{0}")
+      !value.isEmpty && value.utf8.count <= maximum && !value.utf8.contains(0)
     }
 
     let currencyRecords = graph.records.values.filter {
@@ -2836,10 +2838,26 @@ public struct SQLiteCanonicalCommitter: Sendable {
     var statement: OpaquePointer?
     let sql =
       "SELECT artifact_sha256, profile_id, adapter_version, container_member, source_table, source_record_key, source_column_ordinal, source_column_name FROM provenance_reference WHERE provenance_id=?"
-    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
-      let statement, bind(.text(value.deterministicID), to: statement, at: 1)
-    else { throw CanonicalCommitError.canonicalReadFailed }
-    defer { sqlite3_finalize(statement) }
+    let cached = CommitStatementCache.statement(database, sql)
+    if cached == nil {
+      guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+        throw CanonicalCommitError.canonicalReadFailed
+      }
+    } else {
+      statement = cached
+    }
+    guard let statement, bind(.text(value.deterministicID), to: statement, at: 1) else {
+      if cached == nil { sqlite3_finalize(statement) }
+      throw CanonicalCommitError.canonicalReadFailed
+    }
+    defer {
+      if cached == nil {
+        sqlite3_finalize(statement)
+      } else {
+        sqlite3_reset(statement)
+        sqlite3_clear_bindings(statement)
+      }
+    }
     guard sqlite3_step(statement) == SQLITE_ROW else { return false }
     return columnText(statement, 0) == value.artifactSHA256
       && columnText(statement, 1) == value.profileID
@@ -3022,6 +3040,21 @@ public struct SQLiteCanonicalCommitter: Sendable {
   }
 
   private func run(_ database: OpaquePointer, sql: String, values: [SQLValue]) throws {
+    if let statement = CommitStatementCache.statement(database, sql) {
+      defer {
+        sqlite3_reset(statement)
+        sqlite3_clear_bindings(statement)
+      }
+      for (offset, value) in values.enumerated() {
+        guard bind(value, to: statement, at: Int32(offset + 1)) else {
+          throw CanonicalCommitError.canonicalWriteFailed
+        }
+      }
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw CanonicalCommitError.canonicalWriteFailed
+      }
+      return
+    }
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
       let statement
@@ -3350,7 +3383,10 @@ private final class StagingSnapshot: @unchecked Sendable {
     guard
       sqlite3_open_v2(
         uri, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX, nil)
-        == SQLITE_OK, let database, sqlite3_db_readonly(database, "main") == 1
+        == SQLITE_OK, let database, sqlite3_db_readonly(database, "main") == 1,
+      // The staging copy of a real backup is a few hundred MB and is read in key order across
+      // several indexes; SQLite's default 2 MB page cache re-reads the same pages from disk.
+      sqlite3_exec(database, "PRAGMA cache_size=-262144", nil, nil, nil) == SQLITE_OK
     else {
       if database != nil { sqlite3_close(database) }
       Darwin.close(descriptor)
@@ -3416,4 +3452,45 @@ private struct ImportedCategoryRow {
   let kind: LedgerCategoryKind
   let parentUID: String?
   let displayOrder: Int
+}
+
+/// Prepared statements reused for the length of one commit connection. A real backup runs the
+/// same few INSERT and lookup statements hundreds of thousands of times, and preparing each
+/// one again was about a sixth of the commit. Users reset a statement after each use; `end`
+/// finalizes them all before the connection closes.
+enum CommitStatementCache {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var caches: [OpaquePointer: [String: OpaquePointer]] = [:]
+  /// Enough for every fixed statement the commit runs; anything beyond is prepared each time.
+  private static let limit = 64
+
+  static func begin(_ database: OpaquePointer) {
+    lock.withLock { caches[database] = [:] }
+  }
+
+  static func end(_ database: OpaquePointer) {
+    let statements = lock.withLock { caches.removeValue(forKey: database) } ?? [:]
+    for statement in statements.values { sqlite3_finalize(statement) }
+  }
+
+  /// The cached statement for `sql`, prepared on first use, or nil when `database` has no
+  /// cache (or it is full), in which case the caller prepares and finalizes its own.
+  static func statement(_ database: OpaquePointer, _ sql: String) -> OpaquePointer? {
+    lock.withLock {
+      guard var cache = caches[database] else { return nil }
+      if let statement = cache[sql] { return statement }
+      guard cache.count < limit else { return nil }
+      var statement: OpaquePointer?
+      guard sqlite3_prepare_v3(
+        database, sql, -1, UInt32(SQLITE_PREPARE_PERSISTENT), &statement, nil) == SQLITE_OK,
+        let statement
+      else {
+        sqlite3_finalize(statement)
+        return nil
+      }
+      cache[sql] = statement
+      caches[database] = cache
+      return statement
+    }
+  }
 }
