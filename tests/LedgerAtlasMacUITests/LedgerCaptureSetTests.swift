@@ -94,6 +94,10 @@ import Testing
       showing: sheet.destination, size: captureSize, appWindow: true, readsInProcess: true)
     defer {
       // Closing a window with a sheet still attached ended the whole test process.
+      // Drop any input still queued (such as a spare Escape) so it can't reach later windows.
+      while NSApplication.shared.nextEvent(
+        matching: .any, until: Date(), inMode: .default, dequeue: true) != nil
+      {}
       if let attached = root.window.attachedSheet { root.window.endSheet(attached) }
       drainLog("sheet ended")
       root.close()
@@ -625,7 +629,7 @@ extension MountedRoot {
             menu.cancelTracking()
             return true
           }
-          if let escape = NSEvent.keyEvent(
+          if picked.closeAttempts == 1, let escape = NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
             characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false,
