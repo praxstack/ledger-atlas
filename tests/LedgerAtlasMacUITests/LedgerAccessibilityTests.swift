@@ -310,8 +310,9 @@ final class MountedRoot {
       let elements = accessibilityElements()
       if readTimedOut { break }
       // Keep waiting while the saved ledger is still opening.
+      // The empty-ledger prompt's title is exactly "Open a ledger".
       showsNoLedgerPrompt = elements.contains {
-        "\($0.spokenName) \($0.value)".contains("Open a ledger")
+        $0.spokenName == "Open a ledger" || $0.value == "Open a ledger"
       }
       if elements.count == previous, elements.count > 5, !showsNoLedgerPrompt { break }
       previous = elements.count
