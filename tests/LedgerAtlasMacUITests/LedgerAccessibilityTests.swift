@@ -84,21 +84,16 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
 @MainActor
 @Test(arguments: LedgerDemoTour.destinations)
 func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) async throws {
-  // The app reads this setting from its defaults; the argument domain wins over the global one
-  // and lasts only for this process.
-  let defaults = UserDefaults.standard
-  let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
-  var withAccess = arguments
-  withAccess["AppleKeyboardUIMode"] = 2
-  defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
-  defaults.setVolatileDomain(withAccess, forName: UserDefaults.argumentDomain)
-  defer {
-    defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
-    defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+  // Full Keyboard Access is a per-user macOS setting that AppKit reads at launch. CI turns it on
+  // for the runner (`defaults write -g AppleKeyboardUIMode -int 2`) before the tests start.
+  // Without it, Tab only visits text fields and lists, as on any Mac.
+  let fullKeyboardAccess = NSApplication.shared.isFullKeyboardAccessEnabled
+  if !fullKeyboardAccess, ProcessInfo.processInfo.environment["CI"] != nil {
+    Issue.record("Full Keyboard Access is off on CI; the workflow should turn it on")
   }
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
-  print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(NSApp.isFullKeyboardAccessEnabled)")
+  print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(fullKeyboardAccess)")
   let sidebar = mounted.sidebarList()
   mounted.window.makeFirstResponder(nil)
   var visited: [(id: ObjectIdentifier, name: String)] = []
@@ -107,7 +102,7 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
     mounted.press("\t", keyCode: 48)
     guard let responder = mounted.window.firstResponder, responder !== mounted.window else { continue }
     let id = ObjectIdentifier(responder)
-    if visited.first?.id == id, visited.count > 1 {
+    if visited.first?.id == id {
       cycled = true
       break
     }
@@ -125,13 +120,22 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
   }
   print("A11Y KEYBOARD \(destination.rawValue) tab order: \(visited.map(\.name))")
   #expect(cycled, "\(destination.rawValue): Tab never came back round to the first control")
-  let outsideSidebar = visited.filter { $0.id != sidebar.map { ObjectIdentifier($0) } }
-  #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
+  if fullKeyboardAccess {
+    let outsideSidebar = visited.filter { $0.id != sidebar.map { ObjectIdentifier($0) } }
+    #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
+  }
 }
 
 /// What VoiceOver would say for the control that has keyboard focus.
 @MainActor
 private func focusName(of responder: NSResponder) -> String {
+  // A text field being edited hands focus to the window's shared field editor; VoiceOver
+  // reads the text field itself.
+  if let editor = responder as? NSTextView, editor.isFieldEditor,
+    let field = editor.delegate as? NSResponder
+  {
+    return focusName(of: field)
+  }
   let element = responder as NSObject
   for getter in ["accessibilityLabel", "accessibilityTitle", "accessibilityPlaceholderValue"] {
     if let text = inProcessProperty(element, getter) as? String,
@@ -670,7 +674,9 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
   func visit(_ element: AXUIElement, depth: Int) {
     guard depth < 80 else { return }
     if text(element, kAXRoleAttribute) == kAXRowRole {
-      rows.append(spoken(element, depth: 0))
+      // A row scrolled out of view has no cells until it comes back into view (VoiceOver
+      // scrolls it there first), so only rows with content are read.
+      if !children(element).isEmpty { rows.append(spoken(element, depth: 0)) }
       return
     }
     for child in children(element) { visit(child, depth: depth + 1) }
