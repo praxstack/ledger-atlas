@@ -21,7 +21,7 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   let elements = mounted.accessibilityElements()
   let summary = Dictionary(grouping: elements, by: \.role).mapValues(\.count)
     .sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
-  print("A11Y \(destination.rawValue): \(elements.count) elements: \(summary)")
+  print("A11Y \(destination.rawValue): \(elements.count) elements (in process \(mounted.inProcessCount())): \(summary)")
   #expect(elements.count > 5, "\(destination) exposed almost nothing to VoiceOver")
   let unlabeled = elements.filter { $0.isControl && $0.spokenName.isEmpty }
   for element in unlabeled {
@@ -104,7 +104,7 @@ final class MountedRoot {
   private let suite: String
 
   init(showing destination: AppDestination, appearance: NSAppearance.Name? = nil) async throws {
-    _ = NSApplication.shared
+    Self.launchOnce()
     directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -137,6 +137,26 @@ final class MountedRoot {
       if count == previous, count > 5 { break }
       previous = count
     }
+  }
+
+  /// The test runner never finishes launching an app, so the Accessibility server that answers
+  /// VoiceOver isn't registered yet. Do it once.
+  private static var launched = false
+  private static func launchOnce() {
+    guard !launched else { return }
+    launched = true
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApplication.shared.finishLaunching()
+  }
+
+  /// The same tree walked in process, for comparison in the log.
+  func inProcessCount() -> Int {
+    func count(_ element: Any, _ depth: Int) -> Int {
+      guard depth < 80, let node = element as? NSAccessibilityProtocol else { return 0 }
+      let children = (node as? NSObject)?.accessibilityChildren() ?? []
+      return 1 + children.reduce(0) { $0 + count($1, depth + 1) }
+    }
+    return count(window, 0)
   }
 
   func close() {
