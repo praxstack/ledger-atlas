@@ -839,3 +839,22 @@ void csqlite_debug_describe_main_descriptor(sqlite3 *database, char *output, siz
             fcntl(other, F_GETFL));
     }
 }
+
+#if defined(__APPLE__)
+#include <sys/mount.h>
+#else
+#include <sys/vfs.h>
+#endif
+
+int csqlite_has_fine_timestamps(int descriptor) {
+  struct statfs value;
+  if (fstatfs(descriptor, &value) != 0) return 0;
+#if defined(__APPLE__)
+  return strcmp(value.f_fstypename, "apfs") == 0;
+#else
+  // Linux stamps change times from a coarse clock tick, so two writes a few milliseconds apart
+  // can share one; callers then fall back to requiring a change time two seconds old.
+  (void)value;
+  return 0;
+#endif
+}
