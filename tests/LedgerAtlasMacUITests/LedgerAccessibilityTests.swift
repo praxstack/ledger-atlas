@@ -21,19 +21,19 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   expectEveryControlIsNamed(mounted.accessibilityElements(), on: "\(destination.rawValue)")
 }
 
-/// Increase Contrast: every screen still renders and stays fully labeled in both high-contrast
-/// appearances.
-@MainActor
-@Test(arguments: LedgerDemoTour.destinations)
-func everyScreenStaysLabeledWithIncreasedContrast(_ destination: AppDestination) async throws {
-  for appearance in [NSAppearance.Name.accessibilityHighContrastAqua,
-                     .accessibilityHighContrastDarkAqua] {
-    let mounted = try await MountedRoot(showing: destination, appearance: appearance)
-    defer { mounted.close() }
-    #expect(mounted.window.appearance?.name == appearance)
-    expectEveryControlIsNamed(
-      mounted.accessibilityElements(), on: "\(destination.rawValue) \(appearance.rawValue)")
+/// Increase Contrast: macOS raises contrast for system colours by itself, so the app may only
+/// use system colours. A hand-mixed colour or a faded one (`opacity`) wouldn't follow the
+/// setting and fails here.
+@Test func everyColourFollowsIncreaseContrast() throws {
+  let custom = ["Color(red:", "Color(white:", "Color(hue:", "NSColor(red:", "NSColor(white:",
+                "Color(\"", "Color(#", ".opacity("]
+  var offenders: [String] = []
+  for (file, lines) in try appSources() {
+    for (index, line) in lines.enumerated() where custom.contains(where: line.contains) {
+      offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
+    }
   }
+  #expect(offenders.isEmpty, "\(offenders)")
 }
 
 @MainActor
@@ -133,9 +133,10 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   let mounted = try await MountedRoot(showing: .ledger)
   defer { mounted.close() }
   let time = #/\b\d{2}:\d{2}\b/#
-  let names = mounted.accessibilityElements().map(\.spokenName).filter { $0.count > 12 }
-  for name in names.prefix(40) { print("A11Y NAME \(name.prefix(120))") }
-  let rows = names.filter { $0.contains(time) }
+  // A row is read as its label, or as the text it shows when it has no separate label.
+  let spoken = mounted.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+  let rows = spoken.filter { $0.contains(time) }
+  for row in spoken.filter({ $0.count > 12 }).prefix(30) { print("A11Y NAME \(row.prefix(100))") }
   print("A11Y ROWS \(rows.count) ledger rows")
   #expect(rows.count > 3)
   let kinds = ["Income", "Expense", "Transfer", "Adjustment"]
@@ -247,7 +248,7 @@ final class MountedRoot {
   private let directory: URL
   private let suite: String
 
-  init(showing destination: AppDestination, appearance: NSAppearance.Name? = nil) async throws {
+  init(showing destination: AppDestination) async throws {
     Self.launchOnce()
     directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
@@ -269,7 +270,6 @@ final class MountedRoot {
       contentRect: NSRect(x: 0, y: 0, width: 1100, height: 900),
       styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
-    if let appearance { window.appearance = NSAppearance(named: appearance) }
     window.contentView = NSHostingView(rootView: root)
     window.makeKeyAndOrderFront(nil)
     try await settle()

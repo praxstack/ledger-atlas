@@ -1,3 +1,4 @@
+import AppKit
 import LedgerCore
 import LedgerStore
 import SwiftUI
@@ -174,9 +175,16 @@ struct LedgerBrowseList: View {
               Text("\(day.count)").font(.caption2).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 36)
+            // System selection colours and a solid outline, so the chosen day stays clear with
+            // Increase Contrast on.
             .background(
-              filter.day == day.date ? Color.accentColor.opacity(0.2) : Color.clear,
-              in: RoundedRectangle(cornerRadius: 6))
+              filter.day == day.date
+                ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : Color.clear,
+              in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(filter.day == day.date ? Color.accentColor : Color.clear, lineWidth: 2))
           }
           .buttonStyle(.plain)
           .accessibilityLabel(
