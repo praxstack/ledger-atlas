@@ -44,6 +44,23 @@ public struct InsightsReport: Equatable, Sendable {
       transactions: snapshot.transactions, unitCode: unit, periods: periods)
   }
 
+  /// The day Insights opens on: today, unless nothing is dated in today's period or later,
+  /// as with an older imported backup. Then the newest entry's day, so the screen opens on
+  /// the last period that has entries instead of an empty one.
+  public static func openingDay(
+    in snapshot: LedgerStore.LedgerReadSnapshot, today: SourceLocalDate,
+    _ kind: InsightsPeriodKind, rule: LedgerPeriodRule
+  ) -> SourceLocalDate {
+    let newest = snapshot.transactions.lazy
+      .filter { $0.currentRevision.lifecycle == .active }
+      .map { $0.currentRevision.draft.occurredAt.localDateTime.date }
+      .max()
+    guard let newest, let current = try? period(kind, containing: today, rule: rule),
+      newest < current.start
+    else { return today }
+    return newest
+  }
+
   /// The month (by the ledger's month start day) or calendar year that contains `date`.
   public static func period(
     _ kind: InsightsPeriodKind, containing date: SourceLocalDate, rule: LedgerPeriodRule

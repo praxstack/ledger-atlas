@@ -116,3 +116,13 @@ private let november = try! SourceLocalDate(year: 2026, month: 11, day: 15)
   try LedgerPDFStatementExporter.export(lines: hidden, to: url)
   #expect(try Data(contentsOf: url).starts(with: Data("%PDF".utf8)))
 }
+
+@Test func insightsOpensOnTheNewestMonthWithEntriesWhenTodaysIsEmpty() throws {
+  let ledger = try fixture()
+  let rule = LedgerPeriodRule()
+  #expect(InsightsReport.openingDay(in: ledger, today: november, .month, rule: rule) == november)
+  let later = try SourceLocalDate(year: 2027, month: 2, day: 1)
+  #expect(
+    InsightsReport.openingDay(in: ledger, today: later, .month, rule: rule)
+      == (try SourceLocalDate(year: 2026, month: 11, day: 10)))
+}

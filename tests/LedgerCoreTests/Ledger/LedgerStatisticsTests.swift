@@ -221,6 +221,78 @@ struct LedgerStatisticsTests {
     #expect(lines.last == "Snapshot: \(statistics.snapshotDigest.prefix(16))")
   }
 
+  @Test("a parent cycle in damaged data still gives every amount one top-level line")
+  func parentCycleStillReconciles() throws {
+    let cash = try account("a")
+    let firstID = try StableLedgerID.category(origin: origin, localKey: String(repeating: "1", count: 64))
+    let secondID = try StableLedgerID.category(origin: origin, localKey: String(repeating: "2", count: 64))
+    let first = try LedgerCategory(
+      id: firstID, name: "Loop A", kind: .expense, origin: origin, parentID: secondID)
+    let second = try LedgerCategory(
+      id: secondID, name: "Loop B", kind: .expense, origin: origin, parentID: firstID,
+      displayOrder: 1)
+    let child = try category("c", "Under the loop", parent: first)
+    let statistics = try LedgerPeriodStatistics(
+      accounts: [cash], categories: [first, second, child],
+      transactions: [
+        try transaction("1", kind: .expense, [(cash, .decrease, "10")], category: first),
+        try transaction("2", kind: .expense, [(cash, .decrease, "20")], category: second),
+        try transaction("3", kind: .expense, [(cash, .decrease, "5")], category: child),
+      ], unitCode: "INR", period: november())
+    #expect(statistics.expense == (try decimal("35")))
+    let top = statistics.expenseCategories.filter { $0.depth == 0 }
+    #expect(top.map(\.name) == ["Loop A", "Loop B"])
+    #expect(top.map(\.totalAmount) == [try decimal("15"), try decimal("20")])
+  }
+
+  @Test("renaming a category shown in the figures changes the snapshot digest")
+  func digestCoversCategoryNames() throws {
+    let cash = try account("a")
+    let food = try category("f", "Food")
+    let renamed = try LedgerCategory(id: food.id, name: "Groceries", kind: .expense, origin: origin)
+    let entries = [try transaction("1", kind: .expense, [(cash, .decrease, "10")], category: food)]
+    let before = try LedgerPeriodStatistics(
+      accounts: [cash], categories: [food], transactions: entries, unitCode: "INR",
+      period: november())
+    let after = try LedgerPeriodStatistics(
+      accounts: [cash], categories: [renamed], transactions: entries, unitCode: "INR",
+      period: november())
+    #expect(before.snapshotDigest != after.snapshotDigest)
+  }
+
+  @Test("an entry in another currency on a counted account counts in that currency")
+  func foreignCurrencyEffectsCountInTheirOwnCurrency() throws {
+    let cash = try account("a")
+    let dollarsOnRupeeAccount = try LedgerTransactionSnapshot(
+      id: try StableLedgerID.transaction(origin: origin, localKey: String(repeating: "9", count: 64)),
+      currentRevision: try LedgerTransactionRevision(
+        id: try StableLedgerID.revision(
+          transactionID: try StableLedgerID.transaction(
+            origin: origin, localKey: String(repeating: "9", count: 64)), revision: 1),
+        transactionID: try StableLedgerID.transaction(
+          origin: origin, localKey: String(repeating: "9", count: 64)),
+        revision: 1, predecessorID: nil,
+        draft: try LedgerTransactionDraft(
+          effects: [
+            try LedgerTransactionEffect(
+              accountID: cash.id, direction: .decrease,
+              amount: try CurrencyAmount(unitCode: "USD", amount: ExactDecimal("12")))
+          ], categoryID: nil, kind: .expense,
+          occurredAt: try SourceTemporal(
+            resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 11, day: 3)),
+            in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day),
+          origin: origin),
+        createdAt: UTCInstant(epochMilliseconds: 0)))
+    let dollars = try LedgerPeriodStatistics(
+      accounts: [cash], categories: [], transactions: [dollarsOnRupeeAccount], unitCode: "USD",
+      period: november())
+    #expect(dollars.expense == (try decimal("12")))
+    let rupees = try LedgerPeriodStatistics(
+      accounts: [cash], categories: [], transactions: [dollarsOnRupeeAccount], unitCode: "INR",
+      period: november())
+    #expect(rupees.expense == (try decimal("0")))
+  }
+
   @Test("an empty or reversed period is refused")
   func invalidPeriod() throws {
     let day = try SourceLocalDate(year: 2026, month: 11, day: 1)

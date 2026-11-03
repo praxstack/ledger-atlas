@@ -17,6 +17,8 @@ public struct LedgerStatisticsPeriod: Equatable, Hashable, Sendable {
 
 public enum LedgerStatisticsError: Error, Equatable, Sendable {
   case invalidPeriod
+  /// The category lines don't add up to the total. It is a bug, never shown as numbers.
+  case doesNotReconcile
 }
 
 /// One category's line in a roll-up: its own amount and the amount including every
@@ -74,8 +76,9 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
   public let incomeCategories: [LedgerCategoryStatistic]
   /// Balances of the counted accounts in this currency at the end of the period.
   public let closingBalance: LedgerBalanceSummary?
-  /// SHA-256 of the currency, the period and every transaction revision the figures read.
-  /// The screen and the PDF show it, so two copies can be checked against each other.
+  /// SHA-256 of the currency, the period, every transaction revision the figures read, the
+  /// counted accounts, and the name and parent of every category shown. The screen and the
+  /// PDF show it, so two copies can be checked against each other.
   public let snapshotDigest: String
 
   /// Transaction IDs behind each category's own line, for drill-down.
@@ -87,11 +90,14 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
     transactions: [LedgerTransactionSnapshot], unitCode: String, period: LedgerStatisticsPeriod
   ) throws {
     let zero = try ExactDecimal("0")
+    // Every account that counts in totals; an effect counts when it is in this currency, the
+    // same rule as the currency list, so a currency in the picker never shows empty figures.
     let counted = Dictionary(
-      accounts.filter { $0.countsInTotals && $0.currencyUnit == unitCode }.map { ($0.id, $0) },
+      accounts.filter(\.countsInTotals).map { ($0.id, $0) },
       uniquingKeysWith: { first, _ in first })
     let categoriesByID = Dictionary(
       categories.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let parents = Self.acyclicParents(categoriesByID)
 
     var income = zero
     var expense = zero
@@ -140,7 +146,7 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
 
     var children: [String: [String]] = [:]
     for category in categories {
-      if let parentID = category.parentID, categoriesByID[parentID] != nil {
+      if let parentID = parents[category.id] {
         children[parentID, default: []].append(category.id)
       }
     }
@@ -159,9 +165,11 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
     self.adjustmentCount = counts[.adjustment] ?? 0
     self.childrenByID = children
     self.expenseCategories = try Self.tree(
-      own[.expense] ?? [:], categories: categoriesByID, children: children, zero: zero)
+      own[.expense] ?? [:], categories: categoriesByID, parents: parents, children: children,
+      zero: zero, total: expense)
     self.incomeCategories = try Self.tree(
-      own[.income] ?? [:], categories: categoriesByID, children: children, zero: zero)
+      own[.income] ?? [:], categories: categoriesByID, parents: parents, children: children,
+      zero: zero, total: income)
     var ids: [String: [String]] = [:]
     for (_, byCategory) in own {
       for (key, entry) in byCategory { ids[key, default: []] += entry.ids }
@@ -176,8 +184,14 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
       accounts: Array(counted.values), transactions: balanceTransactions)
     self.closingBalance = sheet.summaries.first { $0.unitCode == unitCode }
 
-    let header = "ledger-atlas.statistics.v1\n\(unitCode)\n\(Self.text(period.start))\n\(Self.text(period.end))\n"
-    let body = digestLines.sorted().joined(separator: "\n")
+    for account in counted.values {
+      digestLines.append("account \(account.id) \(account.currencyUnit) \(account.variant.rawValue)")
+    }
+    for row in expenseCategories + incomeCategories where row.id != Self.uncategorizedID {
+      digestLines.append("category \(row.id) \(parents[row.id] ?? "-") \(row.name)")
+    }
+    let header = "ledger-atlas.statistics.v2\n\(unitCode)\n\(Self.text(period.start))\n\(Self.text(period.end))\n"
+    let body = Set(digestLines).sorted().joined(separator: "\n")
     self.snapshotDigest = SHA256.hash(data: Data((header + body).utf8))
       .map { String(format: "%02x", $0) }.joined()
   }
@@ -197,19 +211,48 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
     return result.sorted()
   }
 
-  /// Income and expense for each period, from the same rules as a single period.
+  /// Income and expense for each period, by the same rules as a single period, in one pass
+  /// over the transactions. Periods must be in order and must not overlap.
   public static func trend(
     accounts: [LedgerAccount], categories: [LedgerCategory],
     transactions: [LedgerTransactionSnapshot], unitCode: String,
     periods: [LedgerStatisticsPeriod]
   ) throws -> [LedgerTrendPoint] {
-    try periods.map { period in
-      let statistics = try LedgerPeriodStatistics(
-        accounts: accounts, categories: [], transactions: transactions, unitCode: unitCode,
-        period: period)
-      return LedgerTrendPoint(
-        period: period, income: statistics.income, expense: statistics.expense,
-        net: statistics.net)
+    let zero = try ExactDecimal("0")
+    let counted = Set(accounts.filter(\.countsInTotals).map(\.id))
+    var income = Array(repeating: zero, count: periods.count)
+    var expense = Array(repeating: zero, count: periods.count)
+    for transaction in transactions where transaction.currentRevision.lifecycle == .active {
+      let draft = transaction.currentRevision.draft
+      guard draft.kind == .income || draft.kind == .expense else { continue }
+      let date = draft.occurredAt.localDateTime.date
+      // Binary search for the period that contains `date`.
+      var low = 0
+      var high = periods.count
+      while low < high {
+        let middle = (low + high) / 2
+        if periods[middle].end <= date { low = middle + 1 } else { high = middle }
+      }
+      guard low < periods.count, periods[low].contains(date) else { continue }
+      var signed = zero
+      for effect in draft.effects
+      where counted.contains(effect.accountID) && effect.amount.unitCode == unitCode {
+        signed =
+          switch effect.direction {
+          case .increase: try signed.adding(effect.amount.amount)
+          case .decrease: try signed.subtracting(effect.amount.amount)
+          }
+      }
+      if draft.kind == .income {
+        income[low] = try income[low].adding(signed)
+      } else {
+        expense[low] = try expense[low].subtracting(signed)
+      }
+    }
+    return try periods.indices.map { index in
+      LedgerTrendPoint(
+        period: periods[index], income: income[index], expense: expense[index],
+        net: try income[index].subtracting(expense[index]))
     }
   }
 
@@ -251,27 +294,57 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
     return (lhs.displayOrder, lhs.name, lhs.id) < (rhs.displayOrder, rhs.name, rhs.id)
   }
 
+  /// Each category's parent, or nil for a top-level one. A parent that doesn't exist makes a
+  /// category top-level, and so does being part of a parent cycle in damaged data, so every
+  /// category reaches exactly one top-level line and the roll-up still adds up.
+  static func acyclicParents(_ categories: [String: LedgerCategory]) -> [String: String] {
+    var inCycle: Set<String> = []
+    var settled: Set<String> = []
+    for start in categories.keys.sorted() where !settled.contains(start) {
+      var path: [String] = []
+      var position: [String: Int] = [:]
+      var cursor: String? = start
+      while let current = cursor, categories[current] != nil, !settled.contains(current) {
+        if let index = position[current] {
+          inCycle.formUnion(path[index...])
+          break
+        }
+        position[current] = path.count
+        path.append(current)
+        cursor = categories[current]?.parentID
+      }
+      settled.formUnion(path)
+    }
+    var parents: [String: String] = [:]
+    for (id, category) in categories where !inCycle.contains(id) {
+      if let parentID = category.parentID, categories[parentID] != nil {
+        parents[id] = parentID
+      }
+    }
+    return parents
+  }
+
   /// Rolls each category's own amount into itself and every ancestor once, then lists the
-  /// categories with activity depth-first. "Uncategorized" comes last.
+  /// categories with activity depth-first. "Uncategorized" comes last. Throws when the
+  /// top-level lines don't add up to `total`.
   private static func tree(
     _ own: [String: (amount: ExactDecimal, ids: [String])],
-    categories: [String: LedgerCategory], children: [String: [String]], zero: ExactDecimal
+    categories: [String: LedgerCategory], parents: [String: String],
+    children: [String: [String]], zero: ExactDecimal, total expected: ExactDecimal
   ) throws -> [LedgerCategoryStatistic] {
     var totals: [String: (amount: ExactDecimal, count: Int)] = [:]
     for (id, entry) in own where id != uncategorizedID {
       var cursor: String? = id
-      var visited: Set<String> = []
-      // `visited` stops a parent cycle in damaged data from looping forever.
-      while let current = cursor, categories[current] != nil, visited.insert(current).inserted {
+      while let current = cursor {
         var total = totals[current] ?? (zero, 0)
         total.amount = try total.amount.adding(entry.amount)
         total.count += entry.ids.count
         totals[current] = total
-        cursor = categories[current]?.parentID
+        cursor = parents[current]
       }
     }
     let roots = categories.values.filter {
-      $0.parentID.flatMap { categories[$0] } == nil && totals[$0.id] != nil
+      parents[$0.id] == nil && totals[$0.id] != nil
     }.sorted { order($0, $1) }.map(\.id)
     var rows: [LedgerCategoryStatistic] = []
     var pending = roots.reversed().map { ($0, 0) }
@@ -281,7 +354,7 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
       else { continue }
       rows.append(
         LedgerCategoryStatistic(
-          id: id, name: category.name, parentID: category.parentID, depth: depth,
+          id: id, name: category.name, parentID: parents[id], depth: depth,
           ownAmount: own[id]?.amount ?? zero, totalAmount: total.amount,
           ownCount: own[id]?.ids.count ?? 0, totalCount: total.count))
       for child in (children[id] ?? []).reversed() where totals[child] != nil {
@@ -295,6 +368,9 @@ public struct LedgerPeriodStatistics: Equatable, Sendable {
           ownAmount: uncategorized.amount, totalAmount: uncategorized.amount,
           ownCount: uncategorized.ids.count, totalCount: uncategorized.ids.count))
     }
+    var sum = zero
+    for row in rows where row.depth == 0 { sum = try sum.adding(row.totalAmount) }
+    guard sum == expected else { throw LedgerStatisticsError.doesNotReconcile }
     return rows
   }
 }

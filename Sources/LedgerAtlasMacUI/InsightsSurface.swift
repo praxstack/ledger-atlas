@@ -22,23 +22,45 @@ struct InsightsSurface: View {
   @State private var unitCode: String?
   @State private var drillDown: LedgerCategoryStatistic?
   @State private var hideNamesInPDF = false
+  /// Built off the main thread whenever the period, currency or ledger changes; the
+  /// sections, the drill-down and the PDF all read this one value.
+  @State private var report: InsightsReport?
 
   private var formatter: LedgerDisplayFormatter { LedgerDisplayFormatter(settings: settings) }
 
   private var day: SourceLocalDate {
-    anchor ?? LedgerPeriodRule.today(in: settings.timeZone)
+    if let anchor { return anchor }
+    let today = LedgerPeriodRule.today(in: settings.timeZone)
+    guard let snapshot else { return today }
+    return InsightsReport.openingDay(in: snapshot, today: today, kind, rule: settings.periodRule)
   }
 
-  private var report: InsightsReport? {
-    guard let snapshot else { return nil }
-    return try? InsightsReport(
-      snapshot: snapshot, kind: kind, containing: day, unitCode: unitCode,
-      rule: settings.periodRule)
+  /// What the report depends on. The ledger part is cheap: an edit or deletion adds a
+  /// revision, and account and category changes are hashed field by field.
+  private var reportKey: InsightsReportKey {
+    var ledger = Hasher()
+    if let snapshot {
+      ledger.combine(snapshot.transactions.count)
+      ledger.combine(snapshot.revisionHistory.count)
+      for account in snapshot.accounts {
+        ledger.combine(account.id)
+        ledger.combine(account.currencyUnit)
+        ledger.combine(account.countsInTotals)
+        ledger.combine(account.variant.rawValue)
+      }
+      for category in snapshot.categories {
+        ledger.combine(category.id)
+        ledger.combine(category.name)
+        ledger.combine(category.parentID)
+        ledger.combine(category.displayOrder)
+      }
+    }
+    return InsightsReportKey(
+      kind: kind, day: day, unitCode: unitCode, rule: settings.periodRule,
+      hasLedger: snapshot != nil, ledger: ledger.finalize())
   }
 
   var body: some View {
-    // Computed once per render; the sections, the drill-down and the PDF all use this value.
-    let report = self.report
     if rows.isEmpty {
       VStack(alignment: .leading, spacing: 12) {
         Text("Insights").font(.largeTitle.bold())
@@ -78,6 +100,21 @@ struct InsightsSurface: View {
         }
       }
       .navigationTitle("Insights")
+      .task(id: reportKey) {
+        guard let snapshot else {
+          report = nil
+          return
+        }
+        let key = reportKey
+        let built = await Task.detached(priority: .userInitiated) {
+          try? InsightsReport(
+            snapshot: snapshot, kind: key.kind, containing: key.day, unitCode: key.unitCode,
+            rule: key.rule)
+        }.value
+        // A newer key started its own task; this result is for an older one.
+        guard !Task.isCancelled else { return }
+        report = built
+      }
       .sheet(item: $drillDown) { category in
         if let report, let snapshot {
           InsightsDrillDown(
@@ -201,7 +238,8 @@ struct InsightsSurface: View {
   ) -> some View {
     if !rows.isEmpty {
       Section(title) {
-        let top = rows.filter { $0.depth == 0 }
+        // The eight largest top-level lines; every line is listed in the rows below.
+        let top = rows.filter { $0.depth == 0 }.sorted { $0.totalAmount > $1.totalAmount }
         Chart(top.prefix(8)) { row in
           BarMark(
             x: .value("Amount", Self.double(row.totalAmount)),
@@ -306,4 +344,13 @@ struct InsightsDrillDown: View {
     }
     .padding(20)
   }
+}
+
+struct InsightsReportKey: Hashable, Sendable {
+  let kind: InsightsPeriodKind
+  let day: SourceLocalDate
+  let unitCode: String?
+  let rule: LedgerPeriodRule
+  let hasLedger: Bool
+  let ledger: Int
 }
