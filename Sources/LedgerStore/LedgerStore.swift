@@ -2664,7 +2664,11 @@ public final class LedgerStore {
 
   private static func execute(_ sql: String, on database: OpaquePointer) throws {
     let result = sqlite3_exec(database, sql, nil, nil, nil)
-    guard result == SQLITE_OK else { throw Error.sqliteFailure(code: result) }
+    // The extended code names the failure (for example which I/O step), where the primary code
+    // alone says only "I/O error".
+    guard result == SQLITE_OK else {
+      throw Error.sqliteFailure(code: sqlite3_extended_errcode(database))
+    }
   }
 
   private enum SQLValue {

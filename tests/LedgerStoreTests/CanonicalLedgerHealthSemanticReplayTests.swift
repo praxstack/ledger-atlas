@@ -196,7 +196,14 @@ func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {
 @Test("a store reuses its checked snapshot only while nothing could have changed it")
 func storeReloadsCoreSnapshotAfterAnyWrite() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
-    let store = try LedgerStoreLifecycle.open(at: url).store
+    var refuseNextSave = false
+    let store = try LedgerStore.openForMutation(
+      at: url,
+      testing: { phase in
+        guard phase == .afterMutationWrite, refuseNextSave else { return }
+        refuseNextSave = false
+        throw LedgerStore.Error.incompatibleCanonicalStore
+      })
     let account = try #require(try store.readSnapshot().accounts.first)
     func renamed(_ name: String) throws -> LedgerAccount {
       try LedgerAccount(
@@ -233,6 +240,12 @@ func storeReloadsCoreSnapshotAfterAnyWrite() throws {
     try store.createAccount(try renamed("Saved here"))
     #expect(throws: (any Error).self) { try store.createAccount(try renamed("Renamed again")) }
     #expect(try currentName() == "Saved here")
+
+    // A save that writes and is then refused leaves nothing behind for the next refresh or save.
+    refuseNextSave = true
+    #expect(throws: (any Error).self) { try store.updateAccount(try renamed("Rolled back")) }
+    #expect(try currentName() == "Saved here")
+    try store.createAccount(try renamed("Saved here"))
   }
 }
 
