@@ -217,6 +217,23 @@ public final class LedgerStore {
   /// Reading it again is most of a save's time on a large ledger, and an unchanged file gives
   /// the same snapshot.
   private var coreSnapshotCache: CoreSnapshotCache?
+  /// The file as fully checked at open, or as the last checked save on top of it left it. Nil
+  /// once anything else may have written it.
+  private var trustedFile: TrustedFile?
+
+  private struct TrustedFile {
+    var identity: stat
+    /// Whether the volume keeps nanosecond change times, so that any write moves them.
+    let fineTimestamps: Bool
+    let stamper: LedgerFileStamper
+
+    /// Whether the file still has `identity`, so nothing has written it since.
+    func isIntact(at url: URL) -> Bool {
+      var current = stat()
+      return lstat(url.path, &current) == 0 && LedgerStore.sameFile(identity, current)
+        && (fineTimestamps || identity.st_ctimespec.tv_sec + 2 < time(nil))
+    }
+  }
 
   private struct CoreSnapshotCache {
     let state: FileState
@@ -445,6 +462,7 @@ public final class LedgerStore {
           &registration)
       }
     }
+    let fineTimestamps = csqlite_has_fine_timestamps(descriptor) == 1
     Darwin.close(descriptor)
     guard
       openResult == SQLITE_OK, let database, let registration
@@ -510,11 +528,20 @@ public final class LedgerStore {
       try validateNoSQLiteCompanions(at: url)
       // Remember the bytes only if nothing wrote the file from its digest to the end of the
       // check, so the bytes checked are the bytes digested.
-      if verified == nil, let fileStamp, stillDigested() { verifiedFiles.insert(fileStamp) }
+      // The file is trusted from here on only if the bytes checked (or remembered) are the
+      // digested ones; saves then keep it trusted and remember each result (`LedgerFileStamper`).
+      let trusted = fileStamp != nil && (verified != nil || stillDigested())
+      if verified == nil, trusted, let fileStamp { verifiedFiles.insert(fileStamp) }
       let store = LedgerStore(
         mutableDatabase: database, identity: identity, url: url,
         registration: registration, mutationTestHook: mutationTestHook,
-        importGraphVerifiedAt: checked.mark)
+        importGraphVerifiedAt: checked.mark,
+        trustedFile: trusted
+          ? expectedIdentity.map {
+            TrustedFile(
+              identity: $0, fineTimestamps: fineTimestamps,
+              stamper: LedgerFileStamper(url: url, verifiedFiles: verifiedFiles))
+          } : nil)
       store.rememberCoreSnapshot(checked.snapshot, readFrom: stateBeforeCheck)
       return store
     } catch {
@@ -2439,8 +2466,9 @@ public final class LedgerStore {
   private init(
     mutableDatabase database: OpaquePointer, identity: stat, url: URL,
     registration: UnsafeMutableRawPointer, mutationTestHook: MutationTestHook?,
-    importGraphVerifiedAt: CanonicalLedgerHealth.ImportGraphMark
+    importGraphVerifiedAt: CanonicalLedgerHealth.ImportGraphMark, trustedFile: TrustedFile?
   ) {
+    self.trustedFile = trustedFile
     self.database = database
     pinnedIdentity = identity
     self.url = url
@@ -2467,6 +2495,8 @@ public final class LedgerStore {
       let fileUnchanged =
         writeWatch?.writtenTables.isEmpty == true
         && importGraphVerifiedAt.map { $0.dataVersion == Self.dataVersion(of: database) } == true
+      // The write lock taken above keeps other SQLite connections out until this commits.
+      let stillTrusted = fileUnchanged && url.map { trustedFile?.isIntact(at: $0) == true } == true
       // The same goes for SQLite's own structure check: the file was checked when it was
       // opened, and every page since then was written by this connection's checked saves.
       try Self.validateCanonicalSchema(
@@ -2498,6 +2528,13 @@ public final class LedgerStore {
       try Self.execute("COMMIT", on: database)
       importGraphVerifiedAt = mark
       writeWatch?.reset()
+      var afterCommit = stat()
+      if stillTrusted, let url, lstat(url.path, &afterCommit) == 0 {
+        trustedFile?.identity = afterCommit
+        trustedFile?.stamper.schedule(afterCommit)
+      } else {
+        trustedFile = nil
+      }
       rememberCoreSnapshot(checked.snapshot, readFrom: stateAfterWrite)
       return result
     } catch {
@@ -2509,6 +2546,12 @@ public final class LedgerStore {
       if let error = error as? Error, error.preservesMutationError { throw error }
       throw Error.incompatibleCanonicalStore
     }
+  }
+
+  /// Tests: remember the file as the last save left it now, instead of after the quiet delay.
+  /// False when the file isn't trusted or no longer has that identity.
+  package func rememberFileNow() -> Bool {
+    trustedFile.map { $0.stamper.stamp($0.identity) } ?? false
   }
 
   private func validateMutationIdentity(requiringNoCompanions: Bool) throws {
@@ -2976,7 +3019,7 @@ public final class LedgerStore {
     else { throw Error.incompatibleCanonicalStore }
   }
 
-  private static func sameFile(_ lhs: stat, _ rhs: stat) -> Bool {
+  static func sameFile(_ lhs: stat, _ rhs: stat) -> Bool {
     lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino && lhs.st_size == rhs.st_size
       && lhs.st_mtimespec.tv_sec == rhs.st_mtimespec.tv_sec
       && lhs.st_mtimespec.tv_nsec == rhs.st_mtimespec.tv_nsec

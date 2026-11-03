@@ -249,6 +249,106 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
   }
 }
 
+/// A write that lands after the file was digested, but before the open's check holds its read
+/// lock, must not be covered by the stamp of the digested bytes.
+@Test("a write between the digest and the check's read lock gets the full check")
+func writeAfterDigestGetsTheFullCheck() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    Thread.sleep(forTimeInterval: 3.2)  // so the file's change time is old enough to stamp
+    do { _ = try LedgerStoreLifecycle.open(at: url, testing: nil, verifiedFiles: remembered) }
+    var identity = stat()
+    #expect(lstat(url.path, &identity) == 0)
+    let digest = hexDigest(of: try Data(contentsOf: url))
+    let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    #expect(
+      remembered.contains(
+        try #require(CanonicalLedgerHealth.verifiedFileStamp(contentDigest: digest, trustKey: key)))
+    )
+
+    var wrote = false
+    #expect(throws: (any Error).self) {
+      try LedgerStore.openForMutation(
+        at: url, expectedIdentity: identity, contentDigest: digest, verifiedFiles: remembered,
+        testing: { phase in
+          guard phase == .afterPinnedOpen, !wrote else { return }
+          // A change the import replay refuses, so only a skipped check could let it open.
+          try mutateAndRehash(
+            at: url, fixture: fixture,
+            sql: """
+              DELETE FROM receipt_binding
+                WHERE idempotency_key=\(quote(fixture.receiptID))
+                  AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+              """,
+            overrides: fixture.digestOverrides())
+          wrote = true
+        })
+    }
+    #expect(wrote)
+  }
+}
+
+/// A store opened from a checked file keeps it remembered through its own checked saves, so a
+/// reopen after edits is fast too. Another connection's write ends that, as does an open that
+/// didn't check a digested file.
+@Test("checked saves keep a remembered file remembered, and nothing else does")
+func checkedSavesKeepARememberedFileRemembered() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    func isRemembered() throws -> Bool {
+      remembered.contains(
+        try #require(
+          CanonicalLedgerHealth.verifiedFileStamp(
+            contentDigest: hexDigest(of: try Data(contentsOf: url)), trustKey: key)))
+    }
+    // Change times must be more than two seconds old before they can prove anything on a
+    // volume with coarse timestamps.
+    func letChangeTimeAge() { Thread.sleep(forTimeInterval: 2.2) }
+    func rename(_ store: LedgerStore, _ name: String) throws {
+      let account = try #require(try store.readSnapshot().accounts.first)
+      try store.updateAccount(
+        try LedgerAccount(
+          id: account.id, name: name, currencyUnit: account.currencyUnit, origin: account.origin,
+          lifecycle: account.lifecycle, groupID: account.groupID,
+          displayOrder: account.displayOrder, hidden: account.hidden,
+          includeInTotals: account.includeInTotals, variant: account.variant))
+    }
+
+    Thread.sleep(forTimeInterval: 3.2)
+    do {
+      let store = try LedgerStoreLifecycle.open(at: url, testing: nil, verifiedFiles: remembered)
+        .store
+      #expect(try isRemembered())
+      try rename(store, "Saved once")
+      letChangeTimeAge()
+      try rename(store, "Saved twice")
+      #expect(try !isRemembered())
+      letChangeTimeAge()
+      #expect(store.rememberFileNow())
+      #expect(try isRemembered())
+
+      // Another connection's commit: the store no longer vouches for the file.
+      try withSQLite(url) { database in
+        try execute(database, "UPDATE ledger_account SET name='Renamed elsewhere';")
+      }
+      letChangeTimeAge()
+      try rename(store, "Saved after")
+      letChangeTimeAge()
+      #expect(!store.rememberFileNow())
+      #expect(try !isRemembered())
+    }
+
+    // An open that didn't check a digested file never remembers its saves.
+    let unchecked = try LedgerStore.openForMutation(
+      at: url, verifiedFiles: remembered, testing: nil)
+    try rename(unchecked, "Saved unchecked")
+    letChangeTimeAge()
+    #expect(!unchecked.rememberFileNow())
+    #expect(try !isRemembered())
+  }
+}
+
 /// A screen refresh reuses the preserved source rows, but never past a change to them.
 @Test("a snapshot reuses preserved source rows only while nothing could have changed them")
 func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {
@@ -1567,6 +1667,10 @@ private func execute(_ database: OpaquePointer, _ sql: String) throws {
 
 private func quote(_ value: String) -> String {
   "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+}
+
+private func hexDigest(of data: Data) -> String {
+  SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
 private func hex(_ data: Data) -> String {

@@ -839,3 +839,23 @@ void csqlite_debug_describe_main_descriptor(sqlite3 *database, char *output, siz
             fcntl(other, F_GETFL));
     }
 }
+
+#if defined(__APPLE__)
+#include <sys/mount.h>
+#else
+#include <sys/vfs.h>
+#endif
+
+int csqlite_has_fine_timestamps(int descriptor) {
+  struct statfs value;
+  if (fstatfs(descriptor, &value) != 0) return 0;
+#if defined(__APPLE__)
+  return strcmp(value.f_fstypename, "apfs") == 0;
+#else
+  // ext4 (also ext2/3), tmpfs, btrfs and xfs keep nanosecond timestamps.
+  switch ((unsigned long)value.f_type) {
+  case 0xEF53UL: case 0x01021994UL: case 0x9123683EUL: case 0x58465342UL: return 1;
+  default: return 0;
+  }
+#endif
+}

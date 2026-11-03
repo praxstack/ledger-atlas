@@ -13,6 +13,10 @@ int csqlite_inflate_raw(
 );
 uint32_t csqlite_crc32(const uint8_t *source, size_t source_length);
 
+/// 1 when the volume holding `descriptor` keeps change times to the nanosecond (APFS on macOS),
+/// so that any write to a file moves its change time. 0 when it doesn't or can't be told.
+int csqlite_has_fine_timestamps(int descriptor);
+
 int csqlite_open_pinned_rw(
     const char *canonical_path,
     int authenticated_fd,
