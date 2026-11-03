@@ -21,7 +21,7 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   expectEveryControlIsNamed(mounted.accessibilityElements(), on: "\(destination.rawValue)")
 }
 
-/// Increase Contrast: macOS raises contrast for system colours by itself, so the app may only
+/// Guard for Increase Contrast: macOS raises contrast for system colours by itself, so the app may only
 /// use system colours. A hand-mixed colour or a faded one (`opacity`) wouldn't follow the
 /// setting and fails here.
 @Test func everyColourFollowsIncreaseContrast() throws {
@@ -90,7 +90,7 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   #expect(after != before, "Down arrow left the sidebar on row \(before)")
 }
 
-/// Larger text: macOS has no Dynamic Type, so the app must not pin text sizes. Every font
+/// Guard for larger text: macOS has no Dynamic Type, so the app must not pin text sizes. Every font
 /// is a system text style (`.body`, `.caption`, ...), which follows the macOS text size and
 /// display zoom settings; a fixed point size or custom font fails here.
 @Test func everyFontIsASystemTextStyle() throws {
@@ -104,7 +104,7 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   #expect(offenders.isEmpty, "\(offenders)")
 }
 
-/// Not color alone: every coloured foreground in the app sits on text, so the meaning is in
+/// Guard for not using colour alone: every coloured foreground in the app sits on text, so the meaning is in
 /// words too (errors are red text, never a red mark on its own).
 @Test func colourIsNeverTheOnlySignal() throws {
   let colours = [".red", ".green", ".orange", ".yellow", ".blue", ".pink", ".purple"]
@@ -139,8 +139,22 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   print("A11Y ROWS \(rows.count) ledger rows")
   #expect(rows.count > 3)
   let kinds = ["Income", "Expense", "Transfer", "Adjustment"]
-  let missing = rows.filter { row in !kinds.contains { row.contains($0) } }
+  // The kind is its own field in the row: "<title>, <Kind> · …" or the title itself.
+  let missing = rows.filter { row in
+    let fields = row.split(whereSeparator: { ",·".contains($0) })
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+    return !fields.contains(where: kinds.contains)
+  }
   #expect(missing.isEmpty, "\(missing.count) rows don't say their kind")
+}
+
+/// A source line without a trailing `//` comment, or empty for a comment-only line.
+private func codePart(of line: String) -> String {
+  let trimmed = line.trimmingCharacters(in: .whitespaces)
+  if trimmed.hasPrefix("//") { return "" }
+  // A " //" outside a string ends the code; good enough for this codebase's style.
+  guard let range = line.range(of: " // ") else { return line }
+  return String(line[..<range.lowerBound])
 }
 
 private func appSources() throws -> [(String, [String])] {
@@ -381,7 +395,7 @@ private final class FullSizeTestWindow: NSWindow {
     }
     let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
     for (index, line) in lines.enumerated()
-    where animationAPIs.contains(where: line.contains) && !line.contains("//") {
+    where animationAPIs.contains(where: codePart(of: line).contains) {
       checked += 1
       // The animation value must come from MotionPolicy on the same or the next two lines.
       let window = lines[index..<min(index + 3, lines.count)].joined(separator: " ")
