@@ -11,9 +11,10 @@ import Testing
 /// operation, ceiling and result, and is written to `LEDGER_ATLAS_TEST_ARTIFACTS` when set (CI
 /// uploads that folder).
 ///
-/// Ceilings are for a debug build on a shared CI runner. Open, read, search, report and save sit
-/// at about twice their time on main's macOS run after #139, so a 2x slowdown fails; the rest
-/// stay loose and catch a path that stops being paged or turns quadratic.
+/// Ceilings are for a debug build on a shared CI runner, set from main's macOS run after #139.
+/// Open, report and save sit at about twice their time there. Read (a cache hit after open) and
+/// search take well under a second, so their ceiling is 1 s. The rest stay loose and catch a
+/// path that stops being paged or turns quadratic.
 ///
 /// It takes a few minutes, so it runs only when `LEDGER_ATLAS_PERFORMANCE_RECEIPT` is set. CI
 /// sets it in its own step on pushes to main and manual runs.
