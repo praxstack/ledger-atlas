@@ -286,7 +286,9 @@ public enum LedgerStoreLifecycle {
       at: url, allowingUpgradeTransitionCompanions: allowsUpgradeTransitionCompanions)
     defer { Darwin.close(source.descriptor) }
     let trustKey = try LedgerReceiptTrust.key(for: url, create: false)
-    switch try inspect(source, trustKey: trustKey) {
+    // A current-schema file is fully checked once, by `openPublished` on the pinned connection
+    // the store keeps. Checking it here as well doubled the time to open a large ledger.
+    switch try inspect(source, trustKey: trustKey, checkingCurrent: false) {
     case .current:
       let recovered = try reconcilePublishedUpgrade(source, at: url, lease: lease, hook: hook)
       try lease.requireBound(destination)
@@ -1545,7 +1547,11 @@ public enum LedgerStoreLifecycle {
     return false
   }
 
-  private static func inspect(_ source: PinnedFile, trustKey: Data? = nil) throws -> Inspection {
+  /// `checkingCurrent: false` only classifies a current-schema file; the caller must then run
+  /// the full check itself before trusting it.
+  private static func inspect(
+    _ source: PinnedFile, trustKey: Data? = nil, checkingCurrent: Bool = true
+  ) throws -> Inspection {
     let database = try openReadOnlyDatabase(source.descriptor)
     defer { sqlite3_close(database) }
     let version = scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_version'")
@@ -1554,7 +1560,11 @@ public enum LedgerStoreLifecycle {
     if version == String(CanonicalLedgerSchema.version),
       fingerprint == CanonicalLedgerSchema.fingerprint
     {
-      try validateDatabase(database, as: .current, trustKey: trustKey)
+      if checkingCurrent {
+        try validateDatabase(database, as: .current, trustKey: trustKey)
+      } else {
+        try validateHeader(database, as: CanonicalLedgerSchema.currentRelease)
+      }
       return .current
     }
     if let version, let fingerprint, let versionNumber = Int(version),
@@ -1619,6 +1629,18 @@ public enum LedgerStoreLifecycle {
     _ database: OpaquePointer, as release: CanonicalLedgerSchema.SchemaRelease,
     trustKey: Data? = nil
   ) throws {
+    try validateHeader(database, as: release)
+    guard
+      scalarText(database, "PRAGMA quick_check") == "ok",
+      hasNoRows(database, "PRAGMA foreign_key_check"),
+      CanonicalLedgerHealth.isHealthy(database, trustKey: trustKey)
+    else { throw Error.invalidStore }
+  }
+
+  /// The metadata and schema checks: cheap, and independent of the file's size.
+  private static func validateHeader(
+    _ database: OpaquePointer, as release: CanonicalLedgerSchema.SchemaRelease
+  ) throws {
     guard
       scalarInt(database, "PRAGMA application_id") == Int(CanonicalLedgerSchema.applicationID),
       scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_version'")
@@ -1628,10 +1650,7 @@ public enum LedgerStoreLifecycle {
       scalarText(database, "SELECT value FROM ledger_meta WHERE key='schema_fingerprint'")
         == release.fingerprint,
       scalarInt(database, "SELECT count(*) FROM ledger_meta") == 3,
-      schemaObjects(database) == release.objects,
-      scalarText(database, "PRAGMA quick_check") == "ok",
-      hasNoRows(database, "PRAGMA foreign_key_check"),
-      CanonicalLedgerHealth.isHealthy(database, trustKey: trustKey)
+      schemaObjects(database) == release.objects
     else { throw Error.invalidStore }
   }
 

@@ -119,6 +119,78 @@ func currentV11RejectsMissingExternalTrustKey() throws {
   }
 }
 
+/// A remembered stamp lets the check skip the replay, but only for the same import rows under
+/// the same trust key. Any change to the import graph, or another key, gets the full replay.
+@Test("a remembered import graph skips the replay only for the same rows and key")
+func rememberedImportGraphSkipsReplayOnlyWhenUnchanged() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let key = try #require(
+      try LedgerReceiptTrust.key(for: url, create: false, stableIdentity: fixture.receiptID))
+    let otherKey = Data(repeating: 7, count: 32)
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    let healthyStamp = try withSQLite(url) { database in
+      try CanonicalLedgerHealth.validate(database, trustKey: key, remembering: remembered)
+      let stamp = try CanonicalLedgerHealth.importGraphStamp(database, trustKey: key)
+      #expect(remembered.contains(stamp))
+      #expect(try CanonicalLedgerHealth.importGraphStamp(database, trustKey: otherKey) != stamp)
+      return stamp
+    }
+
+    // An import-graph change the replay refuses: the remembered stamp no longer matches.
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_binding
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+        """,
+      overrides: fixture.digestOverrides())
+    try withSQLite(url) { database in
+      let changedStamp = try CanonicalLedgerHealth.importGraphStamp(database, trustKey: key)
+      #expect(changedStamp != healthyStamp)
+      #expect(throws: (any Error).self) {
+        try CanonicalLedgerHealth.validate(database, trustKey: key, remembering: remembered)
+      }
+      #expect(!remembered.contains(changedStamp))
+
+      // Only a stamp for these exact rows skips the replay; the check then passes. The same
+      // stamp is never accepted under another key, or when nothing is remembered.
+      remembered.insert(changedStamp)
+      #expect(throws: Never.self) {
+        try CanonicalLedgerHealth.validate(database, trustKey: key, remembering: remembered)
+      }
+      #expect(throws: (any Error).self) {
+        try CanonicalLedgerHealth.validate(database, trustKey: otherKey, remembering: remembered)
+      }
+      #expect(throws: (any Error).self) {
+        try CanonicalLedgerHealth.validate(database, trustKey: key)
+      }
+    }
+  }
+}
+
+/// A screen refresh reuses the preserved source rows, but never past a change to them.
+@Test("a snapshot reuses preserved source rows only while nothing could have changed them")
+func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStoreLifecycle.open(at: url).store
+    let first = try store.readSnapshot().preservedSource
+    #expect(!first.isEmpty)
+    #expect(try store.readSnapshot().preservedSource == first)
+
+    // Another connection rewrites one preserved payload; no row count changes.
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        "UPDATE sidecar_reference SET payload=X'2A2A' WHERE rowid=(SELECT min(rowid) FROM sidecar_reference);"
+      )
+    }
+    let after = try store.readSnapshot().preservedSource
+    #expect(after != first)
+    #expect(after.contains { $0.payload == Data([0x2A, 0x2A]) })
+  }
+}
+
 @Test("the health check leaves the caller's connection as it found it")
 func healthCheckRestoresConnectionState() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in

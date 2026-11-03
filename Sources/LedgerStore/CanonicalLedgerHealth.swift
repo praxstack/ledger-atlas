@@ -1,4 +1,5 @@
 import CSQLite
+import CryptoKit
 import Foundation
 import LedgerAdapterSemantics
 import LedgerCore
@@ -12,6 +13,8 @@ package enum CanonicalLedgerHealth {
 
   /// Tables that only an import writes. Besides these, the import-graph replay reads only
   /// `ledger_meta` and the v19 marker literals (`import.v19*`) on transaction revisions.
+  /// `importGraphStamp` hashes exactly these inputs: a replay that reads anything more must
+  /// add it there too.
   package static let importOnlyTables = [
     "provenance_reference", "import_receipt", "economic_event", "economic_event_transfer",
     "event_source_binding", "sidecar_reference", "receipt_event", "receipt_binding",
@@ -58,6 +61,143 @@ package enum CanonicalLedgerHealth {
         database, "SELECT key || '=' || value FROM main.ledger_meta ORDER BY key", { $0.text(0) }))
   }
 
+  /// Import graphs that already passed the full replay, as keyed stamps.
+  ///
+  /// The replay of a large import is most of the time it takes to open it, and its result
+  /// depends only on the rows it reads, the receipt trust key and the code doing the check.
+  /// A stamp is an HMAC, under the ledger's Keychain trust key, of exactly those rows plus the
+  /// replay's revision, the schema and the running build. So a later open of the same import graph, with the same key
+  /// and the same app build, can skip the replay; any other change gets the full replay.
+  ///
+  /// Stamps are not secret, and they can't be forged without the trust key, which never comes
+  /// from the ledger file. The app keeps them in its defaults; losing them only costs time.
+  package final class VerifiedImportGraphs: @unchecked Sendable {
+    /// Only the app itself keeps stamps between runs. Tests and command-line tools remember them
+    /// in memory, so a replay changed during development is never skipped by an old stamp.
+    package static let shared = VerifiedImportGraphs(
+      defaults: Bundle.main.bundleIdentifier == "com.praxstack.ledgeratlas" ? .standard : nil)
+    static let defaultsKey = "LedgerAtlas.verifiedImportGraphs.v1"
+    static let limit = 16
+
+    private let lock = NSLock()
+    private let defaults: UserDefaults?
+    private var stamps: [String]
+
+    /// `defaults: nil` keeps stamps in memory only.
+    package init(defaults: UserDefaults?) {
+      self.defaults = defaults
+      stamps = defaults?.stringArray(forKey: Self.defaultsKey) ?? []
+    }
+
+    package func contains(_ stamp: String) -> Bool {
+      lock.withLock { stamps.contains(stamp) }
+    }
+
+    package func insert(_ stamp: String) {
+      lock.withLock {
+        stamps.removeAll { $0 == stamp }
+        stamps.append(stamp)
+        if stamps.count > Self.limit { stamps.removeFirst(stamps.count - Self.limit) }
+        defaults?.set(stamps, forKey: Self.defaultsKey)
+      }
+    }
+  }
+
+  /// The keyed stamp of everything the import-graph replay reads (see `importOnlyTables`):
+  /// every row of the import-only tables with its rowid, `ledger_meta`, and each v19 marker
+  /// literal with the transaction its revision belongs to. Call it inside the read transaction
+  /// the check runs in.
+  package static func importGraphStamp(_ database: OpaquePointer, trustKey: Data) throws -> String
+  {
+    guard trustKey.count == 32 else { throw HealthError.invalid }
+    var hasher = SHA256()
+    func add(_ text: String) {
+      var length = UInt64(text.utf8.count).bigEndian
+      withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
+      hasher.update(data: Data(text.utf8))
+    }
+    func addRows(_ sql: String) throws {
+      var statement: OpaquePointer?
+      guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement
+      else { throw HealthError.invalid }
+      defer { sqlite3_finalize(statement) }
+      let columns = sqlite3_column_count(statement)
+      add(sql)
+      var step = sqlite3_step(statement)
+      while step == SQLITE_ROW {
+        for column in 0..<columns {
+          var type = UInt8(sqlite3_column_type(statement, column))
+          withUnsafeBytes(of: &type) { hasher.update(bufferPointer: $0) }
+          switch Int32(type) {
+          case SQLITE_NULL: break
+          case SQLITE_INTEGER:
+            var value = sqlite3_column_int64(statement, column).bigEndian
+            withUnsafeBytes(of: &value) { hasher.update(bufferPointer: $0) }
+          case SQLITE_FLOAT:
+            var value = sqlite3_column_double(statement, column).bitPattern.bigEndian
+            withUnsafeBytes(of: &value) { hasher.update(bufferPointer: $0) }
+          default:
+            // Text and blobs: read as bytes, so nothing is re-encoded on the way.
+            let pointer = sqlite3_column_blob(statement, column)
+            let count = Int(sqlite3_column_bytes(statement, column))
+            var length = UInt64(count).bigEndian
+            withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
+            if count > 0, let pointer {
+              hasher.update(bufferPointer: UnsafeRawBufferPointer(start: pointer, count: count))
+            }
+          }
+        }
+        step = sqlite3_step(statement)
+      }
+      guard step == SQLITE_DONE else { throw HealthError.invalid }
+    }
+    let present = Set(
+      try rows(database, "SELECT name FROM main.sqlite_schema WHERE type='table'", { $0.text(0) }))
+    for table in importOnlyTables {
+      add(table)
+      if present.contains(table) {
+        try addRows("SELECT rowid, * FROM main.\(table) ORDER BY rowid")
+      }
+    }
+    try addRows("SELECT key, value FROM main.ledger_meta ORDER BY key")
+    try addRows(
+      "SELECT v.transaction_id, l.revision_id, l.ordinal, l.field, l.literal FROM main.ledger_transaction_source_literal l JOIN main.ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE l.field GLOB 'import.v19*' ORDER BY l.revision_id, l.ordinal"
+    )
+    let digest = Data(hasher.finalize())
+    let message =
+      Data(
+        [
+          "ledger-atlas/import-graph-verified/v1", "replay-revision=\(replayRevision)",
+          CanonicalLedgerSchema.fingerprint, buildIdentity, "",
+        ]
+          .joined(separator: "\n").utf8) + digest
+    let code = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: trustKey))
+    return Data(code).map { String(format: "%02x", $0) }.joined()
+  }
+
+  /// Bump this whenever `validateImportGraph`, or anything it calls, changes what it accepts.
+  /// Stamps made under another revision no longer match, so every import is replayed once.
+  static let replayRevision = 1
+
+  /// Which build of the checking code made a stamp: the bundle version plus the executable's
+  /// size and modification time, so a new app build also re-checks once. `replayRevision` is
+  /// the guarantee; this is a backstop.
+  static let buildIdentity: String = {
+    let info = Bundle.main.infoDictionary ?? [:]
+    var parts = [
+      info["CFBundleShortVersionString"] as? String ?? "",
+      info["CFBundleVersion"] as? String ?? "",
+    ]
+    var value = stat()
+    if let path = Bundle.main.executableURL?.path, stat(path, &value) == 0 {
+      parts.append("\(value.st_size)")
+      parts.append("\(value.st_mtimespec.tv_sec).\(value.st_mtimespec.tv_nsec)")
+    } else {
+      parts.append(UUID().uuidString)
+    }
+    return parts.joined(separator: "/")
+  }()
+
   /// `verifyingReceiptImages` re-hashes every stored receipt image. Opening, restoring and
   /// backing up do that; a write skips it, since receipt bytes can't change after insert and
   /// the store hashes them when they go in.
@@ -65,11 +205,13 @@ package enum CanonicalLedgerHealth {
   /// `importGraphVerifiedAt` is the mark from an earlier full check on this connection. When
   /// the file still has that mark, and the caller knows no import-only row was written since,
   /// the import-graph replay (most of the check's time on a large import) is not repeated.
+  /// `remembering` skips the replay for an import graph it holds a stamp for, and records one
+  /// after a replay passes. It needs a trust key; without one the replay always runs.
   /// Returns the mark the import graph was verified at.
   @discardableResult
-  static func validate(
+  package static func validate(
     _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true,
-    importGraphVerifiedAt: ImportGraphMark? = nil
+    importGraphVerifiedAt: ImportGraphMark? = nil, remembering: VerifiedImportGraphs? = nil
   ) throws -> ImportGraphMark {
     // Run the whole check in one read transaction with a larger page cache. Otherwise SQLite
     // re-takes its file lock for each of the many small queries below, and a ~900 MB imported
@@ -89,7 +231,16 @@ package enum CanonicalLedgerHealth {
     defer { if ownsTransaction { sqlite3_exec(database, "COMMIT", nil, nil, nil) } }
     let mark = try importGraphMark(database)
     if mark != importGraphVerifiedAt {
-      try validateImportGraph(database, trustKey: trustKey)
+      // A stamp that can't be computed only means the replay runs.
+      let stamp = remembering.flatMap { _ in
+        trustKey.flatMap { try? importGraphStamp(database, trustKey: $0) }
+      }
+      if let stamp, let remembering, remembering.contains(stamp) {
+        // This exact import graph passed the replay before, under this key and build.
+      } else {
+        try validateImportGraph(database, trustKey: trustKey)
+        if let stamp { remembering?.insert(stamp) }
+      }
     }
     try validateReceiptAttachments(database, verifyingImages: verifyingReceiptImages)
     _ = try readSnapshot(database)

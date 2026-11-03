@@ -2249,6 +2249,38 @@ import Testing
   }
 }
 
+/// Open checks a current ledger once, on the connection it keeps. That single check must still
+/// refuse whatever the separate read-only check used to catch.
+@Test func lifecycleOpenRefusesInvalidCurrentLedgersWithoutTouchingThem() throws {
+  let mutations = [
+    "INSERT INTO ledger_meta(key, value) VALUES('source_preservation_v1', '[]')",
+    """
+    PRAGMA foreign_keys=OFF;
+    INSERT INTO ledger_account VALUES('orphan', 'Cash', 'USD', 'missing-origin', 'active')
+    """,
+  ]
+  for mutation in mutations {
+    try withLifecycleDirectory { directory in
+      let url = directory.appendingPathComponent("ledger.sqlite")
+      _ = try LedgerStoreLifecycle.create(at: url)
+      try mutateV10ImportLedger(at: url, sql: mutation)
+      let before = try Data(contentsOf: url)
+      let entriesBefore = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+
+      #expect(throws: LedgerStoreLifecycle.Error.invalidStore) {
+        try LedgerStoreLifecycle.inspect(at: url)
+      }
+      #expect(throws: LedgerStoreLifecycle.Error.invalidStore) {
+        try LedgerStoreLifecycle.open(at: url)
+      }
+      #expect(try Data(contentsOf: url) == before)
+      #expect(
+        Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
+          == Set(entriesBefore))
+    }
+  }
+}
+
 private actor LifecycleTestGate {
   private var arrived = false
   private var waiter: CheckedContinuation<Void, Never>?
