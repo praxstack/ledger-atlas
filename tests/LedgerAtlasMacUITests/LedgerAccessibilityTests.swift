@@ -24,18 +24,111 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
 }
 
 /// Guard for Increase Contrast: macOS raises contrast for system colours by itself, so the app may only
-/// use system colours. A hand-mixed colour or a faded one (`opacity`) wouldn't follow the
-/// setting and fails here.
+/// use system colours or the theme's tokens. A hand-mixed colour or a faded one (`opacity`)
+/// wouldn't follow the setting and fails here. `LedgerTheme.swift` is the one exemption: it
+/// defines every token with its own Increase Contrast value (`themeColoursHaveIncreaseContrastValues`).
 @Test func everyColourFollowsIncreaseContrast() throws {
   let custom = ["Color(red:", "Color(white:", "Color(hue:", "NSColor(red:", "NSColor(white:",
-                "Color(\"", "Color(#", ".opacity("]
+                "NSColor(srgbRed:", "NSColor(name:", "Color(\"", "Color(#", ".opacity("]
   var offenders: [String] = []
-  for (file, lines) in try appSources() {
+  for (file, lines) in try appSources() where file != "LedgerTheme.swift" {
     for (index, line) in lines.enumerated() where custom.contains(where: line.contains) {
       offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
     }
   }
   #expect(offenders.isEmpty, "\(offenders)")
+}
+
+/// The theme's colours follow Increase Contrast: every token resolves differently under the
+/// high-contrast appearances, like the system colours do. The few that may not are listed,
+/// with the reason, in `LedgerTheme.increaseContrastExceptions`.
+@MainActor
+@Test func themeColoursHaveIncreaseContrastValues() throws {
+  for (name, color) in LedgerTheme.allTokens {
+    for (normal, high) in themeAppearancePairs {
+      let a = try resolvedThemeColor(color, normal), b = try resolvedThemeColor(color, high)
+      if a == b, let reason = LedgerTheme.increaseContrastExceptions[name] {
+        print("A11Y CONTRAST \(name) unchanged in \(high.rawValue): \(reason)")
+        continue
+      }
+      #expect(a != b, "\(name) looks the same with Increase Contrast in \(normal.rawValue)")
+    }
+  }
+}
+
+/// Text colours are readable: 4.5:1 against the canvas and cards (WCAG AA for body text), and
+/// 7:1 with Increase Contrast. Translucent tokens are measured over each background.
+@MainActor
+@Test func themeTextColoursMeetContrastMinimums() throws {
+  for (name, color) in LedgerTheme.textTokens {
+    for (normal, high) in themeAppearancePairs {
+      for (appearance, minimum) in [(normal, 4.5), (high, 7.0)] {
+        for (surfaceName, surface) in [("canvas", LedgerTheme.canvas), ("card", LedgerTheme.card)] {
+          let background = try resolvedThemeColor(surface, appearance)
+          let ratio = contrastRatio(try resolvedThemeColor(color, appearance), over: background)
+          #expect(
+            ratio >= minimum,
+            "\(name) on \(surfaceName) in \(appearance.rawValue) is \(ratio):1, needs \(minimum):1")
+        }
+      }
+    }
+  }
+}
+
+/// Each appearance picks its own look, and the test switch picks the high-contrast one.
+@MainActor
+@Test func themeVariantFollowsTheAppearance() throws {
+  let aqua = try #require(NSAppearance(named: .aqua))
+  let dark = try #require(NSAppearance(named: .darkAqua))
+  #expect(LedgerTheme.variant(of: aqua) == .aqua)
+  #expect(LedgerTheme.variant(of: dark) == .darkAqua)
+  LedgerTheme.$resolvesIncreaseContrast.withValue(true) {
+    #expect(LedgerTheme.variant(of: aqua) == .accessibilityHighContrastAqua)
+    #expect(LedgerTheme.variant(of: dark) == .accessibilityHighContrastDarkAqua)
+  }
+}
+
+/// One look of the theme: a base appearance, with or without Increase Contrast.
+private struct ThemeLook: Sendable {
+  let base: NSAppearance.Name
+  let increaseContrast: Bool
+  var rawValue: String { base.rawValue + (increaseContrast ? " + Increase Contrast" : "") }
+}
+
+private let themeAppearancePairs: [(ThemeLook, ThemeLook)] = [NSAppearance.Name.aqua, .darkAqua]
+  .map { (ThemeLook(base: $0, increaseContrast: false), ThemeLook(base: $0, increaseContrast: true)) }
+
+@MainActor
+private func resolvedThemeColor(_ color: Color, _ look: ThemeLook) throws -> NSColor {
+  let appearance = try #require(NSAppearance(named: look.base))
+  var result = NSColor.clear
+  LedgerTheme.$resolvesIncreaseContrast.withValue(look.increaseContrast) {
+    appearance.performAsCurrentDrawingAppearance {
+      result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
+    }
+  }
+  return result
+}
+
+/// WCAG 2 contrast of `foreground` composited over an opaque `background`.
+private func contrastRatio(_ foreground: NSColor, over background: NSColor) -> Double {
+  func channel(_ f: CGFloat, _ b: CGFloat) -> Double {
+    let value = Double(f * foreground.alphaComponent + b * (1 - foreground.alphaComponent))
+    return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+  }
+  func backgroundChannel(_ b: CGFloat) -> Double {
+    let value = Double(b)
+    return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+  }
+  let fg =
+    0.2126 * channel(foreground.redComponent, background.redComponent)
+    + 0.7152 * channel(foreground.greenComponent, background.greenComponent)
+    + 0.0722 * channel(foreground.blueComponent, background.blueComponent)
+  let bg =
+    0.2126 * backgroundChannel(background.redComponent)
+    + 0.7152 * backgroundChannel(background.greenComponent)
+    + 0.0722 * backgroundChannel(background.blueComponent)
+  return (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
 }
 
 @MainActor

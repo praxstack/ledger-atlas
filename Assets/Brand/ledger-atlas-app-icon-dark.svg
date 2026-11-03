@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-labelledby="lad-icon-title lad-icon-desc">
+  <title id="lad-icon-title">Ledger Atlas (dark)</title>
+  <desc id="lad-icon-desc">Ledger Atlas app icon, dark appearance. On a graphite rounded square sits a smoked glass globe. Its parallels are drawn as evenly spaced ledger rules, one meridian curves through them, and a single solid dot marks one exact coordinate: every entry has a place on the map.</desc>
+  <defs>
+    <!-- macOS icon grid: 824 x 824 continuous-corner square centred in 1024 -->
+    <path id="lad-squircle" d="M924 512 923.9 616.9 923.6 650.4 923.2 674.7 922.6 694.5 921.8 711.4 920.8 726.3 919.7 739.7 918.3 751.9 916.8 763.2 915.1 773.7 913.2 783.4 911.2 792.6 908.9 801.2 906.4 809.3 903.8 817 901 824.2 897.9 831.1 894.7 837.7 891.2 843.9 887.6 849.8 883.7 855.4 879.6 860.8 875.2 865.8 870.7 870.7 865.8 875.2 860.8 879.6 855.4 883.7 849.8 887.6 843.9 891.2 837.7 894.7 831.1 897.9 824.2 901 817 903.8 809.3 906.4 801.2 908.9 792.6 911.2 783.4 913.2 773.7 915.1 763.2 916.8 751.9 918.3 739.7 919.7 726.3 920.8 711.4 921.8 694.5 922.6 674.7 923.2 650.4 923.6 616.9 923.9 512 924 407.1 923.9 373.6 923.6 349.3 923.2 329.5 922.6 312.6 921.8 297.7 920.8 284.3 919.7 272.1 918.3 260.8 916.8 250.3 915.1 240.6 913.2 231.4 911.2 222.8 908.9 214.7 906.4 207 903.8 199.8 901 192.9 897.9 186.3 894.7 180.1 891.2 174.2 887.6 168.6 883.7 163.2 879.6 158.2 875.2 153.3 870.7 148.8 865.8 144.4 860.8 140.3 855.4 136.4 849.8 132.8 843.9 129.3 837.7 126.1 831.1 123 824.2 120.2 817 117.6 809.3 115.1 801.2 112.8 792.6 110.8 783.4 108.9 773.7 107.2 763.2 105.7 751.9 104.3 739.7 103.2 726.3 102.2 711.4 101.4 694.5 100.8 674.7 100.4 650.4 100.1 616.9 100 512 100.1 407.1 100.4 373.6 100.8 349.3 101.4 329.5 102.2 312.6 103.2 297.7 104.3 284.3 105.7 272.1 107.2 260.8 108.9 250.3 110.8 240.6 112.8 231.4 115.1 222.8 117.6 214.7 120.2 207 123 199.8 126.1 192.9 129.3 186.3 132.8 180.1 136.4 174.2 140.3 168.6 144.4 163.2 148.8 158.2 153.3 153.3 158.2 148.8 163.2 144.4 168.6 140.3 174.2 136.4 180.1 132.8 186.3 129.3 192.9 126.1 199.8 123 207 120.2 214.7 117.6 222.8 115.1 231.4 112.8 240.6 110.8 250.3 108.9 260.8 107.2 272.1 105.7 284.3 104.3 297.7 103.2 312.6 102.2 329.5 101.4 349.3 100.8 373.6 100.4 407.1 100.1 512 100 616.9 100.1 650.4 100.4 674.7 100.8 694.5 101.4 711.4 102.2 726.3 103.2 739.7 104.3 751.9 105.7 763.2 107.2 773.7 108.9 783.4 110.8 792.6 112.8 801.2 115.1 809.3 117.6 817 120.2 824.2 123 831.1 126.1 837.7 129.3 843.9 132.8 849.8 136.4 855.4 140.3 860.8 144.4 865.8 148.8 870.7 153.3 875.2 158.2 879.6 163.2 883.7 168.6 887.6 174.2 891.2 180.1 894.7 186.3 897.9 192.9 901 199.8 903.8 207 906.4 214.7 908.9 222.8 911.2 231.4 913.2 240.6 915.1 250.3 916.8 260.8 918.3 272.1 919.7 284.3 920.8 297.7 921.8 312.6 922.6 329.5 923.2 349.3 923.6 373.6 923.9 407.1Z"/>
+    <clipPath id="lad-squircle-clip"><use href="#lad-squircle"/></clipPath>
+    <clipPath id="lad-disc-clip"><circle cx="512" cy="512" r="268"/></clipPath>
+
+    <linearGradient id="lad-field" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3a3a3d"/>
+      <stop offset="0.55" stop-color="#232325"/>
+      <stop offset="1" stop-color="#151516"/>
+    </linearGradient>
+    <radialGradient id="lad-field-glow" cx="512" cy="300" r="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lad-top-sheen" x1="0" y1="100" x2="0" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lad-rim" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+
+    <linearGradient id="lad-glass" x1="0" y1="244" x2="0" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f4c51"/>
+      <stop offset="1" stop-color="#0e2c30"/>
+    </linearGradient>
+    <linearGradient id="lad-glass-rim" x1="0" y1="244" x2="0" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9fe6ec" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#9fe6ec" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="lad-glass-depth" x1="0" y1="244" x2="0" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0.45" stop-color="#0a7c86" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.3"/>
+    </linearGradient>
+    <radialGradient id="lad-glass-spec" cx="430" cy="330" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="lad-icon-shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="lad-disc-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+  </defs>
+
+  <!-- 1. icon shadow -->
+  <use href="#lad-squircle" fill="#000000" fill-opacity="0.26" transform="translate(0 12)" filter="url(#lad-icon-shadow)"/>
+
+  <!-- 2. teal field with soft depth -->
+  <g clip-path="url(#lad-squircle-clip)">
+    <rect x="100" y="100" width="824" height="824" fill="#1c1c1e"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#lad-field)"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#lad-field-glow)"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#lad-top-sheen)"/>
+
+    <!-- 3. globe shadow cast on the field -->
+    <circle cx="512" cy="540" r="262" fill="#000000" fill-opacity="0.55" filter="url(#lad-disc-shadow)"/>
+  </g>
+  <use href="#lad-squircle" fill="none" stroke="url(#lad-rim)" stroke-width="3"/>
+
+  <!-- 4. frosted glass globe -->
+  <circle cx="512" cy="512" r="268" fill="url(#lad-glass)"/>
+  <circle cx="512" cy="512" r="268" fill="url(#lad-glass-spec)"/>
+  <circle cx="512" cy="512" r="262" fill="none" stroke="url(#lad-glass-depth)" stroke-width="12"/>
+
+  <!-- 5. ledger rules = parallels, clipped to the globe -->
+  <g clip-path="url(#lad-disc-clip)" stroke="#4fc3ce" stroke-opacity="0.38" stroke-width="13" fill="none">
+    <path d="M200 320H824"/>
+    <path d="M200 416H824"/>
+    <path d="M200 512H824"/>
+    <path d="M200 608H824"/>
+    <path d="M200 704H824"/>
+  </g>
+
+  <!-- 6. one meridian: the right half of an ellipse from pole to pole -->
+  <path d="M512 244A134 268 0 0 1 512 780" clip-path="url(#lad-disc-clip)" fill="none" stroke="#4fc3ce" stroke-opacity="0.8" stroke-width="13"/>
+
+  <!-- 7. glass rim -->
+  <circle cx="512" cy="512" r="266.5" fill="none" stroke="url(#lad-glass-rim)" stroke-width="3"/>
+
+  <!-- 8. the coordinate: one exact entry, located -->
+  <circle cx="637" cy="416" r="44" fill="#16393d"/>
+  <circle cx="637" cy="416" r="31" fill="#4fc3ce"/>
+</svg>
