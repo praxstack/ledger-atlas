@@ -89,7 +89,7 @@ if [ -s "$RAW" ]; then
   if ffmpeg -y -loglevel error -i "$RAW" \
     -vf "scale=1280:-2:flags=lanczos,fps=15,format=yuv420p" -c:v libx264 -crf 26 \
     -movflags +faststart -an "$OUT/tour-recording.mp4"; then
-    seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/tour-recording.mp4" | cut -d. -f1)
+    seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/tour-recording.mp4" | cut -d. -f1 || true)
     changes=$(ffmpeg -i "$OUT/tour-recording.mp4" -vf "select='gt(scene,0.02)',showinfo" \
       -f null - 2>&1 | grep -c "pts_time" || true)
     echo "screen recording: ${seconds}s, $changes scene changes"
