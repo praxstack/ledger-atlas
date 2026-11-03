@@ -383,15 +383,11 @@ final class MountedRoot {
   func settle() async throws {
     var previous = -1
     for _ in 0..<30 {
-      if readsInProcess {
-        // Wait inside a nested run of the main run loop, not by suspending. A suspended test
-        // hands the loop back to the test runner's own run, and a stray stop of the main
-        // run loop that lands there ends the whole test process with status 0. A nested run
-        // takes the stop instead, and the test carries on.
-        Self.runMainLoop(for: 0.2)
-      } else {
-        try await Task.sleep(for: .milliseconds(200))
-      }
+      // Take any pending stop of the main run loop before suspending. Showing a window
+      // after an earlier sheet can leave one behind, and if it lands in the test runner's
+      // own run of the loop it ends the whole test process with status 0.
+      Self.takePendingStops()
+      try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
       let elements = accessibilityElements()
       if readTimedOut { break }
@@ -412,6 +408,14 @@ final class MountedRoot {
       if CFRunLoopRunInMode(.defaultMode, left, false) == .stopped {
         print("CAPTURE a stop of the main run loop was taken by a nested run")
       }
+    }
+  }
+
+  /// Clears a stop of the main run loop that is waiting for the next run, so it lands in a
+  /// short nested run here and not in the test runner's own run.
+  static func takePendingStops() {
+    for _ in 0..<5 where CFRunLoopRunInMode(.defaultMode, 0, true) == .stopped {
+      print("CAPTURE a pending stop of the main run loop was taken")
     }
   }
 
@@ -463,6 +467,7 @@ final class MountedRoot {
     // the ledger file under an open SQLite connection crashed the close (SQLite's "file
     // unlinked while open" log), so the folder is removed when the test process ends.
     Self.removeAtExit(directory)
+    Self.takePendingStops()
   }
 
   nonisolated(unsafe) private static var foldersToRemove: [String] = []
