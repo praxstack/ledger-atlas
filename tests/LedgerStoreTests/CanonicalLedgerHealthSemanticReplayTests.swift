@@ -196,7 +196,14 @@ func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {
 @Test("a store reuses its checked snapshot only while nothing could have changed it")
 func storeReloadsCoreSnapshotAfterAnyWrite() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
-    let store = try LedgerStoreLifecycle.open(at: url).store
+    var refuseNextSave = false
+    let store = try LedgerStore.openForMutation(
+      at: url,
+      testing: { phase in
+        guard phase == .afterMutationWrite, refuseNextSave else { return }
+        refuseNextSave = false
+        throw LedgerStore.Error.incompatibleCanonicalStore
+      })
     let account = try #require(try store.readSnapshot().accounts.first)
     func renamed(_ name: String) throws -> LedgerAccount {
       try LedgerAccount(
@@ -233,6 +240,12 @@ func storeReloadsCoreSnapshotAfterAnyWrite() throws {
     try store.createAccount(try renamed("Saved here"))
     #expect(throws: (any Error).self) { try store.createAccount(try renamed("Renamed again")) }
     #expect(try currentName() == "Saved here")
+
+    // A save that writes and is then refused leaves nothing behind for the next refresh or save.
+    refuseNextSave = true
+    #expect(throws: (any Error).self) { try store.updateAccount(try renamed("Rolled back")) }
+    #expect(try currentName() == "Saved here")
+    try store.createAccount(try renamed("Saved here"))
   }
 }
 
@@ -1497,4 +1510,59 @@ private func v19ChangedTemporalCommitment() -> String {
 private enum ReplayError: Error {
   case sqlite
   case statement(String)
+}
+
+@Test("saves keep working while read-only connections open and close on the same file")
+func savesSurviveConcurrentReadOnlyOpens() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStore.openForMutation(at: url)
+    let account = try #require(try store.readSnapshot().accounts.first)
+    let failures = LockedFailures()
+    let opened = LockedFlag()
+    let stop = LockedFlag()
+    let readers = DispatchGroup()
+    // The app's session loads the ledger read-only on a background thread while the editor
+    // saves through its own connection. A load may be refused while a save's journal is on
+    // disk; what must never happen is a save failing because a load was running.
+    for _ in 0..<2 {
+      DispatchQueue.global().async(group: readers) {
+        while !stop.isSet {
+          if let reader = try? LedgerStore.openReadOnly(at: url), (try? reader.readSnapshot()) != nil {
+            opened.set()
+          }
+        }
+      }
+    }
+    for index in 0..<150 {
+      let renamed = try LedgerAccount(
+        id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
+        origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+        displayOrder: account.displayOrder, hidden: account.hidden,
+        includeInTotals: account.includeInTotals, variant: account.variant)
+      do {
+        try store.updateAccount(renamed)
+      } catch {
+        failures.record("save \(index): \(error)")
+      }
+    }
+    stop.set()
+    readers.wait()
+    #expect(failures.all.isEmpty, "\(failures.all.prefix(5))")
+    #expect(opened.isSet, "no read-only load ever opened the file, so nothing overlapped")
+    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save 149")
+  }
+}
+
+private final class LockedFailures: @unchecked Sendable {
+  private let lock = NSLock()
+  private var values: [String] = []
+  func record(_ value: String) { lock.withLock { values.append(value) } }
+  var all: [String] { lock.withLock { values } }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = false
+  func set() { lock.withLock { value = true } }
+  var isSet: Bool { lock.withLock { value } }
 }
