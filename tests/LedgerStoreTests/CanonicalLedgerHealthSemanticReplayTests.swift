@@ -394,6 +394,50 @@ func backgroundStampNeverFailsASave() throws {
   }
 }
 
+/// On a large ledger the background check holds its read lock for seconds, longer than a save
+/// waits for one. A save stops the check instead of waiting it out.
+@Test("a save stops a running background check instead of waiting for it")
+func saveStopsARunningStamp() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    Thread.sleep(forTimeInterval: 3.2)
+    let store = try LedgerStoreLifecycle.open(
+      at: url, testing: nil, verifiedFiles: .init(defaults: nil)
+    ).store
+    let stamper = try #require(store.fileStamper)
+    let inCheck = DispatchSemaphore(value: 0)
+    // Hold the check's read lock until the check is cancelled, or for 20 seconds.
+    stamper.afterPageCheck = { stillCurrent in
+      inCheck.signal()
+      let deadline = Date().addingTimeInterval(20)
+      while stillCurrent() && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+    }
+    var current = stat()
+    #expect(lstat(url.path, &current) == 0)
+    let identity = current
+    let stamped = LockedFlag()
+    let finished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      if stamper.stamp(identity) { stamped.set() }
+      finished.signal()
+    }
+    #expect(inCheck.wait(timeout: .now() + 20) == .success)
+    let account = try #require(try store.readSnapshot().accounts.first)
+    let started = Date()
+    try store.updateAccount(
+      try LedgerAccount(
+        id: account.id, name: "Saved during a check", currencyUnit: account.currencyUnit,
+        origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+        displayOrder: account.displayOrder, hidden: account.hidden,
+        includeInTotals: account.includeInTotals, variant: account.variant))
+    #expect(Date().timeIntervalSince(started) < 4)
+    #expect(finished.wait(timeout: .now() + 20) == .success)
+    #expect(!stamped.isSet)
+    #expect(
+      try store.readSnapshot().accounts.first { $0.id == account.id }?.name
+        == "Saved during a check")
+  }
+}
+
 /// A screen refresh reuses the preserved source rows, but never past a change to them.
 @Test("a snapshot reuses preserved source rows only while nothing could have changed them")
 func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {

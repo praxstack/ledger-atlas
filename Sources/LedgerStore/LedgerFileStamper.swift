@@ -27,6 +27,8 @@ package final class LedgerFileStamper: @unchecked Sendable {
   private let queue = DispatchQueue(label: "LedgerAtlas.fileStamper", qos: .utility)
   private let lock = NSLock()
   private var generation = 0
+  /// The connection of the check that is running now, so `cancel()` can stop it.
+  private var running: OpaquePointer?
 
   package init(
     url: URL, verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs, fineTimestamps: Bool
@@ -44,25 +46,38 @@ package final class LedgerFileStamper: @unchecked Sendable {
       return generation
     }
     queue.asyncAfter(deadline: .now() + Self.quietDelay) { [self] in
-      guard lock.withLock({ generation == scheduled }) else { return }
-      _ = stamp(identity)
+      _ = stamp(identity, generation: scheduled)
     }
   }
 
-  /// Drop a scheduled stamp that hasn't run yet.
+  /// Drop a scheduled stamp, and stop one that is running so it lets go of the file within
+  /// moments. Every save calls this first: on a ~900 MB ledger the check holds its read lock
+  /// for several seconds, longer than a save waits for one.
   func cancel() {
-    lock.withLock { generation += 1 }
+    lock.withLock {
+      generation += 1
+      if let running { sqlite3_interrupt(running) }
+    }
   }
 
   /// Check and hash the file now and remember it, if it still has `identity`. Returns whether
   /// it did.
   @discardableResult
   package func stamp(_ identity: stat) -> Bool {
+    stamp(identity, generation: lock.withLock { generation })
+  }
+
+  /// Tests: runs inside the check's read lock, after the page check, with a test of whether
+  /// the check has been cancelled.
+  package var afterPageCheck: (@Sendable (_ stillCurrent: () -> Bool) -> Void)?
+
+  private func stamp(_ identity: stat, generation current: Int) -> Bool {
+    guard lock.withLock({ generation == current }) else { return false }
     let started = time(nil)
     // An unchanged identity before and after proves the bytes checked and hashed are the ones
     // the last save left, but only if any write in between must move the change time.
     guard fineTimestamps || identity.st_ctimespec.tv_sec + 2 < started, isUnchanged(identity),
-      let digest = Self.checkedDigest(url), isUnchanged(identity),
+      let digest = checkedDigest(whileCurrent: current), isUnchanged(identity),
       let trustKey = try? LedgerReceiptTrust.key(for: url, create: false),
       let stamp = CanonicalLedgerHealth.verifiedFileStamp(contentDigest: digest, trustKey: trustKey)
     else { return false }
@@ -83,14 +98,23 @@ package final class LedgerFileStamper: @unchecked Sendable {
   /// descriptor to the ledger would drop every POSIX lock this process holds on it, including a
   /// save's write lock (#140). The connection is opened read-write, as `openReadOnly` does,
   /// because a read-only description of the file broke the editor's write lock on macOS.
-  private static func checkedDigest(_ url: URL) -> String? {
+  ///
+  /// It gives up as soon as `cancel()` moves the generation past `current`.
+  private func checkedDigest(whileCurrent current: Int) -> String? {
     var database: OpaquePointer?
-    defer { sqlite3_close(database) }
+    defer {
+      lock.withLock { running = nil }
+      sqlite3_close(database)
+    }
     guard
       sqlite3_open_v2(
         url.path, &database,
         SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
       let database,
+      lock.withLock({
+        running = database
+        return generation == current
+      }),
       sqlite3_busy_timeout(database, LedgerStore.busyTimeoutMilliseconds) == SQLITE_OK,
       sqlite3_exec(database, "PRAGMA query_only=1", nil, nil, nil) == SQLITE_OK,
       sqlite3_exec(database, "BEGIN", nil, nil, nil) == SQLITE_OK
@@ -106,6 +130,7 @@ package final class LedgerFileStamper: @unchecked Sendable {
       && sqlite3_column_text(statement, 0).map { String(cString: $0) } == "ok"
       && sqlite3_step(statement) == SQLITE_DONE
     sqlite3_finalize(statement)
+    afterPageCheck?({ self.lock.withLock { self.generation == current } })
     var file: UnsafeMutablePointer<sqlite3_file>?
     guard checked,
       sqlite3_file_control(database, "main", SQLITE_FCNTL_FILE_POINTER, &file) == SQLITE_OK,
@@ -118,6 +143,7 @@ package final class LedgerFileStamper: @unchecked Sendable {
     var buffer = [UInt8](repeating: 0, count: 1_024 * 1_024)
     var offset: sqlite3_int64 = 0
     while offset < size {
+      guard lock.withLock({ generation == current }) else { return nil }
       let count = Int(min(sqlite3_int64(buffer.count), size - offset))
       let result = buffer.withUnsafeMutableBytes {
         read(file, $0.baseAddress, Int32(count), offset)

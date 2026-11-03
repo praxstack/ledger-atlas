@@ -2487,6 +2487,8 @@ public final class LedgerStore {
   ) throws -> MutationResult {
     try validateMutationIdentity(requiringNoCompanions: true)
     let writtenBefore = writeWatch?.writtenTables ?? []
+    // A background check of the file holds a read lock for seconds; a save always wins.
+    trustedFile?.stamper.cancel()
     try Self.execute("BEGIN IMMEDIATE", on: database)
     do {
       try mutationTestHook?(.afterBeginImmediate)
@@ -2555,6 +2557,9 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
   }
+
+  /// Tests: the background check that remembers this store's file, if the store trusts it.
+  package var fileStamper: LedgerFileStamper? { trustedFile?.stamper }
 
   /// Tests: remember the file as the last save left it now, instead of after the quiet delay.
   /// False when the file isn't trusted or no longer has that identity.
