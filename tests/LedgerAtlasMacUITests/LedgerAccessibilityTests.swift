@@ -1,5 +1,5 @@
-import ApplicationServices
 import AppKit
+import ApplicationServices
 import Foundation
 import LedgerCore
 import LedgerStore
@@ -10,15 +10,15 @@ import Testing
 
 // Synthetic data only: every screen shows the made-up demo ledger.
 
-/// MACV2-21 (#57): every screen, with a ledger open, exposes a VoiceOver label for each
-/// control. This reads the same accessibility tree VoiceOver reads, from the real root view
-/// hosted in a window.
+/// MACV2-21 (#57): every screen, with a ledger open, gives each control a name VoiceOver can
+/// speak. It reads the tree through the macOS Accessibility API, the same one VoiceOver uses,
+/// from the real root view hosted in a window.
 @MainActor
-@Test(.disabled("probe first"), arguments: LedgerDemoTour.destinations)
+@Test(arguments: LedgerDemoTour.destinations)
 func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) async throws {
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
-  let elements = mounted.accessibilityElements()
+  let elements = await mounted.accessibilityElements()
   let summary = Dictionary(grouping: elements, by: \.role).mapValues(\.count)
     .sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
   print("A11Y \(destination.rawValue): \(elements.count) elements: \(summary)")
@@ -31,7 +31,7 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
 }
 
 /// One accessibility element as VoiceOver sees it.
-struct SpokenElement {
+struct SpokenElement: Sendable {
   let role: String
   let subrole: String
   let label: String
@@ -40,12 +40,13 @@ struct SpokenElement {
   let placeholder: String
   let identifier: String
 
-  static let controlRoles: Set<NSAccessibility.Role> = [
-    .button, .checkBox, .radioButton, .popUpButton, .menuButton, .textField, .slider,
-    .comboBox, .incrementor, .link, .disclosureTriangle, .textArea,
+  static let controlRoles: Set<String> = [
+    kAXButtonRole, kAXCheckBoxRole, kAXRadioButtonRole, kAXPopUpButtonRole, kAXMenuButtonRole,
+    kAXTextFieldRole, kAXSliderRole, kAXComboBoxRole, kAXIncrementorRole, kAXDisclosureTriangleRole,
+    kAXTextAreaRole, "AXLink",
   ]
 
-  var isControl: Bool { Self.controlRoles.map(\.rawValue).contains(role) }
+  var isControl: Bool { Self.controlRoles.contains(role) }
 
   /// What VoiceOver reads as the element's name.
   var spokenName: String {
@@ -56,6 +57,40 @@ struct SpokenElement {
     "\(role)/\(subrole) label=\(label.debugDescription) title=\(title.debugDescription) "
       + "value=\(value.prefix(40).debugDescription) id=\(identifier.debugDescription)"
   }
+}
+
+/// Reads this process's windows through the Accessibility API. It must run off the main
+/// thread: the app answers these requests on its main run loop, so a call made from the main
+/// thread can't complete.
+func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
+  let app = AXUIElementCreateApplication(pid)
+  AXUIElementSetMessagingTimeout(app, 5)
+  func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+  func text(_ element: AXUIElement, _ name: String) -> String {
+    guard let value = attribute(element, name) else { return "" }
+    return (value as? String) ?? "\(value)"
+  }
+  var found: [SpokenElement] = []
+  func visit(_ element: AXUIElement, depth: Int) {
+    guard depth < 80 else { return }
+    found.append(
+      SpokenElement(
+        role: text(element, kAXRoleAttribute), subrole: text(element, kAXSubroleAttribute),
+        label: text(element, kAXDescriptionAttribute), title: text(element, kAXTitleAttribute),
+        value: text(element, kAXValueAttribute),
+        placeholder: text(element, kAXPlaceholderValueAttribute),
+        identifier: text(element, kAXIdentifierAttribute)))
+    for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+      visit(child, depth: depth + 1)
+    }
+  }
+  for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] {
+    visit(window, depth: 0)
+  }
+  return found
 }
 
 /// The root view in a window with the synthetic demo ledger open on one screen.
@@ -92,44 +127,27 @@ final class MountedRoot {
     window.makeKeyAndOrderFront(nil)
     // Wait for the ledger to open and the screen to settle.
     var previous = -1
-    for _ in 0..<50 {
-      try await Task.sleep(for: .milliseconds(100))
+    for _ in 0..<30 {
+      try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
-      let count = accessibilityElements().count
+      let count = await accessibilityElements().count
       if count == previous, count > 5 { break }
       previous = count
     }
   }
 
   func close() {
+    window.orderOut(nil)
+    window.contentView = nil
     window.close()
     UserDefaults.standard.removePersistentDomain(forName: suite)
     try? FileManager.default.removeItem(at: directory)
   }
 
-  func accessibilityElements() -> [SpokenElement] {
-    guard let root = window.contentView else { return [] }
-    var found: [SpokenElement] = []
-    var seen = Set<ObjectIdentifier>()
-    func visit(_ node: Any, depth: Int) {
-      guard depth < 60, let element = node as? NSAccessibilityProtocol & NSObject,
-        seen.insert(ObjectIdentifier(element)).inserted
-      else { return }
-      if element.isAccessibilityElement() {
-        found.append(
-          SpokenElement(
-            role: element.accessibilityRole()?.rawValue ?? "",
-            subrole: element.accessibilitySubrole()?.rawValue ?? "",
-            label: element.accessibilityLabel() ?? "",
-            title: element.accessibilityTitle() ?? "",
-            value: (element.accessibilityValue()).map { "\($0)" } ?? "",
-            placeholder: element.accessibilityPlaceholderValue() ?? "",
-            identifier: element.accessibilityIdentifier() ?? ""))
-      }
-      for child in element.accessibilityChildren() ?? [] { visit(child, depth: depth + 1) }
-    }
-    visit(root, depth: 0)
-    return found
+  /// Every element in this window's tree, read the way VoiceOver reads it.
+  func accessibilityElements() async -> [SpokenElement] {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    return await Task.detached { accessibilityTree(of: pid) }.value
   }
 }
 
@@ -172,38 +190,3 @@ private final class FullSizeTestWindow: NSWindow {
   #expect(offenders.isEmpty, "\(offenders)")
 }
 
-// TEMPORARY probe: which way of reading the accessibility tree works on CI.
-@MainActor
-@Test func accessibilityTreeProbe() async throws {
-  let mounted = try await MountedRoot(showing: .accounts)
-  defer { mounted.close() }
-  let view = try #require(mounted.window.contentView)
-  func count(_ node: Any?, _ depth: Int = 0) -> Int {
-    guard depth < 60, let element = node as? NSAccessibilityProtocol & NSObject else { return 0 }
-    return 1 + (element.accessibilityChildren() ?? []).reduce(0) { $0 + count($1, depth + 1) }
-  }
-  print("A11YPROBE contentView children: \(view.accessibilityChildren()?.count ?? -1) total \(count(view))")
-  print("A11YPROBE window total \(count(mounted.window))")
-  print("A11YPROBE subviews \(view.subviews.map { String(describing: type(of: $0)) })")
-  _ = view.accessibilityHitTest(NSPoint(x: 500, y: 400))
-  _ = NSApplication.shared.accessibilityApplicationFocusedUIElement()
-  try await Task.sleep(for: .milliseconds(500))
-  print("A11YPROBE after hit test total \(count(view))")
-  let app = AXUIElementCreateApplication(getpid())
-  var windows: CFTypeRef?
-  let windowsError = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
-  print("A11YPROBE AX windows error \(windowsError.rawValue) count \((windows as? [AXUIElement])?.count ?? -1) trusted \(AXIsProcessTrusted())")
-  let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-  let enhanced = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-  print("A11YPROBE set manual \(manual.rawValue) enhanced \(enhanced.rawValue)")
-  try await Task.sleep(for: .milliseconds(1000))
-  view.layoutSubtreeIfNeeded()
-  print("A11YPROBE after AX enable total \(count(view)) window \(count(mounted.window))")
-  func axCount(_ element: AXUIElement, _ depth: Int = 0) -> Int {
-    guard depth < 60 else { return 0 }
-    var children: CFTypeRef?
-    _ = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
-    return 1 + ((children as? [AXUIElement]) ?? []).reduce(0) { $0 + axCount($1, depth + 1) }
-  }
-  print("A11YPROBE AXUIElement app total \(axCount(app))")
-}
