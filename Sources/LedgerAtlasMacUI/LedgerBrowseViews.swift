@@ -307,7 +307,10 @@ struct LedgerBrowseList: View {
     let title = category ?? entry.kind.rawValue.capitalized
     let amount = "\(entry.amount.amount.rawLiteral) \(entry.amount.unitCode)"
     let time = String(format: "%02d:%02d", entry.occurredAt.hour, entry.occurredAt.minute)
-    let detail = [amount, account.isEmpty ? nil : account, time].compactMap { $0 }
+    // Say the kind in words when the title is a category, so income and expense never rely on
+    // colour or category names alone.
+    let kind = category == nil ? nil : entry.kind.rawValue.capitalized
+    let detail = [kind, amount, account.isEmpty ? nil : account, time].compactMap { $0 }
       .joined(separator: " · ")
     let markers = entry.indicators.map(Self.indicatorLabel).joined(separator: ", ")
     let tagLine = entry.tagIDs.compactMap { tagNames[$0] }.sorted {

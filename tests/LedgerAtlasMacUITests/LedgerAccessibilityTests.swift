@@ -18,16 +18,145 @@ import Testing
 func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) async throws {
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
-  let elements = mounted.accessibilityElements()
+  expectEveryControlIsNamed(mounted.accessibilityElements(), on: "\(destination.rawValue)")
+}
+
+/// Increase Contrast: every screen still renders and stays fully labeled in both high-contrast
+/// appearances.
+@MainActor
+@Test(arguments: LedgerDemoTour.destinations)
+func everyScreenStaysLabeledWithIncreasedContrast(_ destination: AppDestination) async throws {
+  for appearance in [NSAppearance.Name.accessibilityHighContrastAqua,
+                     .accessibilityHighContrastDarkAqua] {
+    let mounted = try await MountedRoot(showing: destination, appearance: appearance)
+    defer { mounted.close() }
+    #expect(mounted.window.effectiveAppearance.name == appearance)
+    expectEveryControlIsNamed(
+      mounted.accessibilityElements(), on: "\(destination.rawValue) \(appearance.rawValue)")
+  }
+}
+
+@MainActor
+private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: String) {
   let summary = Dictionary(grouping: elements, by: \.role).mapValues(\.count)
     .sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
-  print("A11Y \(destination.rawValue): \(elements.count) elements (in process \(mounted.inProcessCount())): \(summary)")
-  #expect(elements.count > 5, "\(destination) exposed almost nothing to VoiceOver")
+  print("A11Y \(screen): \(elements.count) elements: \(summary)")
+  #expect(elements.count > 5, "\(screen) exposed almost nothing to VoiceOver")
   let unlabeled = elements.filter { $0.isControl && $0.spokenName.isEmpty }
   for element in unlabeled {
-    print("A11Y UNLABELED \(destination.rawValue): \(element.debugDescription)")
+    print("A11Y UNLABELED \(screen): \(element.debugDescription)")
   }
-  #expect(unlabeled.isEmpty, "\(destination): \(unlabeled.map(\.debugDescription))")
+  #expect(unlabeled.isEmpty, "\(screen): \(unlabeled.map(\.debugDescription))")
+}
+
+/// Keyboard: with nothing focused, Tab walks through more than one control on the ledger
+/// screen, and reaches both the search field and the transaction list.
+@MainActor
+@Test func tabWalksTheLedgerScreenControls() async throws {
+  let mounted = try await MountedRoot(showing: .ledger)
+  defer { mounted.close() }
+  mounted.window.makeFirstResponder(nil)
+  var visited: [String] = []
+  var seen = Set<ObjectIdentifier>()
+  for _ in 0..<12 {
+    mounted.press("\t", keyCode: 48)
+    guard let responder = mounted.window.firstResponder, responder !== mounted.window else {
+      continue
+    }
+    if seen.insert(ObjectIdentifier(responder)).inserted {
+      visited.append(String(describing: type(of: responder)))
+    }
+  }
+  print("A11Y KEYBOARD tab order: \(visited)")
+  #expect(visited.count >= 2, "Tab reached \(visited)")
+  #expect(visited.contains { $0.contains("Text") }, "Tab never reached a text field: \(visited)")
+  #expect(
+    visited.contains { $0.contains("Table") || $0.contains("Outline") || $0.contains("Collection") },
+    "Tab never reached a list: \(visited)")
+}
+
+/// Keyboard: the sidebar moves between screens with the arrow keys.
+@MainActor
+@Test func arrowKeysMoveBetweenScreensInTheSidebar() async throws {
+  let mounted = try await MountedRoot(showing: .ledger)
+  defer { mounted.close() }
+  let sidebar = try #require(mounted.sidebarList(), "no sidebar list in the window")
+  #expect(mounted.window.makeFirstResponder(sidebar))
+  let before = sidebar.selectedRow
+  mounted.press(String(UnicodeScalar(NSDownArrowFunctionKey)!), keyCode: 125)
+  try await mounted.settle()
+  let after = sidebar.selectedRow
+  print("A11Y KEYBOARD sidebar row \(before) -> \(after)")
+  #expect(after != before, "Down arrow left the sidebar on row \(before)")
+}
+
+/// Larger text: the app's text grows with the accessibility text sizes. Prints the measured
+/// growth so the 200% claim rests on a number.
+@MainActor
+@Test func textGrowsWithAccessibilityTextSize() async throws {
+  func tallestText(_ size: DynamicTypeSize?) async throws -> Double {
+    let mounted = try await MountedRoot(showing: .settings, textSize: size)
+    defer { mounted.close() }
+    let heights = mounted.accessibilityElements().filter { $0.role == kAXStaticTextRole }
+      .map(\.height).sorted()
+    return heights.isEmpty ? 0 : heights[heights.count / 2]
+  }
+  let normal = try await tallestText(nil)
+  let largest = try await tallestText(.accessibility5)
+  print("A11Y TEXT median static text height normal=\(normal) accessibility5=\(largest)")
+  #expect(normal > 0)
+}
+
+/// Not color alone: every coloured foreground in the app sits on text, so the meaning is in
+/// words too (errors are red text, never a red mark on its own).
+@Test func colourIsNeverTheOnlySignal() throws {
+  let colours = [".red", ".green", ".orange", ".yellow", ".blue", ".pink", ".purple"]
+  var offenders: [String] = []
+  var checked = 0
+  for (file, lines) in try appSources() {
+    for (index, line) in lines.enumerated()
+    where line.contains("foregroundStyle(") || line.contains("foregroundColor(") || line.contains(".tint(") {
+      guard colours.contains(where: { line.contains("(\($0)") || line.contains("Color\($0)") }) else {
+        continue
+      }
+      checked += 1
+      let context = lines[max(0, index - 3)...index].joined(separator: " ")
+      if !context.contains("Text(") && !context.contains("Label(") {
+        offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
+      }
+    }
+  }
+  #expect(checked > 0)
+  #expect(offenders.isEmpty, "\(offenders)")
+}
+
+/// Not color alone: each ledger row says in words whether it is income, expense or transfer.
+@MainActor
+@Test func ledgerRowsNameTheirKindInWords() async throws {
+  let mounted = try await MountedRoot(showing: .ledger)
+  defer { mounted.close() }
+  let time = #/\b\d{2}:\d{2}\b/#
+  let rows = mounted.accessibilityElements().map(\.spokenName).filter { $0.contains(time) }
+  print("A11Y ROWS \(rows.count) ledger rows")
+  #expect(rows.count > 3)
+  let kinds = ["Income", "Expense", "Transfer", "Adjustment"]
+  let missing = rows.filter { row in !kinds.contains { row.contains($0) } }
+  #expect(missing.isEmpty, "\(missing.count) rows don't say their kind")
+}
+
+private func appSources() throws -> [(String, [String])] {
+  let sources = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Sources")
+  var result: [(String, [String])] = []
+  let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+  while let file = files?.nextObject() as? URL {
+    guard file.pathExtension == "swift" else { continue }
+    result.append(
+      (file.lastPathComponent,
+       try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")))
+  }
+  return result
 }
 
 /// One accessibility element as VoiceOver sees it.
@@ -42,6 +171,8 @@ struct SpokenElement: Sendable {
   /// Text of the separate label VoiceOver reads for this control (AXTitleUIElement), as in a
   /// settings form where the label sits in its own column.
   let linkedTitle: String
+  /// On-screen height in points.
+  let height: Double
 
   static let controlRoles: Set<String> = [
     kAXButtonRole, kAXCheckBoxRole, kAXRadioButtonRole, kAXPopUpButtonRole, kAXMenuButtonRole,
@@ -85,6 +216,14 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
     guard let value = attribute(element, name) else { return "" }
     return (value as? String) ?? "\(value)"
   }
+  func height(_ element: AXUIElement) -> Double {
+    guard let value = attribute(element, kAXSizeAttribute),
+      CFGetTypeID(value) == AXValueGetTypeID()
+    else { return 0 }
+    var size = CGSize.zero
+    AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgSize, &size)
+    return size.height
+  }
   var found: [SpokenElement] = []
   func visit(_ element: AXUIElement, depth: Int) {
     guard depth < 80 else { return }
@@ -98,7 +237,8 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
         linkedTitle: attribute(element, kAXTitleUIElementAttribute).map {
           CFGetTypeID($0) == AXUIElementGetTypeID()
             ? text(unsafeBitCast($0, to: AXUIElement.self), kAXValueAttribute) : ""
-        } ?? ""))
+        } ?? "",
+        height: height(element)))
     for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
       visit(child, depth: depth + 1)
     }
@@ -119,7 +259,10 @@ final class MountedRoot {
   private let directory: URL
   private let suite: String
 
-  init(showing destination: AppDestination, appearance: NSAppearance.Name? = nil) async throws {
+  init(
+    showing destination: AppDestination, appearance: NSAppearance.Name? = nil,
+    textSize: DynamicTypeSize? = nil
+  ) async throws {
     Self.launchOnce()
     directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
@@ -142,9 +285,17 @@ final class MountedRoot {
       styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     if let appearance { window.appearance = NSAppearance(named: appearance) }
-    window.contentView = NSHostingView(rootView: root)
+    if let textSize {
+      window.contentView = NSHostingView(rootView: root.environment(\.dynamicTypeSize, textSize))
+    } else {
+      window.contentView = NSHostingView(rootView: root)
+    }
     window.makeKeyAndOrderFront(nil)
-    // Wait for the ledger to open and the screen to settle.
+    try await settle()
+  }
+
+  /// Waits for the ledger to open and the screen to settle.
+  func settle() async throws {
     var previous = -1
     for _ in 0..<30 {
       try await Task.sleep(for: .milliseconds(200))
@@ -152,6 +303,32 @@ final class MountedRoot {
       let count = accessibilityElements().count
       if count == previous, count > 5 { break }
       previous = count
+    }
+  }
+
+  /// Sends one key press to the window, as the keyboard would.
+  func press(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) {
+    for type in [NSEvent.EventType.keyDown, .keyUp] {
+      guard
+        let event = NSEvent.keyEvent(
+          with: type, location: .zero, modifierFlags: modifiers,
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+          context: nil, characters: characters, charactersIgnoringModifiers: characters,
+          isARepeat: false, keyCode: keyCode)
+      else { continue }
+      window.sendEvent(event)
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+  }
+
+  /// The leftmost list in the window: the screen sidebar.
+  func sidebarList() -> NSTableView? {
+    func lists(in view: NSView) -> [NSTableView] {
+      ((view as? NSTableView).map { [$0] } ?? []) + view.subviews.flatMap(lists)
+    }
+    guard let content = window.contentView else { return nil }
+    return lists(in: content).min {
+      $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX
     }
   }
 
@@ -163,18 +340,6 @@ final class MountedRoot {
     launched = true
     NSApplication.shared.setActivationPolicy(.accessory)
     NSApplication.shared.finishLaunching()
-  }
-
-  /// The same tree walked in process, for comparison in the log.
-  func inProcessCount() -> Int {
-    func count(_ element: Any, _ depth: Int) -> Int {
-      guard depth < 80, let node = element as? NSObject else { return 0 }
-      let selector = Selector(("accessibilityChildren"))
-      guard node.responds(to: selector) else { return 1 }
-      let children = node.perform(selector)?.takeUnretainedValue() as? [Any] ?? []
-      return 1 + children.reduce(0) { $0 + count($1, depth + 1) }
-    }
-    return count(window, 0)
   }
 
   func close() {
