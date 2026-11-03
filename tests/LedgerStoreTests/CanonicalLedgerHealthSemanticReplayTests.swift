@@ -1511,3 +1511,58 @@ private enum ReplayError: Error {
   case sqlite
   case statement(String)
 }
+
+@Test("saves keep working while read-only connections open and close on the same file")
+func savesSurviveConcurrentReadOnlyOpens() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStore.openForMutation(at: url)
+    let account = try #require(try store.readSnapshot().accounts.first)
+    let failures = LockedFailures()
+    let opened = LockedFlag()
+    let stop = LockedFlag()
+    let readers = DispatchGroup()
+    // The app's session loads the ledger read-only on a background thread while the editor
+    // saves through its own connection. A load may be refused while a save's journal is on
+    // disk; what must never happen is a save failing because a load was running.
+    for _ in 0..<2 {
+      DispatchQueue.global().async(group: readers) {
+        while !stop.isSet {
+          if let reader = try? LedgerStore.openReadOnly(at: url), (try? reader.readSnapshot()) != nil {
+            opened.set()
+          }
+        }
+      }
+    }
+    for index in 0..<150 {
+      let renamed = try LedgerAccount(
+        id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
+        origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+        displayOrder: account.displayOrder, hidden: account.hidden,
+        includeInTotals: account.includeInTotals, variant: account.variant)
+      do {
+        try store.updateAccount(renamed)
+      } catch {
+        failures.record("save \(index): \(error)")
+      }
+    }
+    stop.set()
+    readers.wait()
+    #expect(failures.all.isEmpty, "\(failures.all.prefix(5))")
+    #expect(opened.isSet, "no read-only load ever opened the file, so nothing overlapped")
+    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save 149")
+  }
+}
+
+private final class LockedFailures: @unchecked Sendable {
+  private let lock = NSLock()
+  private var values: [String] = []
+  func record(_ value: String) { lock.withLock { values.append(value) } }
+  var all: [String] { lock.withLock { values } }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = false
+  func set() { lock.withLock { value = true } }
+  var isSet: Bool { lock.withLock { value } }
+}

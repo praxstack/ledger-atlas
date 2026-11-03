@@ -316,11 +316,17 @@ public final class LedgerStore {
     }
   }
 
+  /// How long a statement waits for another connection's lock before failing as busy. The app
+  /// loads a ledger on a background connection while the editor saves through its own, so
+  /// without a wait one of them fails outright whenever the two meet.
+  static let busyTimeoutMilliseconds: Int32 = 5_000
+
   public static func openReadOnly(at url: URL) throws -> LedgerStore {
     try validateNoSQLiteCompanions(at: url)
-    // EXPERIMENT (#140): a read-write description, so a writer on this file in the same process
-    // never ends up taking a write lock through a read-only descriptor. SQLite still opens the
-    // connection read-only.
+    // Prefer a read-write description even though SQLite opens this connection read-only. With a
+    // read-only one, a save on another connection in this process intermittently failed to take
+    // its write lock (SQLITE_IOERR_LOCK, errno EBADF) on macOS: 3 to 7 of 25 stress runs of the
+    // journey tests, against 0 of 25 with this. A file the process can only read falls back.
     var descriptor = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
     if descriptor < 0 { descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW) }
     guard descriptor >= 0 else { throw Error.incompatibleCanonicalStore }
@@ -347,6 +353,7 @@ public final class LedgerStore {
       if database != nil { sqlite3_close(database) }
       throw Error.incompatibleCanonicalStore
     }
+    sqlite3_busy_timeout(database, Self.busyTimeoutMilliseconds)
     do {
       // HAS_MOVED is not meaningful for a standard VFS opened through a file descriptor.
       // The descriptor was authenticated before opening and the path is revalidated below.
@@ -434,6 +441,7 @@ public final class LedgerStore {
     else {
       throw Error.incompatibleCanonicalStore
     }
+    sqlite3_busy_timeout(database, busyTimeoutMilliseconds)
     do {
       try mutationTestHook?(.afterPinnedOpen)
       try execute("PRAGMA foreign_keys=ON", on: database)

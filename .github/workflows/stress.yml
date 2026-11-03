@@ -58,6 +58,11 @@ jobs:
               echo "== run $run failed"
               cp run.log "$RUNNER_TEMP/stress-failures/run-$run.log"
               grep -E "✘|recorded an issue|Caught error|sqliteFailure|LedgerStore: " run.log | head -40
+            elif ! grep -qE "Test run with [1-9][0-9]* tests? (in [0-9]+ suites? )?passed" run.log; then
+              # A filter that matches nothing still exits 0; count that as a broken stress run.
+              echo "== run $run ran no tests for filter '$FILTER'"
+              tail -5 run.log
+              exit 2
             fi
           done
           echo "$failures of $REPEAT runs failed" | tee -a "$GITHUB_STEP_SUMMARY"

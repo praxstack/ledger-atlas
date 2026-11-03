@@ -25,7 +25,7 @@ int csqlite_open_pinned_rw(
 int csqlite_close_pinned(sqlite3 *database, void *registration);
 /// Test diagnostics only: describes the main database file descriptor SQLite holds for this
 /// connection (number, open flags or errno, inode) and every other open descriptor on the same
-/// inode. Writes at most `size` bytes, NUL-terminated.
+/// inode (scanning at most 65,536 descriptors). Writes at most `size` bytes, NUL-terminated.
 void csqlite_debug_describe_main_descriptor(sqlite3 *database, char *output, size_t size);
 
 #endif
