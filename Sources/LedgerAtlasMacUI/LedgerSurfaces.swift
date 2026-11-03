@@ -43,54 +43,6 @@ struct SearchSurface: View {
   }
 }
 
-struct InsightsSurface: View {
-  let rows: [LedgerJourney.SurfaceRow]
-  let table: String
-  let emptyMessage: String
-  let open: () -> Void
-  let exportPDF: () -> Void
-
-  var body: some View {
-    if rows.isEmpty {
-      VStack(alignment: .leading, spacing: 12) {
-        Text("Insights").font(.largeTitle.bold())
-        Text(emptyMessage).foregroundStyle(.secondary)
-        Button("Open…", action: open)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .padding(32)
-    } else {
-      List {
-        Section("Accessible table") {
-          Text(table)
-            .font(.body.monospaced())
-            .textSelection(.enabled)
-            .accessibilityLabel(table)
-            .accessibilityAddTraits(.isStaticText)
-        }
-        Section("Status") {
-          ForEach(rows) { row in
-            HStack {
-              Text(row.title)
-              Spacer()
-              Text(row.detail)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(row.title), \(row.detail)")
-          }
-        }
-        Section("Export") {
-          Button("Export PDF statement", action: exportPDF)
-            .accessibilityLabel("Export PDF statement")
-        }
-      }
-      .navigationTitle("Insights")
-    }
-  }
-}
-
 struct DataBackedSurface: View {
   let destination: AppDestination
   let rows: [LedgerJourney.SurfaceRow]

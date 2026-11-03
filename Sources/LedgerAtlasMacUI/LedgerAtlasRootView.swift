@@ -389,6 +389,19 @@ public struct LedgerAtlasRootView: View {
     }
   }
 
+  private func exportPeriodStatement(_ report: InsightsReport, title: String, hidingNames: Bool) {
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [UTType.pdf]
+    panel.nameFieldStringValue = "ledger-atlas-statement-\(LedgerPeriodStatistics.isoText(report.period.start)).pdf"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try LedgerPDFStatementExporter.export(
+        lines: report.statementLines(redactingNames: hidingNames, title: title), to: url)
+    } catch {
+      journey.recordFailure("The PDF statement could not be saved.")
+    }
+  }
+
   private static let xlsxType = UTType(filenameExtension: "xlsx") ?? .data
 
   private func exportXLSXWorkbook() {
@@ -1430,9 +1443,13 @@ public struct LedgerAtlasRootView: View {
       InsightsSurface(
         rows: journey.rows(for: .insights),
         table: journey.insightTable,
-        emptyMessage: selection.emptyStateMessage
+        emptyMessage: selection.emptyStateMessage,
+        snapshot: journey.snapshot,
+        settings: productSettings
       ) { openLedger() } exportPDF: {
         exportPDFStatement()
+      } exportPeriodPDF: { report, title, hideNames in
+        exportPeriodStatement(report, title: title, hidingNames: hideNames)
       }
       .id(selection)
     } else {
