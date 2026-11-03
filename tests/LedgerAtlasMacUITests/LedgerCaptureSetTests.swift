@@ -17,11 +17,6 @@ import Testing
 /// `$LEDGER_ATLAS_TEST_ARTIFACTS/ui-captures`, which CI uploads as an artifact.
 @MainActor
 @Test func everyTraceabilityRecordHasASyntheticCapture() async throws {
-  // The test process has ended mid-run with exit status 0; say who called exit.
-  atexit {
-    let stack = Thread.callStackSymbols.prefix(25).joined(separator: "\n")
-    FileHandle.standardError.write(Data("CAPTURE exit called from:\n\(stack)\n".utf8))
-  }
   let records = try traceabilityRecords()
   #expect(records.count == 25)
   let missing = records.filter { capturePlan[$0.key] == nil }.map(\.key)

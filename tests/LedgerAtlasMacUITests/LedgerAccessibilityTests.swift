@@ -476,16 +476,9 @@ final class MountedRoot {
     Self.removeAtExit(directory)
   }
 
-  nonisolated(unsafe) private static var foldersToRemove: [String] = []
   private static func removeAtExit(_ folder: URL) {
-    if foldersToRemove.isEmpty {
-      atexit {
-        for path in MountedRoot.foldersToRemove {
-          try? FileManager.default.removeItem(atPath: path)
-        }
-      }
-    }
-    foldersToRemove.append(folder.path)
+    if testFoldersToRemove.isEmpty { atexit(removeTestFolders) }
+    testFoldersToRemove.append(folder.path)
   }
 
   /// Every element in this window's tree, read the way VoiceOver reads it.
@@ -555,4 +548,14 @@ private final class FullSizeTestWindow: NSWindow {
   }
   #expect(checked > 0, "no animations found; is the Sources path right?")
   #expect(offenders.isEmpty, "\(offenders)")
+}
+
+// Kept outside the main-actor `MountedRoot`: the test runner calls exit() off the main thread,
+// and a main-actor exit handler traps there.
+nonisolated(unsafe) private var testFoldersToRemove: [String] = []
+
+private func removeTestFolders() {
+  for path in testFoldersToRemove {
+    try? FileManager.default.removeItem(atPath: path)
+  }
 }
