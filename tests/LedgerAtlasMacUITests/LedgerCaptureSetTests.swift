@@ -559,7 +559,7 @@ extension MountedRoot {
     // press runs the menu's own tracking loop; a timer in that loop picks the item.
     let picked = PickBox(menu: menu)
     let timer = Timer(timeInterval: 0.25, repeats: true) { timer in
-      MainActor.assumeIsolated {
+      let finished = MainActor.assumeIsolated { () -> Bool in
         let menu = picked.menu
         picked.ticks += 1
         if let index = menu.items.firstIndex(where: { $0.title == title }) {
@@ -569,11 +569,12 @@ extension MountedRoot {
         } else if picked.ticks > 20 {
           picked.titles = menu.items.map(\.title)
         } else {
-          return
+          return false
         }
-        timer.invalidate()
         menu.cancelTracking()
+        return true
       }
+      if finished { timer.invalidate() }
     }
     RunLoop.main.add(timer, forMode: .common)
     let location = popUp.convert(NSPoint(x: popUp.bounds.midX, y: popUp.bounds.midY), to: nil)
