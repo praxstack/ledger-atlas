@@ -296,7 +296,10 @@ public enum LedgerStoreLifecycle {
       try requireInspectableCompanions(at: url, databaseDescriptor: source.descriptor)
       try lease.requireBound(destination)
       let store: LedgerStore
-      do { store = try openPublished(at: url, expected: source.identity) } catch {
+      do {
+        store = try openPublished(
+          at: url, expected: source.identity, contentDigest: source.contentDigest)
+      } catch {
         if recovered != nil {
           let recoveryLeaf = recovered!.url.lastPathComponent
           throw Error.publicationCompleted(
@@ -1813,8 +1816,12 @@ public enum LedgerStoreLifecycle {
         ? captureInactiveCompanionFiles(at: url)
         : captureInactiveCompanions(at: url, databaseDescriptor: descriptor))
       try requirePath(url, matches: value)
+      // The digest must be of the bytes the file had at `value`, the identity callers check
+      // against later.
+      let digested = try digestedState(descriptor)
+      guard sameFile(value, digested.identity) else { throw Error.pathChanged }
       return PinnedFile(
-        descriptor: descriptor, identity: value, url: url, contentDigest: try digest(descriptor),
+        descriptor: descriptor, identity: value, url: url, contentDigest: digested.digest,
         inactiveCompanions: companions)
     } catch {
       Darwin.close(descriptor)
@@ -2065,10 +2072,12 @@ public enum LedgerStoreLifecycle {
     case descriptor(Int32, identity: stat)
   }
 
-  private static func openPublished(at url: URL, expected: stat) throws -> LedgerStore {
+  private static func openPublished(
+    at url: URL, expected: stat, contentDigest: String? = nil
+  ) throws -> LedgerStore {
     do {
       let store = try LedgerStore.openForMutation(
-        at: url, expectedIdentity: expected, testing: nil)
+        at: url, expectedIdentity: expected, contentDigest: contentDigest, testing: nil)
       guard store.matchesPinnedInode(expected) else { throw Error.pathChanged }
       return store
     } catch let error as Error { throw error } catch { throw Error.invalidStore }

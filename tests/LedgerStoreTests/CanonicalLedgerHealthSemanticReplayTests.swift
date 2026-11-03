@@ -1,4 +1,5 @@
 import CSQLite
+import CryptoKit
 import Foundation
 import LedgerAdapterSemantics
 import LedgerCore
@@ -166,6 +167,60 @@ func rememberedImportGraphSkipsReplayOnlyWhenUnchanged() throws {
         try CanonicalLedgerHealth.validate(database, trustKey: key)
       }
     }
+  }
+}
+
+/// Opening a ledger file the app already fully checked, byte for byte unchanged, skips the slow
+/// checks. Any change to the bytes, another key, or an open that did not digest the file gets
+/// the full check.
+@Test("a remembered ledger file skips the open checks only while its bytes are unchanged")
+func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    func fileStamp(_ key: Data) throws -> String {
+      let digest = SHA256.hash(data: try Data(contentsOf: url))
+      return try #require(
+        CanonicalLedgerHealth.verifiedFileStamp(
+          contentDigest: digest.map { String(format: "%02x", $0) }.joined(), trustKey: key))
+    }
+
+    // A full open of a healthy file remembers its bytes.
+    do { _ = try LedgerStoreLifecycle.open(at: url) }
+    #expect(CanonicalLedgerHealth.verifiedFiles.contains(try fileStamp(key)))
+    #expect(try fileStamp(Data(repeating: 7, count: 32)) != fileStamp(key))
+    #expect(CanonicalLedgerHealth.verifiedFileStamp(contentDigest: "00", trustKey: key) == nil)
+
+    // A change the import replay refuses, so only a skipped check could let it open.
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_binding
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+        """,
+      overrides: fixture.digestOverrides())
+    #expect(throws: (any Error).self) { try LedgerStoreLifecycle.open(at: url) }
+    let brokenStamp = try fileStamp(key)
+    #expect(!CanonicalLedgerHealth.verifiedFiles.contains(brokenStamp))
+
+    // Remembering these exact bytes skips the checks. An open that did not digest the file
+    // never trusts a stamp.
+    CanonicalLedgerHealth.verifiedFiles.insert(brokenStamp)
+    #expect(throws: Never.self) { _ = try LedgerStoreLifecycle.open(at: url) }
+    #expect(throws: (any Error).self) { try LedgerStore.openForMutation(at: url) }
+
+    // Any write changes the bytes, even one that puts a value back, and the full check runs
+    // again.
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        """
+        UPDATE ledger_meta SET value='changed' WHERE key='schema_version';
+        UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.version)' WHERE key='schema_version';
+        """)
+    }
+    #expect(try fileStamp(key) != brokenStamp)
+    #expect(throws: (any Error).self) { try LedgerStoreLifecycle.open(at: url) }
   }
 }
 

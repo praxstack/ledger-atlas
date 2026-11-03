@@ -374,8 +374,12 @@ public final class LedgerStore {
     try openForMutation(at: url, expectedIdentity: nil, testing: nil)
   }
 
+  /// `contentDigest` is the SHA-256 of the file's bytes, read by the caller while the file had
+  /// `expectedIdentity`. When this build has already fully checked those exact bytes under the
+  /// ledger's trust key (`CanonicalLedgerHealth.verifiedFiles`), and the file still has that
+  /// identity once the check holds its read lock, the slow checks are skipped.
   package static func openForMutation(
-    at url: URL, expectedIdentity: stat? = nil,
+    at url: URL, expectedIdentity: stat? = nil, contentDigest: String? = nil,
     testing mutationTestHook: MutationTestHook?
   ) throws -> LedgerStore {
     if let expectedIdentity { try validatePath(url, matches: expectedIdentity) }
@@ -449,11 +453,40 @@ public final class LedgerStore {
         throw Error.incompatibleCanonicalStore
       }
       try validateCanonicalJournalMode(on: database)
-      try validateCanonicalSchema(on: database)
-      let stateBeforeCheck = fileState(of: database)
-      let checked = try CanonicalLedgerHealth.validateReading(
-        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
-        remembering: .shared)
+      let trustKey = try LedgerReceiptTrust.key(for: url, create: false)
+      // One read transaction for the whole check, so nothing can write the file between proving
+      // its bytes are the ones digested and reading them.
+      try execute("BEGIN", on: database)
+      let stateBeforeCheck: FileState?
+      let checked: (mark: CanonicalLedgerHealth.ImportGraphMark, snapshot: LedgerReadSnapshot)
+      let fileStamp: String?
+      let alreadyVerified: Bool
+      do {
+        try validateCanonicalSchema(
+          on: database, checkingForeignKeys: false, checkingIntegrity: false)
+        // The reads above hold the shared lock. A file with the same inode, size, modification
+        // and change time as when it was digested still has the digested bytes: any write moves
+        // its change time, which only a change to the system clock could set back.
+        var current = stat()
+        fileStamp =
+          if let expectedIdentity, let contentDigest, let trustKey,
+            lstat(url.path, &current) == 0, sameFile(expectedIdentity, current)
+          {
+            CanonicalLedgerHealth.verifiedFileStamp(contentDigest: contentDigest, trustKey: trustKey)
+          } else {
+            nil
+          }
+        alreadyVerified = fileStamp.map(CanonicalLedgerHealth.verifiedFiles.contains) ?? false
+        if !alreadyVerified { try validateCanonicalSchema(on: database) }
+        stateBeforeCheck = fileState(of: database)
+        checked = try CanonicalLedgerHealth.validateReading(
+          database, trustKey: trustKey, remembering: .shared, fileAlreadyVerified: alreadyVerified)
+        try execute("COMMIT", on: database)
+      } catch {
+        sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+        throw error
+      }
+      if let fileStamp, !alreadyVerified { CanonicalLedgerHealth.verifiedFiles.insert(fileStamp) }
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       let store = LedgerStore(
