@@ -147,8 +147,6 @@ import Testing
   // 25 records and 3 key states, each in light and dark.
   let expectedFiles: Int = 56
   #expect(index.count == expectedFiles)
-  // Take any late stop of the main run loop here, before the test runner's own run resumes.
-  MountedRoot.runMainLoop(for: 3)
 }
 
 /// The empty state, the lock screen and a refused passcode, in light and dark. (Loaded and the

@@ -383,10 +383,6 @@ final class MountedRoot {
   func settle() async throws {
     var previous = -1
     for _ in 0..<30 {
-      // Take any pending stop of the main run loop before suspending. Showing a window
-      // after an earlier sheet can leave one behind, and if it lands in the test runner's
-      // own run of the loop it ends the whole test process with status 0.
-      Self.takePendingStops()
       try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
       let elements = accessibilityElements()
@@ -398,24 +394,6 @@ final class MountedRoot {
       }
       if elements.count == previous, elements.count > 5, !showsNoLedgerPrompt { break }
       previous = elements.count
-    }
-  }
-
-  /// Runs the main run loop for `seconds`, carrying on past any stop of it.
-  static func runMainLoop(for seconds: Double) {
-    let end = Date().addingTimeInterval(seconds)
-    while case let left = end.timeIntervalSinceNow, left > 0 {
-      if CFRunLoopRunInMode(.defaultMode, left, false) == .stopped {
-        print("CAPTURE a stop of the main run loop was taken by a nested run")
-      }
-    }
-  }
-
-  /// Clears a stop of the main run loop that is waiting for the next run, so it lands in a
-  /// short nested run here and not in the test runner's own run.
-  static func takePendingStops() {
-    for _ in 0..<5 where CFRunLoopRunInMode(.defaultMode, 0, true) == .stopped {
-      print("CAPTURE a pending stop of the main run loop was taken")
     }
   }
 
@@ -453,20 +431,30 @@ final class MountedRoot {
     launched = true
     NSApplication.shared.setActivationPolicy(.accessory)
     NSApplication.shared.finishLaunching()
-    guardTestRunLoop()
+    keepTestRunLoopAlive()
   }
 
-  /// AppKit calls `NSApplication.stop(_:)` in some places (such as ending a sheet) to leave
-  /// `NSApp.run()`. The tests never call `run()`: the test runner's own run of the main run
-  /// loop is what keeps the process alive, so a stop there ended the whole test process with
-  /// status 0. While the app isn't running, a stop is logged and dropped.
-  private static func guardTestRunLoop() {
-    let app = NSApplication.self
-    guard
-      let original = class_getInstanceMethod(app, #selector(NSApplication.stop(_:))),
-      let guarded = class_getInstanceMethod(app, #selector(NSApplication.testGuardedStop(_:)))
-    else { return }
-    method_exchangeImplementations(original, guarded)
+  nonisolated(unsafe) private static var loopDepth = 0
+
+  /// The test process lives inside the test runner's own run of the main run loop, and that
+  /// run should never end: when the tests finish, the runner calls exit() itself. Something in
+  /// AppKit or SwiftUI sometimes stops it after a sheet closes, which ended the whole test
+  /// process with status 0 partway through. This watches the main run loop and, when that
+  /// outermost run ends, logs it and runs the loop again. Nested runs are counted and left
+  /// alone. The outermost run was entered before this observer existed, so it sits at -1.
+  private static func keepTestRunLoopAlive() {
+    let activities = CFRunLoopActivity.entry.rawValue | CFRunLoopActivity.exit.rawValue
+    let observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) { _, activity in
+      if activity == .entry {
+        loopDepth += 1
+        return
+      }
+      loopDepth -= 1
+      guard loopDepth < 0 else { return }
+      print("CAPTURE the test runner's run of the main loop was stopped; running it again")
+      CFRunLoopRun()
+    }
+    CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
   }
 
   func close() {
@@ -481,7 +469,6 @@ final class MountedRoot {
     // the ledger file under an open SQLite connection crashed the close (SQLite's "file
     // unlinked while open" log), so the folder is removed when the test process ends.
     Self.removeAtExit(directory)
-    Self.takePendingStops()
   }
 
   nonisolated(unsafe) private static var foldersToRemove: [String] = []
@@ -563,16 +550,4 @@ private final class FullSizeTestWindow: NSWindow {
   }
   #expect(checked > 0, "no animations found; is the Sources path right?")
   #expect(offenders.isEmpty, "\(offenders)")
-}
-
-extension NSApplication {
-  /// Swapped in for `stop(_:)` by `MountedRoot`; after the swap this name calls AppKit's own.
-  @objc fileprivate func testGuardedStop(_ sender: Any?) {
-    if isRunning {
-      testGuardedStop(sender)
-      return
-    }
-    let caller = Thread.callStackSymbols.dropFirst().prefix(8).joined(separator: "\n")
-    print("CAPTURE dropped NSApplication.stop while not running, from:\n\(caller)")
-  }
 }
