@@ -67,31 +67,47 @@ package enum LedgerDemoTour {
     SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
   }
 
-  /// Writes a small, made-up household ledger: four accounts, a category tree, about three
-  /// months of income and spending, transfers (one in another currency), a monthly rent rule
-  /// and a groceries budget.
+  /// Writes a small, made-up household ledger: seven accounts in three groups (one hidden, one
+  /// an investment), a category tree with a subcategory, about three months of income and
+  /// spending, transfers (one in another currency), a monthly rent rule and a groceries budget.
   package static func makeDemoLedger(at url: URL) throws {
     let store = try LedgerStoreLifecycle.create(at: url).store
     let app = LedgerApplication(store: store)
     let origin = try LedgerOrigin(id: key("demo-origin"), label: "local")
-    func account(_ name: String, _ unit: String) throws -> LedgerAccount {
+    // Account groups, so the Accounts screen shows grouped cards with subtotals.
+    let groups = try ["Cash & Bank", "Cards", "Savings & Investments"].enumerated().map {
+      try LedgerAccountGroup(id: key("group-\($0.element)"), name: $0.element, displayOrder: $0.offset)
+    }
+    for group in groups { try app.createAccountGroup(group) }
+    func account(
+      _ name: String, _ unit: String, group: Int?, order: Int, hidden: Bool = false,
+      variant: LedgerAccountVariant = .standard
+    ) throws -> LedgerAccount {
       try LedgerAccount(
         id: StableLedgerID.account(origin: origin, localKey: key("account-\(name)")),
-        name: name, currencyUnit: unit, origin: origin)
+        name: name, currencyUnit: unit, origin: origin, groupID: group.map { groups[$0].id },
+        displayOrder: order, hidden: hidden, variant: variant)
     }
-    func category(_ name: String, _ kind: LedgerCategoryKind) throws -> LedgerCategory {
+    func category(
+      _ name: String, _ kind: LedgerCategoryKind, parent: LedgerCategory? = nil
+    ) throws -> LedgerCategory {
       try LedgerCategory(
         id: StableLedgerID.category(origin: origin, localKey: key("category-\(name)")),
-        name: name, kind: kind, origin: origin)
+        name: name, kind: kind, origin: origin, parentID: parent?.id)
     }
-    let cash = try account("Cash", "INR")
-    let bank = try account("Everyday Bank", "INR")
-    let card = try account("Rewards Card", "INR")
-    let travel = try account("Travel Wallet", "USD")
-    for item in [cash, bank, card, travel] { try app.createAccount(item) }
+    let cash = try account("Cash", "INR", group: 0, order: 0)
+    let bank = try account("Everyday Bank", "INR", group: 0, order: 1)
+    let card = try account("Rewards Card", "INR", group: 1, order: 0)
+    let travel = try account("Travel Wallet", "USD", group: nil, order: 0)
+    let savings = try account("Emergency Savings", "INR", group: 2, order: 0)
+    let fund = try account("Index Fund", "INR", group: 2, order: 1, variant: .investment)
+    let oldWallet = try account("Old Wallet", "INR", group: 0, order: 2, hidden: true)
+    for item in [cash, bank, card, travel, savings, fund, oldWallet] {
+      try app.createAccount(item)
+    }
     let salary = try category("Salary", .income)
     let food = try category("Food", .expense)
-    let groceries = try category("Groceries", .expense)
+    let groceries = try category("Groceries", .expense, parent: food)
     let rent = try category("Rent", .expense)
     let transport = try category("Transport", .expense)
     let fun = try category("Entertainment", .expense)
@@ -136,6 +152,8 @@ package enum LedgerDemoTour {
       (transport, cash, ["120.00", "95.00", "260.00", "80.00"]),
       (fun, card, ["899.00", "450.00"]),
     ]
+    try add(.income, savings, nil, "150000.00", 8, 1, note: "Opening balance")
+    try add(.income, fund, nil, "220000.00", 8, 1, note: "Opening balance")
     for month in 8...10 {
       try add(.income, bank, salary, "85000.00", month, 1, note: "Monthly salary")
       try add(.expense, bank, rent, "24000.00", month, 3, note: "Flat rent")

@@ -257,19 +257,84 @@ func accessibilityTree(of pid: pid_t, windowIdentifier: String) -> [SpokenElemen
   return found
 }
 
+/// An element's Accessibility property read in-process through its Objective-C getter (such
+/// as `accessibilityLabel`), which is how SwiftUI's elements answer.
+@MainActor
+func inProcessProperty(_ element: NSObject, _ getter: String) -> Any? {
+  let selector = Selector(getter)
+  guard element.responds(to: selector) else { return nil }
+  return element.perform(selector)?.takeUnretainedValue()
+}
+
+@MainActor
+private func inProcessText(_ element: NSObject, _ getter: String) -> String {
+  guard let value = inProcessProperty(element, getter) else { return "" }
+  return (value as? String) ?? (value as? NSAttributedString)?.string ?? "\(value)"
+}
+
+/// The same reading as `accessibilityTree`, taken in-process on the main thread from the
+/// window's own Accessibility objects. Reading this process's UI through the system API runs
+/// AppKit and SwiftUI code in the reading thread, which crashes now and then; the screenshot
+/// captures read this way instead.
+@MainActor
+func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
+  var found: [SpokenElement] = []
+  func visit(_ element: NSObject, depth: Int) {
+    guard depth < 80 else { return }
+    let linked = inProcessProperty(element, "accessibilityTitleUIElement") as? NSObject
+    found.append(
+      SpokenElement(
+        role: inProcessText(element, "accessibilityRole"),
+        subrole: inProcessText(element, "accessibilitySubrole"),
+        label: inProcessText(element, "accessibilityLabel"),
+        title: inProcessText(element, "accessibilityTitle"),
+        value: inProcessText(element, "accessibilityValue"),
+        placeholder: inProcessText(element, "accessibilityPlaceholderValue"),
+        identifier: inProcessText(element, "accessibilityIdentifier"),
+        linkedTitle: linked.map { inProcessText($0, "accessibilityValue") } ?? ""))
+    for child in inProcessProperty(element, "accessibilityChildren") as? [NSObject] ?? [] {
+      visit(child, depth: depth + 1)
+    }
+    // A list's rows are made on demand and aren't among its children here; read the rows
+    // on screen.
+    if let table = element as? NSTableView {
+      let rows = table.rows(in: table.visibleRect)
+      for row in rows.location..<(rows.location + rows.length) {
+        if let rowView = table.rowView(atRow: row, makeIfNecessary: false) {
+          visit(rowView, depth: depth + 1)
+        }
+      }
+    }
+  }
+  visit(window, depth: 0)
+  return found
+}
+
 /// The root view in a window with the synthetic demo ledger open on one screen.
 @MainActor
 final class MountedRoot {
   let window: NSWindow
   private let directory: URL
   private let suite: String
-  private let identifier = "a11y-window-\(UUID().uuidString)"
+  let identifier = "a11y-window-\(UUID().uuidString)"
   /// Set when an Accessibility read ran out of time; its reader thread may still be running.
   private(set) var readTimedOut = false
   /// The empty-ledger prompt is showing instead of the screen.
   private(set) var showsNoLedgerPrompt = false
+  /// Read the Accessibility tree in-process on the main thread (see
+  /// `inProcessAccessibilityTree`) instead of through the system API from another thread.
+  /// Only the captures use this, to check what is on screen. It is not evidence of what
+  /// VoiceOver hears: the VoiceOver label checks keep the default (false) and go through the
+  /// real Accessibility API.
+  let readsInProcess: Bool
 
-  init(showing destination: AppDestination) async throws {
+  /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
+  init(
+    showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
+    size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
+    readsInProcess: Bool = false
+  ) async throws {
+    self.readsInProcess = readsInProcess
     Self.launchOnce()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
@@ -278,24 +343,40 @@ final class MountedRoot {
     defer { if !mounted { try? FileManager.default.removeItem(at: directory) } }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let ledger = directory.appendingPathComponent("Demo Household.sqlite")
-    try LedgerDemoTour.makeDemoLedger(at: ledger)
+    if withLedger { try LedgerDemoTour.makeDemoLedger(at: ledger) }
     suite = "LedgerAtlasMacUITests.a11y.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     let bookmarks = SecurityScopedBookmarkStore(
       defaults: defaults, makeBookmark: { Data($0.path.utf8) },
       resolveBookmark: { URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)) })
-    try bookmarks.save(ledger, for: .canonicalLedger)
-    let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
+    if withLedger { try bookmarks.save(ledger, for: .canonicalLedger) }
+    let lock =
+      appLock ?? LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
     let root = LedgerAtlasRootView(
       initialSelection: destination, appLock: lock,
       productSettings: .init(startScreen: destination), bookmarkStore: bookmarks,
+      // A widget store in the test folder, as the app has its App Group container. Without
+      // one every screen reports "Widget status could not be published".
+      widgetProjectionPublisher: RedactedWidgetProjectionPublisher(
+        store: .init(containerURL: directory)),
       scopeStarter: { _ in true }, scopeStopper: { _ in })
+    // `appWindow` builds the window the way the app's WindowGroup does (full-size content
+    // under a hosting controller), so the detail column starts beside the sidebar instead of
+    // under it. Captures need that; the Accessibility checks don't.
     window = FullSizeTestWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 1100, height: 900),
-      styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+      contentRect: NSRect(origin: .zero, size: size),
+      styleMask: appWindow
+        ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        : [.titled, .closable, .resizable],
+      backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.setAccessibilityIdentifier(identifier)
-    window.contentView = NSHostingView(rootView: root)
+    if appWindow {
+      window.contentViewController = NSHostingController(rootView: root)
+      window.setContentSize(size)
+    } else {
+      window.contentView = NSHostingView(rootView: root)
+    }
     window.makeKeyAndOrderFront(nil)
     mounted = true
     do { try await settle() } catch { close(); throw error }
@@ -353,20 +434,78 @@ final class MountedRoot {
     launched = true
     NSApplication.shared.setActivationPolicy(.accessory)
     NSApplication.shared.finishLaunching()
+    keepTestRunLoopAlive()
+  }
+
+  nonisolated(unsafe) private static var loopDepth = 0
+  /// How many times the test runner's run of the main loop was stopped and run again.
+  nonisolated(unsafe) static var runLoopRestarts = 0
+  static let maxRunLoopRestarts = 20
+
+  /// The test process lives inside the test runner's own run of the main run loop, and that
+  /// run should never end: when the tests finish, the runner calls exit() itself. Something in
+  /// AppKit or SwiftUI sometimes stops it after a sheet closes, which ended the whole test
+  /// process with status 0 partway through. This watches the main run loop and, when that
+  /// outermost run ends, logs it and runs the loop again. Nested runs are counted and left
+  /// alone. The outermost run was entered before this observer existed, so it sits at -1;
+  /// that holds because `launchOnce` first runs from a test body, inside the runner's own run.
+  /// Restarts nest on the stack, so after `maxRunLoopRestarts` the stop is let through and the
+  /// CI summary check fails the job. Finding the caller is #151.
+  /// Run loop observers aren't called while they are already firing, so each restart hands
+  /// over to a fresh observer before running the loop again.
+  private static func keepTestRunLoopAlive() {
+    let activities = CFRunLoopActivity.entry.rawValue | CFRunLoopActivity.exit.rawValue
+    let observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) {
+      observer, activity in
+      if activity == .entry {
+        loopDepth += 1
+        return
+      }
+      loopDepth -= 1
+      guard loopDepth < 0, runLoopRestarts < maxRunLoopRestarts else { return }
+      runLoopRestarts += 1
+      print("CAPTURE the test runner's run of the main loop was stopped (\(runLoopRestarts)); running it again")
+      CFRunLoopObserverInvalidate(observer)
+      keepTestRunLoopAlive()
+      CFRunLoopRun()
+    }
+    CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
   }
 
   func close() {
     window.orderOut(nil)
-    window.contentView = nil
-    window.close()
+    autoreleasepool {
+      window.contentViewController = nil
+      window.contentView = nil
+      window.close()
+    }
     UserDefaults.standard.removePersistentDomain(forName: suite)
+    // SwiftUI may release the open ledger a little later; unlinking its file first is fine
+    // since #150 keeps the pinned file's name alive until the connection closes.
     try? FileManager.default.removeItem(at: directory)
   }
+
 
   /// Every element in this window's tree, read the way VoiceOver reads it.
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
   /// there, so pump it until the background read finishes.
   func accessibilityElements() -> [SpokenElement] {
+    if readsInProcess {
+      // SwiftUI only builds its accessibility elements once an Accessibility client has asked
+      // for them. Run alone, nothing else in the process has, and the in-process tree is
+      // just the window title; so ask once through the system API first.
+      if !Self.systemReadDone {
+        Self.systemReadDone = true
+        _ = systemAccessibilityElements()
+      }
+      return inProcessAccessibilityTree(of: window)
+    }
+    return systemAccessibilityElements()
+  }
+
+  nonisolated(unsafe) private static var systemReadDone = false
+
+  private func systemAccessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
     let identifier = identifier
@@ -430,4 +569,3 @@ private final class FullSizeTestWindow: NSWindow {
   #expect(checked > 0, "no animations found; is the Sources path right?")
   #expect(offenders.isEmpty, "\(offenders)")
 }
-

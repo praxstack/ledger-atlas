@@ -124,8 +124,16 @@ jobs:
       # waitUntilExit) while another test-side task finishes the work. On a 3-core
       # runner the parallel Swift Testing pool runs out of threads and every test
       # stalls (seen on run 41355070020). Serial runs keep a free thread.
+      # A test process that quits early (exit 0, no summary) must not pass: require Swift
+      # Testing's closing "Test run with N tests ... passed" line.
       - name: swift test
-        run: swift test --no-parallel
+        run: |
+          set -o pipefail
+          swift test --no-parallel 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          grep -qE "Test run with [0-9]+ tests? .*passed" "$RUNNER_TEMP/swift-test.log" || {
+            echo "::error::swift test ended without its passing summary; the test process stopped early"
+            exit 1
+          }
         timeout-minutes: 30
         env:
           LEDGER_ATLAS_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
@@ -134,10 +142,25 @@ jobs:
       - name: Show test crash report
         if: failure()
         run: |
+          # The crash reporter writes the report a few seconds after the process dies.
+          for _ in $(seq 1 20); do
+            ls ~/Library/Logs/DiagnosticReports/*.ips >/dev/null 2>&1 && break
+            sleep 2
+          done
           for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -1); do
             echo "== $f"
             python3 scripts/ci/print-crash.py "$f" || head -c 20000 "$f"
           done
+      # MACV2-21 (#57): the synthetic UI captures for the 25 screenshot traceability records
+      # and key states, light and dark. Uploaded even when a check fails, to see what went wrong.
+      - name: Upload UI captures
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: ui-captures
+          path: ${{ runner.temp }}/test-artifacts/ui-captures
+          retention-days: 30
+          if-no-files-found: ignore
       - name: Upload test captures on failure
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
