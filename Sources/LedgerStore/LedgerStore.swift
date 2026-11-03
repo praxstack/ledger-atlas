@@ -374,8 +374,18 @@ public final class LedgerStore {
     try openForMutation(at: url, expectedIdentity: nil, testing: nil)
   }
 
+  private typealias CheckedRead = (
+    mark: CanonicalLedgerHealth.ImportGraphMark, snapshot: LedgerReadSnapshot
+  )
+
+  /// `contentDigest` is the SHA-256 of the file's bytes, read by the caller while the file had
+  /// `expectedIdentity`, whose change time is old enough that any later write would move it.
+  /// When this build has already fully checked those exact bytes under the ledger's trust key
+  /// (a stamp in `verifiedFiles`), and the file still has that identity once the check holds
+  /// its read lock, the slow checks are skipped.
   package static func openForMutation(
-    at url: URL, expectedIdentity: stat? = nil,
+    at url: URL, expectedIdentity: stat? = nil, contentDigest: String? = nil,
+    verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs = CanonicalLedgerHealth.verifiedFiles,
     testing mutationTestHook: MutationTestHook?
   ) throws -> LedgerStore {
     if let expectedIdentity { try validatePath(url, matches: expectedIdentity) }
@@ -449,13 +459,58 @@ public final class LedgerStore {
         throw Error.incompatibleCanonicalStore
       }
       try validateCanonicalJournalMode(on: database)
-      try validateCanonicalSchema(on: database)
-      let stateBeforeCheck = fileState(of: database)
-      let checked = try CanonicalLedgerHealth.validateReading(
-        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
-        remembering: .shared)
+      let trustKey = try LedgerReceiptTrust.key(for: url, create: false)
+      // A file with the same inode, size, modification and change time as when it was digested
+      // still has the digested bytes: any write moves its change time (the caller only passes a
+      // digest for a file whose change time is old enough for that to hold), and only a change
+      // to the system clock could set it back.
+      func stillDigested() -> Bool {
+        var current = stat()
+        return expectedIdentity.map { lstat(url.path, &current) == 0 && sameFile($0, current) }
+          ?? false
+      }
+      let fileStamp = contentDigest.flatMap { digest in
+        trustKey.flatMap {
+          CanonicalLedgerHealth.verifiedFileStamp(contentDigest: digest, trustKey: $0)
+        }
+      }
+      // A remembered file is checked in one read transaction, so nothing can write it between
+      // proving its bytes are the digested ones and reading them.
+      try execute("BEGIN", on: database)
+      var verified: (state: FileState?, checked: CheckedRead)?
+      do {
+        try validateCanonicalSchema(
+          on: database, checkingForeignKeys: false, checkingIntegrity: false)
+        // The reads above hold the shared lock, so the file can't change while this one reads.
+        if let fileStamp, verifiedFiles.contains(fileStamp), stillDigested() {
+          verified = (
+            fileState(of: database),
+            try CanonicalLedgerHealth.validateReading(
+              database, trustKey: trustKey, remembering: .shared, fileAlreadyVerified: true)
+          )
+        }
+        try execute("COMMIT", on: database)
+      } catch {
+        sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+        throw error
+      }
+      let stateBeforeCheck: FileState?
+      let checked: CheckedRead
+      if let verified {
+        (stateBeforeCheck, checked) = verified
+      } else {
+        // The full check keeps its own transactions, so a save on another connection never
+        // waits for the whole check.
+        try validateCanonicalSchema(on: database)
+        stateBeforeCheck = fileState(of: database)
+        checked = try CanonicalLedgerHealth.validateReading(
+          database, trustKey: trustKey, remembering: .shared)
+      }
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
+      // Remember the bytes only if nothing wrote the file from its digest to the end of the
+      // check, so the bytes checked are the bytes digested.
+      if verified == nil, let fileStamp, stillDigested() { verifiedFiles.insert(fileStamp) }
       let store = LedgerStore(
         mutableDatabase: database, identity: identity, url: url,
         registration: registration, mutationTestHook: mutationTestHook,

@@ -122,10 +122,14 @@ public enum LedgerStoreLifecycle {
     try open(at: url, testing: nil)
   }
 
-  package static func open(at url: URL, testing hook: TestHook?) throws -> Result {
-    do { return try openImpl(at: url, hook: hook) } catch let error as Error { throw error } catch {
-      throw Error.interrupted
-    }
+  /// `verifiedFiles` lets a test use its own stamps instead of the process-wide ones.
+  package static func open(
+    at url: URL, testing hook: TestHook?,
+    verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs = CanonicalLedgerHealth.verifiedFiles
+  ) throws -> Result {
+    do {
+      return try openImpl(at: url, hook: hook, verifiedFiles: verifiedFiles)
+    } catch let error as Error { throw error } catch { throw Error.interrupted }
   }
 
   /// Where an upgrade keeps the untouched pre-upgrade ledger.  The `.v10-recovery` suffix is
@@ -269,7 +273,9 @@ public enum LedgerStoreLifecycle {
     }
   }
 
-  private static func openImpl(at url: URL, hook: TestHook?) throws -> Result {
+  private static func openImpl(
+    at url: URL, hook: TestHook?, verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs
+  ) throws -> Result {
     let destination = try Destination(url)
     defer { Darwin.close(destination.parentDescriptor) }
     let lease = try LifecycleLease(destination)
@@ -296,7 +302,11 @@ public enum LedgerStoreLifecycle {
       try requireInspectableCompanions(at: url, databaseDescriptor: source.descriptor)
       try lease.requireBound(destination)
       let store: LedgerStore
-      do { store = try openPublished(at: url, expected: source.identity) } catch {
+      do {
+        store = try openPublished(
+          at: url, expected: source.identity, contentDigest: source.identityBoundDigest,
+          verifiedFiles: verifiedFiles)
+      } catch {
         if recovered != nil {
           let recoveryLeaf = recovered!.url.lastPathComponent
           throw Error.publicationCompleted(
@@ -1771,16 +1781,20 @@ public enum LedgerStoreLifecycle {
     let url: URL
     let contentDigest: String
     let inactiveCompanions: InactiveCompanions?
+    /// `contentDigest`, when the file's change time is old enough that an unchanged identity
+    /// proves unchanged bytes (see `openPinned`); otherwise nil.
+    let identityBoundDigest: String?
 
     init(
       descriptor: Int32, identity: stat, url: URL, contentDigest: String,
-      inactiveCompanions: InactiveCompanions? = nil
+      inactiveCompanions: InactiveCompanions? = nil, identityBoundDigest: String? = nil
     ) {
       self.descriptor = descriptor
       self.identity = identity
       self.url = url
       self.contentDigest = contentDigest
       self.inactiveCompanions = inactiveCompanions
+      self.identityBoundDigest = identityBoundDigest
     }
   }
 
@@ -1813,9 +1827,20 @@ public enum LedgerStoreLifecycle {
         ? captureInactiveCompanionFiles(at: url)
         : captureInactiveCompanions(at: url, databaseDescriptor: descriptor))
       try requirePath(url, matches: value)
+      // The digest must be of the bytes the file had at `value`, the identity callers check
+      // against later.
+      let digestStarted = time(nil)
+      let digested = try digestedState(descriptor)
+      guard sameFile(value, digested.identity) else { throw Error.pathChanged }
+      // An unchanged identity proves unchanged bytes only if any later write must move the
+      // change time. A write lands at or after `digestStarted`, so it does on any volume whose
+      // timestamps are finer than two seconds, once the file's change time is older than that.
+      // This assumes the file's times come from this Mac's clock, as on a local volume.
+      let identityBound =
+        value.st_ctimespec.tv_sec + 2 < digestStarted ? digested.digest : nil
       return PinnedFile(
-        descriptor: descriptor, identity: value, url: url, contentDigest: try digest(descriptor),
-        inactiveCompanions: companions)
+        descriptor: descriptor, identity: value, url: url, contentDigest: digested.digest,
+        inactiveCompanions: companions, identityBoundDigest: identityBound)
     } catch {
       Darwin.close(descriptor)
       throw error
@@ -2065,10 +2090,14 @@ public enum LedgerStoreLifecycle {
     case descriptor(Int32, identity: stat)
   }
 
-  private static func openPublished(at url: URL, expected: stat) throws -> LedgerStore {
+  private static func openPublished(
+    at url: URL, expected: stat, contentDigest: String? = nil,
+    verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs = CanonicalLedgerHealth.verifiedFiles
+  ) throws -> LedgerStore {
     do {
       let store = try LedgerStore.openForMutation(
-        at: url, expectedIdentity: expected, testing: nil)
+        at: url, expectedIdentity: expected, contentDigest: contentDigest,
+        verifiedFiles: verifiedFiles, testing: nil)
       guard store.matchesPinnedInode(expected) else { throw Error.pathChanged }
       return store
     } catch let error as Error { throw error } catch { throw Error.invalidStore }
