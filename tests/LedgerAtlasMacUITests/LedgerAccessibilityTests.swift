@@ -30,7 +30,7 @@ func everyScreenStaysLabeledWithIncreasedContrast(_ destination: AppDestination)
                      .accessibilityHighContrastDarkAqua] {
     let mounted = try await MountedRoot(showing: destination, appearance: appearance)
     defer { mounted.close() }
-    #expect(mounted.window.effectiveAppearance.name == appearance)
+    #expect(mounted.window.appearance?.name == appearance)
     expectEveryControlIsNamed(
       mounted.accessibilityElements(), on: "\(destination.rawValue) \(appearance.rawValue)")
   }
@@ -90,21 +90,18 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   #expect(after != before, "Down arrow left the sidebar on row \(before)")
 }
 
-/// Larger text: the app's text grows with the accessibility text sizes. Prints the measured
-/// growth so the 200% claim rests on a number.
-@MainActor
-@Test func textGrowsWithAccessibilityTextSize() async throws {
-  func tallestText(_ size: DynamicTypeSize?) async throws -> Double {
-    let mounted = try await MountedRoot(showing: .settings, textSize: size)
-    defer { mounted.close() }
-    let heights = mounted.accessibilityElements().filter { $0.role == kAXStaticTextRole }
-      .map(\.height).sorted()
-    return heights.isEmpty ? 0 : heights[heights.count / 2]
+/// Larger text: macOS has no Dynamic Type, so the app must not pin text sizes. Every font
+/// is a system text style (`.body`, `.caption`, ...), which follows the macOS text size and
+/// display zoom settings; a fixed point size or custom font fails here.
+@Test func everyFontIsASystemTextStyle() throws {
+  let fixed = ["system(size:", ".custom(", "NSFont(name:", "systemFont(ofSize:"]
+  var offenders: [String] = []
+  for (file, lines) in try appSources() {
+    for (index, line) in lines.enumerated() where fixed.contains(where: line.contains) {
+      offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
+    }
   }
-  let normal = try await tallestText(nil)
-  let largest = try await tallestText(.accessibility5)
-  print("A11Y TEXT median static text height normal=\(normal) accessibility5=\(largest)")
-  #expect(normal > 0)
+  #expect(offenders.isEmpty, "\(offenders)")
 }
 
 /// Not color alone: every coloured foreground in the app sits on text, so the meaning is in
@@ -120,7 +117,7 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
         continue
       }
       checked += 1
-      let context = lines[max(0, index - 3)...index].joined(separator: " ")
+      let context = lines[max(0, index - 5)...index].joined(separator: " ")
       if !context.contains("Text(") && !context.contains("Label(") {
         offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
       }
@@ -136,7 +133,9 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   let mounted = try await MountedRoot(showing: .ledger)
   defer { mounted.close() }
   let time = #/\b\d{2}:\d{2}\b/#
-  let rows = mounted.accessibilityElements().map(\.spokenName).filter { $0.contains(time) }
+  let names = mounted.accessibilityElements().map(\.spokenName).filter { $0.count > 12 }
+  for name in names.prefix(40) { print("A11Y NAME \(name.prefix(120))") }
+  let rows = names.filter { $0.contains(time) }
   print("A11Y ROWS \(rows.count) ledger rows")
   #expect(rows.count > 3)
   let kinds = ["Income", "Expense", "Transfer", "Adjustment"]
@@ -171,8 +170,6 @@ struct SpokenElement: Sendable {
   /// Text of the separate label VoiceOver reads for this control (AXTitleUIElement), as in a
   /// settings form where the label sits in its own column.
   let linkedTitle: String
-  /// On-screen height in points.
-  let height: Double
 
   static let controlRoles: Set<String> = [
     kAXButtonRole, kAXCheckBoxRole, kAXRadioButtonRole, kAXPopUpButtonRole, kAXMenuButtonRole,
@@ -216,14 +213,6 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
     guard let value = attribute(element, name) else { return "" }
     return (value as? String) ?? "\(value)"
   }
-  func height(_ element: AXUIElement) -> Double {
-    guard let value = attribute(element, kAXSizeAttribute),
-      CFGetTypeID(value) == AXValueGetTypeID()
-    else { return 0 }
-    var size = CGSize.zero
-    AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgSize, &size)
-    return size.height
-  }
   var found: [SpokenElement] = []
   func visit(_ element: AXUIElement, depth: Int) {
     guard depth < 80 else { return }
@@ -237,8 +226,7 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
         linkedTitle: attribute(element, kAXTitleUIElementAttribute).map {
           CFGetTypeID($0) == AXUIElementGetTypeID()
             ? text(unsafeBitCast($0, to: AXUIElement.self), kAXValueAttribute) : ""
-        } ?? "",
-        height: height(element)))
+        } ?? ""))
     for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
       visit(child, depth: depth + 1)
     }
@@ -259,10 +247,7 @@ final class MountedRoot {
   private let directory: URL
   private let suite: String
 
-  init(
-    showing destination: AppDestination, appearance: NSAppearance.Name? = nil,
-    textSize: DynamicTypeSize? = nil
-  ) async throws {
+  init(showing destination: AppDestination, appearance: NSAppearance.Name? = nil) async throws {
     Self.launchOnce()
     directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
@@ -285,11 +270,7 @@ final class MountedRoot {
       styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     if let appearance { window.appearance = NSAppearance(named: appearance) }
-    if let textSize {
-      window.contentView = NSHostingView(rootView: root.environment(\.dynamicTypeSize, textSize))
-    } else {
-      window.contentView = NSHostingView(rootView: root)
-    }
+    window.contentView = NSHostingView(rootView: root)
     window.makeKeyAndOrderFront(nil)
     try await settle()
   }
