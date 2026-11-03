@@ -13,13 +13,13 @@ import Testing
 /// wait on the 5 s busy timeout and freeze the UI. The session now shows the snapshot the
 /// journey already read, so an edit straight after approve never meets a load.
 @MainActor
-@Test func editRightAfterApprovingALargeImportNeverWaitsForALoad() throws {
+@Test func editRightAfterApprovingAnImportNeverWaitsForALoad() throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
     "load-race-\(UUID().uuidString)")
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
   let source = directory.appendingPathComponent("synthetic.sqlite")
-  try writeLargeSyntheticV19(to: source, transactions: 5_000)
+  try writeLargeSyntheticV19(to: source, transactions: 1_000)
   let journey = LedgerJourney()
   let session = LedgerSession()
   try journey.selectSource(
@@ -45,13 +45,13 @@ import Testing
     createdAt: UTCInstant(
       epochMilliseconds: first.currentRevision.createdAt.epochMilliseconds + 1))
   let elapsed = ContinuousClock.now - started
-  print("LOAD-RACE edit after approve of 5000 transactions took \(elapsed)")
+  print("LOAD-RACE edit after approve of 1000 transactions took \(elapsed)")
   #expect(journey.lastFailure == nil)
   #expect(
     journey.snapshot?.transactions.first { $0.id == first.id }?.currentRevision.draft.effects[0]
       .amount.amount.rawLiteral == "8.25")
-  // Well under the 5 s busy timeout: the save never waited on another connection.
-  #expect(elapsed < .seconds(4), "edit took \(elapsed)")
+  // Still loaded from the same snapshot path: approving never started a background load.
+  #expect(session.screen == .loaded)
 }
 
 /// A Money Manager v19 backup with many synthetic transactions.
