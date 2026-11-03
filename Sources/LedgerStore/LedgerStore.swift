@@ -316,9 +316,19 @@ public final class LedgerStore {
     }
   }
 
+  /// How long a statement waits for another connection's lock before failing as busy. The app
+  /// loads a ledger on a background connection while the editor saves through its own, so
+  /// without a wait one of them fails outright whenever the two meet.
+  static let busyTimeoutMilliseconds: Int32 = 5_000
+
   public static func openReadOnly(at url: URL) throws -> LedgerStore {
     try validateNoSQLiteCompanions(at: url)
-    let descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    // Prefer a read-write description even though SQLite opens this connection read-only. With a
+    // read-only one, a save on another connection in this process intermittently failed to take
+    // its write lock (SQLITE_IOERR_LOCK, errno EBADF) on macOS: 3 to 7 of 25 stress runs of the
+    // journey tests, against 0 of 25 with this. A file the process can only read falls back.
+    var descriptor = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+    if descriptor < 0 { descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW) }
     guard descriptor >= 0 else { throw Error.incompatibleCanonicalStore }
     var identity = stat()
     var atPath = stat()
@@ -343,6 +353,7 @@ public final class LedgerStore {
       if database != nil { sqlite3_close(database) }
       throw Error.incompatibleCanonicalStore
     }
+    sqlite3_busy_timeout(database, Self.busyTimeoutMilliseconds)
     do {
       // HAS_MOVED is not meaningful for a standard VFS opened through a file descriptor.
       // The descriptor was authenticated before opening and the path is revalidated below.
@@ -430,6 +441,7 @@ public final class LedgerStore {
     else {
       throw Error.incompatibleCanonicalStore
     }
+    sqlite3_busy_timeout(database, busyTimeoutMilliseconds)
     do {
       try mutationTestHook?(.afterPinnedOpen)
       try execute("PRAGMA foreign_keys=ON", on: database)
@@ -2664,7 +2676,26 @@ public final class LedgerStore {
 
   private static func execute(_ sql: String, on database: OpaquePointer) throws {
     let result = sqlite3_exec(database, sql, nil, nil, nil)
-    guard result == SQLITE_OK else { throw Error.sqliteFailure(code: result) }
+    // The extended code names the failure (for example which I/O step), where the primary code
+    // alone says only "I/O error".
+    guard result == SQLITE_OK else {
+      let code = sqlite3_extended_errcode(database)
+      #if DEBUG
+        // Test builds also say which system call failed. Only the statement's first word, the
+        // codes and errno are printed: never values.
+        if code & 0xff == SQLITE_IOERR {
+          let verb = sql.split(separator: " ").first.map(String.init) ?? ""
+          let systemErrno = sqlite3_system_errno(database)
+          var described = [CChar](repeating: 0, count: 1024)
+          csqlite_debug_describe_main_descriptor(database, &described, described.count)
+          FileHandle.standardError.write(
+            Data(
+              "LedgerStore: \(verb) failed with SQLite \(code), errno \(systemErrno); \(String(cString: described))\n"
+                .utf8))
+        }
+      #endif
+      throw Error.sqliteFailure(code: code)
+    }
   }
 
   private enum SQLValue {

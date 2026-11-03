@@ -1,6 +1,7 @@
 #include "CSQLite.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -791,4 +792,50 @@ int csqlite_close_pinned(sqlite3 *database, void *registration) {
     int unregister_result = sqlite3_vfs_unregister(&context->vfs);
     if (unregister_result == SQLITE_OK) csqlite_free_pinned_registration(context);
     return unregister_result;
+}
+
+void csqlite_debug_describe_main_descriptor(sqlite3 *database, char *output, size_t size) {
+    if (output == NULL || size == 0) return;
+    output[0] = 0;
+    sqlite3_file *file = NULL;
+    if (database == NULL
+        || sqlite3_file_control(database, "main", SQLITE_FCNTL_FILE_POINTER, &file) != SQLITE_OK
+        || file == NULL || file->pMethods == NULL) {
+        snprintf(output, size, "no main file");
+        return;
+    }
+    csqlite_pinned_registration *registration = NULL;
+    int pinned = file->pMethods == &csqlite_pinned_io_methods;
+    if (pinned) {
+        csqlite_pinned_file *wrapper = csqlite_pinned_file_context(file);
+        registration = wrapper->context;
+        file = wrapper->inner;
+    }
+    // SQLite's unixFile starts with pMethods, pVfs and pInode, then the descriptor.
+    int descriptor = *(int *)((unsigned char *)file + 3 * sizeof(void *));
+    struct stat main_identity = {0};
+    int flags = fcntl(descriptor, F_GETFL);
+    int flags_errno = flags < 0 ? errno : 0;
+    int have_identity = fstat(descriptor, &main_identity) == 0;
+    // A closed main descriptor is the case worth describing, so fall back to the pinned file's
+    // recorded identity to still find other handles on the same file.
+    if (!have_identity && registration != NULL) {
+        main_identity = registration->database_identity;
+        have_identity = 1;
+    }
+    int length = snprintf(
+        output, size, "%s fd %d flags %d errno %d ino %llu;", pinned ? "pinned" : "plain",
+        descriptor, flags, flags_errno,
+        have_identity ? (unsigned long long)main_identity.st_ino : 0ULL);
+    // Scan the whole descriptor table, capped so an unlimited table cannot stall a failing test.
+    long table_size = sysconf(_SC_OPEN_MAX);
+    int limit = table_size > 0 ? (int)(table_size < 65536 ? table_size : 65536) : 1024;
+    for (int other = 0; other < limit && length > 0 && (size_t)length < size; other++) {
+        struct stat value = {0};
+        if (other == descriptor || fstat(other, &value) != 0) continue;
+        if (!have_identity || !csqlite_same_inode(&value, &main_identity)) continue;
+        length += snprintf(
+            output + length, size - (size_t)length, " also fd %d flags %d;", other,
+            fcntl(other, F_GETFL));
+    }
 }
