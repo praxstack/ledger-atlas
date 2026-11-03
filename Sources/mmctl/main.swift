@@ -7,6 +7,7 @@ private let usageExit: Int32 = 64
 private let dataExit: Int32 = 65
 private let operationExit: Int32 = 4
 private let zeroLossExit: Int32 = 5
+private let unsupportedExit: Int32 = 3
 
 private enum CLIInputError: Error {
   case invalidArguments
@@ -442,6 +443,27 @@ guard let command = arguments.first else {
   exit(0)
 }
 
+/// Ledger Atlas does not write other apps' formats. Asking for one is refused with a stable
+/// code, and the output path is never created.
+private func runExport(_ arguments: [String]) -> Never {
+  let usage = "usage: mmctl export --format <mm-v19> --output <path>"
+  let parsed: ParsedOptions
+  do {
+    parsed = try parseOptions(
+      arguments.dropFirst(), valueNames: ["--format", "--output"], flagNames: [])
+  } catch { writeUsage(usage) }
+  guard let name = parsed.values["--format"], let output = parsed.values["--output"],
+    let format = VendorExportFormat(rawValue: name)
+  else { writeUsage(usage) }
+  do {
+    try VendorExport.export(format, to: URL(fileURLWithPath: output))
+  } catch {
+    let code = (error as? VendorExportError)?.rawValue ?? "export_failed"
+    FileHandle.standardError.write(Data("mmctl export: \(code)\n".utf8))
+    exit(unsupportedExit)
+  }
+}
+
 private func runCertify(_ arguments: [String]) -> Never {
   let usage =
     "usage: mmctl certify --input <backup> --work-dir <empty-dir> --time-zone <iana-id|fixed:SECONDS> --locale <locale> [--oracle <json-file>] [--json]"
@@ -499,6 +521,7 @@ case "coverage": runCoverage(arguments)
 case "stage": runStage(arguments)
 case "reconcile": runReconcile(arguments)
 case "certify": runCertify(arguments)
+case "export": runExport(arguments)
 default:
-  writeUsage("usage: mmctl <inspect|classify|coverage|stage|reconcile|certify> ...")
+  writeUsage("usage: mmctl <inspect|classify|coverage|stage|reconcile|certify|export> ...")
 }

@@ -63,6 +63,46 @@ struct MMCTLTests {
     }
   }
 
+  @Test("a Money Manager format export is refused and writes nothing")
+  func vendorExportIsRefused() throws {
+    try withCLIDirectory { directory in
+      let sentinel = "PRIVATE_EXPORT_SENTINEL"
+      let missing = directory.appendingPathComponent("\(sentinel).mmbak")
+      let refused = try runMMCTL(["export", "--format", "mm-v19", "--output", missing.path])
+
+      #expect(refused.status == 3)
+      #expect(refused.stderr.contains("vendor_export_unsupported"))
+      #expect(!FileManager.default.fileExists(atPath: missing.path))
+      #expect(!refused.combined.contains(sentinel))
+
+      // An existing file at the destination is left exactly as it was.
+      let existing = directory.appendingPathComponent("existing.mmbak")
+      try Data("synthetic-only".utf8).write(to: existing)
+      let again = try runMMCTL(["export", "--format", "mm-v19", "--output", existing.path])
+      #expect(again.status == 3)
+      #expect(try Data(contentsOf: existing) == Data("synthetic-only".utf8))
+      #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["existing.mmbak"])
+
+      let unknown = try runMMCTL(["export", "--format", sentinel, "--output", missing.path])
+      #expect(unknown.status == 64)
+      #expect(!unknown.combined.contains(sentinel))
+      #expect(!FileManager.default.fileExists(atPath: missing.path))
+    }
+  }
+
+  @Test("the library refuses every vendor export format")
+  func vendorExportLibraryRefuses() throws {
+    let destination = FileManager.default.temporaryDirectory
+      .appendingPathComponent("vendor-export-\(UUID().uuidString).mmbak")
+    for format in VendorExportFormat.allCases {
+      #expect(throws: VendorExportError.vendorExportUnsupported) {
+        try VendorExport.export(format, to: destination)
+      }
+    }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(VendorExport.notice.contains("Money Manager"))
+  }
+
   @Test("malformed arguments return usage without reflecting input")
   func malformedArgumentsAreRedacted() throws {
     let sentinel = "PRIVATE_BAD_ARGUMENT"

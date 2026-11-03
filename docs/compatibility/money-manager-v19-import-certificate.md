@@ -78,5 +78,12 @@ Ledger Atlas v1 never writes Money Manager files. Import is one way: the source 
 opened read-only and `source_unchanged` proves it was not touched. An export the app
 cannot read (a newer schema, a missing contract table, an unknown container) is refused
 with a visible reason before anything is staged, and no partial import is kept.
-Writing a Money Manager backup back out is out of scope for v1. An explicit refusal of a
-Money Manager format export request, with its own test, is tracked in #135.
+Writing a Money Manager backup back out is out of scope for v1, and asking for it is
+refused explicitly:
+
+- `VendorExport.export(.moneyManagerV19, to:)` always throws `vendor_export_unsupported`
+  and never opens, creates or replaces the destination.
+- `mmctl export --format mm-v19 --output <path>` exits 3 with that code and writes nothing.
+  An unknown format is a usage error (exit 64).
+- The Backup screen says that backups and packages are Ledger Atlas files and that
+  exporting to Money Manager format is not supported.

@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import LedgerCore
 import LedgerStore
+internal import MMImport
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -167,6 +168,8 @@ struct BackupSurface: View {
         Button("Import portable package…", action: restorePackage)
           .accessibilityLabel("Import portable package")
       }
+      Text(VendorExport.notice).font(.caption).foregroundStyle(.secondary)
+        .accessibilityLabel(VendorExport.notice)
       if exportXLSX != nil || importXLSX != nil || reset != nil {
         HStack {
           if let exportXLSX {
