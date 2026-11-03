@@ -16,8 +16,8 @@ import Foundation
 package final class LedgerFileStamper: @unchecked Sendable {
   /// How long saves must be quiet before the file is checked and hashed. Longer than two
   /// seconds, so that a write during the hash moves the change time even on a volume with
-  /// coarse timestamps; ten, so the check's read lock (about a second on a ~900 MB ledger)
-  /// rarely delays a save while the user is still editing.
+  /// coarse timestamps; ten, so the check (which holds a read lock for 5-6 s on a ~900 MB
+  /// ledger) rarely runs while the user is still editing. A save that comes anyway stops it.
   static let quietDelay: TimeInterval = 10
 
   private let url: URL
@@ -76,13 +76,26 @@ package final class LedgerFileStamper: @unchecked Sendable {
     let started = time(nil)
     // An unchanged identity before and after proves the bytes checked and hashed are the ones
     // the last save left, but only if any write in between must move the change time.
-    guard fineTimestamps || identity.st_ctimespec.tv_sec + 2 < started, isUnchanged(identity),
-      let digest = checkedDigest(whileCurrent: current), isUnchanged(identity),
-      let trustKey = try? LedgerReceiptTrust.key(for: url, create: false),
+    guard fineTimestamps || identity.st_ctimespec.tv_sec + 2 < started else {
+      return refuse("change time too recent")
+    }
+    guard isUnchanged(identity) else { return refuse("file changed before the check") }
+    guard let digest = checkedDigest(whileCurrent: current) else { return false }
+    guard isUnchanged(identity) else { return refuse("file changed during the check") }
+    guard let trustKey = try? LedgerReceiptTrust.key(for: url, create: false),
       let stamp = CanonicalLedgerHealth.verifiedFileStamp(contentDigest: digest, trustKey: trustKey)
-    else { return false }
+    else { return refuse("no trust key") }
     verifiedFiles.insert(stamp)
     return true
+  }
+
+  /// Tests and diagnostics: why the last stamp that didn't go through stopped.
+  package var lastRefusal: String? { lock.withLock { refusal } }
+  private var refusal: String?
+
+  private func refuse(_ reason: String) -> Bool {
+    lock.withLock { refusal = reason }
+    return false
   }
 
   private func isUnchanged(_ identity: stat) -> Bool {
@@ -118,42 +131,51 @@ package final class LedgerFileStamper: @unchecked Sendable {
       sqlite3_busy_timeout(database, LedgerStore.busyTimeoutMilliseconds) == SQLITE_OK,
       sqlite3_exec(database, "PRAGMA query_only=1", nil, nil, nil) == SQLITE_OK,
       sqlite3_exec(database, "BEGIN", nil, nil, nil) == SQLITE_OK
-    else { return nil }
+    else { return failed("open", database) }
     defer { sqlite3_exec(database, "COMMIT", nil, nil, nil) }
     // The check's reads take the shared lock, which no save can pass until COMMIT.
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(database, "PRAGMA quick_check", -1, &statement, nil) == SQLITE_OK,
       let statement
-    else { return nil }
+    else { return failed("prepare quick_check", database) }
     let checked =
       sqlite3_step(statement) == SQLITE_ROW
       && sqlite3_column_text(statement, 0).map { String(cString: $0) } == "ok"
       && sqlite3_step(statement) == SQLITE_DONE
     sqlite3_finalize(statement)
     afterPageCheck?({ self.lock.withLock { self.generation == current } })
+    guard checked else { return failed("quick_check", database) }
     var file: UnsafeMutablePointer<sqlite3_file>?
-    guard checked,
-      sqlite3_file_control(database, "main", SQLITE_FCNTL_FILE_POINTER, &file) == SQLITE_OK,
-      let file, let methods = file.pointee.pMethods,
+    let control = sqlite3_file_control(database, "main", SQLITE_FCNTL_FILE_POINTER, &file)
+    guard control == SQLITE_OK, let file, let methods = file.pointee.pMethods,
       let read = methods.pointee.xRead, let fileSize = methods.pointee.xFileSize
-    else { return nil }
+    else { return failed("file pointer \(control)", database) }
     var size: sqlite3_int64 = 0
-    guard fileSize(file, &size) == SQLITE_OK else { return nil }
+    let sized = fileSize(file, &size)
+    guard sized == SQLITE_OK else { return failed("file size \(sized)", database) }
     var hasher = SHA256()
     var buffer = [UInt8](repeating: 0, count: 1_024 * 1_024)
     var offset: sqlite3_int64 = 0
     while offset < size {
-      guard lock.withLock({ generation == current }) else { return nil }
+      guard lock.withLock({ generation == current }) else { return failed("cancelled", nil) }
       let count = Int(min(sqlite3_int64(buffer.count), size - offset))
       let result = buffer.withUnsafeMutableBytes {
         read(file, $0.baseAddress, Int32(count), offset)
       }
-      guard result == SQLITE_OK else { return nil }
+      guard result == SQLITE_OK else {
+        return failed("read \(result) at \(offset) of \(size)", database)
+      }
       buffer.withUnsafeBytes {
         hasher.update(bufferPointer: UnsafeRawBufferPointer(rebasing: $0[..<count]))
       }
       offset += sqlite3_int64(count)
     }
     return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+  }
+
+  private func failed(_ step: String, _ database: OpaquePointer?) -> String? {
+    let message = database.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? ""
+    _ = refuse("\(step): \(message)")
+    return nil
   }
 }

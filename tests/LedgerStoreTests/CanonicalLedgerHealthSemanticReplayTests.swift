@@ -325,7 +325,7 @@ func checkedSavesKeepARememberedFileRemembered() throws {
       try rename(store, "Saved twice")
       #expect(try !isRemembered())
       letChangeTimeAge()
-      #expect(store.rememberFileNow())
+      #expect(store.rememberFileNow(), "\(store.fileStamper?.lastRefusal ?? "no stamper")")
       #expect(try isRemembered())
 
       // Another connection's commit: the store no longer vouches for the file.
@@ -390,7 +390,7 @@ func backgroundStampNeverFailsASave() throws {
     // And once saves stop, the stamp goes through.
     var identity = stat()
     #expect(lstat(url.path, &identity) == 0)
-    #expect(stamper.stamp(identity))
+    #expect(stamper.stamp(identity), "\(stamper.lastRefusal ?? "")")
   }
 }
 
