@@ -21,6 +21,8 @@ package final class LedgerFileStamper: @unchecked Sendable {
   static let quietDelay: TimeInterval = 10
 
   private let url: URL
+  /// `url` with its folder's symlinks resolved, for SQLite.
+  private let openPath: String
   private let verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs
   /// Whether the file's volume keeps nanosecond change times (`csqlite_has_fine_timestamps`).
   private let fineTimestamps: Bool
@@ -34,6 +36,16 @@ package final class LedgerFileStamper: @unchecked Sendable {
     url: URL, verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs, fineTimestamps: Bool
   ) {
     self.url = url
+    // SQLite won't open a path through a symlink with SQLITE_OPEN_NOFOLLOW, and a folder may be
+    // reached through one (on macOS, /var is /private/var). Resolve the folder; the file itself
+    // must still not be a link.
+    let folder = url.deletingLastPathComponent().path
+    if let resolved = realpath(folder, nil) {
+      openPath = String(cString: resolved) + "/" + url.lastPathComponent
+      free(resolved)
+    } else {
+      openPath = url.path
+    }
     self.verifiedFiles = verifiedFiles
     self.fineTimestamps = fineTimestamps
   }
@@ -121,7 +133,7 @@ package final class LedgerFileStamper: @unchecked Sendable {
     }
     guard
       sqlite3_open_v2(
-        url.path, &database,
+        openPath, &database,
         SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
       let database,
       lock.withLock({
@@ -175,7 +187,8 @@ package final class LedgerFileStamper: @unchecked Sendable {
 
   private func failed(_ step: String, _ database: OpaquePointer?) -> String? {
     let message = database.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? ""
-    _ = refuse("\(step): \(message)")
+    let code = database.map { sqlite3_extended_errcode($0) } ?? 0
+    _ = refuse("\(step): \(message) (\(code))")
     return nil
   }
 }
