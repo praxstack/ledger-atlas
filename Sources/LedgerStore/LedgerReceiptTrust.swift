@@ -139,6 +139,10 @@ package enum LedgerReceiptTrust {
         guard try keychain.add(value, account) == value else {
           throw LedgerReceiptTrustError.conflictingKeys
         }
+        // The file goes only once the Keychain gives the same key back.
+        guard try keychain.read(account) == value else {
+          throw LedgerReceiptTrustError.moveNotVerified
+        }
         try LedgerReceiptKeyFile.remove(account: account, in: directory)
       }
     case .appFiles:
@@ -333,5 +337,7 @@ package enum LedgerReceiptTrustError: Error, Equatable, Sendable {
   case invalidKey
   /// Moving keys found a different key already at the destination.
   case conflictingKeys
+  /// Moving keys couldn't read a key back from its new place, so its old copy was kept.
+  case moveNotVerified
   case file(Int32)
 }

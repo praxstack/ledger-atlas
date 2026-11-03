@@ -282,13 +282,17 @@ private final class AppLockTestFailure {
 private final class FakeLockStorage {
   var keychain: [String: Data] = [:]
   var choice: LedgerSecretStorage = .appFiles
+  var keychainDeleteFails = false
   let directory = FileManager.default.temporaryDirectory
     .appendingPathComponent("app-lock-\(UUID().uuidString)", isDirectory: true)
 
   var storage: LedgerAppLock.Storage {
     LedgerAppLock.Storage(
       choice: { self.choice }, readKeychain: { self.keychain[$0] },
-      writeKeychain: { account, value in self.keychain[account] = value },
+      writeKeychain: { account, value in
+        if value == nil, self.keychainDeleteFails { throw LedgerAppLock.Error.storageFailure }
+        self.keychain[account] = value
+      },
       directory: { self.directory })
   }
 
@@ -353,5 +357,24 @@ private final class FakeLockStorage {
   try LedgerPrivateFile.write(Data(repeating: 1, count: 32), to: "passcode-digest", in: fake.directory)
   fake.keychain = [:]
   try fake.storage.move(to: .appFiles)
+  #expect(!fake.lock().hasPasscode)
+}
+
+@MainActor
+@Test func aFailedKeychainDeleteKeepsThePasscodeInsteadOfBringingItBackLater() throws {
+  let fake = FakeLockStorage()
+  let lock = fake.lock()
+  try lock.setPasscode("1234")
+  // A copy left in the Keychain by an earlier version, which macOS refuses to delete.
+  fake.keychain["passcode-digest"] = try LedgerPrivateFile.read("passcode-digest", in: fake.directory)
+  fake.keychainDeleteFails = true
+  #expect(throws: LedgerAppLock.Error.storageFailure) { try lock.removePasscode(current: "1234") }
+  // The file wasn't touched, so the passcode is still consistently set and removal can be retried.
+  let reopened = fake.lock()
+  #expect(reopened.hasPasscode)
+  fake.keychainDeleteFails = false
+  #expect(reopened.unlock(with: "1234"))
+  try reopened.removePasscode(current: "1234")
+  #expect(fake.keychain.isEmpty)
   #expect(!fake.lock().hasPasscode)
 }

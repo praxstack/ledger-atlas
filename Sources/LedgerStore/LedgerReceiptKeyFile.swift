@@ -54,7 +54,13 @@ package enum LedgerReceiptKeyFile {
       at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: NSNumber(value: 0o700)])
     // A folder made earlier with wider permissions is tightened before a key goes in.
-    guard chmod(directory.path, 0o700) == 0 else { throw LedgerReceiptTrustError.file(errno) }
+    // Opened without following a symlink, so a link in the folder's place is refused.
+    let keysFolder = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard keysFolder >= 0 else { throw LedgerReceiptTrustError.file(errno) }
+    let tightened = fchmod(keysFolder, 0o700) == 0
+    let chmodError = errno
+    close(keysFolder)
+    guard tightened else { throw LedgerReceiptTrustError.file(chmodError) }
     let final = directory.appendingPathComponent(account + ".key").path
     let temporary = directory.appendingPathComponent(".\(account).\(UUID().uuidString).tmp").path
     let descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)

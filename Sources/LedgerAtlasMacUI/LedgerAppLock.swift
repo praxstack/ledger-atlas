@@ -249,13 +249,22 @@ public final class LedgerAppLock {
     }
 
     func write(_ account: String, _ data: Data?) throws {
+      guard let data else {
+        // Removal clears both places, the unchosen one first. If that fails, the chosen place
+        // still holds the item, so a removed passcode can never come back from a leftover copy.
+        switch choice() {
+        case .appFiles:
+          try writeKeychain(account, nil)
+          try writeFile(account, nil)
+        case .deviceKeychain:
+          try writeFile(account, nil)
+          try writeKeychain(account, nil)
+        }
+        return
+      }
       switch choice() {
-      case .deviceKeychain:
-        try writeKeychain(account, data)
-      case .appFiles:
-        try writeFile(account, data)
-        // A removed passcode must not come back from an earlier version's Keychain item.
-        if data == nil { try writeKeychain(account, nil) }
+      case .deviceKeychain: try writeKeychain(account, data)
+      case .appFiles: try writeFile(account, data)
       }
     }
 

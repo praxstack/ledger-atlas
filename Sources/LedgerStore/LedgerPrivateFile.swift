@@ -13,6 +13,7 @@ package enum LedgerPrivateFile {
     case invalidName
     case notARegularFile
     case tooLarge
+    case empty
     case system(Int32)
   }
 
@@ -43,6 +44,8 @@ package enum LedgerPrivateFile {
     guard fstat(descriptor, &status) == 0 else { throw Error.system(errno) }
     guard (status.st_mode & S_IFMT) == S_IFREG else { throw Error.notARegularFile }
     guard status.st_size <= maximumSize else { throw Error.tooLarge }
+    // Writes are atomic, so an empty file is damage, never a value.
+    guard status.st_size > 0 else { throw Error.empty }
     var bytes = [UInt8](repeating: 0, count: Int(status.st_size))
     var total = 0
     while total < bytes.count {
@@ -67,10 +70,11 @@ package enum LedgerPrivateFile {
       return
     }
     guard data.count <= maximumSize else { throw Error.tooLarge }
+    guard !data.isEmpty else { throw Error.empty }
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: NSNumber(value: 0o700)])
-    guard chmod(directory.path, 0o700) == 0 else { throw Error.system(errno) }
+    try tightenFolder(directory)
     let temporary = directory.appendingPathComponent(".\(name).\(UUID().uuidString).tmp").path
     let descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
     guard descriptor >= 0 else { throw Error.system(errno) }
@@ -93,6 +97,15 @@ package enum LedgerPrivateFile {
     if let failure { throw Error.system(failure) }
     guard rename(temporary, final) == 0 else { throw Error.system(errno) }
     syncFolder(directory)
+  }
+
+  /// Makes the folder owner-only. It is opened without following a symlink, so a link put in
+  /// its place is refused instead of changing the folder it points to.
+  private static func tightenFolder(_ directory: URL) throws {
+    let folder = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard folder >= 0 else { throw Error.system(errno) }
+    defer { close(folder) }
+    guard fchmod(folder, 0o700) == 0 else { throw Error.system(errno) }
   }
 
   private static func syncFolder(_ directory: URL) {

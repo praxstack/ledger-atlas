@@ -1532,13 +1532,15 @@ func receiptKeyGoesToTheDeviceKeychainWhenChosen() throws {
 private final class FakeDeviceKeys {
   var items: [String: Data] = [:]
   var failDeleteFor: String?
+  /// Reports success for an add without keeping the key.
+  var dropsAdds = false
 
   var keys: LedgerReceiptTrust.DeviceKeys {
     LedgerReceiptTrust.DeviceKeys(
       accounts: { self.items.keys.sorted() }, read: { self.items[$0] },
       add: { value, account in
         if let existing = self.items[account] { return existing }
-        self.items[account] = value
+        if !self.dropsAdds { self.items[account] = value }
         return value
       },
       delete: { account in
@@ -1578,6 +1580,18 @@ func receiptKeysMoveBetweenFilesAndTheDeviceKeychain() throws {
   #expect(try LedgerReceiptKeyFile.accounts(in: directory) == [a, b])
   #expect(try LedgerReceiptKeyFile.read(account: a, in: directory) == keyA)
 
+  // A key the Keychain doesn't give back keeps its file.
+  let c = String(repeating: "1c", count: 32)
+  _ = try LedgerReceiptKeyFile.store(keyA, account: c, in: directory)
+  fake.dropsAdds = true
+  #expect(throws: LedgerReceiptTrustError.moveNotVerified) {
+    try LedgerReceiptTrust.moveKeys(to: .deviceKeychain, keychain: fake.keys, directory: directory)
+  }
+  fake.dropsAdds = false
+  #expect(try LedgerReceiptKeyFile.read(account: a, in: directory) == keyA)
+  #expect(try LedgerReceiptKeyFile.read(account: c, in: directory) == keyA)
+  fake.items = [:]
+
   // A different key already at the destination stops the move and removes nothing.
   fake.items[a] = Data(repeating: 9, count: 32)
   #expect(throws: LedgerReceiptTrustError.conflictingKeys) {
@@ -1613,6 +1627,11 @@ func privateFilesReplaceRemoveAndRefuseUnsafeInput() throws {
   #expect(throws: LedgerPrivateFile.Error.invalidName) {
     try LedgerPrivateFile.write(Data(), to: "../escape", in: directory)
   }
+  #expect(throws: LedgerPrivateFile.Error.empty) {
+    try LedgerPrivateFile.write(Data(), to: "empty", in: directory)
+  }
+  FileManager.default.createFile(atPath: directory.appendingPathComponent("blank").path, contents: Data())
+  #expect(throws: LedgerPrivateFile.Error.empty) { try LedgerPrivateFile.read("blank", in: directory) }
   #expect(throws: LedgerPrivateFile.Error.tooLarge) {
     try LedgerPrivateFile.write(Data(count: 4097), to: "big", in: directory)
   }

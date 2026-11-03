@@ -93,8 +93,12 @@ struct SettingsSurface: View {
         choice == .deviceKeychain
         ? "The passcode and receipt keys are now in this Mac's Keychain."
         : "The passcode and receipt keys are now in the app's private storage."
+    } catch LedgerReceiptTrustError.conflictingKeys {
+      message =
+        "A different receipt key is already in the other place, so nothing more was moved and the setting is unchanged. Your ledgers still open. Export diagnostics and report it."
     } catch {
-      message = "The passcode and receipt keys could not be moved, so they stay where they were."
+      message =
+        "The passcode and receipt keys could not be moved, so the setting is unchanged. Everything is still readable; you can try again."
     }
   }
 
