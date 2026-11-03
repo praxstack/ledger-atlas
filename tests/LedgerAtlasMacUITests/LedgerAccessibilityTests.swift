@@ -153,7 +153,7 @@ final class MountedRoot {
   func inProcessCount() -> Int {
     func count(_ element: Any, _ depth: Int) -> Int {
       guard depth < 80, let node = element as? NSAccessibilityProtocol else { return 0 }
-      let children = (node as? NSObject)?.accessibilityChildren() ?? []
+      let children = (node.accessibilityChildren?() ?? nil) ?? []
       return 1 + children.reduce(0) { $0 + count($1, depth + 1) }
     }
     return count(window, 0)
