@@ -383,7 +383,15 @@ final class MountedRoot {
   func settle() async throws {
     var previous = -1
     for _ in 0..<30 {
-      try await Task.sleep(for: .milliseconds(200))
+      if readsInProcess {
+        // Wait inside a nested run of the main run loop, not by suspending. A suspended test
+        // hands the loop back to the test runner's own run, and a stray stop of the main
+        // run loop that lands there ends the whole test process with status 0. A nested run
+        // takes the stop instead, and the test carries on.
+        Self.runMainLoop(for: 0.2)
+      } else {
+        try await Task.sleep(for: .milliseconds(200))
+      }
       window.contentView?.layoutSubtreeIfNeeded()
       let elements = accessibilityElements()
       if readTimedOut { break }
@@ -394,6 +402,16 @@ final class MountedRoot {
       }
       if elements.count == previous, elements.count > 5, !showsNoLedgerPrompt { break }
       previous = elements.count
+    }
+  }
+
+  /// Runs the main run loop for `seconds`, carrying on past any stop of it.
+  static func runMainLoop(for seconds: Double) {
+    let end = Date().addingTimeInterval(seconds)
+    while case let left = end.timeIntervalSinceNow, left > 0 {
+      if CFRunLoopRunInMode(.defaultMode, left, false) == .stopped {
+        print("CAPTURE a stop of the main run loop was taken by a nested run")
+      }
     }
   }
 
