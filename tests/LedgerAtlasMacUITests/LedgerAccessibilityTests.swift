@@ -435,10 +435,28 @@ final class MountedRoot {
 
   func close() {
     window.orderOut(nil)
-    window.contentView = nil
-    window.close()
+    autoreleasepool {
+      window.contentViewController = nil
+      window.contentView = nil
+      window.close()
+    }
     UserDefaults.standard.removePersistentDomain(forName: suite)
-    try? FileManager.default.removeItem(at: directory)
+    // SwiftUI can release the view, and with it the open ledger, a little later. Removing
+    // the ledger file under an open SQLite connection crashed the close (SQLite's "file
+    // unlinked while open" log), so the folder is removed when the test process ends.
+    Self.removeAtExit(directory)
+  }
+
+  nonisolated(unsafe) private static var foldersToRemove: [String] = []
+  private static func removeAtExit(_ folder: URL) {
+    if foldersToRemove.isEmpty {
+      atexit {
+        for path in MountedRoot.foldersToRemove {
+          try? FileManager.default.removeItem(atPath: path)
+        }
+      }
+    }
+    foldersToRemove.append(folder.path)
   }
 
   /// Every element in this window's tree, read the way VoiceOver reads it.
