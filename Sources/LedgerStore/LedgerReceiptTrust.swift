@@ -16,6 +16,9 @@ package enum LedgerReceiptTrust {
   ) throws -> Data? {
     let identity = persistedReceiptIdentity(at: url) ?? stableIdentity ?? "empty-ledger"
     let currentAccount = account(for: identity, namespace: currentNamespace)
+    // A Keychain key wins over a file key. Only one is ever created for an account: the file is
+    // written only when the Keychain refused the key, and a refusing build can't read or write
+    // the Keychain later, so the two can't disagree in practice.
     if let value = try read(account: currentAccount, synchronizable: true) { return value }
     if let fileValue = try LedgerReceiptKeyFile.read(
       account: currentAccount, in: keyDirectory())
@@ -65,10 +68,19 @@ package enum LedgerReceiptTrust {
   /// Stores a new key in iCloud Keychain when the build may use it. The free ad-hoc signed app
   /// may not (errSecMissingEntitlement), so the key goes to a private file instead.
   private static func storeNew(_ value: Data, account: String) throws -> Data {
+    try storeNew(value, account: account, keychain: store, directory: keyDirectory)
+  }
+
+  /// `storeNew` with its Keychain write and key folder passed in, so tests can make the Keychain
+  /// refuse the key the way the ad-hoc app's Keychain does.
+  package static func storeNew(
+    _ value: Data, account: String, keychain: (Data, String) throws -> Data,
+    directory: () throws -> URL
+  ) throws -> Data {
     do {
-      return try store(value, account: account)
+      return try keychain(value, account)
     } catch LedgerReceiptTrustError.keychain(let status) where status == errSecMissingEntitlement {
-      return try LedgerReceiptKeyFile.store(value, account: account, in: keyDirectory())
+      return try LedgerReceiptKeyFile.store(value, account: account, in: directory())
     }
   }
 

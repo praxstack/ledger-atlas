@@ -1468,3 +1468,41 @@ func receiptKeyFileKeepsTheFirstKeyAndRefusesTampering() throws {
     try LedgerReceiptKeyFile.store(Data(repeating: 1, count: 16), account: account, in: directory)
   }
 }
+
+@Test("a key the Keychain refuses for lack of entitlement goes to the key file and is reused")
+func receiptKeyFallsBackToTheFileOnlyForAMissingEntitlement() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("receipt-keys-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let account = String(repeating: "0a", count: 32)
+  // The ad-hoc app's Keychain refuses iCloud items with errSecMissingEntitlement (-34018).
+  let refusing: (Data, String) throws -> Data = { _, _ in
+    throw LedgerReceiptTrustError.keychain(-34018)
+  }
+  let first = Data(repeating: 4, count: 32)
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      first, account: account, keychain: refusing, directory: { directory }) == first)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == first)
+  // A later store for the same account keeps the first key.
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      Data(repeating: 5, count: 32), account: account, keychain: refusing,
+      directory: { directory }) == first)
+
+  // Any other Keychain failure is reported, and no key file is written.
+  let other = String(repeating: "0b", count: 32)
+  #expect(throws: LedgerReceiptTrustError.keychain(-25293)) {
+    try LedgerReceiptTrust.storeNew(
+      first, account: other,
+      keychain: { _, _ in throw LedgerReceiptTrustError.keychain(-25293) },
+      directory: { directory })
+  }
+  #expect(try LedgerReceiptKeyFile.read(account: other, in: directory) == nil)
+  // A Keychain that takes the key leaves no file behind.
+  let kept = String(repeating: "0c", count: 32)
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      first, account: kept, keychain: { value, _ in value }, directory: { directory }) == first)
+  #expect(try LedgerReceiptKeyFile.read(account: kept, in: directory) == nil)
+}
