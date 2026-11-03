@@ -503,7 +503,7 @@ extension MountedRoot {
         $0.title == title || $0.accessibilityLabel() == title
       })
     else {
-      log("no NSButton titled \(title); found \(buttons(in: content).map(\.title))")
+      log("no NSButton titled \(title); found \(window.contentView.map { buttons(in: $0).map(\.title) } ?? [])")
       return false
     }
     button.performClick(nil)
