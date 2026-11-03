@@ -46,7 +46,6 @@ struct LedgerCardModifier: ViewModifier {
       .overlay(
         RoundedRectangle(cornerRadius: LedgerTheme.Radius.card).strokeBorder(LedgerTheme.hairline, lineWidth: 0.5)
       )
-      .shadow(color: .black.opacity(0.03), radius: 1, y: 1)
   }
 }
 
@@ -86,12 +85,12 @@ public struct LedgerPrimaryButtonStyle: ButtonStyle {
 
   public func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .font(.system(size: large ? 13.5 : 12.5, weight: .semibold))
+      .font(large ? Font.system(.body, weight: .semibold) : Font.system(.callout, weight: .semibold))
       .foregroundStyle(LedgerTheme.onAccent)
       .padding(.horizontal, large ? 16 : 11)
       .frame(height: large ? 34 : 26)
       .background(
-        LedgerTheme.accent.opacity(configuration.isPressed ? 0.85 : 1),
+        configuration.isPressed ? LedgerTheme.accentPressed : LedgerTheme.accent,
         in: .rect(cornerRadius: large ? 9 : LedgerTheme.Radius.control)
       )
       .contentShape(.rect)
@@ -104,12 +103,12 @@ public struct LedgerSecondaryButtonStyle: ButtonStyle {
 
   public func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .font(.system(size: 12.5, weight: .medium))
+      .font(.system(.callout, weight: .medium))
       .foregroundStyle(LedgerTheme.ink)
       .padding(.horizontal, 11)
       .frame(height: 26)
       .background(
-        LedgerTheme.fieldFill.opacity(configuration.isPressed ? 1.6 : 1),
+        configuration.isPressed ? LedgerTheme.fieldFillPressed : LedgerTheme.fieldFill,
         in: .rect(cornerRadius: LedgerTheme.Radius.control)
       )
       .contentShape(.rect)
@@ -129,9 +128,9 @@ public struct LedgerChip: View {
   public var body: some View {
     HStack(spacing: 6) {
       if let systemImage {
-        Image(systemName: systemImage).font(.system(size: 10, weight: .semibold)).foregroundStyle(LedgerTheme.inkTertiary)
+        Image(systemName: systemImage).font(.system(.caption, weight: .semibold)).foregroundStyle(LedgerTheme.inkTertiary)
       }
-      Text(title).font(.system(size: 12, weight: .medium))
+      Text(title).font(.system(.callout, weight: .medium))
     }
     .foregroundStyle(LedgerTheme.ink)
     .padding(.horizontal, 10)
@@ -181,23 +180,23 @@ public struct LedgerIconTile: View {
   }
 
   let content: Content
-  let tint: Color
+  let swatch: LedgerTheme.Swatch
   let size: CGFloat
 
-  public init(_ content: Content, tint: Color, size: CGFloat = LedgerTheme.Metrics.iconTile) {
+  public init(_ content: Content, swatch: LedgerTheme.Swatch, size: CGFloat = LedgerTheme.Metrics.iconTile) {
     self.content = content
-    self.tint = tint
+    self.swatch = swatch
     self.size = size
   }
 
   public var body: some View {
     ZStack {
-      RoundedRectangle(cornerRadius: size * 0.29, style: .continuous).fill(tint.opacity(0.16))
+      RoundedRectangle(cornerRadius: size * 0.29, style: .continuous).fill(swatch.soft)
       switch content {
       case .symbol(let name):
-        Image(systemName: name).font(.system(size: size * 0.46, weight: .semibold)).foregroundStyle(tint)
+        Image(systemName: name).font(.system(.callout, weight: .semibold)).foregroundStyle(swatch.color)
       case .initials(let text):
-        Text(text).font(.system(size: size * 0.39, weight: .bold)).foregroundStyle(tint)
+        Text(text).font(.system(.caption, weight: .bold)).foregroundStyle(swatch.color)
       }
     }
     .frame(width: size, height: size)
@@ -221,8 +220,8 @@ public struct LedgerProgressTrack: View {
     GeometryReader { proxy in
       let over = fraction > 1
       ZStack(alignment: .leading) {
-        Capsule().fill(LedgerTheme.hairlineSoft)
-        Capsule().fill(over ? LedgerTheme.negative : tint.opacity(tint == LedgerTheme.ink ? 0.85 : 1))
+        Capsule().fill(LedgerTheme.track)
+        Capsule().fill(over ? LedgerTheme.negative : tint)
           .frame(width: proxy.size.width * min(max(fraction, 0), 1))
         if over {
           Rectangle().fill(LedgerTheme.card).frame(width: 1.5)

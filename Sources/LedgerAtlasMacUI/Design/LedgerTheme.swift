@@ -3,8 +3,10 @@ import SwiftUI
 
 /// The design tokens for the Ledger Atlas look. See DESIGN.md for the rules behind them.
 ///
-/// Every colour is dynamic: it resolves for light, dark and both Increase Contrast
-/// appearances, so views never branch on the colour scheme themselves.
+/// This is the only file allowed to define colours (the accessibility guard in
+/// LedgerAccessibilityTests exempts it). Every colour here is dynamic and has its own
+/// Increase Contrast value, so it follows that setting the way system colours do, and views
+/// never branch on the colour scheme or fade a colour themselves.
 public enum LedgerTheme {
   // MARK: Colour
 
@@ -46,23 +48,61 @@ public enum LedgerTheme {
   /// Blue alternative for money in, for the "income blue" amount-colour setting.
   public static let positiveBlue = dynamic(light: 0x2F6FD0, dark: 0x6FA8FF)
 
-  /// Category and account colours: muted, equal in perceived lightness, used only as
-  /// small dots and thin bars.
-  public static let categoryPalette: [Color] = [
-    dynamic(light: 0x5B7FB8, dark: 0x7D9FD6),
-    dynamic(light: 0xC27A46, dark: 0xDF9764),
-    dynamic(light: 0x6E9E72, dark: 0x8CBF90),
-    dynamic(light: 0xC2A245, dark: 0xDCBD60),
-    dynamic(light: 0xA7709D, dark: 0xC690BB),
-    dynamic(light: 0x5E9EA3, dark: 0x7DBDC2),
-    dynamic(light: 0xB5666A, dark: 0xD68589),
-    dynamic(light: 0x8B8F97, dark: 0xA3A7AE),
-  ]
+  /// The quiet half of a figure (currency symbol, paise). One per amount colour, so the
+  /// de-emphasis follows Increase Contrast instead of fading a colour by hand.
+  public static let inkQuiet = dynamic(
+    light: 0x1D1D1F, dark: 0xF5F5F7, lightAlpha: 0.5, darkAlpha: 0.5,
+    highContrastLightAlpha: 0.75, highContrastDarkAlpha: 0.78)
+  public static let positiveQuiet = dynamic(
+    light: 0x1F8A55, dark: 0x4CC985, highContrastLight: 0x0E6B3C, highContrastDark: 0x7BE0A8,
+    lightAlpha: 0.6, darkAlpha: 0.6, highContrastLightAlpha: 0.8, highContrastDarkAlpha: 0.82)
+  public static let positiveBlueQuiet = dynamic(
+    light: 0x2F6FD0, dark: 0x6FA8FF, lightAlpha: 0.6, darkAlpha: 0.6,
+    highContrastLightAlpha: 0.8, highContrastDarkAlpha: 0.82)
+  public static let negativeQuiet = dynamic(
+    light: 0xC2412D, dark: 0xFF7A66, highContrastLight: 0x9C2A18, highContrastDark: 0xFF9C8C,
+    lightAlpha: 0.62, darkAlpha: 0.62, highContrastLightAlpha: 0.82, highContrastDarkAlpha: 0.84)
+  public static let inkSecondaryQuiet = dynamic(
+    light: 0x515154, dark: 0xC7C7CC, lightAlpha: 0.6, darkAlpha: 0.6,
+    highContrastLightAlpha: 0.8, highContrastDarkAlpha: 0.82)
 
-  /// A stable palette colour for any name, so a category keeps its colour everywhere.
-  public static func paletteColor(for key: String) -> Color {
-    categoryPalette[Int(stableHash(key) % UInt64(categoryPalette.count))]
+  /// Pressed states for the two button styles.
+  public static let accentPressed = dynamic(light: 0x086770, dark: 0x3FAAB4, highContrastLight: 0x00474D, highContrastDark: 0x9FE8EE)
+  public static let fieldFillPressed = dynamic(
+    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.09, darkAlpha: 0.13,
+    highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.22)
+  /// Track behind progress bars.
+  public static let track = dynamic(
+    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.06, darkAlpha: 0.08,
+    highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.2)
+
+  /// A palette colour with its soft fill (icon tiles, selected chips).
+  public struct Swatch: Sendable {
+    public let color: Color
+    public let soft: Color
   }
+
+  /// Category and account colours: muted, equal in perceived lightness, used only as
+  /// small keys, thin bars and soft tiles.
+  public static let palette: [Swatch] = [
+    (0x5B7FB8, 0x7D9FD6), (0xC27A46, 0xDF9764), (0x6E9E72, 0x8CBF90), (0xC2A245, 0xDCBD60),
+    (0xA7709D, 0xC690BB), (0x5E9EA3, 0x7DBDC2), (0xB5666A, 0xD68589), (0x8B8F97, 0xA3A7AE),
+  ].map { light, dark in
+    Swatch(
+      color: dynamic(light: light, dark: dark),
+      soft: dynamic(
+        light: light, dark: dark, lightAlpha: 0.16, darkAlpha: 0.2,
+        highContrastLightAlpha: 0.28, highContrastDarkAlpha: 0.32))
+  }
+
+  public static var categoryPalette: [Color] { palette.map(\.color) }
+
+  /// A stable palette swatch for any name, so a category keeps its colour everywhere.
+  public static func swatch(for key: String) -> Swatch {
+    palette[Int(stableHash(key) % UInt64(palette.count))]
+  }
+
+  public static func paletteColor(for key: String) -> Color { swatch(for: key).color }
 
   static func stableHash(_ key: String) -> UInt64 {
     // FNV-1a: stable across launches, unlike `Hasher`.
@@ -112,30 +152,37 @@ public enum LedgerTheme {
 
   // MARK: Type
 
-  /// The type scale. All styles are SF Pro; money adds tabular figures (see `MoneyText`).
+  /// The type scale. Every style is a system text style, so it follows the Mac's text size
+  /// and display zoom (the accessibility guard forbids fixed point sizes). Money adds tabular
+  /// figures (see `MoneyText`).
   public enum Typeface {
-    /// 44 pt display figure: the one hero number on a screen.
-    public static let hero = Font.system(size: 44, weight: .semibold, design: .default)
-    /// 32 pt figure in the inspector.
-    public static let figureLarge = Font.system(size: 32, weight: .semibold)
-    /// 20 pt key figures.
-    public static let figure = Font.system(size: 20, weight: .semibold)
-    /// 30 pt welcome and empty-state titles.
-    public static let display = Font.system(size: 30, weight: .bold)
-    /// 15 pt screen titles in the toolbar.
-    public static let screenTitle = Font.system(size: 15, weight: .bold)
-    /// 13 pt semibold card titles.
-    public static let cardTitle = Font.system(size: 13, weight: .semibold)
-    public static let body = Font.system(size: 13)
-    public static let bodyEmphasis = Font.system(size: 13, weight: .medium)
-    public static let secondary = Font.system(size: 12)
-    public static let caption = Font.system(size: 11.5)
-    public static let captionEmphasis = Font.system(size: 11, weight: .semibold)
+    /// The one hero figure on a screen.
+    public static let hero = Font.system(.largeTitle, weight: .semibold)
+    /// Inspector headline figure.
+    public static let figureLarge = Font.system(.title, weight: .semibold)
+    /// Key figures in cards.
+    public static let figure = Font.system(.title2, weight: .semibold)
+    /// Welcome and empty-state titles.
+    public static let display = Font.system(.largeTitle, weight: .bold)
+    /// Screen titles.
+    public static let screenTitle = Font.system(.title3, weight: .bold)
+    /// Card and section titles.
+    public static let cardTitle = Font.headline
+    public static let body = Font.body
+    public static let bodyEmphasis = Font.system(.body, weight: .medium)
+    public static let secondary = Font.callout
+    public static let caption = Font.subheadline
+    public static let captionEmphasis = Font.system(.subheadline, weight: .semibold)
   }
 
-  /// Tracking for large figures, in points per point of size (SF Pro Display tightening).
-  static func figureTracking(forSize size: CGFloat) -> CGFloat {
-    size >= 28 ? -size * 0.03 : (size >= 18 ? -size * 0.018 : 0)
+  /// Tracking for figures by role: large figures tighten like SF Pro Display.
+  static func figureTracking(for size: MoneyText.Size) -> CGFloat {
+    switch size {
+    case .hero: -0.8
+    case .large: -0.5
+    case .figure: -0.25
+    case .row, .small, .caption: 0
+    }
   }
 
   // MARK: Dynamic colour

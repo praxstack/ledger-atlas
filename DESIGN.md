@@ -36,6 +36,7 @@ Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Inc
 | `inkSecondary` | `#515154` | `#C7C7CC` | Secondary text |
 | `inkTertiary` | `#86868B` | `#8E8E93` | Labels, captions, axis text |
 | `hairline` | black 8% | white 9% | Separators (22% / 26% with Increase Contrast) |
+| `inkQuiet`, `positiveQuiet`, `negativeQuiet` | 50–62% of their colour | same | The currency symbol and paise of a figure |
 | `fieldFill` | black 4.5% | white 7% | Fields, chips, segmented items |
 | `accent` | `#0A7C86` | `#4FC3CE` | Selection, focus, primary action |
 | `accentSoft` | accent 11% | accent 16% | Selected rows, provenance note |
@@ -47,19 +48,19 @@ Category palette (muted, equal perceived lightness), light / dark: blue `#5B7FB8
 
 ### 3.2 Type
 
-SF Pro only (system font); no bundled faces. Money uses `MoneyText`, which adds tabular figures.
+SF Pro only (system font); no bundled faces. Every style is a **system text style**, never a fixed point size, so text follows the Mac's text size and display zoom (enforced by `everyFontIsASystemTextStyle`). Money uses `MoneyText`, which adds tabular figures and tightens large figures.
 
-| Style | Size / weight | Use |
+| Style | Text style | Use |
 |---|---|---|
-| `hero` | 44 semibold, tracking −3% | The one hero figure on a screen (net worth) |
-| `figureLarge` | 32 semibold | Inspector amount |
-| `display` | 30 bold | Welcome and empty-state titles |
-| `figure` | 20 semibold | Key figures in cards |
-| `screenTitle` | 15 bold | Toolbar title |
-| `cardTitle` | 13 semibold | Card and section titles |
-| `body` | 13 regular | Rows, labels |
-| `secondary` | 12 regular | Secondary lines |
-| `caption` | 11.5 regular | Captions, axis labels |
+| `hero` | Large Title, semibold | The one hero figure on a screen (net worth) |
+| `display` | Large Title, bold | Welcome and empty-state titles |
+| `figureLarge` | Title, semibold | Inspector amount |
+| `figure` | Title 2, semibold | Key figures in cards |
+| `screenTitle` | Title 3, bold | Screen titles |
+| `cardTitle` | Headline | Card and section titles |
+| `body` / `bodyEmphasis` | Body / Body medium | Rows, labels, row amounts |
+| `secondary` | Callout | Secondary lines, sidebar balances |
+| `caption` | Subheadline | Captions, axis labels |
 
 ### 3.3 Space, shape, size
 
@@ -102,6 +103,7 @@ Swift Charts. One question per chart, and every chart has an accessible table or
 
 ## 7. Accessibility
 
+- **Colour guard**: only `LedgerTheme.swift` may define colours, and each token there carries its own Increase Contrast value (`themeColoursHaveIncreaseContrastValues`). Elsewhere, no hand-mixed colours and no `.opacity(` (`everyColourFollowsIncreaseContrast`); use a token such as `inkQuiet` or a swatch's `soft` instead.
 - **Reduce Transparency**: every glass surface turns solid (`card` fill + hairline). System materials do this themselves; custom glass checks `accessibilityReduceTransparency`.
 - **Increase Contrast**: dynamic colours switch to their high-contrast values; hairlines become 22–26%.
 - **Reduce Motion**: crossfade or no transition (`MotionPolicy`).

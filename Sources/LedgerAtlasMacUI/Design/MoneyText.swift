@@ -14,35 +14,28 @@ extension EnvironmentValues {
 /// VoiceOver reads the plain formatted amount, sign included.
 public struct MoneyText: View {
   public enum Size: Sendable {
-    /// The one hero figure on a screen (44 pt).
+    /// The one hero figure on a screen.
     case hero
-    /// Inspector headline (32 pt).
+    /// Inspector headline.
     case large
-    /// Key figures in cards (20 pt).
+    /// Key figures in cards.
     case figure
-    /// Table rows (13 pt medium).
+    /// Table rows.
     case row
-    /// Secondary text and sidebar balances (12.5 pt).
+    /// Secondary text and sidebar balances.
     case small
-    /// Captions (11.5 pt).
+    /// Captions.
     case caption
 
-    var points: CGFloat {
+    /// A system text style per role, so figures follow the Mac's text size.
+    var font: Font {
       switch self {
-      case .hero: 44
-      case .large: 32
-      case .figure: 20
-      case .row: 13
-      case .small: 12.5
-      case .caption: 11.5
-      }
-    }
-
-    var weight: Font.Weight {
-      switch self {
-      case .hero, .large, .figure: .semibold
-      case .row: .medium
-      case .small, .caption: .regular
+      case .hero: LedgerTheme.Typeface.hero
+      case .large: LedgerTheme.Typeface.figureLarge
+      case .figure: LedgerTheme.Typeface.figure
+      case .row: LedgerTheme.Typeface.bodyEmphasis
+      case .small: LedgerTheme.Typeface.secondary
+      case .caption: LedgerTheme.Typeface.caption
       }
     }
   }
@@ -80,41 +73,43 @@ public struct MoneyText: View {
 
   public var body: some View {
     let parts = formatter.parts(amount, sign: sign)
-    MoneyText.compose(parts, size: size, color: color(for: parts))
+    let colors = palette(for: parts)
+    MoneyText.compose(parts, size: size, color: colors.main, quiet: colors.quiet)
       .lineLimit(1)
       .fixedSize(horizontal: true, vertical: false)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(parts.text)
   }
 
-  private func color(for parts: MoneyParts) -> Color {
+  /// The figure's colour and its quiet partner (symbol, paise). Both are theme tokens, so they
+  /// follow Increase Contrast.
+  private func palette(for parts: MoneyParts) -> (main: Color, quiet: Color) {
+    let ink = (LedgerTheme.ink, LedgerTheme.inkQuiet)
     switch tone {
-    case .neutral: return LedgerTheme.ink
-    case .secondary: return LedgerTheme.inkSecondary
+    case .neutral: return ink
+    case .secondary: return (LedgerTheme.inkSecondary, LedgerTheme.inkSecondaryQuiet)
     case .automatic:
       if amount.amount.isNegative, negativeIsAlert || (sign == .always && amountColors.tintsSpending) {
-        return LedgerTheme.negative
+        return (LedgerTheme.negative, LedgerTheme.negativeQuiet)
       }
-      guard amount.amount.isPositive, sign == .always else { return LedgerTheme.ink }
+      guard amount.amount.isPositive, sign == .always else { return ink }
       switch amountColors {
-      case .monochrome: return LedgerTheme.ink
-      case .incomeBlueExpenseRed: return LedgerTheme.positiveBlue
-      case .incomeGreen, .incomeGreenExpenseRed: return LedgerTheme.positive
+      case .monochrome: return ink
+      case .incomeBlueExpenseRed: return (LedgerTheme.positiveBlue, LedgerTheme.positiveBlueQuiet)
+      case .incomeGreen, .incomeGreenExpenseRed: return (LedgerTheme.positive, LedgerTheme.positiveQuiet)
       }
     }
   }
 
-  /// Builds the styled text. The symbol and fraction drop to about half strength so the whole
-  /// units read first; they keep the same colour so the figure stays one object.
-  static func compose(_ parts: MoneyParts, size: Size, color: Color) -> Text {
-    let font = Font.system(size: size.points, weight: size.weight).monospacedDigit()
-    let tracking = LedgerTheme.figureTracking(forSize: size.points)
-    let quiet = color.opacity(size.points >= 18 ? 0.42 : 0.55)
+  /// Builds the styled text. The symbol and fraction take the quiet colour so the whole units
+  /// read first, while the figure stays one object.
+  static func compose(_ parts: MoneyParts, size: Size, color: Color, quiet: Color) -> Text {
+    let font = size.font.monospacedDigit()
     let head = Text(parts.sign.rawValue).font(font).foregroundStyle(color)
     let symbol = Text(parts.leading).font(font).foregroundStyle(quiet)
     let whole = Text(parts.whole).font(font).foregroundStyle(color)
     let fraction = Text(parts.fraction + parts.trailing).font(font).foregroundStyle(quiet)
-    return (head + symbol + whole + fraction).tracking(tracking)
+    return (head + symbol + whole + fraction).tracking(LedgerTheme.figureTracking(for: size))
   }
 }
 

@@ -24,18 +24,50 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
 }
 
 /// Guard for Increase Contrast: macOS raises contrast for system colours by itself, so the app may only
-/// use system colours. A hand-mixed colour or a faded one (`opacity`) wouldn't follow the
-/// setting and fails here.
+/// use system colours or the theme's tokens. A hand-mixed colour or a faded one (`opacity`)
+/// wouldn't follow the setting and fails here. `LedgerTheme.swift` is the one exemption: it
+/// defines every token with its own Increase Contrast value (`themeColoursHaveIncreaseContrastValues`).
 @Test func everyColourFollowsIncreaseContrast() throws {
   let custom = ["Color(red:", "Color(white:", "Color(hue:", "NSColor(red:", "NSColor(white:",
-                "Color(\"", "Color(#", ".opacity("]
+                "NSColor(srgbRed:", "NSColor(name:", "Color(nsColor:", "Color(\"", "Color(#", ".opacity("]
   var offenders: [String] = []
-  for (file, lines) in try appSources() {
+  for (file, lines) in try appSources() where file != "LedgerTheme.swift" {
     for (index, line) in lines.enumerated() where custom.contains(where: line.contains) {
       offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
     }
   }
   #expect(offenders.isEmpty, "\(offenders)")
+}
+
+/// The theme's colours follow Increase Contrast: each token resolves differently under the
+/// high-contrast appearances, like the system colours do.
+@MainActor
+@Test func themeColoursHaveIncreaseContrastValues() throws {
+  let tokens: [(String, Color)] = [
+    ("ink", LedgerTheme.ink), ("inkSecondary", LedgerTheme.inkSecondary),
+    ("inkTertiary", LedgerTheme.inkTertiary), ("inkQuiet", LedgerTheme.inkQuiet),
+    ("hairline", LedgerTheme.hairline), ("fieldFill", LedgerTheme.fieldFill),
+    ("accent", LedgerTheme.accent), ("accentSoft", LedgerTheme.accentSoft),
+    ("positive", LedgerTheme.positive), ("positiveQuiet", LedgerTheme.positiveQuiet),
+    ("negative", LedgerTheme.negative), ("warning", LedgerTheme.warning), ("track", LedgerTheme.track),
+  ]
+  func resolved(_ color: Color, _ name: NSAppearance.Name) throws -> NSColor {
+    let appearance = try #require(NSAppearance(named: name))
+    var result = NSColor.clear
+    appearance.performAsCurrentDrawingAppearance {
+      result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
+    }
+    return result
+  }
+  for (name, color) in tokens {
+    for (normal, high) in [
+      (NSAppearance.Name.aqua, NSAppearance.Name.accessibilityHighContrastAqua),
+      (.darkAqua, .accessibilityHighContrastDarkAqua),
+    ] {
+      let a = try resolved(color, normal), b = try resolved(color, high)
+      #expect(a != b, "\(name) looks the same with Increase Contrast in \(normal.rawValue)")
+    }
+  }
 }
 
 @MainActor
