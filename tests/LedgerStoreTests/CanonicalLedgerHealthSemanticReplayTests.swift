@@ -1791,7 +1791,7 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
     let store = try LedgerStore.openForMutation(at: url)
     let account = try #require(try store.readSnapshot().accounts.first)
     let failures = LockedFailures()
-    let opened = LockedFlag()
+    let reads = LockedCount()
     let stop = LockedFlag()
     let readers = DispatchGroup()
     // The app's session loads the ledger read-only on a background thread while the editor
@@ -1801,12 +1801,18 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
       DispatchQueue.global().async(group: readers) {
         while !stop.isSet {
           if let reader = try? LedgerStore.openReadOnly(at: url), (try? reader.readSnapshot()) != nil {
-            opened.set()
+            reads.increment()
           }
         }
       }
     }
-    for index in 0..<150 {
+    // Save at least 150 times, and keep saving until 5 more reads have completed while saves
+    // run: fast saves can otherwise all finish before either reader gets one full read (seen
+    // after #152). Reads that finished before the first save don't count.
+    let readsBeforeSaves = reads.value
+    var index = 0
+    while index < 150 || (reads.value < readsBeforeSaves + 5 && index < 5_000) {
+      defer { index += 1 }
       let renamed = try LedgerAccount(
         id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
         origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
@@ -1818,11 +1824,14 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
         failures.record("save \(index): \(error)")
       }
     }
+    let readsDuringSaves = reads.value - readsBeforeSaves
     stop.set()
     readers.wait()
     #expect(failures.all.isEmpty, "\(failures.all.prefix(5))")
-    #expect(opened.isSet, "no read-only load ever opened the file, so nothing overlapped")
-    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save 149")
+    #expect(
+      readsDuringSaves >= 5,
+      "only \(readsDuringSaves) read-only loads finished during \(index) saves, so too little overlapped")
+    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save \(index - 1)")
   }
 }
 
@@ -1831,6 +1840,13 @@ private final class LockedFailures: @unchecked Sendable {
   private var values: [String] = []
   func record(_ value: String) { lock.withLock { values.append(value) } }
   var all: [String] { lock.withLock { values } }
+}
+
+private final class LockedCount: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+  func increment() { lock.withLock { count += 1 } }
+  var value: Int { lock.withLock { count } }
 }
 
 private final class LockedFlag: @unchecked Sendable {

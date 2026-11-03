@@ -75,6 +75,27 @@ jobs:
               - 'scripts/**'
               - '.github/workflows/**'
 
+  # What the Keychain allows an ad-hoc signed, sandboxed, optimized build like the shipped
+  # DMG, including after an update (see scripts/ci/keychain-probe.sh). Its own job so the
+  # table is easy to find; informational, never fails the run.
+  keychain-probe:
+    name: Keychain probe (macOS)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true' || github.event_name != 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: ./scripts/ci/select-xcode.sh
+        env:
+          XCODE_VERSION: ${{ vars.XCODE_VERSION }}
+      - name: Keychain probe
+        run: ./scripts/ci/keychain-probe.sh
+
   swift:
     name: Swift build + test (macOS)
     needs: changes
