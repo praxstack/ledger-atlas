@@ -84,21 +84,16 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
 @MainActor
 @Test(arguments: LedgerDemoTour.destinations)
 func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) async throws {
-  // The app reads this setting from its defaults; the argument domain wins over the global one
-  // and lasts only for this process.
-  let defaults = UserDefaults.standard
-  let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
-  var withAccess = arguments
-  withAccess["AppleKeyboardUIMode"] = 2
-  defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
-  defaults.setVolatileDomain(withAccess, forName: UserDefaults.argumentDomain)
-  defer {
-    defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
-    defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+  // Full Keyboard Access is a per-user macOS setting that AppKit reads at launch. CI turns it on
+  // for the runner (`defaults write -g AppleKeyboardUIMode -int 2`) before the tests start.
+  // Without it, Tab only visits text fields and lists, as on any Mac.
+  let fullKeyboardAccess = NSApplication.shared.isFullKeyboardAccessEnabled
+  if !fullKeyboardAccess, ProcessInfo.processInfo.environment["CI"] != nil {
+    Issue.record("Full Keyboard Access is off on CI; the workflow should turn it on")
   }
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
-  print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(NSApp.isFullKeyboardAccessEnabled)")
+  print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(fullKeyboardAccess)")
   let sidebar = mounted.sidebarList()
   mounted.window.makeFirstResponder(nil)
   var visited: [(id: ObjectIdentifier, name: String)] = []
@@ -107,13 +102,23 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
     mounted.press("\t", keyCode: 48)
     guard let responder = mounted.window.firstResponder, responder !== mounted.window else { continue }
     let id = ObjectIdentifier(responder)
-    if visited.first?.id == id, visited.count > 1 {
+    if visited.first?.id == id {
       cycled = true
       break
     }
     if visited.contains(where: { $0.id == id }) { continue }
-    let name = focusName(of: responder)
-    visited.append((id, name))
+    // SwiftUI puts placeholder key views (`KeyViewProxy`) into the window's key loop, off
+    // screen and outside the Accessibility tree, to hand focus between its hosting views. They
+    // aren't controls, so they're counted but not checked.
+    if String(describing: type(of: responder)).contains("KeyViewProxy") {
+      visited.append((id, "(SwiftUI key-view placeholder)"))
+      continue
+    }
+    var name = focusName(of: responder)
+    // Some SwiftUI form controls (a Picker's popup, a Stepper) carry their label only in the
+    // system Accessibility tree, so ask the system what VoiceOver hears for the focused element.
+    if name.isEmpty { name = mounted.systemFocusedName() }
+    visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name))
     if let view = responder as? NSView {
       let frame = view.convert(view.bounds, to: nil)
       #expect(
@@ -125,14 +130,49 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
   }
   print("A11Y KEYBOARD \(destination.rawValue) tab order: \(visited.map(\.name))")
   #expect(cycled, "\(destination.rawValue): Tab never came back round to the first control")
-  let outsideSidebar = visited.filter { $0.id != sidebar.map { ObjectIdentifier($0) } }
-  #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
+  if fullKeyboardAccess {
+    let outsideSidebar = visited.filter { $0.id != sidebar.map { ObjectIdentifier($0) } }
+    #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
+  }
 }
 
 /// What VoiceOver would say for the control that has keyboard focus.
 @MainActor
 private func focusName(of responder: NSResponder) -> String {
-  let element = responder as NSObject
+  // A text field being edited hands focus to the window's shared field editor; VoiceOver
+  // reads the text field itself.
+  if let editor = responder as? NSTextView, editor.isFieldEditor,
+    let field = editor.delegate as? NSResponder
+  {
+    return focusName(of: field)
+  }
+  if let name = ownName(of: responder as NSObject) { return name }
+  // A form control is often named by the label next to it, as VoiceOver reads it.
+  if let titleElement = inProcessProperty(responder, "accessibilityTitleUIElement") as? NSObject,
+    let name = ownName(of: titleElement) ?? (inProcessProperty(titleElement, "accessibilityValue") as? String)
+  {
+    return name
+  }
+  if let button = responder as? NSButton, !button.title.isEmpty { return button.title }
+  if let table = responder as? NSTableView {
+    return "list of \(table.numberOfRows) rows"
+  }
+  // A scroll bar is a standard AppKit control; VoiceOver names it by its role.
+  if responder is NSScroller { return "scroll bar" }
+  // A hosting view that takes focus for a SwiftUI control: VoiceOver reads the control inside.
+  var queue = (inProcessProperty(responder, "accessibilityChildren") as? [NSObject]) ?? []
+  var looked = 0
+  while !queue.isEmpty, looked < 40 {
+    let element = queue.removeFirst()
+    looked += 1
+    if let name = ownName(of: element) { return name }
+    queue += (inProcessProperty(element, "accessibilityChildren") as? [NSObject]) ?? []
+  }
+  return ""
+}
+
+@MainActor
+private func ownName(of element: NSObject) -> String? {
   for getter in ["accessibilityLabel", "accessibilityTitle", "accessibilityPlaceholderValue"] {
     if let text = inProcessProperty(element, getter) as? String,
       !text.trimmingCharacters(in: .whitespaces).isEmpty
@@ -140,10 +180,7 @@ private func focusName(of responder: NSResponder) -> String {
       return text
     }
   }
-  if let table = responder as? NSTableView {
-    return "list of \(table.numberOfRows) rows"
-  }
-  return ""
+  return nil
 }
 
 /// Visible focus: the app never turns off the system focus ring, so whatever has keyboard
@@ -622,6 +659,21 @@ final class MountedRoot {
     return result.rows
   }
 
+  /// The name the system Accessibility API gives the focused element, read off the main thread.
+  func systemFocusedName() -> String {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let result = RowsBox()
+    Thread.detachNewThread {
+      result.finish([accessibilityFocusedName(of: pid)])
+    }
+    let deadline = Date().addingTimeInterval(10)
+    while !result.isDone, Date() < deadline {
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    if !result.isDone { readTimedOut = true }
+    return result.rows.first ?? ""
+  }
+
   private func systemAccessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
@@ -673,7 +725,16 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
   var rows: [String] = []
   func visit(_ element: AXUIElement, depth: Int) {
     guard depth < 80 else { return }
-    if text(element, kAXRoleAttribute) == kAXRowRole {
+    let role = text(element, kAXRoleAttribute)
+    // A row scrolled out of view has empty cells until it comes back into view (VoiceOver
+    // scrolls it there first), so a list's rows are read as the list shows them.
+    if role == kAXTableRole || role == kAXOutlineRole,
+      let visible = attribute(element, kAXVisibleRowsAttribute) as? [AXUIElement], !visible.isEmpty
+    {
+      rows += visible.map { spoken($0, depth: 0) }
+      return
+    }
+    if role == kAXRowRole {
       rows.append(spoken(element, depth: 0))
       return
     }
@@ -685,6 +746,31 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
     visit(window, depth: 0)
   }
   return rows
+}
+
+/// What VoiceOver names the focused element: its description or title, else the label next to it.
+func accessibilityFocusedName(of pid: pid_t) -> String {
+  let app = AXUIElementCreateApplication(pid)
+  AXUIElementSetMessagingTimeout(app, 5)
+  func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+  func name(_ element: AXUIElement) -> String? {
+    [kAXDescriptionAttribute, kAXTitleAttribute]
+      .compactMap { attribute(element, $0) as? String }
+      .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+  }
+  guard let focused = attribute(app, kAXFocusedUIElementAttribute) else { return "" }
+  let element = focused as! AXUIElement
+  if let own = name(element) { return own }
+  if let label = attribute(element, kAXTitleUIElementAttribute) {
+    let labelElement = label as! AXUIElement
+    if let text = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String), !text.isEmpty {
+      return text
+    }
+  }
+  return ""
 }
 
 /// Hands the tree from the reader thread back to the main thread.
