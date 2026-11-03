@@ -300,3 +300,6 @@ python3 -I scripts/mm_v19_contract_check.py /path/to/backup.mmbak --json
 
 Exit 0 compatible, 1 additive drift, 2 breaking, 3 not SQLite or not v19. The source
 is opened with `mode=ro&immutable=1` and hashed before and after.
+
+To certify a whole import (bytes, profile, adapter, locale, oracle and level), use
+`mmctl certify`; see `money-manager-v19-import-certificate.md`.
