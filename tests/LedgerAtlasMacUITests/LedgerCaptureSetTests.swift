@@ -50,12 +50,12 @@ import Testing
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
       log("clicking Begin editing")
-    #expect(root.click(named: "Begin editing accounts"), "no Begin editing button")
+      #expect(root.click(named: "Begin editing accounts"), "no Begin editing button")
       try await root.settle()
     }
-    // What the screen says, read once before scrolling: SwiftUI drops a scrolled list's rows
-    // from the Accessibility tree until they are laid out again.
-    let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    // What the screen says before scrolling, plus what it shows after: only the rows on
+    // screen are read.
+    let before = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     for (record, shot) in group.sorted(by: { $0.0.number < $1.0.number }) {
       let plan = try #require(capturePlan[record.key])
       log("record \(record.number) \(record.key)")
@@ -64,6 +64,7 @@ import Testing
         root.window.appearance = NSAppearance(named: appearance.name)
         scroll(root.window, to: shot.scroll)
         pump(0.6)
+        let text = before + root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
         let png = try #require(windowPNG(root.window), "\(record.key) could not be captured")
         expectUsable(png, text: text, expecting: plan.expects, for: record.key)
         let name = record.fileName(appearance)
@@ -602,7 +603,16 @@ extension MountedRoot {
         } else {
           return false
         }
-        menu.cancelTracking()
+        // Close the menu with Escape, as a person would. (`cancelTracking()` also stopped
+        // the main run loop, which ended the test process with status 0.)
+        if let escape = NSEvent.keyEvent(
+          with: .keyDown, location: .zero, modifierFlags: [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
+          characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false,
+          keyCode: 53)
+        {
+          NSApplication.shared.postEvent(escape, atStart: false)
+        }
         return true
       }
       if finished { timer.invalidate() }
