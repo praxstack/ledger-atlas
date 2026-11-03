@@ -257,6 +257,35 @@ func accessibilityTree(of pid: pid_t, windowIdentifier: String) -> [SpokenElemen
   return found
 }
 
+/// The same reading as `accessibilityTree`, taken in-process on the main thread through
+/// AppKit's own Accessibility objects. Reading this process's UI from another thread runs
+/// AppKit and SwiftUI code off the main thread, which crashes now and then; the screenshot
+/// captures read this way instead.
+@MainActor
+func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
+  func text(_ element: NSObject, _ attribute: NSAccessibility.Attribute) -> String {
+    guard let value = element.accessibilityAttributeValue(attribute) else { return "" }
+    return (value as? String) ?? (value as? NSAttributedString)?.string ?? "\(value)"
+  }
+  var found: [SpokenElement] = []
+  func visit(_ element: NSObject, depth: Int) {
+    guard depth < 80 else { return }
+    let linked = element.accessibilityAttributeValue(.titleUIElement) as? NSObject
+    found.append(
+      SpokenElement(
+        role: text(element, .role), subrole: text(element, .subrole),
+        label: text(element, .description), title: text(element, .title),
+        value: text(element, .value), placeholder: text(element, .placeholderValue),
+        identifier: text(element, .identifier),
+        linkedTitle: linked.map { text($0, .value) } ?? ""))
+    for child in element.accessibilityAttributeValue(.children) as? [NSObject] ?? [] {
+      visit(child, depth: depth + 1)
+    }
+  }
+  visit(window, depth: 0)
+  return found
+}
+
 /// The root view in a window with the synthetic demo ledger open on one screen.
 @MainActor
 final class MountedRoot {
@@ -268,12 +297,17 @@ final class MountedRoot {
   private(set) var readTimedOut = false
   /// The empty-ledger prompt is showing instead of the screen.
   private(set) var showsNoLedgerPrompt = false
+  /// Read the Accessibility tree in-process on the main thread (see
+  /// `inProcessAccessibilityTree`) instead of through the system API from another thread.
+  let readsInProcess: Bool
 
   /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
   init(
     showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
-    size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false
+    size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
+    readsInProcess: Bool = false
   ) async throws {
+    self.readsInProcess = readsInProcess
     Self.launchOnce()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
@@ -387,6 +421,7 @@ final class MountedRoot {
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
   /// there, so pump it until the background read finishes.
   func accessibilityElements() -> [SpokenElement] {
+    if readsInProcess { return inProcessAccessibilityTree(of: window) }
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
     let identifier = identifier

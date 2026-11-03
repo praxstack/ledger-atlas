@@ -39,7 +39,8 @@ import Testing
     .sorted(by: { $0.value[0].0.number < $1.value[0].0.number })
   {
     log("screen \(screen.destination) editing=\(screen.editing)")
-    let root = try await MountedRoot(showing: screen.destination, size: captureSize, appWindow: true)
+    let root = try await MountedRoot(
+      showing: screen.destination, size: captureSize, appWindow: true, readsInProcess: true)
     defer { root.close() }
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
@@ -75,7 +76,7 @@ import Testing
     guard let plan = capturePlan[record.key], case .sheet(let sheet) = plan.shot else { continue }
     log("sheet \(record.number) \(record.key)")
     let root = try await MountedRoot(
-      showing: sheet.destination, size: captureSize, appWindow: true)
+      showing: sheet.destination, size: captureSize, appWindow: true, readsInProcess: true)
     defer {
       // Closing a window with a sheet still attached ended the whole test process.
       if let attached = root.window.attachedSheet { root.window.endSheet(attached) }
@@ -130,7 +131,9 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   }
 
   log("empty state")
-  let empty = try await MountedRoot(showing: .ledger, withLedger: false, size: captureSize, appWindow: true)
+  let empty = try await MountedRoot(
+    showing: .ledger, withLedger: false, size: captureSize, appWindow: true,
+    readsInProcess: true)
   defer { empty.close() }
   for appearance in CaptureAppearance.allCases {
     empty.window.appearance = NSAppearance(named: appearance.name)
@@ -145,7 +148,8 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   try lock.setPasscode("2468")
   lock.lock()
   log("lock screen")
-  let locked = try await MountedRoot(showing: .ledger, appLock: lock, size: captureSize, appWindow: true)
+  let locked = try await MountedRoot(
+    showing: .ledger, appLock: lock, size: captureSize, appWindow: true, readsInProcess: true)
   defer { locked.close() }
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
@@ -497,6 +501,27 @@ private func accessibleText(of element: Any, depth: Int = 0) -> [String] {
     + children.flatMap { accessibleText(of: $0, depth: depth + 1) }
 }
 
+/// The AppKit screen frame (bottom-left origin) of the first element in the window whose
+/// label or title is `name`, read in-process on the main thread.
+@MainActor
+private func inProcessFrame(in window: NSWindow, named name: String) -> CGRect? {
+  func find(_ element: NSObject, depth: Int) -> CGRect? {
+    guard depth < 80 else { return nil }
+    let names = [NSAccessibility.Attribute.description, .title].compactMap {
+      let value = element.accessibilityAttributeValue($0)
+      return value as? String ?? (value as? NSAttributedString)?.string
+    }
+    if names.contains(name), let element = element as? any NSAccessibilityElementProtocol {
+      return element.accessibilityFrame()
+    }
+    for child in element.accessibilityAttributeValue(.children) as? [NSObject] ?? [] {
+      if let found = find(child, depth: depth + 1) { return found }
+    }
+    return nil
+  }
+  return find(window, depth: 0)
+}
+
 /// What the menu timer saw, shared with the code waiting for it on the main thread.
 @MainActor
 private final class PickBox {
@@ -512,22 +537,35 @@ extension MountedRoot {
   /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
   /// Returns false if there is no such control.
   func click(named name: String) -> Bool {
-    let pid = ProcessInfo.processInfo.processIdentifier
-    let identifier = identifier
-    let result = FrameBox()
-    Thread.detachNewThread {
-      result.finish(accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name))
+    let frame: CGRect?
+    if readsInProcess {
+      frame = inProcessFrame(in: window, named: name)
+    } else {
+      let pid = ProcessInfo.processInfo.processIdentifier
+      let identifier = identifier
+      let result = FrameBox()
+      Thread.detachNewThread {
+        result.finish(accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name))
+      }
+      let deadline = Date().addingTimeInterval(20)
+      while !result.isDone, Date() < deadline {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+      }
+      frame = result.frame.flatMap { found in
+        // System Accessibility frames are in screen points from the top left; AppKit's from
+        // the bottom left.
+        NSScreen.screens.first.map {
+          CGRect(
+            x: found.minX, y: $0.frame.maxY - found.maxY, width: found.width,
+            height: found.height)
+        }
+      }
     }
-    let deadline = Date().addingTimeInterval(20)
-    while !result.isDone, Date() < deadline {
-      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
-    }
-    guard let frame = result.frame, let screen = NSScreen.screens.first else {
+    guard let frame else {
       log("nothing named \(name) to click")
       return false
     }
-    // Accessibility frames are in screen points from the top left; AppKit's from the bottom left.
-    let centre = NSPoint(x: frame.midX, y: screen.frame.maxY - frame.midY)
+    let centre = NSPoint(x: frame.midX, y: frame.midY)
     let location = window.convertPoint(fromScreen: centre)
     for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
       guard
