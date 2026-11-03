@@ -65,4 +65,31 @@ private func entry(
   #expect(model.recent.first?.sign == .always)
   #expect(model.recent.first?.amount.amount.isNegative == true)
   #expect(model.recent.contains { $0.title == "Salary" && $0.isIncome })
+  #expect(!model.includesLaterEntries)
+
+  // An entry dated next month counts in the headline (as on Accounts) and is called out.
+  let later = transactions + [
+    try entry("5", bank, .decrease, "5000", kind: .expense, category: food, month: 12, day: 3)
+  ]
+  let ahead = try OverviewModel(
+    snapshot: LedgerStore.LedgerReadSnapshot(
+      accounts: [bank], transactions: later, revisionHistory: later.map(\.currentRevision),
+      undisplayedImportedEventCount: 0, categories: [food, rent]),
+    today: SourceLocalDate(year: 2026, month: 11, day: 20), rule: LedgerPeriodRule())
+  #expect(ahead.includesLaterEntries)
+  #expect(ahead.netWorth.amount == (try ExactDecimal("155000")))
+  #expect(ahead.history.last?.value == (try ExactDecimal("160000")))
+}
+
+@Test func overviewKeepsTheLatestEntriesNewestFirst() throws {
+  let bank = try LedgerAccount(
+    id: StableLedgerID.account(origin: origin, localKey: key("a")), name: "Bank",
+    currencyUnit: "INR", origin: origin)
+  let days = [14, 3, 27, 9, 21, 1, 18, 30, 6, 12, 25]
+  let transactions = try days.enumerated().map { index, day in
+    try entry(String(index, radix: 16), bank, .decrease, "1", kind: .expense, month: 11, day: day)
+  }
+  let latest = OverviewModel.latest(4, of: transactions)
+  #expect(latest.map { $0.currentRevision.draft.occurredAt.localDateTime.date.day } == [30, 27, 25, 21])
+  #expect(OverviewModel.latest(20, of: transactions).count == days.count)
 }

@@ -45,6 +45,9 @@ struct OverviewModel: Sendable {
   let netWorth: CurrencyAmount
   /// Change since the close of last month, nil without a previous month.
   let monthChange: CurrencyAmount?
+  /// True when entries dated after the shown month count in `netWorth` (it matches Accounts),
+  /// so the headline is above the chart's last point.
+  let includesLaterEntries: Bool
   /// Twelve month-end closes, oldest first.
   let history: [NetWorthPoint]
   /// This month's statistics and the six-month trend (money in and out).
@@ -78,6 +81,11 @@ struct OverviewModel: Sendable {
     let zero = try ExactDecimal("0")
     let net = sheet.summaries.first { $0.unitCode == unit }?.net ?? zero
     netWorth = try CurrencyAmount(unitCode: unit, amount: net)
+    let monthEnd = month.period.end
+    includesLaterEntries = snapshot.transactions.contains {
+      $0.currentRevision.lifecycle == .active
+        && $0.currentRevision.draft.occurredAt.localDateTime.date >= monthEnd
+    }
     if closes.count >= 2 {
       monthChange = try CurrencyAmount(
         unitCode: unit, amount: try closes[closes.count - 1].subtracting(closes[closes.count - 2]))
@@ -118,14 +126,27 @@ struct OverviewModel: Sendable {
       snapshot.categories.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     let accountNames = Dictionary(
       snapshot.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-    recent =
-      snapshot.transactions
-      .filter { $0.currentRevision.lifecycle == .active }
-      .sorted { $0.currentRevision.draft.occurredAt.localDateTime > $1.currentRevision.draft.occurredAt.localDateTime }
-      .prefix(8)
-      .compactMap { transaction in
-        Self.recentLine(transaction, categories: categoryNames, accounts: accountNames)
-      }
+    recent = Self.latest(8, of: snapshot.transactions).compactMap { transaction in
+      Self.recentLine(transaction, categories: categoryNames, accounts: accountNames)
+    }
+  }
+
+  /// The `count` latest active transactions, newest first, in one pass (no full sort).
+  static func latest(_ count: Int, of transactions: [LedgerTransactionSnapshot])
+    -> [LedgerTransactionSnapshot]
+  {
+    func when(_ t: LedgerTransactionSnapshot) -> SourceLocalDateTime {
+      t.currentRevision.draft.occurredAt.localDateTime
+    }
+    var kept: [LedgerTransactionSnapshot] = []
+    kept.reserveCapacity(count + 1)
+    for transaction in transactions where transaction.currentRevision.lifecycle == .active {
+      if kept.count == count, let last = kept.last, when(transaction) <= when(last) { continue }
+      let index = kept.firstIndex { when(transaction) > when($0) } ?? kept.endIndex
+      kept.insert(transaction, at: index)
+      if kept.count > count { kept.removeLast() }
+    }
+    return kept
   }
 
   static func recentLine(

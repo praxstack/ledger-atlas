@@ -111,11 +111,21 @@ public struct LedgerAtlasRootView: View {
     .environment(\.ledgerFormatter, LedgerDisplayFormatter(settings: productSettings))
     .environment(\.ledgerAmountColors, productSettings.amountColors)
     .tint(LedgerTheme.accent)
-    .onChange(of: journey.snapshotGeneration, initial: true) { _, _ in
-      sidebarAccounts = journey.snapshot.map {
-        LedgerSidebarAccount.list(
-          accounts: $0.accounts, groups: $0.accountGroups, transactions: $0.transactions)
-      } ?? []
+    .task(id: journey.snapshotGeneration) {
+      // The balance sheet walks every entry, so it is built off the main thread; a newer
+      // snapshot cancels this task and its result is dropped.
+      let snapshot = journey.snapshot
+      let listed = await Task.detached(priority: .userInitiated) {
+        snapshot.map {
+          LedgerSidebarAccount.list(
+            accounts: $0.accounts, groups: $0.accountGroups, transactions: $0.transactions)
+        } ?? []
+      }.value
+      guard !Task.isCancelled else { return }
+      sidebarAccounts = listed
+      if let focused = focusedAccountID, !listed.contains(where: { $0.id == focused }) {
+        focusedAccountID = nil
+      }
     }
     .toolbar {
       ToolbarItemGroup {
@@ -376,7 +386,9 @@ public struct LedgerAtlasRootView: View {
       }
       lifecycleMessage = outcome.message
       lifecycleRetryOperation = outcome.retryOperation
-      if [.created, .opened, .upgraded].contains(outcome.kind) { selection = .ledger }
+      if [.created, .opened, .upgraded].contains(outcome.kind) {
+        selection = productSettings.startScreen
+      }
     }
   }
 
@@ -1222,7 +1234,7 @@ public struct LedgerAtlasRootView: View {
         return
       }
     }
-    selection = .ledger
+    selection = productSettings.startScreen
   }
 
   @ViewBuilder
@@ -1285,7 +1297,8 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .overview {
       OverviewSurface(
-        snapshot: journey.snapshot, settings: productSettings, show: { selection = $0 })
+        snapshot: journey.snapshot, generation: journey.snapshotGeneration,
+        settings: productSettings, show: { selection = $0 })
     } else if selection == .ledger {
       let listing = splitListing
       LedgerView(

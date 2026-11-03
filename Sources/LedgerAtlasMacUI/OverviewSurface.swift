@@ -8,6 +8,8 @@ import SwiftUI
 /// and every figure also appears as text.
 struct OverviewSurface: View {
   let snapshot: LedgerStore.LedgerReadSnapshot?
+  /// `LedgerJourney.snapshotGeneration`: moves on every new snapshot, including another ledger.
+  let generation: Int
   let settings: LedgerProductSettings
   let show: (AppDestination) -> Void
 
@@ -52,13 +54,12 @@ struct OverviewSurface: View {
     }
   }
 
-  /// Changes whenever an edit lands (every edit adds a revision) or settings move the period.
+  /// Changes with every new snapshot (an edit, or another ledger) and when settings move the
+  /// period.
   private var snapshotKey: Int {
     var hasher = Hasher()
-    hasher.combine(snapshot?.transactions.count)
-    hasher.combine(snapshot?.revisionHistory.count)
-    hasher.combine(snapshot?.accounts.count)
-    hasher.combine(snapshot?.budgets.count)
+    hasher.combine(generation)
+    hasher.combine(snapshot == nil)
     hasher.combine(settings.periodRule)
     hasher.combine(settings.timeZone.identifier)
     return hasher.finalize()
@@ -108,6 +109,11 @@ private struct NetWorthCard: View {
             }
             .font(LedgerTheme.Typeface.secondary)
           }
+        }
+        if model.includesLaterEntries {
+          Text("Includes entries dated after this month.")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
         }
       }
       NetWorthChart(points: model.history, unitCode: model.unitCode)
