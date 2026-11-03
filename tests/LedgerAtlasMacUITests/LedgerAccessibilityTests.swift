@@ -186,7 +186,7 @@ private final class FullSizeTestWindow: NSWindow {
   print("A11YPROBE window total \(count(mounted.window))")
   print("A11YPROBE subviews \(view.subviews.map { String(describing: type(of: $0)) })")
   _ = view.accessibilityHitTest(NSPoint(x: 500, y: 400))
-  _ = NSApplication.shared.accessibilityFocusedUIElement()
+  _ = NSApplication.shared.accessibilityApplicationFocusedUIElement()
   try await Task.sleep(for: .milliseconds(500))
   print("A11YPROBE after hit test total \(count(view))")
   let app = AXUIElementCreateApplication(getpid())
