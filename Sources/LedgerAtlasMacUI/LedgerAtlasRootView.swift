@@ -15,9 +15,7 @@ public struct LedgerAtlasRootView: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
-  @State private var session = LedgerSession(
-    testingScopeStarter: { LedgerLocations.startAccess($0) },
-    testingScopeStopper: { LedgerLocations.stopAccess($0) })
+  @State private var session: LedgerSession
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
   @State private var portal = LedgerPortalController()
@@ -37,6 +35,10 @@ public struct LedgerAtlasRootView: View {
   private let intentConsumer: () -> LedgerIntentRequest?
   private let widgetProjectionPublisher: RedactedWidgetProjectionPublisher?
   private let importReviewSummary: ImportReviewSummary
+  /// Security-scope access for a ledger URL. Tests pass `{ _ in true }` to open a temporary
+  /// ledger outside app storage.
+  private let scopeStarter: (URL) -> Bool
+  private let scopeStopper: (URL) -> Void
 
   public init(
     initialSelection: AppDestination = .defaultSelection,
@@ -59,15 +61,21 @@ public struct LedgerAtlasRootView: View {
     productSettings: LedgerProductSettings,
     bookmarkStore: SecurityScopedBookmarkStore,
     widgetProjectionPublisher: RedactedWidgetProjectionPublisher? = nil,
-    intentConsumer: @escaping () -> LedgerIntentRequest? = { nil }
+    intentConsumer: @escaping () -> LedgerIntentRequest? = { nil },
+    scopeStarter: @escaping (URL) -> Bool = { LedgerLocations.startAccess($0) },
+    scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) }
   ) {
     _selection = State(initialValue: initialSelection)
+    _session = State(
+      initialValue: LedgerSession(testingScopeStarter: scopeStarter, testingScopeStopper: scopeStopper))
     _appLock = State(initialValue: appLock)
     _productSettings = State(initialValue: productSettings)
     self.importReviewSummary = importReviewSummary ?? .awaitingSyntheticMetadata
     self.bookmarkStore = bookmarkStore
     self.widgetProjectionPublisher = widgetProjectionPublisher
     self.intentConsumer = intentConsumer
+    self.scopeStarter = scopeStarter
+    self.scopeStopper = scopeStopper
   }
 
   public var body: some View {
@@ -263,8 +271,7 @@ public struct LedgerAtlasRootView: View {
       let outcome = await Self.performLedgerSelection(
         operation, url: url, bookmarkStore: bookmarkStore,
         widgetPublisher: widgetProjectionPublisher, journey: journey, session: session,
-        scopeStarter: { LedgerLocations.startAccess($0) },
-        scopeStopper: { LedgerLocations.stopAccess($0) },
+        scopeStarter: scopeStarter, scopeStopper: scopeStopper,
         isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
@@ -285,8 +292,7 @@ public struct LedgerAtlasRootView: View {
       let outcome = await Self.reopenSavedLedger(
         bookmarkStore: bookmarkStore, widgetPublisher: widgetProjectionPublisher,
         journey: journey, session: session,
-        scopeStarter: { LedgerLocations.startAccess($0) },
-        scopeStopper: { LedgerLocations.stopAccess($0) },
+        scopeStarter: scopeStarter, scopeStopper: scopeStopper,
         isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
