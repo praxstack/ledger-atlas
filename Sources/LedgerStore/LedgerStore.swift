@@ -2667,7 +2667,19 @@ public final class LedgerStore {
     // The extended code names the failure (for example which I/O step), where the primary code
     // alone says only "I/O error".
     guard result == SQLITE_OK else {
-      throw Error.sqliteFailure(code: sqlite3_extended_errcode(database))
+      let code = sqlite3_extended_errcode(database)
+      #if DEBUG
+        // Test builds also say which system call failed. Only the statement's first word, the
+        // codes and errno are printed: never values.
+        if code & 0xff == SQLITE_IOERR {
+          let verb = sql.split(separator: " ").first.map(String.init) ?? ""
+          FileHandle.standardError.write(
+            Data(
+              "LedgerStore: \(verb) failed with SQLite \(code), errno \(sqlite3_system_errno(database))\n"
+                .utf8))
+        }
+      #endif
+      throw Error.sqliteFailure(code: code)
     }
   }
 

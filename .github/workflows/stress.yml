@@ -57,7 +57,7 @@ jobs:
               failures=$((failures + 1))
               echo "== run $run failed"
               cp run.log "$RUNNER_TEMP/stress-failures/run-$run.log"
-              grep -E "✘|recorded an issue|Caught error|sqliteFailure" run.log | head -40
+              grep -E "✘|recorded an issue|Caught error|sqliteFailure|LedgerStore: " run.log | head -40
             fi
           done
           echo "$failures of $REPEAT runs failed" | tee -a "$GITHUB_STEP_SUMMARY"
