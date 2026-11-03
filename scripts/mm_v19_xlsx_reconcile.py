@@ -3,7 +3,7 @@
 
 Money Manager can export every transaction to an XLSX workbook (sheet
 "Money Manager"). This script reads that workbook and an imported canonical
-ledger and compares, per kind and per calendar month, the row count and the
+ledger and compares, per kind, calendar month and currency, the row count and the
 amount sum. It prints aggregates only: kinds, months, counts and sums. It never
 prints dates of single rows, accounts, categories, notes or descriptions.
 
@@ -65,22 +65,25 @@ class InputError(Exception):
 
 
 class Totals:
-    """Row count and amount sum per (kind, month)."""
+    """Row count and amount sum per (kind, month, currency)."""
 
     def __init__(self) -> None:
         self.count: Counter = Counter()
-        self.amount: dict[tuple[str, str], Decimal] = {}
+        self.amount: dict[tuple[str, str, str], Decimal] = {}
+        self.skipped = (
+            0  # XLSX "Transfer-In" rows, left out because Transfer-Out stands for the pair
+        )
 
-    def add(self, kind: str, month: str, amount: Decimal) -> None:
-        key = (kind, month)
+    def add(self, kind: str, month: str, currency: str, amount: Decimal) -> None:
+        key = (kind, month, currency)
         self.count[key] += 1
         self.amount[key] = self.amount.get(key, Decimal(0)) + amount
 
     def kind_count(self, kind: str) -> int:
-        return sum(n for (k, _), n in self.count.items() if k == kind)
+        return sum(n for (k, _, _), n in self.count.items() if k == kind)
 
     def kind_amount(self, kind: str) -> Decimal:
-        return sum((a for (k, _), a in self.amount.items() if k == kind), Decimal(0))
+        return sum((a for (k, _, _), a in self.amount.items() if k == kind), Decimal(0))
 
 
 def _column(reference: str) -> str:
@@ -158,7 +161,7 @@ def _amount(text: str | None, row: int) -> Decimal:
 
 
 def read_xlsx(path: Path, sheet: str = "Money Manager") -> Totals:
-    """Counts and sums per (kind, month) from a Money Manager XLSX export."""
+    """Counts and sums per (kind, month, currency) from a Money Manager XLSX export."""
     try:
         archive = zipfile.ZipFile(path)
     except (OSError, zipfile.BadZipFile) as error:
@@ -175,7 +178,7 @@ def read_xlsx(path: Path, sheet: str = "Money Manager") -> Totals:
                 if name and name not in header:
                     header[name] = _column(cell.get("r", ""))
             break
-        needed = ("Date", "Income/Expense", "Amount")
+        needed = ("Date", "Income/Expense", "Amount", "Currency")
         missing = [name for name in needed if name not in header]
         if missing:
             raise InputError(f"column {', '.join(missing)} is missing")
@@ -189,6 +192,7 @@ def read_xlsx(path: Path, sheet: str = "Money Manager") -> Totals:
                 continue
             label = cells.get(header["Income/Expense"])
             if label in XLSX_SKIPPED_KINDS:
+                totals.skipped += 1
                 continue
             kind = XLSX_KINDS.get(label or "")
             if kind is None:
@@ -203,6 +207,7 @@ def read_xlsx(path: Path, sheet: str = "Money Manager") -> Totals:
             totals.add(
                 kind,
                 _month(cells.get(header["Date"]) or "", date1904, number),
+                cells.get(header["Currency"]) or "",
                 _amount(cells.get(header["Amount"]), number),
             )
         return totals
@@ -214,18 +219,20 @@ SELECT CASE e.event_kind
          WHEN 'expense' THEN 'expense'
          ELSE 'balance' END,
        printf('%04d-%02d', e.local_year, e.local_month),
+       e.currency_unit,
        e.amount_literal
 FROM economic_event e
 WHERE e.event_kind IN ('income', 'expense', 'adjustment', 'adjustment_debit')
 UNION ALL
-SELECT 'transfer', printf('%04d-%02d', d.local_year, d.local_month), d.amount_literal
+SELECT 'transfer', printf('%04d-%02d', d.local_year, d.local_month), d.currency_unit,
+       d.amount_literal
 FROM economic_event_transfer t
 JOIN economic_event d ON d.event_id = t.debit_event_id
 """
 
 
 def read_ledger(path: Path) -> Totals:
-    """Counts and sums per (kind, month) from an imported canonical ledger."""
+    """Counts and sums per (kind, month, currency) from an imported canonical ledger."""
     if not path.is_file():
         raise InputError("the ledger file does not exist")
     uri = f"{path.resolve().as_uri()}?mode=ro&immutable=1"
@@ -235,12 +242,12 @@ def read_ledger(path: Path) -> Totals:
         raise InputError("the ledger cannot be opened") from error
     try:
         totals = Totals()
-        for kind, month, literal in database.execute(LEDGER_QUERY):
+        for kind, month, currency, literal in database.execute(LEDGER_QUERY):
             try:
                 amount = abs(Decimal(literal))
             except (InvalidOperation, TypeError) as error:
                 raise InputError("a ledger amount is not a decimal") from error
-            totals.add(kind, month, amount)
+            totals.add(kind, month, currency, amount)
         return totals
     except sqlite3.DatabaseError as error:
         raise InputError("the file is not a Ledger Atlas ledger") from error
@@ -252,10 +259,10 @@ def _through(totals: Totals, last: str | None) -> Totals:
     if last is None:
         return totals
     kept = Totals()
-    for (kind, month), count in totals.count.items():
-        if month <= last:
-            kept.count[(kind, month)] = count
-            kept.amount[(kind, month)] = totals.amount[(kind, month)]
+    for key, count in totals.count.items():
+        if key[1] <= last:
+            kept.count[key] = count
+            kept.amount[key] = totals.amount[key]
     return kept
 
 
@@ -266,13 +273,14 @@ def reconcile(xlsx: Totals, ledger: Totals) -> list[str]:
         {key for key in xlsx.count if key[0] not in ONE_SIDED}
         | {key for key in ledger.count if key[0] not in ONE_SIDED}
     )
-    for kind, month in months:
-        x_count, l_count = xlsx.count[(kind, month)], ledger.count[(kind, month)]
-        x_sum = xlsx.amount.get((kind, month), Decimal(0))
-        l_sum = ledger.amount.get((kind, month), Decimal(0))
+    for key in months:
+        kind, month, currency = key
+        x_count, l_count = xlsx.count[key], ledger.count[key]
+        x_sum = xlsx.amount.get(key, Decimal(0))
+        l_sum = ledger.amount.get(key, Decimal(0))
         if x_count != l_count or x_sum != l_sum:
             problems.append(
-                f"MISMATCH kind={kind} month={month} xlsx_count={x_count} "
+                f"MISMATCH kind={kind} month={month} currency={currency} xlsx_count={x_count} "
                 f"ledger_count={l_count} xlsx_sum={x_sum} ledger_sum={l_sum}"
             )
     return problems
@@ -330,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         l_sum = str(ledger.kind_amount(kind)) if on_ledger else "-"
         print(f"kind={kind} xlsx_count={x} ledger_count={l} xlsx_sum={x_sum} ledger_sum={l_sum}")
     # Months are compared up to --through; --expect checks whole-file totals.
+    print(f"skipped_transfer_in_rows={xlsx.skipped}")
     problems = reconcile(
         _through(whole_xlsx, arguments.through), _through(whole_ledger, arguments.through)
     )

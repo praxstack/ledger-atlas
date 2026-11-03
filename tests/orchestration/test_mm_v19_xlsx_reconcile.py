@@ -127,7 +127,8 @@ def write_ledger(path: Path, extra: list[tuple] = ()) -> Path:
         """
         CREATE TABLE economic_event(
           event_id TEXT PRIMARY KEY, event_kind TEXT NOT NULL, amount_literal TEXT NOT NULL,
-          local_year INTEGER NOT NULL, local_month INTEGER NOT NULL);
+          local_year INTEGER NOT NULL, local_month INTEGER NOT NULL,
+          currency_unit TEXT NOT NULL DEFAULT 'INR');
         CREATE TABLE economic_event_transfer(
           debit_event_id TEXT NOT NULL, credit_event_id TEXT NOT NULL);
         """
@@ -142,7 +143,12 @@ def write_ledger(path: Path, extra: list[tuple] = ()) -> Path:
         ("a1", "adjustment", "4.00", 2024, 12),
         *extra,
     ]
-    database.executemany("INSERT INTO economic_event VALUES (?, ?, ?, ?, ?)", events)
+    database.executemany(
+        "INSERT INTO economic_event"
+        " (event_id, event_kind, amount_literal, local_year, local_month, currency_unit)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        [event if len(event) == 6 else (*event, "INR") for event in events],
+    )
     database.execute("INSERT INTO economic_event_transfer VALUES ('t1d', 't1c')")
     database.commit()
     database.close()
@@ -184,7 +190,7 @@ def test_extra_ledger_event_names_its_kind_and_month(tmp_path, capsys):
     )
     assert code == 1
     assert (
-        "MISMATCH kind=expense month=2025-02 xlsx_count=1 ledger_count=2 "
+        "MISMATCH kind=expense month=2025-02 currency=INR xlsx_count=1 ledger_count=2 "
         "xlsx_sum=7.25 ledger_sum=8.25"
     ) in output
     assert "month=2025-01" not in output
@@ -198,7 +204,7 @@ def test_amount_difference_alone_is_a_mismatch(tmp_path, capsys):
         write_ledger(tmp_path / "ledger.sqlite"),
     )
     assert code == 1
-    assert "MISMATCH kind=expense month=2025-02 xlsx_count=1 ledger_count=1" in output
+    assert "MISMATCH kind=expense month=2025-02 currency=INR xlsx_count=1 ledger_count=1" in output
 
 
 def test_through_ignores_later_months_on_both_sides(tmp_path, capsys):
@@ -292,3 +298,26 @@ def test_same_account_transfer_is_counted_not_compared(tmp_path, capsys):
     )
     assert code == 1
     assert "MISMATCH kind=same_account_transfer month=all expected_count=0 xlsx_count=1" in output
+
+
+def test_currencies_cannot_cancel_out(tmp_path, capsys):
+    # One expense moved from INR to USD: same count and sum per month, wrong currency.
+    ledger = write_ledger(tmp_path / "ledger.sqlite")
+    database = sqlite3.connect(ledger)
+    database.execute("UPDATE economic_event SET currency_unit='USD' WHERE event_id='e4'")
+    database.commit()
+    database.close()
+    code, output = run(capsys, write_xlsx(tmp_path / "export.xlsx"), ledger)
+    assert code == 1
+    assert "MISMATCH kind=expense month=2025-02 currency=INR xlsx_count=1 ledger_count=0" in output
+    assert "MISMATCH kind=expense month=2025-02 currency=USD xlsx_count=0 ledger_count=1" in output
+
+
+def test_skipped_transfer_in_rows_are_reported(tmp_path, capsys):
+    rows = [*ROWS, (date(2025, 1, 6), "Transfer-In", "Wallet", "40.00")]
+    _, output = run(
+        capsys,
+        write_xlsx(tmp_path / "export.xlsx", rows=rows),
+        write_ledger(tmp_path / "ledger.sqlite"),
+    )
+    assert "skipped_transfer_in_rows=1" in output
