@@ -75,27 +75,37 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   }
 }
 
-/// Each appearance picks its own look, high contrast included.
+/// Each appearance picks its own look, and the test switch picks the high-contrast one.
 @MainActor
 @Test func themeVariantFollowsTheAppearance() throws {
-  for name in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua,
-               .accessibilityHighContrastDarkAqua] {
-    let appearance = try #require(NSAppearance(named: name))
-    print("A11Y APPEARANCE \(name.rawValue): name=\(appearance.name.rawValue) variant=\(String(describing: LedgerTheme.variant(of: appearance)?.rawValue))")
-    #expect(LedgerTheme.variant(of: appearance) == name)
+  let aqua = try #require(NSAppearance(named: .aqua))
+  let dark = try #require(NSAppearance(named: .darkAqua))
+  #expect(LedgerTheme.variant(of: aqua) == .aqua)
+  #expect(LedgerTheme.variant(of: dark) == .darkAqua)
+  LedgerTheme.$resolvesIncreaseContrast.withValue(true) {
+    #expect(LedgerTheme.variant(of: aqua) == .accessibilityHighContrastAqua)
+    #expect(LedgerTheme.variant(of: dark) == .accessibilityHighContrastDarkAqua)
   }
 }
 
-private let themeAppearancePairs: [(NSAppearance.Name, NSAppearance.Name)] = [
-  (.aqua, .accessibilityHighContrastAqua), (.darkAqua, .accessibilityHighContrastDarkAqua),
-]
+/// One look of the theme: a base appearance, with or without Increase Contrast.
+private struct ThemeLook: Sendable {
+  let base: NSAppearance.Name
+  let increaseContrast: Bool
+  var rawValue: String { base.rawValue + (increaseContrast ? " + Increase Contrast" : "") }
+}
+
+private let themeAppearancePairs: [(ThemeLook, ThemeLook)] = [NSAppearance.Name.aqua, .darkAqua]
+  .map { (ThemeLook(base: $0, increaseContrast: false), ThemeLook(base: $0, increaseContrast: true)) }
 
 @MainActor
-private func resolvedThemeColor(_ color: Color, _ name: NSAppearance.Name) throws -> NSColor {
-  let appearance = try #require(NSAppearance(named: name))
+private func resolvedThemeColor(_ color: Color, _ look: ThemeLook) throws -> NSColor {
+  let appearance = try #require(NSAppearance(named: look.base))
   var result = NSColor.clear
-  appearance.performAsCurrentDrawingAppearance {
-    result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
+  LedgerTheme.$resolvesIncreaseContrast.withValue(look.increaseContrast) {
+    appearance.performAsCurrentDrawingAppearance {
+      result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
+    }
   }
   return result
 }

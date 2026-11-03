@@ -236,25 +236,26 @@ public enum LedgerTheme {
       })
   }
 
-  /// Which of the four looks an appearance asks for. `bestMatch` alone can answer plain Aqua
-  /// for a high-contrast appearance (a match, but not the closest), so the appearance's own
-  /// name is checked too, and the high-contrast names are listed first.
+  /// Tests set this to resolve the Increase Contrast values: AppKit doesn't hand out the
+  /// high-contrast appearances by name (`NSAppearance(named:)` answers plain Aqua for them),
+  /// only the system applies them when Increase Contrast is on.
+  @TaskLocal static var resolvesIncreaseContrast = false
+
+  /// Which of the four looks an appearance asks for.
   static func variant(of appearance: NSAppearance) -> NSAppearance.Name? {
-    let highContrast: Set<NSAppearance.Name> = [
-      .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
-      .accessibilityHighContrastVibrantLight, .accessibilityHighContrastVibrantDark,
-    ]
-    let base = appearance.bestMatch(from: [
+    let match = appearance.bestMatch(from: [
       .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua, .aqua, .darkAqua,
     ])
-    let isDark =
-      base == .darkAqua || base == .accessibilityHighContrastDarkAqua
-      || appearance.name == .accessibilityHighContrastDarkAqua
-      || appearance.name == .accessibilityHighContrastVibrantDark
-    if highContrast.contains(appearance.name) || base.map(highContrast.contains) == true {
-      return isDark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua
+    let isDark = match == .darkAqua || match == .accessibilityHighContrastDarkAqua
+    let isHighContrast =
+      resolvesIncreaseContrast || match == .accessibilityHighContrastAqua
+      || match == .accessibilityHighContrastDarkAqua
+    switch (isDark, isHighContrast) {
+    case (false, false): return .aqua
+    case (true, false): return .darkAqua
+    case (false, true): return .accessibilityHighContrastAqua
+    case (true, true): return .accessibilityHighContrastDarkAqua
     }
-    return isDark ? .darkAqua : .aqua
   }
 
   static func rgb(_ hex: UInt32, alpha: CGFloat) -> NSColor {
