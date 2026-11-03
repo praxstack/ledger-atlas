@@ -398,6 +398,15 @@ public struct LedgerAtlasRootView: View {
         NSApplication.shared.terminate(nil)
         return
       }
+      // A second CI launch imports a full-size made-up backup that the script put in this
+      // app's temporary folder, instead of touring the screens again.
+      if let name = LedgerDemoTour.fullSizeBackupName {
+        await runImportCheck(
+          log, backup: FileManager.default.temporaryDirectory.appendingPathComponent(name))
+        log("done")
+        NSApplication.shared.terminate(nil)
+        return
+      }
       defer {
         session.close()
         journey.closeLedger()
@@ -433,7 +442,7 @@ public struct LedgerAtlasRootView: View {
   /// The shipped app's import path, end to end, on a made-up Money Manager backup: Open Ledger
   /// must recognise the backup, the import must finish, and the imported ledger must reopen the
   /// way it does at the next launch. CI reads the "import check:" lines (scripts/ci/demo-tour.sh).
-  private func runImportCheck(_ log: (String) -> Void) async {
+  private func runImportCheck(_ log: (String) -> Void, backup given: URL? = nil) async {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
       "LedgerAtlasImportCheck-\(UUID().uuidString)", isDirectory: true)
     var imported: URL?
@@ -448,8 +457,10 @@ public struct LedgerAtlasRootView: View {
     }
     do {
       try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-      let backup = folder.appendingPathComponent("MM(demo).mmbak")
-      try LedgerDemoTour.writeMoneyManagerBackup(to: backup)
+      let backup = given ?? folder.appendingPathComponent("MM(demo).mmbak")
+      if given == nil { try LedgerDemoTour.writeMoneyManagerBackup(to: backup) }
+      let started = Date()
+      func seconds() -> String { String(format: "%.1fs", Date().timeIntervalSince(started)) }
       log("import check: backup recognised \(LedgerJourney.isMoneyManagerBackup(backup))")
       session.close()
       journey.closeLedger()
@@ -458,11 +469,13 @@ public struct LedgerAtlasRootView: View {
       imported = canonical
       await journey.selectSourceInBackground(
         backup, stagingDatabaseURL: folder.appendingPathComponent("stage.sqlite"),
-        canonicalDatabaseURL: canonical, sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: 0))
-      log("import check: review \(journey.phase) \(journey.lastFailure ?? "")")
+        canonicalDatabaseURL: canonical,
+        // The made-up full-size backup is dated like a phone in India (+05:30).
+        sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: given == nil ? 0 : 19_800))
+      log("import check: review \(journey.phase) after \(seconds()) \(journey.lastFailure ?? "")")
       await approveImport()
       log(
-        "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions \(journey.lastFailure ?? "")"
+        "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions after \(seconds()) \(journey.lastFailure ?? "")"
       )
       // What the next launch does: the ledger closes, then reopens from its bookmark.
       session.close()
@@ -471,7 +484,7 @@ public struct LedgerAtlasRootView: View {
         bookmarkStore: bookmarkStore, widgetPublisher: widgetProjectionPublisher,
         journey: journey, session: session, scopeStarter: scopeStarter, scopeStopper: scopeStopper)
       log(
-        "import check: reopen \(outcome.kind) failure=\(outcome.failure.map { "\($0)" } ?? "none") \(outcome.message ?? "")"
+        "import check: reopen \(outcome.kind) failure=\(outcome.failure.map { "\($0)" } ?? "none") after \(seconds()) \(outcome.message ?? "")"
       )
       log("import check: widget \(widgetProjectionPublisher == nil ? "off in this build" : "on")")
     } catch {
