@@ -6,6 +6,9 @@ Manager compatibility boundary, a versioned canonical-ledger backend, and an
 early SwiftUI shell. Both tracks are kept in this repository; neither implies a
 universal compatibility or release claim.
 
+**Installing the Mac app:** see [docs/INSTALL.md](docs/INSTALL.md) (download, first launch,
+where your ledgers live, backups and updates).
+
 ## Development
 
 ```bash
