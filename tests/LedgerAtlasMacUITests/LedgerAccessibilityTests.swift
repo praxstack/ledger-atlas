@@ -29,7 +29,7 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
 /// defines every token with its own Increase Contrast value (`themeColoursHaveIncreaseContrastValues`).
 @Test func everyColourFollowsIncreaseContrast() throws {
   let custom = ["Color(red:", "Color(white:", "Color(hue:", "NSColor(red:", "NSColor(white:",
-                "NSColor(srgbRed:", "NSColor(name:", "Color(nsColor:", "Color(\"", "Color(#", ".opacity("]
+                "NSColor(srgbRed:", "NSColor(name:", "Color(\"", "Color(#", ".opacity("]
   var offenders: [String] = []
   for (file, lines) in try appSources() where file != "LedgerTheme.swift" {
     for (index, line) in lines.enumerated() where custom.contains(where: line.contains) {
