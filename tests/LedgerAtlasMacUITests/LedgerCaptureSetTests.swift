@@ -142,6 +142,10 @@ import Testing
   // 25 records and 3 key states, each in light and dark.
   let expectedFiles: Int = 56
   #expect(index.count == expectedFiles)
+  print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
+  #expect(
+    MountedRoot.runLoopRestarts < MountedRoot.maxRunLoopRestarts,
+    "the main run loop was stopped too often; restarts are capped")
 }
 
 /// The empty state, the lock screen and a refused passcode, in light and dark. (Loaded and the

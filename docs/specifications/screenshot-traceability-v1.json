@@ -5,6 +5,7 @@
   "source_screenshots_read_only": true,
   "private_root": "/Users/prax/Developer/money-manager-reverse-engineering/docs/real-app-screenshots",
   "evidence_grade": "observed",
+  "synthetic_capture_note": "synthetic_capture_path is relative to the ui-captures artifact of the macOS CI job (kept 30 days), not a file in this repo. Every record is captured in light and dark: the path names the light file, and its dark sibling ends in -dark.png. The appearance in a state_id (such as record 1's dark.populated.root) describes the source screenshot.",
   "control_contract_ids": [
     "account.add", "account.cancel", "account.delete", "account.reorder", "account.save", "account.select", "account_name.edit", "account_scope.select", "accounts.manage",
     "backup.create", "backup.help", "backup.restore", "backup.schedule", "backup.share", "balance_history.open", "breakdown.select",

@@ -323,6 +323,9 @@ final class MountedRoot {
   private(set) var showsNoLedgerPrompt = false
   /// Read the Accessibility tree in-process on the main thread (see
   /// `inProcessAccessibilityTree`) instead of through the system API from another thread.
+  /// Only the captures use this, to check what is on screen. It is not evidence of what
+  /// VoiceOver hears: the VoiceOver label checks keep the default (false) and go through the
+  /// real Accessibility API.
   let readsInProcess: Bool
 
   /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
@@ -435,13 +438,19 @@ final class MountedRoot {
   }
 
   nonisolated(unsafe) private static var loopDepth = 0
+  /// How many times the test runner's run of the main loop was stopped and run again.
+  nonisolated(unsafe) static var runLoopRestarts = 0
+  static let maxRunLoopRestarts = 20
 
   /// The test process lives inside the test runner's own run of the main run loop, and that
   /// run should never end: when the tests finish, the runner calls exit() itself. Something in
   /// AppKit or SwiftUI sometimes stops it after a sheet closes, which ended the whole test
   /// process with status 0 partway through. This watches the main run loop and, when that
   /// outermost run ends, logs it and runs the loop again. Nested runs are counted and left
-  /// alone. The outermost run was entered before this observer existed, so it sits at -1.
+  /// alone. The outermost run was entered before this observer existed, so it sits at -1;
+  /// that holds because `launchOnce` first runs from a test body, inside the runner's own run.
+  /// Restarts nest on the stack, so after `maxRunLoopRestarts` the stop is let through and the
+  /// CI summary check fails the job. Finding the caller is #151.
   /// Run loop observers aren't called while they are already firing, so each restart hands
   /// over to a fresh observer before running the loop again.
   private static func keepTestRunLoopAlive() {
@@ -453,8 +462,9 @@ final class MountedRoot {
         return
       }
       loopDepth -= 1
-      guard loopDepth < 0 else { return }
-      print("CAPTURE the test runner's run of the main loop was stopped; running it again")
+      guard loopDepth < 0, runLoopRestarts < maxRunLoopRestarts else { return }
+      runLoopRestarts += 1
+      print("CAPTURE the test runner's run of the main loop was stopped (\(runLoopRestarts)); running it again")
       CFRunLoopObserverInvalidate(observer)
       keepTestRunLoopAlive()
       CFRunLoopRun()
@@ -470,16 +480,11 @@ final class MountedRoot {
       window.close()
     }
     UserDefaults.standard.removePersistentDomain(forName: suite)
-    // SwiftUI can release the view, and with it the open ledger, a little later. Removing
-    // the ledger file under an open SQLite connection crashed the close (SQLite's "file
-    // unlinked while open" log), so the folder is removed when the test process ends.
-    Self.removeAtExit(directory)
+    // SwiftUI may release the open ledger a little later; unlinking its file first is fine
+    // since #150 keeps the pinned file's name alive until the connection closes.
+    try? FileManager.default.removeItem(at: directory)
   }
 
-  private static func removeAtExit(_ folder: URL) {
-    if testFoldersToRemove.isEmpty { atexit(removeTestFolders) }
-    testFoldersToRemove.append(folder.path)
-  }
 
   /// Every element in this window's tree, read the way VoiceOver reads it.
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
@@ -548,14 +553,4 @@ private final class FullSizeTestWindow: NSWindow {
   }
   #expect(checked > 0, "no animations found; is the Sources path right?")
   #expect(offenders.isEmpty, "\(offenders)")
-}
-
-// Kept outside the main-actor `MountedRoot`: the test runner calls exit() off the main thread,
-// and a main-actor exit handler traps there.
-nonisolated(unsafe) private var testFoldersToRemove: [String] = []
-
-private func removeTestFolders() {
-  for path in testFoldersToRemove {
-    try? FileManager.default.removeItem(atPath: path)
-  }
 }
