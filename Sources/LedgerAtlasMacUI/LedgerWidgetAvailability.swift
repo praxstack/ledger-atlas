@@ -14,7 +14,7 @@ public enum LedgerWidgetAvailability {
 
   /// The publisher for the running app, or nil when the build has no usable App Group.
   package static func publisherForThisBuild(
-    teamIdentifier: String? = signingTeamIdentifier(),
+    teamIdentifier: String? = runningTeamIdentifier,
     containerURL: (String) -> URL? = {
       FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)
     }
@@ -29,6 +29,9 @@ public enum LedgerWidgetAvailability {
     }
     return RedactedWidgetProjectionPublisher(store: .init(containerURL: container))
   }
+
+  /// Read once: the signature can't change while the app runs.
+  static let runningTeamIdentifier = signingTeamIdentifier()
 
   /// The Team ID the running code is signed with; nil for ad-hoc and unsigned builds.
   public static func signingTeamIdentifier() -> String? {

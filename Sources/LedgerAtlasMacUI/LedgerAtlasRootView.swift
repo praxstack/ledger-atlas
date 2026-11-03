@@ -438,6 +438,8 @@ public struct LedgerAtlasRootView: View {
     defer {
       session.close()
       journey.closeLedger()
+      // Safe: the tour only runs on a Mac with no ledgers (`demoLedgerURL`), so this bookmark
+      // can only be the check's own.
       bookmarkStore.clear()
       if let imported { LedgerLocations.removeLedgerFiles(at: imported) }
       try? FileManager.default.removeItem(at: folder)
@@ -906,7 +908,7 @@ public struct LedgerAtlasRootView: View {
     let retry = operation == .create ? "Choose Create Ledger to retry." : "Choose Open Ledger to retry."
     switch error as? LedgerStoreLifecycle.Error {
     case .invalidStore where operation == .open:
-      return "This file is not a Ledger Atlas ledger. To bring in a Money Manager backup, choose Import Money Manager Backup instead."
+      return "This file is not a Ledger Atlas ledger, or it is damaged. To bring in a Money Manager backup, choose Import Money Manager Backup instead."
     case .unsupportedStore:
       return "This version of Ledger Atlas can't open this ledger. If it was saved by a newer version, update the app, then open it again."
     case .busy:

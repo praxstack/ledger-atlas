@@ -1150,7 +1150,7 @@ private enum FlowTestError: Error { case sqlite, injected }
       session: session, scopeStarter: { _ in true }, scopeStopper: { _ in })
 
     let expected =
-      "This file is not a Ledger Atlas ledger. To bring in a Money Manager backup, choose Import Money Manager Backup instead."
+      "This file is not a Ledger Atlas ledger, or it is damaged. To bring in a Money Manager backup, choose Import Money Manager Backup instead."
     #expect(outcome.kind == .failed)
     #expect(outcome.failure == .invalidStore)
     #expect(outcome.message == expected)
