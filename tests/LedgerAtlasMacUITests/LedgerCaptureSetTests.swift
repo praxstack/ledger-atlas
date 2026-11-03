@@ -84,8 +84,9 @@ import Testing
     }
     log("opened \(sheet.title)")
     pump(0.6)
-    // A sheet is read as part of its parent window, as VoiceOver reads it.
-    let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    // Read the sheet's Accessibility tree on the main thread. (Reading it from another thread,
+    // as the screen checks do, makes SwiftUI trap once a sheet is up.)
+    let text = accessibleText(of: sheetWindow)
     log("read \(text.count) elements")
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
@@ -473,6 +474,32 @@ private func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
+/// Every label, title and value in an element's Accessibility tree, read in-process on the
+/// main thread.
+@MainActor
+private func accessibleText(of element: Any, depth: Int = 0) -> [String] {
+  guard depth < 40, let element = element as? NSObject else { return [] }
+  // The attribute API reaches SwiftUI's elements too; AppKit bridges it to their properties.
+  func string(_ attribute: NSAccessibility.Attribute) -> String? {
+    element.accessibilityAttributeValue(attribute) as? String
+  }
+  let own = [string(.description), string(.title), string(.value)]
+    .compactMap { $0 }.filter { !$0.isEmpty }
+  let children = element.accessibilityAttributeValue(.children) as? [Any] ?? []
+  return [own.joined(separator: " ")].filter { !$0.isEmpty }
+    + children.flatMap { accessibleText(of: $0, depth: depth + 1) }
+}
+
+/// What the menu timer saw, shared with the code waiting for it on the main thread.
+@MainActor
+private final class PickBox {
+  let menu: NSMenu
+  var ticks = 0
+  var done = false
+  var titles: [String] = []
+  init(menu: NSMenu) { self.menu = menu }
+}
+
 extension MountedRoot {
   /// Clicks a control the way the mouse does: finds it by its spoken name in the
   /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
@@ -528,14 +555,46 @@ extension MountedRoot {
       log("no pop-up \(label) or \(row); \(ordered.count) pop-ups")
       return false
     }
-    // SwiftUI fills a menu just before it opens.
-    menu.delegate?.menuNeedsUpdate?(menu)
-    menu.update()
-    guard let index = menu.items.firstIndex(where: { $0.title == title }) else {
-      log("pop-up \(row) has \(menu.items.map(\.title)), not \(title)")
+    // SwiftUI fills the menu only while it is open, so open it with a mouse press. The
+    // press runs the menu's own tracking loop; a timer in that loop picks the item.
+    let picked = PickBox(menu: menu)
+    let timer = Timer(timeInterval: 0.25, repeats: true) { timer in
+      MainActor.assumeIsolated {
+        let menu = picked.menu
+        picked.ticks += 1
+        if let index = menu.items.firstIndex(where: { $0.title == title }) {
+          picked.titles = menu.items.map(\.title)
+          menu.performActionForItem(at: index)
+          picked.done = true
+        } else if picked.ticks > 20 {
+          picked.titles = menu.items.map(\.title)
+        } else {
+          return
+        }
+        timer.invalidate()
+        menu.cancelTracking()
+      }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    let location = popUp.convert(NSPoint(x: popUp.bounds.midX, y: popUp.bounds.midY), to: nil)
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+      guard
+        let event = NSEvent.mouseEvent(
+          with: type, location: location, modifierFlags: [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+          context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+      else { continue }
+      window.sendEvent(event)
+      pump(0.05)
+    }
+    let deadline = Date().addingTimeInterval(8)
+    while !picked.done, timer.isValid, Date() < deadline { pump(0.1) }
+    timer.invalidate()
+    menu.cancelTracking()
+    guard picked.done else {
+      log("pop-up \(row) has \(picked.titles), not \(title)")
       return false
     }
-    menu.performActionForItem(at: index)
     pump(0.5)
     return true
   }
