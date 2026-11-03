@@ -11,8 +11,10 @@ import Testing
 /// operation, ceiling and result, and is written to `LEDGER_ATLAS_TEST_ARTIFACTS` when set (CI
 /// uploads that folder).
 ///
-/// Ceilings are for a debug build on a shared CI runner, so they are loose: they catch a path
-/// that stops being paged or turns quadratic, not small slowdowns.
+/// Ceilings are for a debug build on a shared CI runner, set from main's macOS run after #139.
+/// Open, report and save sit at about twice their time there. Read (a cache hit after open) and
+/// search take well under a second, so their ceiling is 1 s. The rest stay loose and catch a
+/// path that stops being paged or turns quadratic.
 ///
 /// It takes a few minutes, so it runs only when `LEDGER_ATLAS_PERFORMANCE_RECEIPT` is set. CI
 /// sets it in its own step on pushes to main and manual runs.
@@ -51,11 +53,11 @@ struct LedgerPerformanceReceiptTests {
       .intValue ?? 0
 
     // Open and read, as the app does when a ledger is chosen.
-    let opened = try receipt.time("open the ledger", ceiling: 60) {
+    let opened = try receipt.time("open the ledger", ceiling: 30) {
       try LedgerStoreLifecycle.open(at: ledgerURL)
     }
     let application = LedgerApplication(store: opened.store)
-    let snapshot = try receipt.time("read every entry", ceiling: 60) {
+    let snapshot = try receipt.time("read every entry", ceiling: 1) {
       try opened.store.readSnapshot()
     }
     #expect(snapshot.transactions.count == Self.transactionCount)
@@ -83,17 +85,17 @@ struct LedgerPerformanceReceiptTests {
     }
 
     // Search and report through the store.
-    let found = try receipt.time("search by note", ceiling: 30) {
+    let found = try receipt.time("search by note", ceiling: 1) {
       try application.search(.init(noteContains: "lunch 77"))
     }
     #expect(!found.isEmpty)
-    let report = try receipt.time("build the INR report", ceiling: 45) {
+    let report = try receipt.time("build the INR report", ceiling: 8) {
       try application.report(unitCode: "INR")
     }
     _ = report
 
     // Save one new expense, then back the ledger up.
-    try receipt.time("save one new expense", ceiling: 60) {
+    try receipt.time("save one new expense", ceiling: 35) {
       _ = try application.createTransaction(
         idempotencyKey: corpus.key("one-more"), draft: try corpus.expense(n: 0, note: "one more"),
         createdAt: corpus.createdAt)
