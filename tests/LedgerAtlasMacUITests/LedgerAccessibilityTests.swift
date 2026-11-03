@@ -136,7 +136,6 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
   // A row is read as its label, or as the text it shows when it has no separate label.
   let spoken = mounted.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
   let rows = spoken.filter { $0.contains(time) }
-  for row in spoken.filter({ $0.count > 12 }).prefix(30) { print("A11Y NAME \(row.prefix(100))") }
   print("A11Y ROWS \(rows.count) ledger rows")
   #expect(rows.count > 3)
   let kinds = ["Income", "Expense", "Transfer", "Adjustment"]
