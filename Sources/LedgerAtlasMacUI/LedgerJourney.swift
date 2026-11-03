@@ -23,7 +23,15 @@ public final class LedgerJourney {
     public let detail: String
   }
 
+  /// Slow import work running off the main thread. The UI shows progress and disables the
+  /// import buttons while it is set.
+  public enum BackgroundWork: Equatable, Sendable {
+    case preparingImport
+    case importing
+  }
+
   public private(set) var phase: Phase = .idle
+  public private(set) var backgroundWork: BackgroundWork?
   private var review: ImportWorkspace.Review?
   public private(set) var summary: ImportReviewSummary = .awaitingSyntheticMetadata
   public private(set) var snapshot: LedgerStore.LedgerReadSnapshot? {
@@ -57,6 +65,39 @@ public final class LedgerJourney {
       .init(
         sourceURL: sourceURL, stagingDatabaseURL: stagingDatabaseURL,
         canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone))
+    try adopt(preparation, canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone)
+  }
+
+  /// `selectSource` with the slow preparation (reading and staging the whole backup) off the
+  /// main thread, so the window stays responsive and can show progress.
+  public func selectSourceInBackground(
+    _ sourceURL: URL, stagingDatabaseURL: URL, canonicalDatabaseURL: URL,
+    sourceTimeZone: SourceTimeZone
+  ) async {
+    guard backgroundWork == nil else { return }
+    disconnectLedger()
+    lastFailure = nil
+    backgroundWork = .preparingImport
+    defer { backgroundWork = nil }
+    let workspace = workspace
+    let request = ImportWorkspace.Request(
+      sourceURL: sourceURL, stagingDatabaseURL: stagingDatabaseURL,
+      canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone)
+    do {
+      let preparation = try await Task.detached(priority: .userInitiated) {
+        try workspace.prepare(request)
+      }.value
+      try adopt(
+        preparation, canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone)
+    } catch {
+      failClosed(message: "Import could not be prepared.")
+    }
+  }
+
+  private func adopt(
+    _ preparation: ImportWorkspace.Preparation, canonicalDatabaseURL: URL,
+    sourceTimeZone: SourceTimeZone
+  ) throws {
     review = preparation.review
     let data = try JSONEncoder().encode(preparation.review)
     summary = ImportReviewSummary(
@@ -108,6 +149,40 @@ public final class LedgerJourney {
     ledgerURL = canonicalDatabaseURL
     canonicalURL = canonicalDatabaseURL
     phase = .imported
+  }
+
+  /// `approveAndOpen` with the commit and the first read off the main thread. On a real
+  /// backup the commit takes minutes, which froze the window when it ran on the main thread.
+  package func approveInBackground(into session: LedgerSession) async {
+    guard backgroundWork == nil else { return }
+    guard let prepared, let canonicalURL else {
+      failClosed(message: "Import could not be approved.")
+      return
+    }
+    lastFailure = nil
+    backgroundWork = .importing
+    defer { backgroundWork = nil }
+    let workspace = workspace
+    do {
+      let opened = try await Task.detached(priority: .userInitiated) {
+        _ = try workspace.commit(prepared, approval: workspace.approve(prepared))
+        let store = try LedgerStore.openReadOnly(at: canonicalURL)
+        return OpenedImport(store: store, snapshot: try store.readSnapshot())
+      }.value
+      // The handle is spent; approving again must not import a second time.
+      self.prepared = nil
+      application = nil
+      mutableStore = nil
+      snapshot = opened.snapshot
+      openedStore = opened.store
+      ledgerURL = canonicalURL
+      self.canonicalURL = canonicalURL
+      phase = .imported
+      // Present the snapshot just read instead of loading the ledger again (#143).
+      session.openValidated(canonicalURL, snapshot: opened.snapshot)
+    } catch {
+      failClosed(message: "Import could not be approved.")
+    }
   }
 
   public func openLedger(_ url: URL) {
@@ -1394,4 +1469,11 @@ public final class LedgerJourney {
       ]
     }
   }
+}
+
+/// A store and its first snapshot, handed from the background import to the main actor. The
+/// store isn't used by the background task once it's returned.
+private struct OpenedImport: @unchecked Sendable {
+  let store: LedgerStore
+  let snapshot: LedgerStore.LedgerReadSnapshot
 }

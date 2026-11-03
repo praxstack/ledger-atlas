@@ -1288,3 +1288,61 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   try journey.generateOccurrences(rule, through: end, createdAt: UTCInstant(epochMilliseconds: 2))
   #expect(try journey.checksum() == checksum)
 }
+
+@MainActor
+@Test func backgroundImportPreparesAndApprovesOffTheMainThreadAndOpensTheLedger() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+
+  let journey = LedgerJourney()
+  let session = LedgerSession()
+  #expect(journey.backgroundWork == nil)
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.lastFailure == nil)
+  #expect(journey.phase == .reviewing)
+  #expect(journey.summary.decision == .reviewable)
+
+  await journey.approveInBackground(into: session)
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.lastFailure == nil)
+  #expect(journey.phase == .imported)
+  #expect(journey.ledgerURL == directory.appendingPathComponent("canonical.sqlite"))
+  #expect(!journey.rows(for: .ledger).isEmpty)
+  #expect(session.screen != .loading)
+
+  // Approving again without a new preparation fails visibly instead of importing twice.
+  await journey.approveInBackground(into: session)
+  #expect(journey.lastFailure == "Import could not be approved.")
+}
+
+@MainActor
+@Test func backgroundImportShowsAFileThatIsNotABackupAsBlocked() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("not-a-backup.sqlite")
+  try Data("not sqlite".utf8).write(to: source)
+  let journey = LedgerJourney()
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.phase == .blocked)
+  await journey.approveInBackground(into: LedgerSession())
+  #expect(journey.lastFailure == "Import could not be approved.")
+}
+
+@Test func elapsedTimeReadsInSecondsThenMinutes() {
+  let start = Date(timeIntervalSince1970: 0)
+  #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(12.7)) == "12 s")
+  #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(65)) == "1 min 05 s")
+  #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(-3)) == "0 s")
+}

@@ -152,10 +152,12 @@ public struct LedgerAtlasRootView: View {
         journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
         return
       }
-      journey.performSelectSource(
-        url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
-        canonicalDatabaseURL: LedgerLocations.availableURL(named: "Money Manager import", in: ledgers),
-        sourceTimeZone: sourceTimeZone)
+      let canonical = LedgerLocations.availableURL(named: "Money Manager import", in: ledgers)
+      Task {
+        await journey.selectSourceInBackground(
+          url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+          canonicalDatabaseURL: canonical, sourceTimeZone: sourceTimeZone)
+      }
     }
     .task {
       if LedgerDemoTour.isRequested {
@@ -1025,11 +1027,33 @@ public struct LedgerAtlasRootView: View {
     }
   }
 
+  /// Commits the reviewed import in the background, then keeps the new ledger's access and
+  /// shows it.
+  private func approveImport() async {
+    await journey.approveInBackground(into: session)
+    guard journey.lastFailure == nil else { return }
+    if let url = journey.ledgerURL {
+      do {
+        try bookmarkStore.save(url, for: .canonicalLedger)
+        if !Self.publishWidget(
+          .ready, publisher: widgetProjectionPublisher, journey: journey,
+          session: session, closeLedgerOnFailure: false)
+        {
+          lifecycleMessage = "Widget status could not be published."
+        }
+      } catch {
+        recordFlowFailure(
+          "Ledger access could not be retained.", publishingWidget: .reopenRequired)
+        return
+      }
+    }
+    selection = .ledger
+  }
+
   @ViewBuilder
   private var destinationPreview: some View {
     if selection != .importReview, selection != .onboarding, session.screen == .loading {
-      ProgressView("Opening ledger…")
-        .accessibilityLabel("Opening ledger")
+      OpeningLedgerView()
     } else if selection != .importReview, selection != .onboarding,
       session.screen == .noLedger, lifecycleMessage != nil || journey.lastFailure != nil
     {
@@ -1058,33 +1082,19 @@ public struct LedgerAtlasRootView: View {
         }
         .accessibilityLabel("Backup source time zone")
         .accessibilityHint("Required to preserve the backup's civil date and time meaning.")
-        .disabled(journey.isSourceTimeZoneSelectionLocked)
+        .disabled(journey.isSourceTimeZoneSelectionLocked || journey.backgroundWork != nil)
         Button("Choose Money Manager backup…") { isChoosingImportSource = true }
           .accessibilityLabel("Choose Money Manager backup")
-          .disabled(sourceTimeZoneIdentifier.isEmpty)
+          .disabled(sourceTimeZoneIdentifier.isEmpty || journey.backgroundWork != nil)
+        if let work = journey.backgroundWork {
+          ImportProgressView(work: work)
+        }
         if journey.phase == .reviewing {
           Button("Approve import") {
-            journey.performApprove(into: session)
-            if journey.lastFailure == nil {
-              if let url = journey.ledgerURL {
-                do {
-                  try bookmarkStore.save(url, for: .canonicalLedger)
-                  if !Self.publishWidget(
-                    .ready, publisher: widgetProjectionPublisher, journey: journey,
-                    session: session, closeLedgerOnFailure: false)
-                  {
-                    lifecycleMessage = "Widget status could not be published."
-                  }
-                } catch {
-                  recordFlowFailure(
-                    "Ledger access could not be retained.", publishingWidget: .reopenRequired)
-                  return
-                }
-              }
-              selection = .ledger
-            }
+            Task { await approveImport() }
           }
           .accessibilityLabel("Approve import")
+          .disabled(journey.backgroundWork != nil)
         }
       }
       .id(selection)
