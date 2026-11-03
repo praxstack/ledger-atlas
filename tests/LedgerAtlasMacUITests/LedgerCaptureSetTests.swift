@@ -77,13 +77,16 @@ import Testing
     let root = try await MountedRoot(
       showing: sheet.destination, size: captureSize, appWindow: true)
     defer { root.close() }
+    log("mounted \(sheet.destination)")
     guard let sheetWindow = try await sheet.open(in: root) else {
       Issue.record("\(record.key): the \(sheet.title) did not open")
       continue
     }
+    log("opened \(sheet.title)")
     pump(0.6)
     // A sheet is read as part of its parent window, as VoiceOver reads it.
     let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    log("read \(text.count) elements")
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
       root.window.appearance = NSAppearance(named: appearance.name)
@@ -249,9 +252,13 @@ enum CaptureSheet: Sendable {
       guard root.click(named: "Begin editing accounts") else { return nil }
       try await root.settle()
       guard root.click(named: "New account") else { return nil }
-    case .editAccount(let row, _):
-      // Each account row has an Actions pop-up; rows are in screen order, top to bottom.
-      guard root.chooseMenuItem("Edit account", fromPopUpAt: row) else { return nil }
+    case .editAccount(let row, let name):
+      // The Actions menus only work while editing. Each account row has one, labelled
+      // with the account's name; `row` is the fallback, counting pop-ups from the top.
+      guard root.click(named: "Begin editing accounts") else { return nil }
+      try await root.settle()
+      guard root.chooseMenuItem("Edit account", from: "Actions for \(name)", orRow: row)
+      else { return nil }
     case .setPasscode:
       guard root.click(named: "Set passcode…") else { return nil }
     }
@@ -444,15 +451,21 @@ private func scroll(_ window: NSWindow, to position: CaptureScroll) {
     let document = main.documentView
   else { return }
   let clip = main.contentView
-  let travel = max(0, document.frame.height - clip.bounds.height)
+  // The window's content runs under the title bar and the sidebar, so the clip view is
+  // inset: its resting origin is (-left, -top), not (0, 0). Keep x as it is, or the rows
+  // slide under the sidebar.
+  let insets = main.contentInsets
+  let travel = max(0, document.frame.height - clip.bounds.height + insets.top + insets.bottom)
   let fraction: CGFloat =
     switch position {
     case .top: 0
     case .middle: 0.5
     case .bottom: 1
     }
-  let y = document.isFlipped ? travel * fraction : travel * (1 - fraction)
-  clip.scroll(to: NSPoint(x: 0, y: y))
+  let y =
+    document.isFlipped
+    ? -insets.top + travel * fraction : -insets.bottom + travel * (1 - fraction)
+  clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
   main.reflectScrolledClipView(clip)
 }
 
@@ -496,9 +509,9 @@ extension MountedRoot {
     return true
   }
 
-  /// Picks an item from the n-th pop-up button (top to bottom), as choosing it with the mouse
-  /// would, without opening the menu.
-  func chooseMenuItem(_ title: String, fromPopUpAt row: Int) -> Bool {
+  /// Picks an item from the pop-up button with this accessibility label (or else the n-th
+  /// pop-up, top to bottom), as choosing it with the mouse would, without opening the menu.
+  func chooseMenuItem(_ title: String, from label: String, orRow row: Int) -> Bool {
     func popUps(in view: NSView) -> [NSPopUpButton] {
       ((view as? NSPopUpButton).map { [$0] } ?? []) + view.subviews.flatMap(popUps)
     }
@@ -506,8 +519,13 @@ extension MountedRoot {
     let ordered = popUps(in: content).sorted {
       $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY
     }
-    guard ordered.indices.contains(row), let menu = ordered[row].menu else {
-      log("no pop-up \(row); \(ordered.count) pop-ups")
+    let described = ordered.map { ($0.accessibilityLabel() ?? "-") + ($0.isEnabled ? "" : " (off)") }
+    log("pop-ups: \(described)")
+    let popUp =
+      ordered.first { $0.accessibilityLabel() == label }
+      ?? (ordered.indices.contains(row) ? ordered[row] : nil)
+    guard let popUp, let menu = popUp.menu else {
+      log("no pop-up \(label) or \(row); \(ordered.count) pop-ups")
       return false
     }
     // SwiftUI fills a menu just before it opens.
