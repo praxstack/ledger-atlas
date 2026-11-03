@@ -198,12 +198,13 @@ public struct LedgerAtlasRootView: View {
   /// picked file turns out to be a backup.
   private func importBackup(from url: URL) {
     guard !appLock.isLocked else { return }
-    let accessing = url.startAccessingSecurityScopedResource()
-    guard accessing else {
+    guard url.startAccessingSecurityScopedResource() else {
       recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
       return
     }
-    defer { url.stopAccessingSecurityScopedResource() }
+    // The backup is read in the background, so access ends when that work does, not here.
+    var handedOff = false
+    defer { if !handedOff { url.stopAccessingSecurityScopedResource() } }
     guard
       let sourceTimeZone = try? SourceTimeZone(
         ianaIdentifier: sourceTimeZoneIdentifier)
@@ -229,7 +230,9 @@ public struct LedgerAtlasRootView: View {
       return
     }
     let canonical = LedgerLocations.availableURL(named: "Money Manager import", in: ledgers)
+    handedOff = true
     Task {
+      defer { url.stopAccessingSecurityScopedResource() }
       await journey.selectSourceInBackground(
         url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
         canonicalDatabaseURL: canonical, sourceTimeZone: sourceTimeZone)
@@ -830,6 +833,10 @@ public struct LedgerAtlasRootView: View {
     } catch {
       LedgerWidgetAvailability.log.error(
         "widget status \(state.rawValue, privacy: .public) not written: \(String(describing: error), privacy: .public)")
+      // The widget must not keep showing an open ledger's summary after the ledger closed or
+      // locked, so a failed non-ready status removes the old one. The widget then shows
+      // "Open Ledger Atlas to continue."
+      if state != .ready { publisher.clear() }
       return false
     }
   }

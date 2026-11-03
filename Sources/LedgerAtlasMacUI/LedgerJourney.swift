@@ -104,9 +104,24 @@ public final class LedgerJourney {
 
   /// Whether `url` is a Money Manager backup the importer would accept, so Open Ledger can
   /// offer to import it instead of failing to open it as a ledger.
+  ///
+  /// Open Ledger asks this on the main thread, and the classifier reads the whole file, which
+  /// takes seconds on a large ledger. So a Ledger Atlas file (its SQLite header carries the
+  /// ledger's application id) and anything far larger than a phone backup is answered without it.
   package static func isMoneyManagerBackup(_ url: URL) -> Bool {
-    SourceClassifier().classify(url).status.admitsImportPreparation
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+    defer { try? handle.close() }
+    guard let header = try? handle.read(upToCount: 100), header.count == 100 else { return false }
+    if header.starts(with: Data("SQLite format 3\0".utf8)) {
+      let applicationID = header[68..<72].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+      if applicationID == UInt32(bitPattern: CanonicalLedgerSchema.applicationID) { return false }
+    }
+    guard let size = try? handle.seekToEnd(), size <= maximumBackupBytes else { return false }
+    return SourceClassifier().classify(url).status.admitsImportPreparation
   }
+
+  /// Phone backups are a few megabytes; this leaves plenty of room.
+  static let maximumBackupBytes: UInt64 = 256 * 1024 * 1024
 
   /// Keeps the Mac awake and stops a quick quit from cutting off a long import step. A step cut
   /// off anyway is safe: the commit is one SQLite transaction, so it rolls back, and choosing

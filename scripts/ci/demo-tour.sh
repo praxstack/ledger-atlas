@@ -86,7 +86,7 @@ echo "demo tour: $count screens"
 grep -q "ledger opened" "$LOG" || { echo "demo ledger did not open"; exit 1; }
 # The import check: a made-up Money Manager backup, imported and reopened by the shipped app.
 grep -q "import check: backup recognised true" "$LOG" || { echo "import check: Open Ledger did not recognise the backup"; exit 1; }
-grep -q "import check: approve imported" "$LOG" || { echo "import check: the import did not finish"; exit 1; }
+grep -q "import check: approve imported, 1 transactions" "$LOG" || { echo "import check: the import did not finish"; exit 1; }
 grep -q "import check: reopen opened failure=none" "$LOG" || { echo "import check: the imported ledger did not reopen"; exit 1; }
 [ "$count" -ge 10 ] || { echo "too few screens captured"; exit 1; }
 # A blank or single-colour window compresses to a few KB; a real screen is far larger.

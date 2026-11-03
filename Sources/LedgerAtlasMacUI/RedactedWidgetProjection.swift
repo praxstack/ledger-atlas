@@ -180,6 +180,10 @@ public struct RedactedWidgetProjectionStore: Sendable {
     return try? JSONDecoder().decode(RedactedWidgetProjection.self, from: data)
   }
 
+  public func remove() {
+    try? FileManager.default.removeItem(at: url)
+  }
+
   public func write(_ projection: RedactedWidgetProjection) throws {
     precondition(projection.schemaVersion == RedactedWidgetProjection.currentSchemaVersion)
     let encoder = JSONEncoder()
@@ -191,6 +195,7 @@ public struct RedactedWidgetProjectionStore: Sendable {
 
 public struct RedactedWidgetProjectionPublisher: Sendable {
   private let write: @Sendable (RedactedWidgetProjection) throws -> Void
+  private let remove: @Sendable () -> Void
 
   /// Writes to the shared store and asks the widget to redraw.
   public init(store: RedactedWidgetProjectionStore) {
@@ -200,11 +205,24 @@ public struct RedactedWidgetProjectionPublisher: Sendable {
         WidgetCenter.shared.reloadAllTimelines()
       #endif
     }
+    remove = {
+      store.remove()
+      #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadAllTimelines()
+      #endif
+    }
   }
 
-  public init(write: @escaping @Sendable (RedactedWidgetProjection) throws -> Void) {
+  public init(
+    write: @escaping @Sendable (RedactedWidgetProjection) throws -> Void,
+    remove: @escaping @Sendable () -> Void = {}
+  ) {
     self.write = write
+    self.remove = remove
   }
+
+  /// Removes the published status, so the widget falls back to "Open Ledger Atlas to continue."
+  public func clear() { remove() }
 
   public func publish(_ state: RedactedWidgetProjection.State) throws {
     try write(.init(state: state))

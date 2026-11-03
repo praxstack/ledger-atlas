@@ -1394,3 +1394,40 @@ private func waitForBackgroundWork(
     await Task.yield()
   }
 }
+
+@MainActor
+@Test func aFailedNonReadyWidgetStatusRemovesTheOldSummary() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let store = RedactedWidgetProjectionStore(containerURL: directory)
+  try store.write(.init(state: .ready))
+  let real = RedactedWidgetProjectionPublisher(store: store)
+  let failing = RedactedWidgetProjectionPublisher(
+    write: { _ in throw CocoaError(.fileWriteNoPermission) }, remove: { real.clear() })
+  let journey = LedgerJourney()
+
+  // A failed refresh of an open ledger keeps the last summary.
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: failing, journey: journey))
+  #expect(store.readOnly().state == .ready)
+  // A failed "locked" must not leave it showing: the widget falls back to reopen-required.
+  #expect(!LedgerAtlasRootView.publishWidget(.locked, publisher: failing, journey: journey))
+  #expect(!FileManager.default.fileExists(atPath: store.url.path))
+  #expect(store.readOnly().state == .reopenRequired)
+}
+
+@Test func removingARefusedCopyLeavesLedgersWithASimilarName() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let copy = directory.appendingPathComponent("Home.sqlite")
+  let names = ["Home.sqlite", "Home.sqlite-journal", "Home.sqlite-wal", "Home.sqlite-shm",
+    "Home.sqlite 2.sqlite", "Home.sqlite.v10-recovery"]
+  for name in names { try Data("x".utf8).write(to: directory.appendingPathComponent(name)) }
+
+  LedgerLocations.removeLedgerFiles(at: copy)
+
+  #expect(
+    try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+      == ["Home.sqlite 2.sqlite", "Home.sqlite.v10-recovery"])
+}
