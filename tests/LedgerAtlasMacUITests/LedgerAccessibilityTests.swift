@@ -153,7 +153,9 @@ final class MountedRoot {
   func inProcessCount() -> Int {
     func count(_ element: Any, _ depth: Int) -> Int {
       guard depth < 80, let node = element as? NSObject else { return 0 }
-      let children = node.value(forKey: "accessibilityChildren") as? [Any] ?? []
+      let selector = Selector(("accessibilityChildren"))
+      guard node.responds(to: selector) else { return 1 }
+      let children = node.perform(selector)?.takeUnretainedValue() as? [Any] ?? []
       return 1 + children.reduce(0) { $0 + count($1, depth + 1) }
     }
     return count(window, 0)
