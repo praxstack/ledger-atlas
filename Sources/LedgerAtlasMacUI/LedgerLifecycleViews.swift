@@ -74,3 +74,69 @@ struct EmptyLedgerPrompt: View {
     .padding(32)
   }
 }
+
+/// Shown while an import step runs off the main thread. A real backup takes minutes, so it
+/// says so and counts the time.
+struct ImportProgressView: View {
+  let work: LedgerJourney.BackgroundWork
+  @State private var started = Date()
+
+  private var title: String {
+    switch work {
+    case .preparingImport: "Reading the backup…"
+    case .importing: "Importing into a new ledger…"
+    }
+  }
+
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 1)) { context in
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        ProgressView().controlSize(.small)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title)
+          Text(
+            "\(LedgerElapsedTime.text(since: started, now: context.date)). A large backup can take several minutes."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(title)
+    .accessibilityIdentifier("import.progress")
+  }
+}
+
+/// Shown while a ledger opens. The first open of a large ledger checks every record and can
+/// take a minute or more; later opens of the same file skip that and take seconds.
+struct OpeningLedgerView: View {
+  @State private var started = Date()
+
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 1)) { context in
+      let seconds = context.date.timeIntervalSince(started)
+      VStack(spacing: 8) {
+        ProgressView("Opening ledger…")
+        if seconds >= 3 {
+          Text(
+            "Checking every record (\(LedgerElapsedTime.text(since: started, now: context.date))). The first open of a large ledger can take a minute or more; later opens are quick."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: 360)
+        }
+      }
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("Opening ledger")
+  }
+}
+
+enum LedgerElapsedTime {
+  /// "12 s" under a minute, then "1 min 05 s".
+  static func text(since start: Date, now: Date) -> String {
+    let total = max(0, Int(now.timeIntervalSince(start)))
+    guard total >= 60 else { return "\(total) s" }
+    return String(format: "%d min %02d s", total / 60, total % 60)
+  }
+}
