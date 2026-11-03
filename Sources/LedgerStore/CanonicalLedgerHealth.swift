@@ -1428,9 +1428,13 @@ package enum CanonicalLedgerHealth {
       }
     }
     for (index, value) in parameters.enumerated() {
+      // Bound with its byte length, so a value with a NUL inside is compared whole rather than
+      // cut short at the NUL (and possibly matching another row).
+      // withCString's buffer holds every UTF-8 byte, embedded NULs included.
       let bound = value.withCString {
         sqlite3_bind_text(
-          statement, Int32(index + 1), $0, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+          statement, Int32(index + 1), $0, Int32(value.utf8.count),
+          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
       }
       guard bound == SQLITE_OK else { throw HealthError.invalid }
     }
