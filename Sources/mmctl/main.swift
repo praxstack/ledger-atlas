@@ -442,11 +442,63 @@ guard let command = arguments.first else {
   exit(0)
 }
 
+private func runCertify(_ arguments: [String]) -> Never {
+  let usage =
+    "usage: mmctl certify --input <backup> --work-dir <empty-dir> --time-zone <iana-id|fixed:SECONDS> --locale <locale> [--oracle <json-file>] [--json]"
+  let parsed: ParsedOptions
+  do {
+    parsed = try parseOptions(
+      arguments.dropFirst(),
+      valueNames: ["--input", "--work-dir", "--time-zone", "--locale", "--oracle"],
+      flagNames: ["--json"])
+  } catch { writeUsage(usage) }
+  guard let input = parsed.values["--input"], let work = parsed.values["--work-dir"],
+    let zone = parsed.values["--time-zone"], let locale = parsed.values["--locale"]
+  else { writeUsage(usage) }
+  let timeZone: SourceTimeZone
+  do {
+    if zone.hasPrefix("fixed:"), let seconds = Int(zone.dropFirst("fixed:".count)) {
+      timeZone = try SourceTimeZone(fixedOffsetSeconds: seconds)
+    } else {
+      timeZone = try SourceTimeZone(ianaIdentifier: zone)
+    }
+  } catch { writeUsage(usage) }
+  // The scratch ledgers go in a directory the caller made for them, so nothing is overwritten.
+  guard let entries = try? FileManager.default.contentsOfDirectory(atPath: work), entries.isEmpty
+  else {
+    FileHandle.standardError.write(Data("mmctl certify: --work-dir must be an empty directory\n".utf8))
+    exit(dataExit)
+  }
+  do {
+    let oracle = try parsed.values["--oracle"].map {
+      try readBoundedJSON(MoneyManagerV19AggregateOracle.self, path: $0, maximumBytes: 64 * 1_024)
+    }
+    let certificate = try MoneyManagerV19ImportCertifier.certify(
+      sourceURL: URL(fileURLWithPath: input), workDirectory: URL(fileURLWithPath: work),
+      sourceTimeZone: timeZone, locale: locale, oracle: oracle)
+    if parsed.flags.contains("--json") {
+      try writeJSON(certificate)
+    } else {
+      let failed = certificate.checks.filter { !$0.passed }.map(\.name)
+      writeHuman(
+        "level=\(certificate.achievedLevel.rawValue) source=\(certificate.sourceSHA256) profile=\(certificate.profileID) events=\(certificate.eventCount) transfer_pairs=\(certificate.transferPairs) failed=\(failed.isEmpty ? "none" : failed.joined(separator: ","))"
+      )
+    }
+    exit(certificate.checks.allSatisfy(\.passed) ? 0 : zeroLossExit)
+  } catch {
+    // Error codes only: never a path or a value from the backup.
+    let code = (error as? MoneyManagerV19ImportCertifierError).map { String(describing: $0) } ?? "import_failed"
+    FileHandle.standardError.write(Data("mmctl certify: \(code)\n".utf8))
+    exit(operationExit)
+  }
+}
+
 switch command {
 case "inspect", "classify": runInspect(arguments, command: command)
 case "coverage": runCoverage(arguments)
 case "stage": runStage(arguments)
 case "reconcile": runReconcile(arguments)
+case "certify": runCertify(arguments)
 default:
-  writeUsage("usage: mmctl <inspect|classify|coverage|stage|reconcile> ...")
+  writeUsage("usage: mmctl <inspect|classify|coverage|stage|reconcile|certify> ...")
 }

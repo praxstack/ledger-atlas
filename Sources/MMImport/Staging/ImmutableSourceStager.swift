@@ -93,22 +93,27 @@ public struct ImmutableSourceStager: Sendable {
     destinationURL: URL,
     profile: SourceProfile,
     before: SourceFingerprint,
+    identity: (sha256: String, sizeBytes: UInt64)? = nil,
     contents: StagingContents? = nil
   ) throws -> StagingResult {
+    // The staged identity is the SQLite database's own bytes. For a plain file that is the file;
+    // for a ZIP it is the selected member, so zipping a backup never changes its ids. `before`
+    // still fingerprints the file on disk for the source-unchanged checks.
+    let identity = identity ?? (before.sha256, before.sizeBytes)
     let stagingID = StableStagingID.stage(
-      artifactSHA256: before.sha256,
+      artifactSHA256: identity.sha256,
       profileID: profile.identifier,
       adapterVersion: request.adapterVersion)
     let contents = try contents ?? readSource(
       descriptor: sourceDescriptor,
-      artifactSHA256: before.sha256,
+      artifactSHA256: identity.sha256,
       profileID: profile.identifier,
       adapterVersion: request.adapterVersion,
       stagingID: stagingID,
       limits: request.limits)
     let manifest = StagingManifest(
       stagingID: stagingID,
-      artifactSHA256: before.sha256,
+      artifactSHA256: identity.sha256,
       profileID: profile.identifier,
       adapterVersion: request.adapterVersion,
       tableCount: contents.tables.count,
@@ -123,7 +128,7 @@ public struct ImmutableSourceStager: Sendable {
       expectedDigest = try store.write(
         contents,
         manifest: manifest,
-        sourceSizeBytes: before.sizeBytes,
+        sourceSizeBytes: identity.sizeBytes,
         limitsDescription: request.limits.stableDescription,
         to: temporaryURL)
     } catch {
@@ -242,6 +247,7 @@ public struct ImmutableSourceStager: Sendable {
     case .failure:
       throw StagingError.selectedZIPMemberUnavailable
     }
+    let memberSHA256 = CanonicalReceiptDigest.sha256(sqliteBytes)
     let database = try openDeserializedReadOnly(sqliteBytes)
     defer { sqlite3_close(database) }
     return try stageSource(
@@ -252,11 +258,12 @@ public struct ImmutableSourceStager: Sendable {
       destinationURL: request.stagingDatabaseURL.standardizedFileURL,
       profile: profile,
       before: before,
+      identity: (memberSHA256, UInt64(sqliteBytes.count)),
       contents: try zipContents(
-        database, artifactSHA256: before.sha256, profileID: profile.identifier,
+        database, artifactSHA256: memberSHA256, profileID: profile.identifier,
         adapterVersion: effectiveRequest.adapterVersion, limits: effectiveRequest.limits,
         stagingID: StableStagingID.stage(
-          artifactSHA256: before.sha256, profileID: profile.identifier,
+          artifactSHA256: memberSHA256, profileID: profile.identifier,
           adapterVersion: effectiveRequest.adapterVersion)))
   }
 

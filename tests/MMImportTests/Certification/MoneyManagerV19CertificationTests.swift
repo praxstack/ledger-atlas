@@ -186,6 +186,133 @@ struct MoneyManagerV19CertificationTests {
       #expect(preserved > 0)
     }
   }
+
+  // MARK: (e) Named certificate
+
+  @Test("a certificate names the bytes, profile, adapter, locale, oracle and derived level")
+  func certificateNamesEverythingItWasTestedAgainst() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeCertifiableBackup(to: source)
+      let sourceBefore = try Data(contentsOf: source)
+      let oracle = MoneyManagerV19AggregateOracle(
+        eventsByKind: [
+          "income": 2, "expense": 2, "adjustment": 1, "adjustment_debit": 1,
+          "transfer_debit": 1, "transfer_credit": 1,
+        ],
+        transferPairs: 1)
+      let work = directory.appendingPathComponent("work-l3")
+      try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
+      let certificate = try MoneyManagerV19ImportCertifier.certify(
+        sourceURL: source, workDirectory: work,
+        sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800), locale: "en-IN",
+        oracle: oracle)
+
+      #expect(certificate.checks.filter { !$0.passed }.map(\.name) == [])
+      #expect(certificate.achievedLevel == .l3DeterministicMapping)
+      #expect(certificate.sourceSHA256 == CanonicalReceiptDigest.sha256(sourceBefore))
+      #expect(certificate.sourceByteCount == sourceBefore.count)
+      #expect(certificate.profileID == "realbyte-android-sqlite-v19-observed")
+      #expect(certificate.adapterVersion == MoneyManagerV19Adapter.version)
+      #expect(certificate.importedArtifactSHA256 == certificate.sourceSHA256)
+      #expect(certificate.locale == "en-IN")
+      // The backup's own locale is recorded next to the one certified, never replaced by it.
+      #expect(certificate.sourceLocales == ["en_US"])
+      #expect(certificate.sourceTimeZone == "fixed:19800")
+      #expect(certificate.oracleID == oracle.oracleID)
+      #expect(certificate.eventCount == 8)
+      #expect(certificate.transferPairs == 1)
+      #expect(try Data(contentsOf: source) == sourceBefore)
+
+      // Aggregates and hashes only: nothing from the backup's rows reaches the certificate.
+      let json = String(decoding: try JSONEncoder().encode(certificate), as: UTF8.self)
+      for secret in ["Wallet", "Salary", "Snacks", "synthetic", "acct-a", "tx-income", "40.00"] {
+        #expect(!json.contains(secret))
+      }
+    }
+  }
+
+  @Test("a ZIP certificate names the wrapper and the imported SQLite member")
+  func zipCertificateNamesWrapperAndMember() throws {
+    try withDirectory { directory in
+      let plain = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeCertifiableBackup(to: plain)
+      let zipped = directory.appendingPathComponent("MM(synthetic-zip).mmbak")
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+      process.arguments = ["-q", "-j", zipped.path, plain.path]
+      try process.run()
+      process.waitUntilExit()
+      try #require(process.terminationStatus == 0)
+      func certify(_ source: URL, _ name: String) throws -> MoneyManagerV19ImportCertificate {
+        let work = directory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
+        return try MoneyManagerV19ImportCertifier.certify(
+          sourceURL: source, workDirectory: work,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800), locale: "en-IN",
+          oracle: nil)
+      }
+      let direct = try certify(plain, "work-plain")
+      let zip = try certify(zipped, "work-zip")
+
+      #expect(zip.achievedLevel == .l2LosslessStaging)
+      #expect(zip.container == "zip")
+      #expect(zip.sourceSHA256 == CanonicalReceiptDigest.sha256(try Data(contentsOf: zipped)))
+      #expect(zip.importedArtifactSHA256 != zip.sourceSHA256)
+      #expect(zip.importedArtifactSHA256 == direct.sourceSHA256)
+      #expect(zip.eventSetHash == direct.eventSetHash)
+      #expect(zip.sourceLocales == ["en_US"])
+    }
+  }
+
+  @Test("without a matching oracle the certificate stops at lossless staging")
+  func certificateLevelNeedsAMatchingOracle() throws {
+    try withDirectory { directory in
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeCertifiableBackup(to: source)
+      func certify(_ name: String, _ oracle: MoneyManagerV19AggregateOracle?) throws
+        -> MoneyManagerV19ImportCertificate
+      {
+        let work = directory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
+        return try MoneyManagerV19ImportCertifier.certify(
+          sourceURL: source, workDirectory: work,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800), locale: "en-IN",
+          oracle: oracle)
+      }
+      let none = try certify("none", nil)
+      #expect(none.achievedLevel == .l2LosslessStaging)
+      #expect(none.oracleID == nil)
+
+      let wrong = try certify(
+        "wrong", MoneyManagerV19AggregateOracle(eventsByKind: ["income": 3], transferPairs: 1))
+      #expect(wrong.achievedLevel == .l2LosslessStaging)
+      #expect(wrong.checks.first { $0.name == "oracle_counts" }?.passed == false)
+
+      #expect(throws: MoneyManagerV19ImportCertifierError.unsupportedLocale) {
+        _ = try MoneyManagerV19ImportCertifier.certify(
+          sourceURL: source, workDirectory: directory,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800), locale: "xx-XX",
+          oracle: nil)
+      }
+    }
+  }
+
+  @Test("an unpaired transfer leg keeps the certificate below lossless staging")
+  func unpairedTransferBlocksLosslessCertificate() throws {
+    try withDirectory { directory in
+      // The full synthetic backup keeps one transfer leg with no partner, on purpose.
+      let source = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeFullSchemaBackup(to: source)
+      let work = directory.appendingPathComponent("work")
+      try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
+      let certificate = try MoneyManagerV19ImportCertifier.certify(
+        sourceURL: source, workDirectory: work,
+        sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800), locale: "en-IN", oracle: nil)
+      #expect(certificate.achievedLevel == .l1ReadOnlyClassification)
+      #expect(certificate.checks.filter { !$0.passed }.map(\.name) == ["no_unresolved_semantics"])
+    }
+  }
 }
 
 // MARK: - Helpers
@@ -235,6 +362,13 @@ private func tableCounts(at url: URL) throws -> [String: Int] {
 }
 
 // Copied from ObservedV19FullSchemaImportTests so this suite stands on its own.
+/// The full synthetic backup without its deliberately unpaired transfer leg, so nothing in it
+/// blocks a lossless claim.
+private func writeCertifiableBackup(to url: URL) throws {
+  try writeFullSchemaBackup(to: url)
+  try execute(at: url, sql: "DELETE FROM INOUTCOME WHERE uid='tx-orphan-out'")
+}
+
 private func writeFullSchemaBackup(to url: URL) throws {
   let ddlURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
