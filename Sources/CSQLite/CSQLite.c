@@ -30,6 +30,9 @@ typedef struct {
     sqlite3_file base;
     csqlite_pinned_registration *context;
     sqlite3_file *inner;
+    // The "/dev/fd/N" name the inner unix file was opened by. The unix VFS keeps the pointer
+    // (as zPath) and reads it again at close, so it must live as long as the file.
+    char descriptor_path[64];
     max_align_t alignment;
 } csqlite_pinned_file;
 
@@ -359,17 +362,19 @@ static int csqlite_open_parent_from_fd(
     csqlite_pinned_registration *context,
     int descriptor,
     sqlite3_file *file,
+    char *descriptor_path,
+    size_t descriptor_path_size,
     int flags,
     int *out_flags
 ) {
-    char descriptor_path[64];
+    // `descriptor_path` must outlive `file`: the parent VFS keeps the pointer, not a copy.
     int length = snprintf(
         descriptor_path,
-        sizeof(descriptor_path),
+        descriptor_path_size,
         "/dev/fd/%d",
         descriptor
     );
-    if (length <= 0 || (size_t)length >= sizeof(descriptor_path)) return SQLITE_CANTOPEN;
+    if (length <= 0 || (size_t)length >= descriptor_path_size) return SQLITE_CANTOPEN;
     int delegated_flags = (flags | SQLITE_OPEN_READWRITE)
         & ~(SQLITE_OPEN_CREATE | SQLITE_OPEN_EXCLUSIVE | SQLITE_OPEN_DELETEONCLOSE
             | SQLITE_OPEN_URI | SQLITE_OPEN_MAIN_JOURNAL | SQLITE_OPEN_WAL);
@@ -404,6 +409,8 @@ static int csqlite_open_pinned_main(
         context,
         context->database_fd,
         pinned->inner,
+        pinned->descriptor_path,
+        sizeof(pinned->descriptor_path),
         flags,
         out_flags
     );
@@ -520,10 +527,14 @@ static int csqlite_pinned_open(
             context->journal_owned = 0;
             return SQLITE_IOERR_DIR_FSYNC;
         }
+        // The journal is the parent's own file, so the name goes in the spare bytes after it:
+        // this VFS's szOsFile adds sizeof(csqlite_pinned_file) to the parent's.
         int result = csqlite_open_parent_from_fd(
             context,
             journal,
             file,
+            (char *)file + context->parent->szOsFile,
+            sizeof(csqlite_pinned_file),
             flags,
             out_flags
         );
