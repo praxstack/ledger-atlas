@@ -169,6 +169,28 @@ func rememberedImportGraphSkipsReplayOnlyWhenUnchanged() throws {
   }
 }
 
+/// A screen refresh reuses the preserved source rows, but never past a change to them.
+@Test("a snapshot reuses preserved source rows only while nothing could have changed them")
+func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStoreLifecycle.open(at: url).store
+    let first = try store.readSnapshot().preservedSource
+    #expect(!first.isEmpty)
+    #expect(try store.readSnapshot().preservedSource == first)
+
+    // Another connection rewrites one preserved payload; no row count changes.
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        "UPDATE sidecar_reference SET payload=X'2A2A' WHERE rowid=(SELECT min(rowid) FROM sidecar_reference);"
+      )
+    }
+    let after = try store.readSnapshot().preservedSource
+    #expect(after != first)
+    #expect(after.contains { $0.payload == Data([0x2A, 0x2A]) })
+  }
+}
+
 @Test("the health check leaves the caller's connection as it found it")
 func healthCheckRestoresConnectionState() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
