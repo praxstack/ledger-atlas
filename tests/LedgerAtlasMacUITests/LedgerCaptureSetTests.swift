@@ -101,7 +101,7 @@ import Testing
       // Dismiss the sheet the way a person does, with its Cancel button, so SwiftUI ends it
       // itself. Ending it from outside (or closing the window under it) has ended the whole
       // test process.
-      if root.window.attachedSheet != nil, root.click(named: "Cancel") {
+      if let sheet = root.window.attachedSheet, root.click(named: "Cancel", in: sheet) {
         for _ in 0..<30 where root.window.attachedSheet != nil { pump(0.1) }
       }
       if let attached = root.window.attachedSheet {
@@ -559,9 +559,10 @@ extension MountedRoot {
   /// Clicks a control the way the mouse does: finds it by its spoken name in the
   /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
   /// Returns false if there is no such control.
-  func click(named name: String) -> Bool {
+  func click(named name: String, in target: NSWindow? = nil) -> Bool {
+    let window = target ?? self.window
     let frame: CGRect?
-    if readsInProcess {
+    if readsInProcess || target != nil {
       frame = inProcessFrame(in: window, named: name)
     } else {
       let pid = ProcessInfo.processInfo.processIdentifier
