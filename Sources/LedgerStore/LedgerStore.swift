@@ -213,6 +213,54 @@ public final class LedgerStore {
   /// The preserved source rows, which only an import writes, from the last committed read.
   /// On a large import they are most of a snapshot's time, and every screen refresh takes one.
   private var preservedSourceCache: PreservedSourceCache?
+  /// The core snapshot from the last full read or checked save, with the file state it read.
+  /// Reading it again is most of a save's time on a large ledger, and an unchanged file gives
+  /// the same snapshot.
+  private var coreSnapshotCache: CoreSnapshotCache?
+
+  private struct CoreSnapshotCache {
+    let state: FileState
+    let snapshot: LedgerReadSnapshot
+  }
+
+  /// What can change the rows a snapshot reads: another connection's commit (`data_version`),
+  /// a row written on this one, even by a trigger or in a rolled-back transaction
+  /// (`total_changes()`), or a schema change (`schema_version`).
+  private struct FileState: Equatable {
+    let dataVersion: Int64
+    let totalChanges: Int64
+    let schemaVersion: Int64
+  }
+
+  private static func fileState(of database: OpaquePointer) -> FileState? {
+    guard let dataVersion = scalarInt("PRAGMA data_version", on: database),
+      let totalChanges = scalarInt("SELECT total_changes()", on: database),
+      let schemaVersion = scalarInt("PRAGMA schema_version", on: database)
+    else { return nil }
+    return FileState(
+      dataVersion: Int64(dataVersion), totalChanges: Int64(totalChanges),
+      schemaVersion: Int64(schemaVersion))
+  }
+
+  /// The cached core snapshot, if nothing has changed since it was read.
+  private func cachedCoreSnapshot() -> LedgerReadSnapshot? {
+    guard let cache = coreSnapshotCache, let state = Self.fileState(of: database),
+      cache.state == state
+    else { return nil }
+    return cache.snapshot
+  }
+
+  /// Keeps `snapshot` only if the file state was the same before and after it was read, so no
+  /// other commit can have landed in between.
+  private func rememberCoreSnapshot(
+    _ snapshot: LedgerReadSnapshot, readFrom before: FileState?
+  ) {
+    guard let before, Self.fileState(of: database) == before else {
+      coreSnapshotCache = nil
+      return
+    }
+    coreSnapshotCache = CoreSnapshotCache(state: before, snapshot: snapshot)
+  }
 
   private struct PreservedSourceCache {
     let mark: CanonicalLedgerHealth.ImportGraphMark
@@ -390,15 +438,18 @@ public final class LedgerStore {
       }
       try validateCanonicalJournalMode(on: database)
       try validateCanonicalSchema(on: database)
-      let importGraphVerifiedAt = try CanonicalLedgerHealth.validate(
+      let stateBeforeCheck = fileState(of: database)
+      let checked = try CanonicalLedgerHealth.validateReading(
         database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
         remembering: .shared)
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
-      return LedgerStore(
+      let store = LedgerStore(
         mutableDatabase: database, identity: identity, url: url,
         registration: registration, mutationTestHook: mutationTestHook,
-        importGraphVerifiedAt: importGraphVerifiedAt)
+        importGraphVerifiedAt: checked.mark)
+      store.rememberCoreSnapshot(checked.snapshot, readFrom: stateBeforeCheck)
+      return store
     } catch {
       _ = csqlite_close_pinned(database, registration)
       throw Error.incompatibleCanonicalStore
@@ -484,7 +535,16 @@ public final class LedgerStore {
   private func readSnapshotContents(
     forPortableExport: Bool = false, reusingPreservedSource: Bool = false
   ) throws -> LedgerReadSnapshot {
-    let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
+    let snapshot: LedgerReadSnapshot
+    if reusingPreservedSource, let cached = cachedCoreSnapshot() {
+      snapshot = cached
+    } else {
+      let stateBeforeRead = Self.fileState(of: database)
+      snapshot = try CanonicalLedgerHealth.readSnapshot(database)
+      if reusingPreservedSource {
+        rememberCoreSnapshot(snapshot, readFrom: stateBeforeRead)
+      }
+    }
     try mutationTestHook?(
       forPortableExport ? .afterPortableExportSnapshotRead : .afterReadSnapshotCoreRead)
     let importedCount =
@@ -2340,17 +2400,22 @@ public final class LedgerStore {
       let fileUnchanged =
         writeWatch?.writtenTables.isEmpty == true
         && importGraphVerifiedAt.map { $0.dataVersion == Self.dataVersion(of: database) } == true
-      try Self.validateCanonicalSchema(on: database, checkingForeignKeys: !fileUnchanged)
-      let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
+      // The same goes for SQLite's own structure check: the file was checked when it was
+      // opened, and every page since then was written by this connection's checked saves.
+      try Self.validateCanonicalSchema(
+        on: database, checkingForeignKeys: !fileUnchanged, checkingIntegrity: !fileUnchanged)
+      let snapshot = try cachedCoreSnapshot() ?? CanonicalLedgerHealth.readSnapshot(database)
       let result = try body(snapshot)
       try mutationTestHook?(.afterMutationWrite)
-      let mark = try CanonicalLedgerHealth.validate(
+      let stateAfterWrite = Self.fileState(of: database)
+      let checked = try CanonicalLedgerHealth.validateReading(
         database,
         trustKey: try self.url.flatMap {
           try LedgerReceiptTrust.key(for: $0, create: false, stableIdentity: trustIdentity)
         }, verifyingReceiptImages: false,
         importGraphVerifiedAt: fileUnchanged && writeWatch?.wroteImportGraph == false
           ? importGraphVerifiedAt : nil)
+      let mark = checked.mark
       // Foreign keys are enforced on this connection (checked at open, and the setting can't
       // change inside a transaction), so a key check of the tables this save wrote is enough.
       let foreignKeyChecks =
@@ -2366,6 +2431,7 @@ public final class LedgerStore {
       try Self.execute("COMMIT", on: database)
       importGraphVerifiedAt = mark
       writeWatch?.reset()
+      rememberCoreSnapshot(checked.snapshot, readFrom: stateAfterWrite)
       return result
     } catch {
       // A rolled-back save leaves nothing behind, so forget the tables it wrote; otherwise one
@@ -2515,7 +2581,7 @@ public final class LedgerStore {
   }
 
   private static func validateCanonicalSchema(
-    on database: OpaquePointer, checkingForeignKeys: Bool = true
+    on database: OpaquePointer, checkingForeignKeys: Bool = true, checkingIntegrity: Bool = true
   ) throws {
     guard
       scalarInt("PRAGMA application_id", on: database) == Int(CanonicalLedgerSchema.applicationID),
@@ -2526,7 +2592,7 @@ public final class LedgerStore {
       scalarText("SELECT value FROM ledger_meta WHERE key='schema_fingerprint'", on: database)
         == CanonicalLedgerSchema.fingerprint,
       schemaObjects(on: database) == CanonicalLedgerSchema.expectedObjects,
-      scalarText("PRAGMA quick_check", on: database) == "ok",
+      !checkingIntegrity || scalarText("PRAGMA quick_check", on: database) == "ok",
       !checkingForeignKeys || hasNoRows("PRAGMA foreign_key_check", on: database)
     else { throw Error.incompatibleCanonicalStore }
   }

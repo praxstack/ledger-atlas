@@ -213,6 +213,18 @@ package enum CanonicalLedgerHealth {
     _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true,
     importGraphVerifiedAt: ImportGraphMark? = nil, remembering: VerifiedImportGraphs? = nil
   ) throws -> ImportGraphMark {
+    try validateReading(
+      database, trustKey: trustKey, verifyingReceiptImages: verifyingReceiptImages,
+      importGraphVerifiedAt: importGraphVerifiedAt, remembering: remembering
+    ).mark
+  }
+
+  /// `validate`, also returning the core snapshot the check read, so a caller that needs one
+  /// doesn't read the whole ledger a second time.
+  static func validateReading(
+    _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true,
+    importGraphVerifiedAt: ImportGraphMark? = nil, remembering: VerifiedImportGraphs? = nil
+  ) throws -> (mark: ImportGraphMark, snapshot: LedgerStore.LedgerReadSnapshot) {
     // Run the whole check in one read transaction with a larger page cache. Otherwise SQLite
     // re-takes its file lock for each of the many small queries below, and a ~900 MB imported
     // ledger keeps evicting the pages the next query needs. A caller already inside a
@@ -243,8 +255,7 @@ package enum CanonicalLedgerHealth {
       }
     }
     try validateReceiptAttachments(database, verifyingImages: verifyingReceiptImages)
-    _ = try readSnapshot(database)
-    return mark
+    return (mark, try readSnapshot(database))
   }
 
   /// Receipt attachments (schema v13). Absent before v13.

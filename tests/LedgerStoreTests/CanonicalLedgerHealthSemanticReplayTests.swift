@@ -191,6 +191,51 @@ func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {
   }
 }
 
+/// Saves and screen refreshes reuse the last checked snapshot, but never past a change to the
+/// file, whoever made it.
+@Test("a store reuses its checked snapshot only while nothing could have changed it")
+func storeReloadsCoreSnapshotAfterAnyWrite() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStoreLifecycle.open(at: url).store
+    let account = try #require(try store.readSnapshot().accounts.first)
+    func renamed(_ name: String) throws -> LedgerAccount {
+      try LedgerAccount(
+        id: account.id, name: name, currencyUnit: account.currencyUnit, origin: account.origin,
+        lifecycle: account.lifecycle, groupID: account.groupID,
+        displayOrder: account.displayOrder, hidden: account.hidden,
+        includeInTotals: account.includeInTotals, variant: account.variant)
+    }
+    func currentName() throws -> String? {
+      try store.readSnapshot().accounts.first { $0.id == account.id }?.name
+    }
+    func renameElsewhere(_ name: String) throws {
+      try withSQLite(url) { database in
+        try execute(
+          database,
+          "UPDATE ledger_account SET name=\(quote(name)) WHERE account_id=\(quote(account.id));")
+      }
+    }
+    #expect(try currentName() == account.name)
+
+    // Another connection's commit reaches the next refresh.
+    try renameElsewhere("Renamed elsewhere")
+    #expect(try currentName() == "Renamed elsewhere")
+
+    // And the next save: re-creating the account as it now stands is a no-op, while the stale
+    // copy would refuse it.
+    try renameElsewhere("Renamed again")
+    try store.createAccount(try renamed("Renamed again"))
+    #expect(try currentName() == "Renamed again")
+
+    // This connection's own saves reach the next refresh and the next save.
+    try store.updateAccount(try renamed("Saved here"))
+    #expect(try currentName() == "Saved here")
+    try store.createAccount(try renamed("Saved here"))
+    #expect(throws: (any Error).self) { try store.createAccount(try renamed("Renamed again")) }
+    #expect(try currentName() == "Saved here")
+  }
+}
+
 @Test("the health check leaves the caller's connection as it found it")
 func healthCheckRestoresConnectionState() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
