@@ -90,8 +90,9 @@ import Testing
     }
     log("opened \(sheet.title)")
     pump(0.6)
-    // A sheet is read as part of its parent window, as VoiceOver reads it, on the main thread.
-    let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    // The sheet and the window behind it, read on the main thread.
+    let text = (inProcessAccessibilityTree(of: sheetWindow) + root.accessibilityElements())
+      .map { "\($0.spokenName) \($0.value)" }
     log("read \(text.count) elements")
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
@@ -482,6 +483,27 @@ private func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
+/// The AppKit screen frame (bottom-left origin) of the first element in the window whose
+/// label or title is `name`, read in-process on the main thread.
+@MainActor
+private func inProcessFrame(in window: NSWindow, named name: String) -> CGRect? {
+  func find(_ element: NSObject, depth: Int) -> CGRect? {
+    guard depth < 80 else { return nil }
+    let names = ["accessibilityLabel", "accessibilityTitle"].compactMap {
+      let value = inProcessProperty(element, $0)
+      return value as? String ?? (value as? NSAttributedString)?.string
+    }
+    if names.contains(name), let element = element as? any NSAccessibilityElementProtocol {
+      return element.accessibilityFrame()
+    }
+    for child in inProcessProperty(element, "accessibilityChildren") as? [NSObject] ?? [] {
+      if let found = find(child, depth: depth + 1) { return found }
+    }
+    return nil
+  }
+  return find(window, depth: 0)
+}
+
 /// What the menu timer saw, shared with the code waiting for it on the main thread.
 @MainActor
 private final class PickBox {
@@ -497,12 +519,12 @@ extension MountedRoot {
   /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
   /// Returns false if there is no such control.
   func click(named name: String) -> Bool {
-    let pid = ProcessInfo.processInfo.processIdentifier
-    let identifier = identifier
-    let found: CGRect?
+    let frame: CGRect?
     if readsInProcess {
-      found = accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name)
+      frame = inProcessFrame(in: window, named: name)
     } else {
+      let pid = ProcessInfo.processInfo.processIdentifier
+      let identifier = identifier
       let result = FrameBox()
       Thread.detachNewThread {
         result.finish(accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name))
@@ -511,13 +533,14 @@ extension MountedRoot {
       while !result.isDone, Date() < deadline {
         RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
       }
-      found = result.frame
-    }
-    // Accessibility frames are in screen points from the top left; AppKit's from the bottom left.
-    let frame = found.flatMap { found in
-      NSScreen.screens.first.map {
-        CGRect(
-          x: found.minX, y: $0.frame.maxY - found.maxY, width: found.width, height: found.height)
+      // System Accessibility frames are in screen points from the top left; AppKit's from
+      // the bottom left.
+      frame = result.frame.flatMap { found in
+        NSScreen.screens.first.map {
+          CGRect(
+            x: found.minX, y: $0.frame.maxY - found.maxY, width: found.width,
+            height: found.height)
+        }
       }
     }
     guard let frame else {

@@ -257,6 +257,49 @@ func accessibilityTree(of pid: pid_t, windowIdentifier: String) -> [SpokenElemen
   return found
 }
 
+/// An element's Accessibility property read in-process through its Objective-C getter (such
+/// as `accessibilityLabel`), which is how SwiftUI's elements answer.
+@MainActor
+func inProcessProperty(_ element: NSObject, _ getter: String) -> Any? {
+  let selector = Selector(getter)
+  guard element.responds(to: selector) else { return nil }
+  return element.perform(selector)?.takeUnretainedValue()
+}
+
+@MainActor
+private func inProcessText(_ element: NSObject, _ getter: String) -> String {
+  guard let value = inProcessProperty(element, getter) else { return "" }
+  return (value as? String) ?? (value as? NSAttributedString)?.string ?? "\(value)"
+}
+
+/// The same reading as `accessibilityTree`, taken in-process on the main thread from the
+/// window's own Accessibility objects. Reading this process's UI through the system API runs
+/// AppKit and SwiftUI code in the reading thread, which crashes now and then; the screenshot
+/// captures read this way instead.
+@MainActor
+func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
+  var found: [SpokenElement] = []
+  func visit(_ element: NSObject, depth: Int) {
+    guard depth < 80 else { return }
+    let linked = inProcessProperty(element, "accessibilityTitleUIElement") as? NSObject
+    found.append(
+      SpokenElement(
+        role: inProcessText(element, "accessibilityRole"),
+        subrole: inProcessText(element, "accessibilitySubrole"),
+        label: inProcessText(element, "accessibilityLabel"),
+        title: inProcessText(element, "accessibilityTitle"),
+        value: inProcessText(element, "accessibilityValue"),
+        placeholder: inProcessText(element, "accessibilityPlaceholderValue"),
+        identifier: inProcessText(element, "accessibilityIdentifier"),
+        linkedTitle: linked.map { inProcessText($0, "accessibilityValue") } ?? ""))
+    for child in inProcessProperty(element, "accessibilityChildren") as? [NSObject] ?? [] {
+      visit(child, depth: depth + 1)
+    }
+  }
+  visit(window, depth: 0)
+  return found
+}
+
 /// The root view in a window with the synthetic demo ledger open on one screen.
 @MainActor
 final class MountedRoot {
@@ -268,10 +311,8 @@ final class MountedRoot {
   private(set) var readTimedOut = false
   /// The empty-ledger prompt is showing instead of the screen.
   private(set) var showsNoLedgerPrompt = false
-  /// Read the Accessibility tree on the main thread. For this process's own windows the
-  /// system API answers in the calling thread, so a reader thread runs AppKit and SwiftUI
-  /// code off the main thread, which crashes now and then. The captures read on the main
-  /// thread instead.
+  /// Read the Accessibility tree in-process on the main thread (see
+  /// `inProcessAccessibilityTree`) instead of through the system API from another thread.
   let readsInProcess: Bool
 
   /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
@@ -394,10 +435,7 @@ final class MountedRoot {
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
   /// there, so pump it until the background read finishes.
   func accessibilityElements() -> [SpokenElement] {
-    if readsInProcess {
-      return accessibilityTree(
-        of: ProcessInfo.processInfo.processIdentifier, windowIdentifier: identifier)
-    }
+    if readsInProcess { return inProcessAccessibilityTree(of: window) }
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
     let identifier = identifier
