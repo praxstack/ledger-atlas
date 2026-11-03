@@ -124,6 +124,25 @@ jobs:
           name: swift-test-captures
           path: ${{ runner.temp }}/test-artifacts
           if-no-files-found: ignore
+      # MACV2-21 (#57): time a 100,000-entry synthetic ledger and keep the receipt. Only on
+      # main and manual runs, because it adds a few minutes.
+      - name: Performance receipt (100,000 entries)
+        if: github.event_name != 'pull_request'
+        run: |
+          swift test --no-parallel --filter LedgerPerformanceReceiptTests
+          python3 scripts/ci/performance-receipt-summary.py \
+            "$RUNNER_TEMP/performance/performance-receipt-100k.json" >> "$GITHUB_STEP_SUMMARY"
+        timeout-minutes: 20
+        env:
+          LEDGER_ATLAS_PERFORMANCE_RECEIPT: "1"
+          LEDGER_ATLAS_TEST_ARTIFACTS: ${{ runner.temp }}/performance
+      - name: Upload performance receipt
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: performance-receipt-100k
+          path: ${{ runner.temp }}/performance
+          if-no-files-found: ignore
       - run: swift run mmctl
       # Measures which file operations the App Sandbox allows next to a user-chosen
       # path (see scripts/ci/sandbox-probe.sh). Prints a table in the job summary.
