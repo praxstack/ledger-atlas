@@ -14,6 +14,15 @@ package enum LedgerDemoTour {
     !(ProcessInfo.processInfo.environment["LEDGER_ATLAS_DEMO_TOUR"] ?? "").isEmpty
   }
 
+  /// With the tour: the file name of a made-up backup in the app's temporary folder to import
+  /// instead of touring (scripts/ci/make-synthetic-backup.py). A bare name, never a path.
+  package static var fullSizeBackupName: String? {
+    guard let name = ProcessInfo.processInfo.environment["LEDGER_ATLAS_DEMO_IMPORT"],
+      !name.isEmpty, !name.contains("/"), name != "..", name != "."
+    else { return nil }
+    return name
+  }
+
   /// Screens shown in the tour, in order. Onboarding and import review come last because they
   /// describe the empty and import states rather than the open ledger.
   package static let destinations: [AppDestination] = [

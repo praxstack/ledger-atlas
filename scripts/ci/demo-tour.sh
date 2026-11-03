@@ -88,6 +88,27 @@ grep -q "ledger opened" "$LOG" || { echo "demo ledger did not open"; exit 1; }
 grep -q "import check: backup recognised true" "$LOG" || { echo "import check: Open Ledger did not recognise the backup"; exit 1; }
 grep -q "import check: approve imported, 1 transactions" "$LOG" || { echo "import check: the import did not finish"; exit 1; }
 grep -q "import check: reopen opened failure=none" "$LOG" || { echo "import check: the imported ledger did not reopen"; exit 1; }
+
+# Second launch: a full-size made-up backup (7,500 entries, like a real phone's), imported and
+# reopened by the shipped app. The app can only read its own container, so the backup goes in
+# the container's temporary folder, which the first launch created.
+FULL_LOG="$OUT/full-import.log"
+CONTAINER_TMP="$HOME/Library/Containers/com.praxstack.ledgeratlas/Data/tmp"
+python3 scripts/ci/make-synthetic-backup.py "$CONTAINER_TMP/MM(full-size).mmbak" 7500
+LEDGER_ATLAS_DEMO_TOUR=1 LEDGER_ATLAS_DEMO_IMPORT="MM(full-size).mmbak" \
+  "$APP/Contents/MacOS/LedgerAtlas" >"$FULL_LOG" 2>&1 &
+PID=$!
+for _ in $(seq 1 900); do
+  kill -0 "$PID" 2>/dev/null || break
+  sleep 1
+done
+kill "$PID" 2>/dev/null || true
+PID=
+rm -f "$CONTAINER_TMP/MM(full-size).mmbak"
+cat "$FULL_LOG"
+grep -q "import check: backup recognised true" "$FULL_LOG" || { echo "full-size import: backup not recognised"; exit 1; }
+grep -q "import check: approve imported, 6830 transactions" "$FULL_LOG" || { echo "full-size import: the import did not finish"; exit 1; }
+grep -q "import check: reopen opened failure=none" "$FULL_LOG" || { echo "full-size import: the imported ledger did not reopen"; exit 1; }
 [ "$count" -ge 10 ] || { echo "too few screens captured"; exit 1; }
 # A blank or single-colour window compresses to a few KB; a real screen is far larger.
 blank=0
