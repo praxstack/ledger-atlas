@@ -30,7 +30,7 @@ let package = Package(
       dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "LedgerAdapterSemantics"]),
     .target(name: "MMFixtures", dependencies: ["LedgerCore"]),
     .target(
-      name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore"],
+      name: "LedgerAtlasMacUI", dependencies: ["MMImport", "LedgerStore", "CSQLite"],
       linkerSettings: [
         .linkedFramework("ImageIO"), .linkedFramework("LocalAuthentication"),
         .linkedFramework("Network"),

@@ -17,6 +17,8 @@ struct LedgerView: View {
   let intentRequest: LedgerIntentRequest?
   let consumeIntent: () -> Void
   let open: () -> Void
+  /// Starts a Money Manager import; offered wherever the ledger is empty or missing.
+  var importBackup: (() -> Void)? = nil
   let lifecycleMessage: String?
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -139,7 +141,7 @@ struct LedgerView: View {
         case .noLedger:
           openPrompt(
             title: "Open a ledger", icon: "folder",
-            description: "Choose a Ledger Atlas ledger to view its native transactions.",
+            description: "Choose a Ledger Atlas ledger, or import a Money Manager backup.",
             buttonTitle: "Open Ledger…", guidance: .noLedger,
             failure: lifecycleMessage ?? lastFailure)
         case .loading:
@@ -173,6 +175,9 @@ struct LedgerView: View {
             } else {
               Button("Begin editing", action: beginEditing)
                 .accessibilityLabel("Begin editing")
+            }
+            if let importBackup {
+              Button(LedgerAtlasRootView.importBackupActionTitle, action: importBackup)
             }
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -268,7 +273,12 @@ struct LedgerView: View {
       Text(title).font(.title2.bold())
       Text(description).foregroundStyle(.secondary)
       if let guidance { LedgerLifecycleGuidanceView(guidance: guidance, failure: failure) }
-      Button(buttonTitle, action: open)
+      HStack {
+        Button(buttonTitle, action: open)
+        if let importBackup {
+          Button(LedgerAtlasRootView.importBackupActionTitle, action: importBackup)
+        }
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(32)

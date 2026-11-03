@@ -35,6 +35,21 @@ macOS blocks apps that are not notarized the first time you open them.
 
 You only do this once per version. (Right-click › Open no longer skips this on macOS 15.)
 
+## Bring in your Money Manager data
+
+Click **Import Money Manager Backup…** in the toolbar (or **File › Import Money Manager
+Backup…**, ⇧⌘I). Pick the backup's time zone, choose the `.mmbak` file, check the review, then
+approve it. The new ledger opens by itself.
+
+**Open Ledger…** is for Ledger Atlas ledgers. If you pick a Money Manager backup there, the
+app offers to import it instead.
+
+## The widget
+
+The free (ad-hoc signed) build can't share data with its widget: macOS only allows that for apps
+signed with a paid developer account. The widget shows "Open Ledger Atlas to continue." and the app works
+normally without it.
+
 ## Where your ledgers live
 
 Ledgers live **inside the app's own storage**, not in a folder you pick:

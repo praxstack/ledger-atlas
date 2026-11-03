@@ -1,4 +1,5 @@
 import AppKit
+internal import CSQLite
 import CryptoKit
 import Foundation
 import LedgerCore
@@ -11,6 +12,15 @@ import LedgerStore
 package enum LedgerDemoTour {
   package static var isRequested: Bool {
     !(ProcessInfo.processInfo.environment["LEDGER_ATLAS_DEMO_TOUR"] ?? "").isEmpty
+  }
+
+  /// With the tour: the file name of a made-up backup in the app's temporary folder to import
+  /// instead of touring (scripts/ci/make-synthetic-backup.py). A bare name, never a path.
+  package static var fullSizeBackupName: String? {
+    guard let name = ProcessInfo.processInfo.environment["LEDGER_ATLAS_DEMO_IMPORT"],
+      !name.isEmpty, !name.contains("/"), name != "..", name != "."
+    else { return nil }
+    return name
   }
 
   /// Screens shown in the tour, in order. Onboarding and import review come last because they
@@ -30,13 +40,36 @@ package enum LedgerDemoTour {
     return ledgers.appendingPathComponent("Demo Household.sqlite")
   }
 
-  /// Removes the demo ledger and everything SQLite kept beside it.
+  /// Removes the demo ledger and everything the store kept beside it. Matching by prefix is safe
+  /// only here: the tour runs in an otherwise empty ledgers folder (`demoLedgerURL`).
   package static func removeDemoLedger(at url: URL) {
     let directory = url.deletingLastPathComponent()
     let stem = url.lastPathComponent
     for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
     where name.hasPrefix(stem) {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+  }
+
+  /// A made-up Money Manager v19 backup: one account, one category, one expense.
+  package static func writeMoneyManagerBackup(to url: URL) throws {
+    var database: OpaquePointer?
+    guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+      sqlite3_close(database)
+      throw CocoaError(.fileWriteUnknown)
+    }
+    defer { sqlite3_close(database) }
+    let sql = """
+      PRAGMA user_version=19;
+      CREATE TABLE ASSETS (uid TEXT); CREATE TABLE ZCATEGORY (uid TEXT);
+      CREATE TABLE CURRENCY (uid TEXT, ISO TEXT);
+      CREATE TABLE INOUTCOME (uid TEXT, assetUid TEXT, currencyUid TEXT, DO_TYPE TEXT, ctgUid TEXT, ZMONEY TEXT, WDATE TEXT, ZDATE TEXT, NOTE TEXT);
+      INSERT INTO ASSETS VALUES ('asset'); INSERT INTO ZCATEGORY VALUES ('category');
+      INSERT INTO CURRENCY VALUES ('currency', 'USD');
+      INSERT INTO INOUTCOME VALUES ('transaction', 'asset', 'currency', '1', 'category', '12.30', '2025-02-03', '1738547200000', 'demo');
+      """
+    guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+      throw CocoaError(.fileWriteUnknown)
     }
   }
 
