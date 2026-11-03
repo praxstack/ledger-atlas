@@ -108,6 +108,15 @@ jobs:
         timeout-minutes: 30
         env:
           LEDGER_ATLAS_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
+      # A crashed test process (for example SIGSEGV) prints no test name or stack, so show
+      # the newest crash report's faulting thread in the log.
+      - name: Show test crash report
+        if: failure()
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -1); do
+            echo "== $f"
+            python3 scripts/ci/print-crash.py "$f" || head -c 20000 "$f"
+          done
       - name: Upload test captures on failure
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
