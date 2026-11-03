@@ -102,6 +102,12 @@ public final class LedgerJourney {
     }
   }
 
+  /// Whether `url` is a Money Manager backup the importer would accept, so Open Ledger can
+  /// offer to import it instead of failing to open it as a ledger.
+  package static func isMoneyManagerBackup(_ url: URL) -> Bool {
+    SourceClassifier().classify(url).status.admitsImportPreparation
+  }
+
   /// Keeps the Mac awake and stops a quick quit from cutting off a long import step. A step cut
   /// off anyway is safe: the commit is one SQLite transaction, so it rolls back, and choosing
   /// the backup again prepares a fresh ledger file.

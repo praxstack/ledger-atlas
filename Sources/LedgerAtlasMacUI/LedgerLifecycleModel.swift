@@ -45,15 +45,19 @@ package struct LedgerLifecycleOutcome: Equatable, Sendable {
   package let recoveryImageExists: Bool
   package let message: String?
   package let retryOperation: LedgerLifecycleOperation?
+  /// Why the store refused, when it did. Open Ledger uses it to remove a copy it made of a file
+  /// that turned out not to be a ledger.
+  package let failure: LedgerStoreLifecycle.Error?
 
   package init(
     kind: Kind, recoveryImageExists: Bool, message: String?,
-    retryOperation: LedgerLifecycleOperation? = nil
+    retryOperation: LedgerLifecycleOperation? = nil, failure: LedgerStoreLifecycle.Error? = nil
   ) {
     self.kind = kind
     self.recoveryImageExists = recoveryImageExists
     self.message = message
     self.retryOperation = retryOperation
+    self.failure = failure
   }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+internal import CSQLite
 import CryptoKit
 import Foundation
 import LedgerCore
@@ -31,12 +32,27 @@ package enum LedgerDemoTour {
   }
 
   /// Removes the demo ledger and everything SQLite kept beside it.
-  package static func removeDemoLedger(at url: URL) {
-    let directory = url.deletingLastPathComponent()
-    let stem = url.lastPathComponent
-    for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-    where name.hasPrefix(stem) {
-      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+  package static func removeDemoLedger(at url: URL) { LedgerLocations.removeLedgerFiles(at: url) }
+
+  /// A made-up Money Manager v19 backup: one account, one category, one expense.
+  package static func writeMoneyManagerBackup(to url: URL) throws {
+    var database: OpaquePointer?
+    guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+      sqlite3_close(database)
+      throw CocoaError(.fileWriteUnknown)
+    }
+    defer { sqlite3_close(database) }
+    let sql = """
+      PRAGMA user_version=19;
+      CREATE TABLE ASSETS (uid TEXT); CREATE TABLE ZCATEGORY (uid TEXT);
+      CREATE TABLE CURRENCY (uid TEXT, ISO TEXT);
+      CREATE TABLE INOUTCOME (uid TEXT, assetUid TEXT, currencyUid TEXT, DO_TYPE TEXT, ctgUid TEXT, ZMONEY TEXT, WDATE TEXT, ZDATE TEXT, NOTE TEXT);
+      INSERT INTO ASSETS VALUES ('asset'); INSERT INTO ZCATEGORY VALUES ('category');
+      INSERT INTO CURRENCY VALUES ('currency', 'USD');
+      INSERT INTO INOUTCOME VALUES ('transaction', 'asset', 'currency', '1', 'category', '12.30', '2025-02-03', '1738547200000', 'demo');
+      """
+    guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+      throw CocoaError(.fileWriteUnknown)
     }
   }
 

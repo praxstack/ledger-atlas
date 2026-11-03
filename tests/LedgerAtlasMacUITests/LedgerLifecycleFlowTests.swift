@@ -98,7 +98,7 @@ import Testing
     #expect(!outcome.recoveryImageExists)
     #expect(
       outcome.message
-        == "Widget status could not be published. Ledger was created, but access could not be retained. Choose Open Ledger to continue."
+        == "Ledger was created, but access could not be retained. Choose Open Ledger to continue."
     )
     #expect(outcome.retryOperation == .open)
     #expect(try LedgerStoreLifecycle.inspect(at: destination) == .current)
@@ -300,7 +300,8 @@ import Testing
     #expect(outcome.kind == .created)
     #expect(!outcome.recoveryImageExists)
     #expect(outcome.retryOperation == nil)
-    #expect(outcome.message == "Widget status could not be published.")
+    // A widget that can't be updated is only logged: no message, and the ledger stays open.
+    #expect(outcome.message == nil)
     #expect(try LedgerStoreLifecycle.inspect(at: destination) == .current)
     #expect(bookmarks.reopen(.canonicalLedger) == .resolved(destination))
     #expect(session.screen == .loaded)
@@ -330,7 +331,7 @@ import Testing
     #expect(outcome.retryOperation == nil)
     #expect(
       outcome.message
-        == "Ledger upgraded. A validated recovery image is available. Widget status could not be published."
+        == "Ledger upgraded. A validated recovery image is available."
     )
     #expect(try LedgerStoreLifecycle.inspect(at: destination) == .current)
     #expect(
@@ -825,7 +826,7 @@ import Testing
 }
 
 @MainActor
-@Test func failedLifecycleAndWidgetPublicationReportBothFailuresToTheCaller() async throws {
+@Test func failedLifecycleReportsOnlyItsOwnFailureWhenTheWidgetAlsoFails() async throws {
   try await withFlowDirectory { directory in
     let destination = directory.appendingPathComponent("missing.sqlite")
     let (bookmarks, defaults, suite) = try makeBookmarkStore()
@@ -839,8 +840,7 @@ import Testing
       session: session, scopeStarter: { _ in true }, scopeStopper: { _ in },
       lifecycle: { _, _ in throw FlowTestError.injected })
 
-    let expected =
-      "Widget status could not be published. Ledger could not be opened. Choose Open Ledger to retry."
+    let expected = "Ledger could not be opened. Choose Open Ledger to retry."
     #expect(outcome.kind == .failed)
     #expect(outcome.message == expected)
     #expect(journey.lastFailure == expected)
@@ -850,7 +850,7 @@ import Testing
 }
 
 @MainActor
-@Test func deniedScopeAndWidgetPublicationReportBothFailuresToTheCaller() async throws {
+@Test func deniedScopeReportsOnlyItsOwnFailureWhenTheWidgetAlsoFails() async throws {
   try await withFlowDirectory { directory in
     let (bookmarks, defaults, suite) = try makeBookmarkStore()
     defer { defaults.removePersistentDomain(forName: suite) }
@@ -863,13 +863,13 @@ import Testing
 
     #expect(
       outcome.message
-        == "Widget status could not be published. Ledger access was not granted to create the ledger. Choose Create Ledger to retry."
+        == "Ledger access was not granted to create the ledger. Choose Create Ledger to retry."
     )
   }
 }
 
 @MainActor
-@Test func corruptBookmarkAndWidgetPublicationReportBothFailuresToTheCaller() async throws {
+@Test func corruptBookmarkReportsOnlyItsOwnFailureWhenTheWidgetAlsoFails() async throws {
   let suite = "LedgerAtlasMacUITests.lifecycle.\(UUID().uuidString)"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
@@ -888,7 +888,7 @@ import Testing
 
   #expect(
     outcome.message
-      == "Widget status could not be published. Ledger access needs to be selected again. Choose Open Ledger to retry."
+      == "Ledger access needs to be selected again. Choose Open Ledger to retry."
   )
 }
 
@@ -1130,3 +1130,61 @@ private func writeV10Ledger(to url: URL) throws -> String {
 }
 
 private enum FlowTestError: Error { case sqlite, injected }
+
+/// What Prax hit on the first test DMG (2026-11-03): a Money Manager backup chosen with Open
+/// Ledger was copied in and then refused with a general message, behind a widget error.
+@MainActor
+@Test func openingAMoneyManagerBackupSaysToImportItAndMarksTheCopyForRemoval() async throws {
+  try await withFlowDirectory { directory in
+    let backup = directory.appendingPathComponent("MM(04-11-26-022456).mmbak")
+    try writeFlowMoneyManagerBackup(to: backup)
+    #expect(LedgerJourney.isMoneyManagerBackup(backup))
+    let (bookmarks, defaults, suite) = try makeBookmarkStore()
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let journey = LedgerJourney()
+    let session = LedgerSession(testingScopeStarter: { _ in true })
+
+    let outcome = await LedgerAtlasRootView.performLedgerLifecycle(
+      .open, at: backup, bookmarkStore: bookmarks,
+      widgetPublisher: .init(write: { _ in throw FlowTestError.injected }), journey: journey,
+      session: session, scopeStarter: { _ in true }, scopeStopper: { _ in })
+
+    let expected =
+      "This file is not a Ledger Atlas ledger. To bring in a Money Manager backup, choose Import Money Manager Backup instead."
+    #expect(outcome.kind == .failed)
+    #expect(outcome.failure == .invalidStore)
+    #expect(outcome.message == expected)
+    #expect(journey.lastFailure == expected)
+    #expect(LedgerAtlasRootView.shouldRemoveRefusedCopy(outcome))
+    #expect(bookmarks.reopen(.canonicalLedger) == .missing)
+  }
+}
+
+@MainActor
+@Test func aRealLedgerIsNotTakenForAMoneyManagerBackup() async throws {
+  try await withFlowDirectory { directory in
+    let ledger = directory.appendingPathComponent("ledger.sqlite")
+    _ = try LedgerStoreLifecycle.create(at: ledger)
+    #expect(!LedgerJourney.isMoneyManagerBackup(ledger))
+  }
+}
+
+@MainActor
+@Test func lifecycleFailuresNameTheirCause() {
+  #expect(
+    LedgerAtlasRootView.lifecycleFailureMessage(.open, LedgerStoreLifecycle.Error.unsupportedStore)
+      == "This version of Ledger Atlas can't open this ledger. If it was saved by a newer version, update the app, then open it again.")
+  #expect(
+    LedgerAtlasRootView.lifecycleFailureMessage(.create, LedgerStoreLifecycle.Error.invalidStore)
+      == "Ledger could not be created. Choose Create Ledger to retry.")
+  #expect(
+    LedgerAtlasRootView.lifecycleFailureMessage(.open, FlowTestError.injected)
+      == "Ledger could not be opened. Choose Open Ledger to retry.")
+  #expect(
+    !LedgerAtlasRootView.shouldRemoveRefusedCopy(
+      .init(kind: .failed, recoveryImageExists: false, message: nil, failure: .busy)))
+}
+
+private func writeFlowMoneyManagerBackup(to url: URL) throws {
+  try LedgerDemoTour.writeMoneyManagerBackup(to: url)
+}

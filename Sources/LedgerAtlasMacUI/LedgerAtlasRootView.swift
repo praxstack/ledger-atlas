@@ -3,6 +3,7 @@ import CryptoKit
 import LedgerCore
 import LedgerStore
 import SwiftUI
+import os
 import UniformTypeIdentifiers
 
 public struct LedgerAtlasRootView: View {
@@ -48,9 +49,7 @@ public struct LedgerAtlasRootView: View {
       initialSelection: initialSelection, importReviewSummary: importReviewSummary,
       appLock: LedgerAppLock(), productSettings: .load(),
       bookmarkStore: SecurityScopedBookmarkStore(),
-      widgetProjectionPublisher: FileManager.default.containerURL(
-        forSecurityApplicationGroupIdentifier: RedactedWidgetProjectionStore.appGroupIdentifier
-      ).map { RedactedWidgetProjectionPublisher(store: .init(containerURL: $0)) },
+      widgetProjectionPublisher: LedgerWidgetAvailability.publisherForThisBuild(),
       intentConsumer: { LedgerIntentBridge.consume() })
   }
 
@@ -115,49 +114,17 @@ public struct LedgerAtlasRootView: View {
           .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
           .keyboardShortcut("o", modifiers: .command)
           .disabled(appLock.isLocked)
+        Button(Self.importBackupActionTitle, action: chooseImportSource)
+          .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
+          .disabled(appLock.isLocked || journey.backgroundWork != nil)
       }
     }
     .fileImporter(
       isPresented: $isChoosingImportSource, allowedContentTypes: Self.importTypes,
       allowsMultipleSelection: false
     ) { result in
-      guard !appLock.isLocked, case .success(let urls) = result, let url = urls.first else { return }
-      let accessing = url.startAccessingSecurityScopedResource()
-      guard accessing else {
-        recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
-        return
-      }
-      defer { url.stopAccessingSecurityScopedResource() }
-      guard
-        let sourceTimeZone = try? SourceTimeZone(
-          ianaIdentifier: sourceTimeZoneIdentifier)
-      else {
-        journey.recordFailure("Choose the backup's source time zone before import.")
-        return
-      }
-      do {
-        try bookmarkStore.save(url, for: .importSource)
-      } catch {
-        recordFlowFailure("Import access could not be retained.", publishingWidget: .reopenRequired)
-        return
-      }
-      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-        UUID().uuidString)
-      guard
-        (try? FileManager.default.createDirectory(
-          at: directory, withIntermediateDirectories: true)) != nil
-      else { return }
-      // The staging copy is scratch; the approved ledger goes to app storage so it survives.
-      guard let ledgers = try? LedgerLocations.ledgersDirectory() else {
-        journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
-        return
-      }
-      let canonical = LedgerLocations.availableURL(named: "Money Manager import", in: ledgers)
-      Task {
-        await journey.selectSourceInBackground(
-          url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
-          canonicalDatabaseURL: canonical, sourceTimeZone: sourceTimeZone)
-      }
+      guard case .success(let urls) = result, let url = urls.first else { return }
+      importBackup(from: url)
     }
     .task {
       if LedgerDemoTour.isRequested {
@@ -166,6 +133,9 @@ public struct LedgerAtlasRootView: View {
       }
       portal.lockDidChange(isLocked: appLock.isLocked)
       if appLock.isLocked { closeLockedLedger() } else { startSavedLedgerReopen() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: Self.importBackupRequested)) { _ in
+      chooseImportSource()
     }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
@@ -183,12 +153,9 @@ public struct LedgerAtlasRootView: View {
       }
     }
     .onChange(of: journey.snapshotGeneration) { _, _ in
-      // Keep the widget's counts current after every edit. A failed refresh is reported but
-      // doesn't close the ledger.
+      // Keep the widget's counts current after every edit.
       guard !appLock.isLocked, journey.snapshot != nil else { return }
-      Self.publishWidget(
-        .ready, publisher: widgetProjectionPublisher, journey: journey, session: session,
-        closeLedgerOnFailure: false)
+      Self.publishWidget(.ready, publisher: widgetProjectionPublisher, journey: journey)
     }
     .onDisappear { lifecycleTask?.cancel() }
     .frame(minWidth: 720, minHeight: 480)
@@ -197,9 +164,14 @@ public struct LedgerAtlasRootView: View {
   private static var importTypes: [UTType] {
     var types: [UTType] = [.database, .data]
     if let sqlite = UTType(filenameExtension: "sqlite") { types.insert(sqlite, at: 0) }
-    if let mmbak = UTType(filenameExtension: "mmbak") { types.insert(mmbak, at: 0) }
+    types.insert(Self.moneyManagerBackupType, at: 0)
     return types
   }
+
+  /// Declared in the app's Info.plist, so the import panel names and offers .mmbak files.
+  package static let moneyManagerBackupType =
+    UTType("com.praxstack.ledgeratlas.money-manager-backup")
+    ?? UTType(filenameExtension: "mmbak", conformingTo: .data) ?? .data
 
   private static var ledgerTypes: [UTType] {
     if let sqlite = UTType(filenameExtension: "sqlite") { return [sqlite, .database] }
@@ -209,6 +181,59 @@ public struct LedgerAtlasRootView: View {
   private static var packageTypes: [UTType] {
     if let package = UTType(filenameExtension: "ledgerpackage") { return [package, .data] }
     return [.data]
+  }
+
+  package static let importBackupActionTitle = "Import Money Manager Backup…"
+  /// Posted by the File menu's import command.
+  public static let importBackupRequested = Notification.Name("LedgerAtlas.importBackupRequested")
+
+  /// Shows the import screen and its file panel.
+  private func chooseImportSource() {
+    guard !appLock.isLocked, journey.backgroundWork == nil else { return }
+    selection = .importReview
+    isChoosingImportSource = true
+  }
+
+  /// Starts importing a Money Manager backup, from Import Backup or from Open Ledger when the
+  /// picked file turns out to be a backup.
+  private func importBackup(from url: URL) {
+    guard !appLock.isLocked else { return }
+    let accessing = url.startAccessingSecurityScopedResource()
+    guard accessing else {
+      recordFlowFailure("Ledger access was not granted.", publishingWidget: .permissionDenied)
+      return
+    }
+    defer { url.stopAccessingSecurityScopedResource() }
+    guard
+      let sourceTimeZone = try? SourceTimeZone(
+        ianaIdentifier: sourceTimeZoneIdentifier)
+    else {
+      journey.recordFailure("Choose the backup's source time zone before import.")
+      return
+    }
+    do {
+      try bookmarkStore.save(url, for: .importSource)
+    } catch {
+      recordFlowFailure("Import access could not be retained.", publishingWidget: .reopenRequired)
+      return
+    }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      UUID().uuidString)
+    guard
+      (try? FileManager.default.createDirectory(
+        at: directory, withIntermediateDirectories: true)) != nil
+    else { return }
+    // The staging copy is scratch; the approved ledger goes to app storage so it survives.
+    guard let ledgers = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
+      return
+    }
+    let canonical = LedgerLocations.availableURL(named: "Money Manager import", in: ledgers)
+    Task {
+      await journey.selectSourceInBackground(
+        url, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+        canonicalDatabaseURL: canonical, sourceTimeZone: sourceTimeZone)
+    }
   }
 
   /// New ledgers live in app storage (see `LedgerLocations`), so creating one only asks for a
@@ -257,14 +282,41 @@ public struct LedgerAtlasRootView: View {
       return
     }
     defer { picked.stopAccessingSecurityScopedResource() }
+    // A Money Manager backup is easy to pick here by mistake. Offer to import it instead of
+    // copying it in and failing to open it.
+    if LedgerJourney.isMoneyManagerBackup(picked) {
+      if Self.confirmImportInsteadOfOpen(picked) {
+        selection = .importReview
+        importBackup(from: picked)
+      }
+      return
+    }
     do {
-      performLedgerSelection(.open, url: try LedgerLocations.importCopy(of: picked, into: directory))
+      // A copy that turns out not to be a ledger is removed again.
+      performLedgerSelection(
+        .open, url: try LedgerLocations.importCopy(of: picked, into: directory),
+        removingCopyIfRefused: true)
     } catch {
       journey.recordFailure("The ledger could not be copied into Ledger Atlas. The original is unchanged.")
     }
   }
 
-  private func performLedgerSelection(_ operation: LedgerLifecycleOperation, url: URL?) {
+  private static func confirmImportInsteadOfOpen(_ url: URL) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "This is a Money Manager backup"
+    alert.informativeText = importInsteadOfOpenExplanation(url.lastPathComponent)
+    alert.addButton(withTitle: "Import Backup")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+  }
+
+  package static func importInsteadOfOpenExplanation(_ name: String) -> String {
+    "“\(name)” is a Money Manager backup, not a Ledger Atlas ledger. Import it to make a new ledger from it. You review everything before it is saved, and the backup itself is never changed."
+  }
+
+  private func performLedgerSelection(
+    _ operation: LedgerLifecycleOperation, url: URL?, removingCopyIfRefused: Bool = false
+  ) {
     guard !appLock.isLocked, url != nil else { return }
     lifecycleTask?.cancel()
     lifecycleGeneration &+= 1
@@ -275,6 +327,9 @@ public struct LedgerAtlasRootView: View {
         widgetPublisher: widgetProjectionPublisher, journey: journey, session: session,
         scopeStarter: scopeStarter, scopeStopper: scopeStopper,
         isCurrent: { !appLock.isLocked && lifecycleGeneration == generation })
+      if removingCopyIfRefused, let url, Self.shouldRemoveRefusedCopy(outcome) {
+        LedgerLocations.removeLedgerFiles(at: url)
+      }
       guard lifecycleGeneration == generation else {
         recordSupersededPublication(outcome)
         return
@@ -283,6 +338,13 @@ public struct LedgerAtlasRootView: View {
       lifecycleRetryOperation = outcome.retryOperation
       if [.created, .opened, .upgraded].contains(outcome.kind) { selection = .ledger }
     }
+  }
+
+  /// Open Ledger copies an outside file into app storage first. When the store says the copy is
+  /// not a ledger it could ever open, the copy is only clutter, so it goes. The original stays.
+  package static func shouldRemoveRefusedCopy(_ outcome: LedgerLifecycleOutcome) -> Bool {
+    outcome.kind == .failed
+      && [.invalidStore, .unsupportedStore].contains(outcome.failure)
   }
 
   private func startSavedLedgerReopen() {
@@ -355,11 +417,59 @@ public struct LedgerAtlasRootView: View {
       }
       try lines.joined(separator: "\n").write(
         to: output.appendingPathComponent("tour.txt"), atomically: true, encoding: .utf8)
+      await runImportCheck(log)
       log("done")
     } catch {
       log("failed: \(error)")
     }
     NSApplication.shared.terminate(nil)
+  }
+
+  /// The shipped app's import path, end to end, on a made-up Money Manager backup: Open Ledger
+  /// must recognise the backup, the import must finish, and the imported ledger must reopen the
+  /// way it does at the next launch. CI reads the "import check:" lines (scripts/ci/demo-tour.sh).
+  private func runImportCheck(_ log: (String) -> Void) async {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "LedgerAtlasImportCheck-\(UUID().uuidString)", isDirectory: true)
+    var imported: URL?
+    defer {
+      session.close()
+      journey.closeLedger()
+      bookmarkStore.clear()
+      if let imported { LedgerLocations.removeLedgerFiles(at: imported) }
+      try? FileManager.default.removeItem(at: folder)
+    }
+    do {
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      let backup = folder.appendingPathComponent("MM(demo).mmbak")
+      try LedgerDemoTour.writeMoneyManagerBackup(to: backup)
+      log("import check: backup recognised \(LedgerJourney.isMoneyManagerBackup(backup))")
+      session.close()
+      journey.closeLedger()
+      let canonical = LedgerLocations.availableURL(
+        named: "Money Manager import", in: try LedgerLocations.ledgersDirectory())
+      imported = canonical
+      await journey.selectSourceInBackground(
+        backup, stagingDatabaseURL: folder.appendingPathComponent("stage.sqlite"),
+        canonicalDatabaseURL: canonical, sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: 0))
+      log("import check: review \(journey.phase) \(journey.lastFailure ?? "")")
+      await approveImport()
+      log(
+        "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions \(journey.lastFailure ?? "")"
+      )
+      // What the next launch does: the ledger closes, then reopens from its bookmark.
+      session.close()
+      journey.closeLedger()
+      let outcome = await Self.reopenSavedLedger(
+        bookmarkStore: bookmarkStore, widgetPublisher: widgetProjectionPublisher,
+        journey: journey, session: session, scopeStarter: scopeStarter, scopeStopper: scopeStopper)
+      log(
+        "import check: reopen \(outcome.kind) failure=\(outcome.failure.map { "\($0)" } ?? "none") \(outcome.message ?? "")"
+      )
+      log("import check: widget \(widgetProjectionPublisher == nil ? "off in this build" : "on")")
+    } catch {
+      log("import check: failed \(error)")
+    }
   }
 
   private func retryLedger(_ operation: LedgerLifecycleOperation) {
@@ -701,35 +811,25 @@ public struct LedgerAtlasRootView: View {
     journey.recordFailure(message)
   }
 
-  @discardableResult
-  private func publishWidget(_ state: RedactedWidgetProjection.State) -> Bool {
-    Self.publishWidget(
-      state, publisher: widgetProjectionPublisher, journey: journey, session: session)
+  private func publishWidget(_ state: RedactedWidgetProjection.State) {
+    Self.publishWidget(state, publisher: widgetProjectionPublisher, journey: journey)
   }
 
+  /// Tells the widget what to show. The widget is a convenience: a build without one (the
+  /// ad-hoc DMG, see `LedgerWidgetAvailability`) skips this, and a failed write is only
+  /// logged. Neither closes the ledger or changes what the app says.
   @discardableResult
   static func publishWidget(
     _ state: RedactedWidgetProjection.State, publisher: RedactedWidgetProjectionPublisher?,
-    journey: LedgerJourney, session: LedgerSession,
-    closeLedgerOnFailure: Bool = true
+    journey: LedgerJourney
   ) -> Bool {
-    guard let publisher else {
-      journey.recordFailure("Widget status could not be published.")
-      if closeLedgerOnFailure {
-        session.close()
-        journey.closeLedger()
-      }
-      return false
-    }
+    guard let publisher else { return false }
     do {
       try publisher.publish(projection: widgetProjection(for: state, journey: journey))
       return true
     } catch {
-      journey.recordFailure("Widget status could not be published.")
-      if closeLedgerOnFailure {
-        session.close()
-        journey.closeLedger()
-      }
+      LedgerWidgetAvailability.log.error(
+        "widget status \(state.rawValue, privacy: .public) not written: \(String(describing: error), privacy: .public)")
       return false
     }
   }
@@ -746,13 +846,8 @@ public struct LedgerAtlasRootView: View {
   private func recordFlowFailure(
     _ message: String, publishingWidget state: RedactedWidgetProjection.State
   ) {
-    journey.recordFailure(
-      Self.failureMessage(
-        widgetPublished: publishWidget(state), flowFailure: message))
-  }
-
-  static func failureMessage(widgetPublished: Bool, flowFailure: String) -> String {
-    widgetPublished ? flowFailure : "Widget status could not be published. \(flowFailure)"
+    publishWidget(state)
+    journey.recordFailure(message)
   }
 
   package static func supersededPublicationMessage(
@@ -791,6 +886,32 @@ public struct LedgerAtlasRootView: View {
         "Backup was published, but durability or final validation did not finish. Verify the destination before retrying."
     }
     return "Backup could not be saved."
+  }
+
+  private static let lifecycleLog = Logger(
+    subsystem: "com.praxstack.ledgeratlas", category: "lifecycle")
+
+  /// Says why a create or open failed, in words the person can act on. The cases come from
+  /// `LedgerStoreLifecycle.Error`; anything else gets the general message.
+  package static func lifecycleFailureMessage(
+    _ operation: LedgerLifecycleOperation, _ error: any Error
+  ) -> String {
+    let retry = operation == .create ? "Choose Create Ledger to retry." : "Choose Open Ledger to retry."
+    switch error as? LedgerStoreLifecycle.Error {
+    case .invalidStore where operation == .open:
+      return "This file is not a Ledger Atlas ledger. To bring in a Money Manager backup, choose Import Money Manager Backup instead."
+    case .unsupportedStore:
+      return "This version of Ledger Atlas can't open this ledger. If it was saved by a newer version, update the app, then open it again."
+    case .busy:
+      return "Ledger Atlas is already opening or changing this ledger. Wait a moment, then try again."
+    case .destinationExists:
+      return "A ledger with that name already exists. Choose Create Ledger and pick another name."
+    case .companionPresent:
+      return "Temporary files left beside this ledger by an earlier session were not recognised, so it was not opened. \(retry)"
+    default:
+      return operation == .create
+        ? "Ledger could not be created. \(retry)" : "Ledger could not be opened. \(retry)"
+    }
   }
 
   private static func permissionDeniedMessage(for operation: LedgerLifecycleOperation) -> String {
@@ -879,10 +1000,8 @@ public struct LedgerAtlasRootView: View {
     guard scopeStarter(url) else {
       session.close()
       journey.closeLedger()
-      let message = failureMessage(
-        widgetPublished: publishWidget(
-          .permissionDenied, publisher: widgetPublisher, journey: journey, session: session),
-        flowFailure: permissionDeniedMessage(for: operation))
+      publishWidget(.permissionDenied, publisher: widgetPublisher, journey: journey)
+      let message = permissionDeniedMessage(for: operation)
       journey.recordFailure(message)
       return .init(
         kind: .failed, recoveryImageExists: false, message: message, retryOperation: operation)
@@ -916,15 +1035,8 @@ public struct LedgerAtlasRootView: View {
         throw LedgerLifecycleFlowError.permissionDenied
       }
       try bookmarkStore.save(url, for: .canonicalLedger)
-      let widgetPublished = publishWidget(
-        .ready, publisher: widgetPublisher, journey: journey, session: session,
-        closeLedgerOnFailure: false)
-      let completed = outcome(for: preparation.completion)
-      guard !widgetPublished else { return completed }
-      return .init(
-        kind: completed.kind, recoveryImageExists: completed.recoveryImageExists,
-        message: [completed.message, "Widget status could not be published."]
-          .compactMap { $0 }.joined(separator: " "))
+      publishWidget(.ready, publisher: widgetPublisher, journey: journey)
+      return outcome(for: preparation.completion)
     } catch {
       let publication: (phase: LedgerStoreLifecycle.PublicationPhase, recovery: Bool)?
       if case .publicationCompleted(let phase, let recovery) =
@@ -987,20 +1099,19 @@ public struct LedgerAtlasRootView: View {
         message =
           permissionDenied
           ? permissionDeniedMessage(for: operation)
-          : operation == .create
-            ? "Ledger could not be created. Choose Create Ledger to retry."
-            : "Ledger could not be opened. Choose Open Ledger to retry."
+          : lifecycleFailureMessage(operation, error)
       }
-      let reportedMessage = failureMessage(
-        widgetPublished: publishWidget(
-          permissionDenied ? .permissionDenied : .reopenRequired,
-          publisher: widgetPublisher, journey: journey, session: session),
-        flowFailure: message)
-      journey.recordFailure(reportedMessage)
+      lifecycleLog.error(
+        "\(operation == .create ? "create" : "open", privacy: .public) failed: \(String(describing: error), privacy: .public)")
+      publishWidget(
+        permissionDenied ? .permissionDenied : .reopenRequired, publisher: widgetPublisher,
+        journey: journey)
+      journey.recordFailure(message)
       return .init(
         kind: .failed,
         recoveryImageExists: publication?.recovery ?? (completedLifecycle?.recoveryImageURL != nil),
-        message: reportedMessage, retryOperation: retryOperation)
+        message: message, retryOperation: retryOperation,
+        failure: error as? LedgerStoreLifecycle.Error)
     }
   }
 
@@ -1019,7 +1130,7 @@ public struct LedgerAtlasRootView: View {
     }
     switch bookmarkStore.reopen(.canonicalLedger) {
     case .missing:
-      _ = publishWidget(.empty, publisher: widgetPublisher, journey: journey, session: session)
+      publishWidget(.empty, publisher: widgetPublisher, journey: journey)
       return .init(kind: .missingBookmark, recoveryImageExists: false, message: nil)
     case .resolved(let url), .stale(let url):
       // A stale bookmark is renewed by the successful open below, which saves it again.
@@ -1030,10 +1141,8 @@ public struct LedgerAtlasRootView: View {
     case .corrupt:
       session.close()
       journey.closeLedger()
-      let message = failureMessage(
-        widgetPublished: publishWidget(
-          .reopenRequired, publisher: widgetPublisher, journey: journey, session: session),
-        flowFailure: "Ledger access needs to be selected again. Choose Open Ledger to retry.")
+      publishWidget(.reopenRequired, publisher: widgetPublisher, journey: journey)
+      let message = "Ledger access needs to be selected again. Choose Open Ledger to retry."
       journey.recordFailure(message)
       return .init(
         kind: .failed, recoveryImageExists: false, message: message, retryOperation: .open)
@@ -1047,12 +1156,7 @@ public struct LedgerAtlasRootView: View {
     if let url = journey.ledgerURL {
       do {
         try bookmarkStore.save(url, for: .canonicalLedger)
-        if !Self.publishWidget(
-          .ready, publisher: widgetProjectionPublisher, journey: journey,
-          session: session, closeLedgerOnFailure: false)
-        {
-          lifecycleMessage = "Widget status could not be published."
-        }
+        publishWidget(.ready)
       } catch {
         recordFlowFailure(
           "Ledger access could not be retained.", publishingWidget: .reopenRequired)
@@ -1072,12 +1176,14 @@ public struct LedgerAtlasRootView: View {
       LedgerLifecycleClosedSessionView(
         title: "Ledger unavailable", guidance: .noLedger,
         failure: lifecycleMessage ?? journey.lastFailure,
-        retryOperation: lifecycleRetryOperation ?? .open, retry: retryLedger)
+        retryOperation: lifecycleRetryOperation ?? .open, retry: retryLedger,
+        importBackup: chooseImportSource)
     } else if selection != .importReview, selection != .onboarding, session.screen == .unavailable {
       LedgerLifecycleClosedSessionView(
         title: "Ledger unavailable", guidance: .unavailable,
         failure: lifecycleMessage ?? journey.lastFailure,
-        retryOperation: lifecycleRetryOperation ?? .open, retry: retryLedger)
+        retryOperation: lifecycleRetryOperation ?? .open, retry: retryLedger,
+        importBackup: chooseImportSource)
     } else if selection == .importReview || selection == .onboarding {
       VStack(alignment: .leading, spacing: 16) {
         ImportReviewView(summary: journey.phase == .idle ? importReviewSummary : journey.summary)
@@ -1122,6 +1228,7 @@ public struct LedgerAtlasRootView: View {
         intentRequest: pendingIntent,
         consumeIntent: { pendingIntent = nil },
         open: openLedger,
+        importBackup: chooseImportSource,
         lifecycleMessage: lifecycleMessage,
         lastFailure: journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
