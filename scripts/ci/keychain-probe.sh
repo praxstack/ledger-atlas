@@ -24,12 +24,52 @@ cat > "$work/probe.entitlements" <<PLIST
   <array><string>group.com.praxstack.ledgeratlas</string></array>
 </dict></plist>
 PLIST
-for build in first second; do
+# A throwaway self-signed code-signing identity, to test whether a stable certificate (unlike
+# ad-hoc) keeps Keychain access across builds. It lives in a temporary keychain only.
+kc="$work/sign.keychain-db"
+setup_cert() {
+security create-keychain -p probe "$kc"
+security set-keychain-settings "$kc"
+security unlock-keychain -p probe "$kc"
+cat > "$work/cert.cnf" <<CNF
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = Ledger Atlas Probe Signing
+[ext]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+CNF
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -config "$work/cert.cnf" \
+  -keyout "$work/key.pem" -out "$work/cert.pem" 2>/dev/null
+openssl pkcs12 -export -legacy -inkey "$work/key.pem" -in "$work/cert.pem" -passout pass:probe \
+  -out "$work/id.p12" 2>/dev/null \
+  || openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" -passout pass:probe \
+    -out "$work/id.p12"
+security import "$work/id.p12" -k "$kc" -P probe -T /usr/bin/codesign >/dev/null
+security set-key-partition-list -S apple-tool:,apple: -s -k probe "$kc" >/dev/null
+security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+openssl x509 -in "$work/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :
+}
+cert_hash=$(setup_cert 2>"$work/cert-setup.txt" | tail -1) || cert_hash=""
+security find-identity -p codesigning "$kc" | grep -q "$cert_hash" 2>/dev/null || {
+  echo "self-signed identity not usable:"; cat "$work/cert-setup.txt"; security find-identity -p codesigning "$kc"; cert_hash=""; }
+
+builds="first second"
+[ -n "$cert_hash" ] && builds="$builds certfirst certsecond"
+for build in $builds; do
   cp "$here/keychain-probe.swift" "$work/$build.swift"
   echo "let build = \"$build\"" >> "$work/$build.swift"
   xcrun swiftc -O "$work/$build.swift" -o "$work/$build" \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$work/Info.plist"
-  codesign -s - -f -i com.praxstack.ledgeratlas.keychain-probe \
+  case $build in
+    cert*) sign=(-s "$cert_hash" --keychain "$kc") ;;
+    *) sign=(-s -) ;;
+  esac
+  codesign "${sign[@]}" -f -i com.praxstack.ledgeratlas.keychain-probe \
     --entitlements "$work/probe.entitlements" "$work/$build"
 done
 {
@@ -44,12 +84,19 @@ run() {
   set -e
   [ "$status" -eq 0 ] || echo "| $2 | exited with $status (142 = timed out, likely a prompt) | |" >> "$work/result.md"
 }
-run "$work/first" write
-run "$work/second" read
+run "$work/first" write adhoc
+run "$work/second" read adhoc
+echo "| | **self-signed certificate builds** | |" >> "$work/result.md"
+if [ -n "$cert_hash" ]; then
+  run "$work/certfirst" write cert
+  run "$work/certsecond" read cert
+else
+  echo "| cert | could not create a signing identity | |" >> "$work/result.md"
+fi
 cat "$work/result.md"
 [ -s "$work/stderr.txt" ] && { echo "stderr:"; cat "$work/stderr.txt"; }
-codesign -d -r- "$work/first" 2>&1 | tail -1
-codesign -d -r- "$work/second" 2>&1 | tail -1
+for b in $builds; do codesign -d -r- "$work/$b" 2>&1 | tail -1; done
+security delete-keychain "$kc" 2>/dev/null || true
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   { echo "### Keychain probe (ad-hoc, sandboxed, optimized)"; cat "$work/result.md"; } >> "$GITHUB_STEP_SUMMARY"
 fi
