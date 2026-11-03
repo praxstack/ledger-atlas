@@ -58,6 +58,8 @@ struct SQLiteStagingStore {
     else { throw StagingError.stagingWriteFailed }
     guard execute(database, "PRAGMA foreign_keys=ON"),
       execute(database, "PRAGMA journal_mode=DELETE"),
+      // Inserts into hash-keyed indexes land on random pages; a 2 MB cache spills them.
+      execute(database, "PRAGMA cache_size=-262144"),
       execute(database, "BEGIN IMMEDIATE"),
       execute(database, Self.schema)
     else { throw StagingError.stagingWriteFailed }
@@ -156,7 +158,10 @@ struct SQLiteStagingStore {
       sqlite3_close(database)
       Darwin.close(sqliteDescriptor)
     }
-    guard scalarText(database, "PRAGMA quick_check") == "ok",
+    // The staging copy of a real backup is a few hundred MB and is read in key order across
+    // several indexes; SQLite's default 2 MB page cache re-reads the same pages from disk.
+    guard sqlite3_exec(database, "PRAGMA cache_size=-262144", nil, nil, nil) == SQLITE_OK,
+      scalarText(database, "PRAGMA quick_check") == "ok",
       scalarText(
         database, "SELECT value FROM staging_meta WHERE key='format_version'") == "1",
       scalarText(

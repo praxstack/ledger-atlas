@@ -97,11 +97,11 @@ public struct CanonicalEventSourceBinding: Codable, Equatable, Hashable, Sendabl
   ) throws {
     guard CanonicalIdentifier.isValid(provenance.deterministicID),
       declaredType?.utf8.count ?? 0 <= 1_024,
-      declaredType?.contains("\u{0}") != true,
-      provenance.locator.containerMember?.contains("\u{0}") != true,
-      !provenance.locator.table.contains("\u{0}"),
-      !provenance.locator.recordKey.contains("\u{0}"),
-      provenance.locator.columnName?.contains("\u{0}") != true
+      declaredType?.utf8.contains(0) != true,
+      provenance.locator.containerMember?.utf8.contains(0) != true,
+      !provenance.locator.table.utf8.contains(0),
+      !provenance.locator.recordKey.utf8.contains(0),
+      provenance.locator.columnName?.utf8.contains(0) != true
     else { throw CanonicalPersistenceError.invalidSourceBinding }
     self.semantic = semantic
     self.provenance = provenance
@@ -146,11 +146,11 @@ public struct CanonicalPersistedSidecar: Codable, Equatable, Sendable {
       sidecarID == provenance.deterministicID, formatVersion == 1,
       maximumBytes > 0, payload.count <= maximumBytes,
       declaredType?.utf8.count ?? 0 <= 1_024,
-      declaredType?.contains("\u{0}") != true,
-      provenance.locator.containerMember?.contains("\u{0}") != true,
-      !provenance.locator.table.contains("\u{0}"),
-      !provenance.locator.recordKey.contains("\u{0}"),
-      provenance.locator.columnName?.contains("\u{0}") != true
+      declaredType?.utf8.contains(0) != true,
+      provenance.locator.containerMember?.utf8.contains(0) != true,
+      !provenance.locator.table.utf8.contains(0),
+      !provenance.locator.recordKey.utf8.contains(0),
+      provenance.locator.columnName?.utf8.contains(0) != true
     else { throw CanonicalPersistenceError.invalidSidecarReference }
     switch storageClass {
     case .null:
@@ -203,15 +203,15 @@ public struct CanonicalReceiptOwnedAnchor: Codable, Equatable, Sendable {
           stagingID: receiptID, sourceSubjectID: sourceSubjectID, kind: subjectKind)),
       CanonicalIdentifier.isValid(artifactSHA256),
       !profileID.isEmpty, profileID.utf8.count <= 256,
-      !profileID.contains("\u{0}"),
+      !profileID.utf8.contains(0),
       !adapterVersion.isEmpty, adapterVersion.utf8.count <= 256,
-      !adapterVersion.contains("\u{0}"),
+      !adapterVersion.utf8.contains(0),
       containerMember?.utf8.count ?? 0 <= 4_096,
-      containerMember?.contains("\u{0}") != true,
+      containerMember?.utf8.contains(0) != true,
       !sourceTable.isEmpty, sourceTable.utf8.count <= 1_024,
-      !sourceTable.contains("\u{0}"),
+      !sourceTable.utf8.contains(0),
       sourceRecordKey?.utf8.count ?? 0 <= 4_096,
-      sourceRecordKey?.contains("\u{0}") != true,
+      sourceRecordKey?.utf8.contains(0) != true,
       (subjectKind == .table && sourceRecordKey == nil)
         || (subjectKind == .record && sourceRecordKey?.isEmpty == false)
     else { throw CanonicalPersistenceError.invalidReceiptOwnedPreservation }
@@ -261,11 +261,11 @@ public struct CanonicalReceiptOwnedPayload: Codable, Equatable, Sendable {
           storageClass: storageClass, payload: payload)),
       formatVersion == 1, maximumBytes > 0, payload.count <= maximumBytes,
       declaredType?.utf8.count ?? 0 <= 1_024,
-      declaredType?.contains("\u{0}") != true,
-      provenance.locator.containerMember?.contains("\u{0}") != true,
-      !provenance.locator.table.contains("\u{0}"),
-      !provenance.locator.recordKey.contains("\u{0}"),
-      provenance.locator.columnName?.contains("\u{0}") != true
+      declaredType?.utf8.contains(0) != true,
+      provenance.locator.containerMember?.utf8.contains(0) != true,
+      !provenance.locator.table.utf8.contains(0),
+      !provenance.locator.recordKey.utf8.contains(0),
+      provenance.locator.columnName?.utf8.contains(0) != true
     else { throw CanonicalPersistenceError.invalidReceiptOwnedPreservation }
     switch storageClass {
     case .null:
