@@ -130,7 +130,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Demo tour (screens of the real app with a synthetic ledger)
+      - name: Demo tour (screens and a screen recording of the real app, synthetic ledger)
         # After the DMG upload, so a tour problem never holds back the DMG itself, and never
         # blocks publishing a tagged release.
         continue-on-error: ${{ startsWith(github.ref, 'refs/tags/v') }}
