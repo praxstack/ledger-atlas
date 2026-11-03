@@ -120,6 +120,25 @@ func currentV11RejectsMissingExternalTrustKey() throws {
   }
 }
 
+/// The receipt identity is read from the ledger even through a symlinked folder (macOS's /var
+/// is one). Missing it would look up the key under a different account and find none.
+@Test("the receipt key is found through a symlinked folder")
+func receiptKeyIsFoundThroughASymlinkedFolder() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let key = try #require(
+      try LedgerReceiptTrust.key(for: url, create: false, stableIdentity: fixture.receiptID))
+    let link = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "link-\(UUID().uuidString)")
+    try FileManager.default.createSymbolicLink(
+      at: link, withDestinationURL: url.deletingLastPathComponent())
+    defer { try? FileManager.default.removeItem(at: link) }
+    // No fallback identity, so the key can only come from the receipt read through the link.
+    #expect(
+      try LedgerReceiptTrust.key(
+        for: link.appendingPathComponent(url.lastPathComponent), create: false) == key)
+  }
+}
+
 /// A remembered stamp lets the check skip the replay, but only for the same import rows under
 /// the same trust key. Any change to the import graph, or another key, gets the full replay.
 @Test("a remembered import graph skips the replay only for the same rows and key")

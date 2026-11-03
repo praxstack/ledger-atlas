@@ -1506,3 +1506,148 @@ func receiptKeyFallsBackToTheFileOnlyForAMissingEntitlement() throws {
       first, account: kept, keychain: { value, _ in value }, directory: { directory }) == first)
   #expect(try LedgerReceiptKeyFile.read(account: kept, in: directory) == nil)
 }
+
+@Test("with Keychain chosen in Settings, a refused iCloud key goes to the device-only Keychain")
+func receiptKeyGoesToTheDeviceKeychainWhenChosen() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("receipt-keys-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let account = String(repeating: "0d", count: 32)
+  var device: [String: Data] = [:]
+  let value = Data(repeating: 6, count: 32)
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      value, account: account, keychain: { _, _ in throw LedgerReceiptTrustError.keychain(-34018) },
+      directory: { directory },
+      deviceKeychain: { value, account in
+        if let existing = device[account] { return existing }
+        device[account] = value
+        return value
+      }) == value)
+  #expect(device[account] == value)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == nil)
+}
+
+/// An in-memory stand-in for the device-only Keychain.
+private final class FakeDeviceKeys {
+  var items: [String: Data] = [:]
+  var failDeleteFor: String?
+  /// Reports success for an add without keeping the key.
+  var dropsAdds = false
+
+  var keys: LedgerReceiptTrust.DeviceKeys {
+    LedgerReceiptTrust.DeviceKeys(
+      accounts: { self.items.keys.sorted() }, read: { self.items[$0] },
+      add: { value, account in
+        if let existing = self.items[account] { return existing }
+        if !self.dropsAdds { self.items[account] = value }
+        return value
+      },
+      delete: { account in
+        if account == self.failDeleteFor { throw LedgerReceiptTrustError.keychain(-25293) }
+        self.items[account] = nil
+      })
+  }
+}
+
+@Test("receipt keys move between files and the device Keychain without losing one")
+func receiptKeysMoveBetweenFilesAndTheDeviceKeychain() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("receipt-keys-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let a = String(repeating: "1a", count: 32)
+  let b = String(repeating: "1b", count: 32)
+  let keyA = Data(repeating: 1, count: 32)
+  let keyB = Data(repeating: 2, count: 32)
+  _ = try LedgerReceiptKeyFile.store(keyA, account: a, in: directory)
+  _ = try LedgerReceiptKeyFile.store(keyB, account: b, in: directory)
+  let fake = FakeDeviceKeys()
+
+  try LedgerReceiptTrust.moveKeys(to: .deviceKeychain, keychain: fake.keys, directory: directory)
+  #expect(fake.items == [a: keyA, b: keyB])
+  #expect(try LedgerReceiptKeyFile.accounts(in: directory).isEmpty)
+
+  // A failure part way leaves every key readable, and a second run finishes the move.
+  fake.failDeleteFor = b
+  #expect(throws: LedgerReceiptTrustError.keychain(-25293)) {
+    try LedgerReceiptTrust.moveKeys(to: .appFiles, keychain: fake.keys, directory: directory)
+  }
+  #expect(try LedgerReceiptKeyFile.read(account: b, in: directory) == keyB)
+  #expect(fake.items[b] == keyB)
+  fake.failDeleteFor = nil
+  try LedgerReceiptTrust.moveKeys(to: .appFiles, keychain: fake.keys, directory: directory)
+  #expect(fake.items.isEmpty)
+  #expect(try LedgerReceiptKeyFile.accounts(in: directory) == [a, b])
+  #expect(try LedgerReceiptKeyFile.read(account: a, in: directory) == keyA)
+
+  // A key the Keychain doesn't give back keeps its file.
+  let c = String(repeating: "1c", count: 32)
+  _ = try LedgerReceiptKeyFile.store(keyA, account: c, in: directory)
+  fake.dropsAdds = true
+  #expect(throws: LedgerReceiptTrustError.moveNotVerified) {
+    try LedgerReceiptTrust.moveKeys(to: .deviceKeychain, keychain: fake.keys, directory: directory)
+  }
+  fake.dropsAdds = false
+  #expect(try LedgerReceiptKeyFile.read(account: a, in: directory) == keyA)
+  #expect(try LedgerReceiptKeyFile.read(account: c, in: directory) == keyA)
+  fake.items = [:]
+
+  // A different key already at the destination stops the move and removes nothing.
+  fake.items[a] = Data(repeating: 9, count: 32)
+  #expect(throws: LedgerReceiptTrustError.conflictingKeys) {
+    try LedgerReceiptTrust.moveKeys(to: .deviceKeychain, keychain: fake.keys, directory: directory)
+  }
+  #expect(try LedgerReceiptKeyFile.read(account: a, in: directory) == keyA)
+  #expect(fake.items[a] == Data(repeating: 9, count: 32))
+}
+
+@Test("private files are replaced whole, removed, and refuse links and unsafe names")
+func privateFilesReplaceRemoveAndRefuseUnsafeInput() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("private-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  #expect(try LedgerPrivateFile.read("passcode-digest", in: directory) == nil)
+  try LedgerPrivateFile.write(Data("one".utf8), to: "passcode-digest", in: directory)
+  try LedgerPrivateFile.write(Data("second".utf8), to: "passcode-digest", in: directory)
+  #expect(try LedgerPrivateFile.read("passcode-digest", in: directory) == Data("second".utf8))
+  let attributes = try FileManager.default.attributesOfItem(
+    atPath: directory.appendingPathComponent("passcode-digest").path)
+  #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+  let folder = try FileManager.default.attributesOfItem(atPath: directory.path)
+  #expect((folder[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["passcode-digest"])
+
+  try LedgerPrivateFile.write(nil, to: "passcode-digest", in: directory)
+  #expect(try LedgerPrivateFile.read("passcode-digest", in: directory) == nil)
+  try LedgerPrivateFile.write(nil, to: "passcode-digest", in: directory)
+
+  try FileManager.default.createSymbolicLink(
+    atPath: directory.appendingPathComponent("lock-state").path, withDestinationPath: "/etc/hosts")
+  #expect(throws: (any Error).self) { try LedgerPrivateFile.read("lock-state", in: directory) }
+  #expect(throws: LedgerPrivateFile.Error.invalidName) {
+    try LedgerPrivateFile.write(Data(), to: "../escape", in: directory)
+  }
+  #expect(throws: LedgerPrivateFile.Error.empty) {
+    try LedgerPrivateFile.write(Data(), to: "empty", in: directory)
+  }
+  FileManager.default.createFile(atPath: directory.appendingPathComponent("blank").path, contents: Data())
+  #expect(throws: LedgerPrivateFile.Error.empty) { try LedgerPrivateFile.read("blank", in: directory) }
+  #expect(throws: LedgerPrivateFile.Error.tooLarge) {
+    try LedgerPrivateFile.write(Data(count: 4097), to: "big", in: directory)
+  }
+}
+
+@Test("the secret storage choice defaults to app files and remembers Keychain")
+func secretStorageChoiceDefaultsToFiles() throws {
+  let suite = "secret-storage-\(UUID().uuidString)"
+  let defaults = try #require(UserDefaults(suiteName: suite))
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let saved = LedgerSecretStorage.defaults
+  LedgerSecretStorage.defaults = defaults
+  defer { LedgerSecretStorage.defaults = saved }
+  #expect(LedgerSecretStorage.current == .appFiles)
+  LedgerSecretStorage.record(.deviceKeychain)
+  #expect(LedgerSecretStorage.current == .deviceKeychain)
+  defaults.set("unknown", forKey: "ledger-atlas.secret-storage.v1")
+  #expect(LedgerSecretStorage.current == .appFiles)
+}
