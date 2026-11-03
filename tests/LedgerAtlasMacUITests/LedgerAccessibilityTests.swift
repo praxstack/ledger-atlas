@@ -75,6 +75,17 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   }
 }
 
+/// Each appearance picks its own look, high contrast included.
+@MainActor
+@Test func themeVariantFollowsTheAppearance() throws {
+  for name in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua,
+               .accessibilityHighContrastDarkAqua] {
+    let appearance = try #require(NSAppearance(named: name))
+    print("A11Y APPEARANCE \(name.rawValue): name=\(appearance.name.rawValue) variant=\(String(describing: LedgerTheme.variant(of: appearance)?.rawValue))")
+    #expect(LedgerTheme.variant(of: appearance) == name)
+  }
+}
+
 private let themeAppearancePairs: [(NSAppearance.Name, NSAppearance.Name)] = [
   (.aqua, .accessibilityHighContrastAqua), (.darkAqua, .accessibilityHighContrastDarkAqua),
 ]

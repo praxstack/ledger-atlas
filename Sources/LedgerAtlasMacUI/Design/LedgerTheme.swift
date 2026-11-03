@@ -223,10 +223,7 @@ public enum LedgerTheme {
   ) -> Color {
     Color(
       nsColor: NSColor(name: nil) { appearance in
-        let match = appearance.bestMatch(from: [
-          .aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
-        ])
-        switch match {
+        switch variant(of: appearance) {
         case .darkAqua?:
           return rgb(dark, alpha: darkAlpha)
         case .accessibilityHighContrastAqua?:
@@ -237,6 +234,27 @@ public enum LedgerTheme {
           return rgb(light, alpha: lightAlpha)
         }
       })
+  }
+
+  /// Which of the four looks an appearance asks for. `bestMatch` alone can answer plain Aqua
+  /// for a high-contrast appearance (a match, but not the closest), so the appearance's own
+  /// name is checked too, and the high-contrast names are listed first.
+  static func variant(of appearance: NSAppearance) -> NSAppearance.Name? {
+    let highContrast: Set<NSAppearance.Name> = [
+      .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+      .accessibilityHighContrastVibrantLight, .accessibilityHighContrastVibrantDark,
+    ]
+    let base = appearance.bestMatch(from: [
+      .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua, .aqua, .darkAqua,
+    ])
+    let isDark =
+      base == .darkAqua || base == .accessibilityHighContrastDarkAqua
+      || appearance.name == .accessibilityHighContrastDarkAqua
+      || appearance.name == .accessibilityHighContrastVibrantDark
+    if highContrast.contains(appearance.name) || base.map(highContrast.contains) == true {
+      return isDark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua
+    }
+    return isDark ? .darkAqua : .aqua
   }
 
   static func rgb(_ hex: UInt32, alpha: CGFloat) -> NSColor {
