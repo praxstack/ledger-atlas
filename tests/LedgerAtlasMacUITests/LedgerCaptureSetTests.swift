@@ -98,7 +98,16 @@ import Testing
       while NSApplication.shared.nextEvent(
         matching: .any, until: Date(), inMode: .default, dequeue: true) != nil
       {}
-      if let attached = root.window.attachedSheet { root.window.endSheet(attached) }
+      // Dismiss the sheet the way a person does, with its Cancel button, so SwiftUI ends it
+      // itself. Ending it from outside (or closing the window under it) has ended the whole
+      // test process.
+      if root.window.attachedSheet != nil, root.click(named: "Cancel") {
+        for _ in 0..<30 where root.window.attachedSheet != nil { pump(0.1) }
+      }
+      if let attached = root.window.attachedSheet {
+        log("Cancel did not close the sheet")
+        root.window.endSheet(attached)
+      }
       drainLog("sheet ended")
       root.close()
       // A menu-opened sheet leaves a stop of the main run loop behind a little later; run
