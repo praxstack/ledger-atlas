@@ -96,6 +96,28 @@ jobs:
       - name: Keychain probe
         run: ./scripts/ci/keychain-probe.sh
 
+  # The shipped app is a release build, and some Keychain fallbacks exist only in debug builds.
+  # Import a synthetic Money Manager backup through a release build so a debug-only path can't
+  # hide a failure the DMG would hit (the receipt key, #153).
+  release-import:
+    name: Release-mode import (macOS)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true' || github.event_name != 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: ./scripts/ci/select-xcode.sh
+        env:
+          XCODE_VERSION: ${{ vars.XCODE_VERSION }}
+      - name: Import tests in a release build
+        run: >-
+          swift test -c release -Xswiftc -enable-testing --no-parallel
+          --filter 'ObservedV19FullSchemaImportTests|ImportWorkspaceTests'
+
   swift:
     name: Swift build + test (macOS)
     needs: changes

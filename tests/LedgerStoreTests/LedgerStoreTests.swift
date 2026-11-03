@@ -1427,3 +1427,82 @@ private func execute(_ database: OpaquePointer, _ sql: String) throws {
 }
 
 private enum TestError: Swift.Error { case sqlite, injected }
+
+@Test("a receipt key file keeps the first key, is owner-only, and refuses links and bad sizes")
+func receiptKeyFileKeepsTheFirstKeyAndRefusesTampering() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("receipt-keys-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let account = String(repeating: "ab", count: 32)
+  let first = Data(repeating: 1, count: 32)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == nil)
+  #expect(try LedgerReceiptKeyFile.store(first, account: account, in: directory) == first)
+  // A second store never replaces the key a ledger was signed with.
+  #expect(
+    try LedgerReceiptKeyFile.store(Data(repeating: 2, count: 32), account: account, in: directory)
+      == first)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == first)
+  let file = directory.appendingPathComponent(account + ".key")
+  let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+  #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+  let folder = try FileManager.default.attributesOfItem(atPath: directory.path)
+  #expect((folder[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+  // No temporary files are left behind.
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == [account + ".key"])
+
+  let short = String(repeating: "cd", count: 32)
+  try Data(repeating: 3, count: 31).write(to: directory.appendingPathComponent(short + ".key"))
+  #expect(throws: LedgerReceiptTrustError.invalidKey) {
+    try LedgerReceiptKeyFile.read(account: short, in: directory)
+  }
+  let linked = String(repeating: "ef", count: 32)
+  try FileManager.default.createSymbolicLink(
+    at: directory.appendingPathComponent(linked + ".key"), withDestinationURL: file)
+  #expect(throws: (any Error).self) {
+    try LedgerReceiptKeyFile.read(account: linked, in: directory)
+  }
+  #expect(throws: LedgerReceiptTrustError.invalidKey) {
+    try LedgerReceiptKeyFile.store(first, account: "../escape", in: directory)
+  }
+  #expect(throws: LedgerReceiptTrustError.invalidKey) {
+    try LedgerReceiptKeyFile.store(Data(repeating: 1, count: 16), account: account, in: directory)
+  }
+}
+
+@Test("a key the Keychain refuses for lack of entitlement goes to the key file and is reused")
+func receiptKeyFallsBackToTheFileOnlyForAMissingEntitlement() throws {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("receipt-keys-\(UUID().uuidString)", isDirectory: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let account = String(repeating: "0a", count: 32)
+  // The ad-hoc app's Keychain refuses iCloud items with errSecMissingEntitlement (-34018).
+  let refusing: (Data, String) throws -> Data = { _, _ in
+    throw LedgerReceiptTrustError.keychain(-34018)
+  }
+  let first = Data(repeating: 4, count: 32)
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      first, account: account, keychain: refusing, directory: { directory }) == first)
+  #expect(try LedgerReceiptKeyFile.read(account: account, in: directory) == first)
+  // A later store for the same account keeps the first key.
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      Data(repeating: 5, count: 32), account: account, keychain: refusing,
+      directory: { directory }) == first)
+
+  // Any other Keychain failure is reported, and no key file is written.
+  let other = String(repeating: "0b", count: 32)
+  #expect(throws: LedgerReceiptTrustError.keychain(-25293)) {
+    try LedgerReceiptTrust.storeNew(
+      first, account: other,
+      keychain: { _, _ in throw LedgerReceiptTrustError.keychain(-25293) },
+      directory: { directory })
+  }
+  #expect(try LedgerReceiptKeyFile.read(account: other, in: directory) == nil)
+  // A Keychain that takes the key leaves no file behind.
+  let kept = String(repeating: "0c", count: 32)
+  #expect(
+    try LedgerReceiptTrust.storeNew(
+      first, account: kept, keychain: { value, _ in value }, directory: { directory }) == first)
+  #expect(try LedgerReceiptKeyFile.read(account: kept, in: directory) == nil)
+}

@@ -6,6 +6,10 @@ import LedgerStore
 import MMImport
 import Testing
 
+// Installing a fixture's known key is a test-only hook that release builds leave out, so these
+// tests exist only in debug builds. CI also builds the tests in release mode (see ci.yml).
+#if DEBUG
+
 /// Committed packages of an imported ledger, one per canonical schema from v12 on. Each must
 /// still restore on today's schema, so a later schema can't break old backups unnoticed (for
 /// example by adding a column the product writers fill). All data is synthetic.
@@ -175,3 +179,4 @@ private func withFixtureDirectory(_ body: (URL) throws -> Void) throws {
   defer { try? FileManager.default.removeItem(at: directory) }
   try body(directory)
 }
+#endif
