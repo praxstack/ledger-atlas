@@ -31,8 +31,16 @@ package enum LedgerDemoTour {
     return ledgers.appendingPathComponent("Demo Household.sqlite")
   }
 
-  /// Removes the demo ledger and everything SQLite kept beside it.
-  package static func removeDemoLedger(at url: URL) { LedgerLocations.removeLedgerFiles(at: url) }
+  /// Removes the demo ledger and everything the store kept beside it. Matching by prefix is safe
+  /// only here: the tour runs in an otherwise empty ledgers folder (`demoLedgerURL`).
+  package static func removeDemoLedger(at url: URL) {
+    let directory = url.deletingLastPathComponent()
+    let stem = url.lastPathComponent
+    for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    where name.hasPrefix(stem) {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+  }
 
   /// A made-up Money Manager v19 backup: one account, one category, one expense.
   package static func writeMoneyManagerBackup(to url: URL) throws {

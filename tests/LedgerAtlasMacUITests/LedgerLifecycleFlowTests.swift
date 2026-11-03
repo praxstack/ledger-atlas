@@ -1185,6 +1185,9 @@ private enum FlowTestError: Error { case sqlite, injected }
       .init(kind: .failed, recoveryImageExists: false, message: nil, failure: .busy)))
 }
 
+/// Owner-only, as Open Ledger's copy into app storage is (`LedgerLocations.importCopy`); the
+/// store refuses a group- or world-readable file as an unsafe path before reading it.
 private func writeFlowMoneyManagerBackup(to url: URL) throws {
   try LedgerDemoTour.writeMoneyManagerBackup(to: url)
+  #expect(chmod(url.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
 }
