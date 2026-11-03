@@ -114,7 +114,10 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
       visited.append((id, "(SwiftUI key-view placeholder)"))
       continue
     }
-    let name = focusName(of: responder)
+    var name = focusName(of: responder)
+    // Some SwiftUI form controls (a Picker's popup, a Stepper) carry their label only in the
+    // system Accessibility tree, so ask the system what VoiceOver hears for the focused element.
+    if name.isEmpty { name = mounted.systemFocusedName() }
     visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name))
     if let view = responder as? NSView {
       let frame = view.convert(view.bounds, to: nil)
@@ -652,6 +655,21 @@ final class MountedRoot {
     return result.rows
   }
 
+  /// The name the system Accessibility API gives the focused element, read off the main thread.
+  func systemFocusedName() -> String {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let result = RowsBox()
+    Thread.detachNewThread {
+      result.finish([accessibilityFocusedName(of: pid)])
+    }
+    let deadline = Date().addingTimeInterval(10)
+    while !result.isDone, Date() < deadline {
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    if !result.isDone { readTimedOut = true }
+    return result.rows.first ?? ""
+  }
+
   private func systemAccessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
@@ -724,6 +742,31 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
     visit(window, depth: 0)
   }
   return rows
+}
+
+/// What VoiceOver names the focused element: its description or title, else the label next to it.
+func accessibilityFocusedName(of pid: pid_t) -> String {
+  let app = AXUIElementCreateApplication(pid)
+  AXUIElementSetMessagingTimeout(app, 5)
+  func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+  func name(_ element: AXUIElement) -> String? {
+    [kAXDescriptionAttribute, kAXTitleAttribute]
+      .compactMap { attribute(element, $0) as? String }
+      .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+  }
+  guard let focused = attribute(app, kAXFocusedUIElementAttribute) else { return "" }
+  let element = focused as! AXUIElement
+  if let own = name(element) { return own }
+  if let label = attribute(element, kAXTitleUIElementAttribute) {
+    let labelElement = label as! AXUIElement
+    if let text = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String), !text.isEmpty {
+      return text
+    }
+  }
+  return ""
 }
 
 /// Hands the tree from the reader thread back to the main thread.
