@@ -74,19 +74,23 @@ package enum CanonicalLedgerHealth {
   package final class VerifiedImportGraphs: @unchecked Sendable {
     /// Only the app itself keeps stamps between runs. Tests and command-line tools remember them
     /// in memory, so a replay changed during development is never skipped by an old stamp.
-    package static let shared = VerifiedImportGraphs(
-      defaults: Bundle.main.bundleIdentifier == "com.praxstack.ledgeratlas" ? .standard : nil)
+    package static let shared = VerifiedImportGraphs(defaults: appDefaults)
     static let defaultsKey = "LedgerAtlas.verifiedImportGraphs.v1"
     static let limit = 16
+    static var appDefaults: UserDefaults? {
+      Bundle.main.bundleIdentifier == "com.praxstack.ledgeratlas" ? .standard : nil
+    }
 
     private let lock = NSLock()
     private let defaults: UserDefaults?
+    private let key: String
     private var stamps: [String]
 
     /// `defaults: nil` keeps stamps in memory only.
-    package init(defaults: UserDefaults?) {
+    package init(defaults: UserDefaults?, key: String = defaultsKey) {
       self.defaults = defaults
-      stamps = defaults?.stringArray(forKey: Self.defaultsKey) ?? []
+      self.key = key
+      stamps = defaults?.stringArray(forKey: key) ?? []
     }
 
     package func contains(_ stamp: String) -> Bool {
@@ -98,9 +102,34 @@ package enum CanonicalLedgerHealth {
         stamps.removeAll { $0 == stamp }
         stamps.append(stamp)
         if stamps.count > Self.limit { stamps.removeFirst(stamps.count - Self.limit) }
-        defaults?.set(stamps, forKey: Self.defaultsKey)
+        defaults?.set(stamps, forKey: key)
       }
     }
+  }
+
+  /// Ledger files that already passed every check made when a ledger is opened, as keyed stamps
+  /// of their exact bytes (see `verifiedFileStamp`). Reopening a file the app checked before,
+  /// unchanged, then skips the integrity, foreign-key, import-replay and receipt-image checks,
+  /// which are most of the time it takes to open a large ledger. Same storage rules as
+  /// `VerifiedImportGraphs.shared`.
+  package static let verifiedFiles = VerifiedImportGraphs(
+    defaults: VerifiedImportGraphs.appDefaults, key: "LedgerAtlas.verifiedFiles.v1")
+
+  /// The keyed stamp of a whole ledger file: an HMAC, under the ledger's trust key, of the
+  /// SHA-256 of every byte of the file plus the replay revision, the schema and the running
+  /// build. The checks read nothing but those bytes, the key and the code, so a file with a
+  /// remembered stamp passes them again; one changed byte, another key or another build does not
+  /// match.
+  package static func verifiedFileStamp(contentDigest: String, trustKey: Data) -> String? {
+    guard trustKey.count == 32, contentDigest.count == 64 else { return nil }
+    let message = Data(
+      [
+        "ledger-atlas/verified-file/v1", "replay-revision=\(replayRevision)",
+        CanonicalLedgerSchema.fingerprint, buildIdentity, contentDigest,
+      ]
+      .joined(separator: "\n").utf8)
+    let code = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: trustKey))
+    return Data(code).map { String(format: "%02x", $0) }.joined()
   }
 
   /// The keyed stamp of everything the import-graph replay reads (see `importOnlyTables`):
@@ -221,9 +250,14 @@ package enum CanonicalLedgerHealth {
 
   /// `validate`, also returning the core snapshot the check read, so a caller that needs one
   /// doesn't read the whole ledger a second time.
+  ///
+  /// `fileAlreadyVerified` is only for a caller that has proved, inside its own read
+  /// transaction, that the file holds exactly the bytes of a remembered `verifiedFileStamp`.
+  /// It skips the import-graph replay and the receipt image re-hash.
   static func validateReading(
     _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true,
-    importGraphVerifiedAt: ImportGraphMark? = nil, remembering: VerifiedImportGraphs? = nil
+    importGraphVerifiedAt: ImportGraphMark? = nil, remembering: VerifiedImportGraphs? = nil,
+    fileAlreadyVerified: Bool = false
   ) throws -> (mark: ImportGraphMark, snapshot: LedgerStore.LedgerReadSnapshot) {
     // Run the whole check in one read transaction with a larger page cache. Otherwise SQLite
     // re-takes its file lock for each of the many small queries below, and a ~900 MB imported
@@ -242,7 +276,7 @@ package enum CanonicalLedgerHealth {
     }
     defer { if ownsTransaction { sqlite3_exec(database, "COMMIT", nil, nil, nil) } }
     let mark = try importGraphMark(database)
-    if mark != importGraphVerifiedAt {
+    if mark != importGraphVerifiedAt, !fileAlreadyVerified {
       // A stamp that can't be computed only means the replay runs.
       let stamp = remembering.flatMap { _ in
         trustKey.flatMap { try? importGraphStamp(database, trustKey: $0) }
@@ -254,7 +288,8 @@ package enum CanonicalLedgerHealth {
         if let stamp { remembering?.insert(stamp) }
       }
     }
-    try validateReceiptAttachments(database, verifyingImages: verifyingReceiptImages)
+    try validateReceiptAttachments(
+      database, verifyingImages: verifyingReceiptImages && !fileAlreadyVerified)
     return (mark, try readSnapshot(database))
   }
 

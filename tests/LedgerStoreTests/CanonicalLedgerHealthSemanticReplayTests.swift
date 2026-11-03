@@ -1,4 +1,5 @@
 import CSQLite
+import CryptoKit
 import Foundation
 import LedgerAdapterSemantics
 import LedgerCore
@@ -166,6 +167,274 @@ func rememberedImportGraphSkipsReplayOnlyWhenUnchanged() throws {
         try CanonicalLedgerHealth.validate(database, trustKey: key)
       }
     }
+  }
+}
+
+/// Opening a ledger file the app already fully checked, byte for byte unchanged, skips the slow
+/// checks. Any change to the bytes, another key, or an open that did not digest the file gets
+/// the full check.
+@Test("a remembered ledger file skips the open checks only while its bytes are unchanged")
+func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    // Its own stamps: a stamp for the broken file below must never reach other tests, whose
+    // fixtures can have the same bytes.
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    func open() throws -> LedgerStoreLifecycle.Result {
+      try LedgerStoreLifecycle.open(at: url, testing: nil, verifiedFiles: remembered)
+    }
+    func fileStamp(_ key: Data) throws -> String {
+      let digest = SHA256.hash(data: try Data(contentsOf: url))
+      return try #require(
+        CanonicalLedgerHealth.verifiedFileStamp(
+          contentDigest: digest.map { String(format: "%02x", $0) }.joined(), trustKey: key))
+    }
+
+    // A stamp is only made or trusted once the file's change time is more than two seconds old,
+    // so that any later write must move it.
+    func letChangeTimeAge() { Thread.sleep(forTimeInterval: 3.2) }
+
+    // A file written just now gets the full check but no stamp.
+    do { _ = try open() }
+    #expect(!remembered.contains(try fileStamp(key)))
+
+    // A full open of a healthy file remembers its bytes.
+    letChangeTimeAge()
+    do { _ = try open() }
+    #expect(remembered.contains(try fileStamp(key)))
+    #expect(try fileStamp(Data(repeating: 7, count: 32)) != fileStamp(key))
+    #expect(CanonicalLedgerHealth.verifiedFileStamp(contentDigest: "00", trustKey: key) == nil)
+
+    // A change the import replay refuses, so only a skipped check could let it open.
+    try mutateAndRehash(
+      at: url, fixture: fixture,
+      sql: """
+        DELETE FROM receipt_binding
+          WHERE idempotency_key=\(quote(fixture.receiptID))
+            AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+        """,
+      overrides: fixture.digestOverrides())
+    letChangeTimeAge()
+    #expect(throws: (any Error).self) { try open() }
+    let brokenStamp = try fileStamp(key)
+    #expect(!remembered.contains(brokenStamp))
+
+    // Remembering these exact bytes skips the checks. An open that did not digest the file
+    // never trusts a stamp.
+    remembered.insert(brokenStamp)
+    #expect(throws: Never.self) { _ = try open() }
+    #expect(throws: (any Error).self) { try LedgerStore.openForMutation(at: url) }
+
+    // Any write changes the bytes, even one that puts a value back, and the full check runs
+    // again. A caller holding the old identity and digest is refused too.
+    var oldIdentity = stat()
+    #expect(lstat(url.path, &oldIdentity) == 0)
+    let oldDigest = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }
+      .joined()
+    try withSQLite(url) { database in
+      try execute(
+        database,
+        """
+        UPDATE ledger_meta SET value='changed' WHERE key='schema_version';
+        UPDATE ledger_meta SET value='\(CanonicalLedgerSchema.version)' WHERE key='schema_version';
+        """)
+    }
+    #expect(try fileStamp(key) != brokenStamp)
+    #expect(throws: (any Error).self) { try open() }
+    #expect(throws: (any Error).self) {
+      try LedgerStore.openForMutation(
+        at: url, expectedIdentity: oldIdentity, contentDigest: oldDigest,
+        verifiedFiles: remembered, testing: nil)
+    }
+  }
+}
+
+/// A write that lands after the file was digested, but before the open's check holds its read
+/// lock, must not be covered by the stamp of the digested bytes.
+@Test("a write between the digest and the check's read lock gets the full check")
+func writeAfterDigestGetsTheFullCheck() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    Thread.sleep(forTimeInterval: 3.2)  // so the file's change time is old enough to stamp
+    do { _ = try LedgerStoreLifecycle.open(at: url, testing: nil, verifiedFiles: remembered) }
+    var identity = stat()
+    #expect(lstat(url.path, &identity) == 0)
+    let digest = hexDigest(of: try Data(contentsOf: url))
+    let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    #expect(
+      remembered.contains(
+        try #require(CanonicalLedgerHealth.verifiedFileStamp(contentDigest: digest, trustKey: key)))
+    )
+
+    var wrote = false
+    #expect(throws: (any Error).self) {
+      try LedgerStore.openForMutation(
+        at: url, expectedIdentity: identity, contentDigest: digest, verifiedFiles: remembered,
+        testing: { phase in
+          guard phase == .afterPinnedOpen, !wrote else { return }
+          // A change the import replay refuses, so only a skipped check could let it open.
+          try mutateAndRehash(
+            at: url, fixture: fixture,
+            sql: """
+              DELETE FROM receipt_binding
+                WHERE idempotency_key=\(quote(fixture.receiptID))
+                  AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
+              """,
+            overrides: fixture.digestOverrides())
+          wrote = true
+        })
+    }
+    #expect(wrote)
+  }
+}
+
+/// A store opened from a checked file keeps it remembered through its own checked saves, so a
+/// reopen after edits is fast too. Another connection's write ends that, as does an open that
+/// didn't check a digested file.
+@Test("checked saves keep a remembered file remembered, and nothing else does")
+func checkedSavesKeepARememberedFileRemembered() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    func isRemembered() throws -> Bool {
+      remembered.contains(
+        try #require(
+          CanonicalLedgerHealth.verifiedFileStamp(
+            contentDigest: hexDigest(of: try Data(contentsOf: url)), trustKey: key)))
+    }
+    // Change times must be more than two seconds old before they can prove anything on a
+    // volume with coarse timestamps.
+    func letChangeTimeAge() { Thread.sleep(forTimeInterval: 3.1) }
+    func rename(_ store: LedgerStore, _ name: String) throws {
+      let account = try #require(try store.readSnapshot().accounts.first)
+      try store.updateAccount(
+        try LedgerAccount(
+          id: account.id, name: name, currencyUnit: account.currencyUnit, origin: account.origin,
+          lifecycle: account.lifecycle, groupID: account.groupID,
+          displayOrder: account.displayOrder, hidden: account.hidden,
+          includeInTotals: account.includeInTotals, variant: account.variant))
+    }
+
+    Thread.sleep(forTimeInterval: 3.2)
+    do {
+      let store = try LedgerStoreLifecycle.open(at: url, testing: nil, verifiedFiles: remembered)
+        .store
+      #expect(try isRemembered())
+      try rename(store, "Saved once")
+      letChangeTimeAge()
+      try rename(store, "Saved twice")
+      #expect(try !isRemembered())
+      letChangeTimeAge()
+      #expect(store.rememberFileNow(), "\(store.fileStamper?.lastRefusal ?? "no stamper")")
+      #expect(try isRemembered())
+
+      // Another connection's commit: the store no longer vouches for the file.
+      try withSQLite(url) { database in
+        try execute(database, "UPDATE ledger_account SET name='Renamed elsewhere';")
+      }
+      letChangeTimeAge()
+      try rename(store, "Saved after")
+      letChangeTimeAge()
+      #expect(!store.rememberFileNow())
+      #expect(try !isRemembered())
+    }
+
+    // An open that didn't check a digested file never remembers its saves.
+    let unchecked = try LedgerStore.openForMutation(
+      at: url, verifiedFiles: remembered, testing: nil)
+    try rename(unchecked, "Saved unchecked")
+    letChangeTimeAge()
+    #expect(!unchecked.rememberFileNow())
+    #expect(try !isRemembered())
+  }
+}
+
+/// The background stamp reads the ledger while the editor may be saving. It must never cost a
+/// save its lock: closing a separate descriptor to the file would drop every lock the process
+/// holds on it (#140).
+@Test("a stamp taken in the background never makes a save fail")
+func backgroundStampNeverFailsASave() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStore.openForMutation(at: url, testing: nil)
+    let stamper = LedgerFileStamper(
+      url: url, verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil),
+      fineTimestamps: true)
+    let stop = LockedFlag()
+    let attempted = LockedFlag()
+    let finished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      while !stop.isSet {
+        var identity = stat()
+        if lstat(url.path, &identity) == 0 { _ = stamper.stamp(identity) }
+        attempted.set()
+      }
+      finished.signal()
+    }
+    let account = try #require(try store.readSnapshot().accounts.first)
+    var saveError: (any Error)?
+    do {
+      for index in 0..<60 {
+        try store.updateAccount(
+          try LedgerAccount(
+            id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
+            origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+            displayOrder: account.displayOrder, hidden: account.hidden,
+            includeInTotals: account.includeInTotals, variant: account.variant))
+      }
+    } catch { saveError = error }
+    stop.set()
+    finished.wait()
+    if let saveError { throw saveError }
+    #expect(attempted.isSet)
+    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save 59")
+    // And once saves stop, the stamp goes through.
+    var identity = stat()
+    #expect(lstat(url.path, &identity) == 0)
+    #expect(stamper.stamp(identity), "\(stamper.lastRefusal ?? "")")
+  }
+}
+
+/// On a large ledger the background check holds its read lock for seconds, longer than a save
+/// waits for one. A save stops the check instead of waiting it out.
+@Test("a save stops a running background check instead of waiting for it")
+func saveStopsARunningStamp() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    Thread.sleep(forTimeInterval: 3.2)
+    let store = try LedgerStoreLifecycle.open(
+      at: url, testing: nil, verifiedFiles: .init(defaults: nil)
+    ).store
+    let stamper = try #require(store.fileStamper)
+    let inCheck = DispatchSemaphore(value: 0)
+    // Hold the check's read lock until the check is cancelled, or for 20 seconds.
+    stamper.afterPageCheck = { stillCurrent in
+      inCheck.signal()
+      let deadline = Date().addingTimeInterval(20)
+      while stillCurrent() && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+    }
+    var current = stat()
+    #expect(lstat(url.path, &current) == 0)
+    let identity = current
+    let stamped = LockedFlag()
+    let finished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      if stamper.stamp(identity) { stamped.set() }
+      finished.signal()
+    }
+    #expect(inCheck.wait(timeout: .now() + 20) == .success)
+    let account = try #require(try store.readSnapshot().accounts.first)
+    let started = Date()
+    try store.updateAccount(
+      try LedgerAccount(
+        id: account.id, name: "Saved during a check", currencyUnit: account.currencyUnit,
+        origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+        displayOrder: account.displayOrder, hidden: account.hidden,
+        includeInTotals: account.includeInTotals, variant: account.variant))
+    #expect(Date().timeIntervalSince(started) < 4)
+    #expect(finished.wait(timeout: .now() + 20) == .success)
+    #expect(!stamped.isSet)
+    #expect(
+      try store.readSnapshot().accounts.first { $0.id == account.id }?.name
+        == "Saved during a check")
   }
 }
 
@@ -1487,6 +1756,10 @@ private func execute(_ database: OpaquePointer, _ sql: String) throws {
 
 private func quote(_ value: String) -> String {
   "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+}
+
+private func hexDigest(of data: Data) -> String {
+  SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
 private func hex(_ data: Data) -> String {
