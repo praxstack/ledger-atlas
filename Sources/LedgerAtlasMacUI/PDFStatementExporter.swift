@@ -70,10 +70,15 @@ public enum LedgerPDFStatementExporter {
   }
 
   public static func export(_ statement: LedgerStatement, to url: URL) throws {
+    try export(
+      lines: statement.text.split(separator: "\n", omittingEmptySubsequences: false)
+        .map(String.init), to: url)
+  }
+
+  /// Writes `lines` as a plain, paginated PDF. The PDF is output only: nothing reads it back.
+  public static func export(lines: [String], to url: URL) throws {
     let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
     guard url.isFileURL, !url.path.isEmpty, !isDirectory else { throw Error.invalidDestination }
-    let lines = statement.text.split(separator: "\n", omittingEmptySubsequences: false)
-      .map(String.init)
     var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
     let data = NSMutableData()
     guard let consumer = CGDataConsumer(data: data),
