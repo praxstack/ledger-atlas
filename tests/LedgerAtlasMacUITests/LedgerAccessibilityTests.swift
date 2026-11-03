@@ -295,6 +295,16 @@ func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
     for child in inProcessProperty(element, "accessibilityChildren") as? [NSObject] ?? [] {
       visit(child, depth: depth + 1)
     }
+    // A list's rows are made on demand and aren't among its children here; read the rows
+    // on screen.
+    if let table = element as? NSTableView {
+      let rows = table.rows(in: table.visibleRect)
+      for row in rows.location..<(rows.location + rows.length) {
+        if let rowView = table.rowView(atRow: row, makeIfNecessary: false) {
+          visit(rowView, depth: depth + 1)
+        }
+      }
+    }
   }
   visit(window, depth: 0)
   return found

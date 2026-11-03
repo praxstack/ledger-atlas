@@ -17,6 +17,11 @@ import Testing
 /// `$LEDGER_ATLAS_TEST_ARTIFACTS/ui-captures`, which CI uploads as an artifact.
 @MainActor
 @Test func everyTraceabilityRecordHasASyntheticCapture() async throws {
+  // The test process has ended mid-run with exit status 0; say who called exit.
+  atexit {
+    let stack = Thread.callStackSymbols.prefix(25).joined(separator: "\n")
+    FileHandle.standardError.write(Data("CAPTURE exit called from:\n\(stack)\n".utf8))
+  }
   let records = try traceabilityRecords()
   #expect(records.count == 25)
   let missing = records.filter { capturePlan[$0.key] == nil }.map(\.key)
@@ -509,7 +514,7 @@ private func inProcessFrame(in window: NSWindow, named name: String) -> CGRect? 
 private final class PickBox {
   let menu: NSMenu
   var ticks = 0
-  var done = false
+  var item: NSMenuItem?
   var titles: [String] = []
   init(menu: NSMenu) { self.menu = menu }
 }
@@ -589,10 +594,9 @@ extension MountedRoot {
       let finished = MainActor.assumeIsolated { () -> Bool in
         let menu = picked.menu
         picked.ticks += 1
-        if let index = menu.items.firstIndex(where: { $0.title == title }) {
+        if let item = menu.items.first(where: { $0.title == title }) {
           picked.titles = menu.items.map(\.title)
-          menu.performActionForItem(at: index)
-          picked.done = true
+          picked.item = item
         } else if picked.ticks > 20 {
           picked.titles = menu.items.map(\.title)
         } else {
@@ -605,24 +609,24 @@ extension MountedRoot {
     }
     RunLoop.main.add(timer, forMode: .common)
     let location = popUp.convert(NSPoint(x: popUp.bounds.midX, y: popUp.bounds.midY), to: nil)
-    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-      guard
-        let event = NSEvent.mouseEvent(
-          with: type, location: location, modifierFlags: [],
-          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-          context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
-      else { continue }
-      window.sendEvent(event)
-      pump(0.05)
+    // The press returns once the timer closes the menu; the item's action is sent after
+    // that, as AppKit does when a menu closes on a chosen item.
+    if let press = NSEvent.mouseEvent(
+      with: .leftMouseDown, location: location, modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+      context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+    {
+      window.sendEvent(press)
     }
     let deadline = Date().addingTimeInterval(8)
-    while !picked.done, timer.isValid, Date() < deadline { pump(0.1) }
+    while picked.item == nil, timer.isValid, Date() < deadline { pump(0.1) }
     timer.invalidate()
-    menu.cancelTracking()
-    guard picked.done else {
+    guard let item = picked.item, let action = item.action else {
       log("pop-up \(row) has \(picked.titles), not \(title)")
       return false
     }
+    pump(0.3)
+    NSApplication.shared.sendAction(action, to: item.target, from: item)
     pump(0.5)
     return true
   }
