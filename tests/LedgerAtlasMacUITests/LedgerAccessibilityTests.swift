@@ -39,6 +39,9 @@ struct SpokenElement: Sendable {
   let value: String
   let placeholder: String
   let identifier: String
+  /// Text of the separate label VoiceOver reads for this control (AXTitleUIElement), as in a
+  /// settings form where the label sits in its own column.
+  let linkedTitle: String
 
   static let controlRoles: Set<String> = [
     kAXButtonRole, kAXCheckBoxRole, kAXRadioButtonRole, kAXPopUpButtonRole, kAXMenuButtonRole,
@@ -46,15 +49,24 @@ struct SpokenElement: Sendable {
     kAXTextAreaRole, "AXLink",
   ]
 
-  var isControl: Bool { Self.controlRoles.contains(role) }
+  /// Parts of standard AppKit chrome (window buttons, scroll bar and stepper arrows). VoiceOver
+  /// names these from their subrole, and the app can't label them.
+  static let systemChrome: Set<String> = [
+    kAXCloseButtonSubrole, kAXMinimizeButtonSubrole, kAXZoomButtonSubrole,
+    kAXFullScreenButtonSubrole, kAXIncrementArrowSubrole, kAXDecrementArrowSubrole,
+    kAXIncrementPageSubrole, kAXDecrementPageSubrole,
+  ]
+
+  var isControl: Bool { Self.controlRoles.contains(role) && !Self.systemChrome.contains(subrole) }
 
   /// What VoiceOver reads as the element's name.
   var spokenName: String {
-    [label, title, placeholder].first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+    [label, title, linkedTitle, placeholder].first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
   }
 
   var debugDescription: String {
     "\(role)/\(subrole) label=\(label.debugDescription) title=\(title.debugDescription) "
+      + "linked=\(linkedTitle.debugDescription) "
       + "value=\(value.prefix(40).debugDescription) id=\(identifier.debugDescription)"
   }
 }
@@ -82,7 +94,11 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
         label: text(element, kAXDescriptionAttribute), title: text(element, kAXTitleAttribute),
         value: text(element, kAXValueAttribute),
         placeholder: text(element, kAXPlaceholderValueAttribute),
-        identifier: text(element, kAXIdentifierAttribute)))
+        identifier: text(element, kAXIdentifierAttribute),
+        linkedTitle: attribute(element, kAXTitleUIElementAttribute).map {
+          CFGetTypeID($0) == AXUIElementGetTypeID()
+            ? text(unsafeBitCast($0, to: AXUIElement.self), kAXValueAttribute) : ""
+        } ?? ""))
     for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
       visit(child, depth: depth + 1)
     }
