@@ -304,7 +304,7 @@ func checkedSavesKeepARememberedFileRemembered() throws {
     }
     // Change times must be more than two seconds old before they can prove anything on a
     // volume with coarse timestamps.
-    func letChangeTimeAge() { Thread.sleep(forTimeInterval: 2.2) }
+    func letChangeTimeAge() { Thread.sleep(forTimeInterval: 3.1) }
     func rename(_ store: LedgerStore, _ name: String) throws {
       let account = try #require(try store.readSnapshot().accounts.first)
       try store.updateAccount(

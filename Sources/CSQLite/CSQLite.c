@@ -852,10 +852,9 @@ int csqlite_has_fine_timestamps(int descriptor) {
 #if defined(__APPLE__)
   return strcmp(value.f_fstypename, "apfs") == 0;
 #else
-  // ext4 (also ext2/3), tmpfs, btrfs and xfs keep nanosecond timestamps.
-  switch ((unsigned long)value.f_type) {
-  case 0xEF53UL: case 0x01021994UL: case 0x9123683EUL: case 0x58465342UL: return 1;
-  default: return 0;
-  }
+  // Linux stamps change times from a coarse clock tick, so two writes a few milliseconds apart
+  // can share one; callers then fall back to requiring a change time two seconds old.
+  (void)value;
+  return 0;
 #endif
 }

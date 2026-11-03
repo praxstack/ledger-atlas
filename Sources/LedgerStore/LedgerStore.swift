@@ -2525,14 +2525,21 @@ public final class LedgerStore {
         throw Error.incompatibleCanonicalStore
       }
       try validateMutationIdentity(requiringNoCompanions: false)
+      let versionBeforeCommit = Self.dataVersion(of: database)
       try Self.execute("COMMIT", on: database)
       importGraphVerifiedAt = mark
       writeWatch?.reset()
+      // The identity this save left: still the pinned file, and with no other connection's
+      // commit between this one and reading it.
       var afterCommit = stat()
-      if stillTrusted, let url, lstat(url.path, &afterCommit) == 0 {
+      if stillTrusted, let url, let pinnedIdentity, lstat(url.path, &afterCommit) == 0,
+        Self.sameInode(pinnedIdentity, afterCommit),
+        versionBeforeCommit != nil, Self.dataVersion(of: database) == versionBeforeCommit
+      {
         trustedFile?.identity = afterCommit
         trustedFile?.stamper.schedule(afterCommit)
       } else {
+        trustedFile?.stamper.cancel()
         trustedFile = nil
       }
       rememberCoreSnapshot(checked.snapshot, readFrom: stateAfterWrite)
