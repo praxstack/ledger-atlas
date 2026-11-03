@@ -349,6 +349,51 @@ func checkedSavesKeepARememberedFileRemembered() throws {
   }
 }
 
+/// The background stamp reads the ledger while the editor may be saving. It must never cost a
+/// save its lock: closing a separate descriptor to the file would drop every lock the process
+/// holds on it (#140).
+@Test("a stamp taken in the background never makes a save fail")
+func backgroundStampNeverFailsASave() throws {
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
+    let store = try LedgerStore.openForMutation(at: url, testing: nil)
+    let stamper = LedgerFileStamper(
+      url: url, verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil),
+      fineTimestamps: true)
+    let stop = LockedFlag()
+    let attempted = LockedFlag()
+    let finished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      while !stop.isSet {
+        var identity = stat()
+        if lstat(url.path, &identity) == 0 { _ = stamper.stamp(identity) }
+        attempted.set()
+      }
+      finished.signal()
+    }
+    let account = try #require(try store.readSnapshot().accounts.first)
+    var saveError: (any Error)?
+    do {
+      for index in 0..<60 {
+        try store.updateAccount(
+          try LedgerAccount(
+            id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
+            origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
+            displayOrder: account.displayOrder, hidden: account.hidden,
+            includeInTotals: account.includeInTotals, variant: account.variant))
+      }
+    } catch { saveError = error }
+    stop.set()
+    finished.wait()
+    if let saveError { throw saveError }
+    #expect(attempted.isSet)
+    #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save 59")
+    // And once saves stop, the stamp goes through.
+    var identity = stat()
+    #expect(lstat(url.path, &identity) == 0)
+    #expect(stamper.stamp(identity))
+  }
+}
+
 /// A screen refresh reuses the preserved source rows, but never past a change to them.
 @Test("a snapshot reuses preserved source rows only while nothing could have changed them")
 func snapshotReloadsPreservedSourceAfterAnotherConnectionWrites() throws {

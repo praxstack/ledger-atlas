@@ -540,7 +540,8 @@ public final class LedgerStore {
           ? expectedIdentity.map {
             TrustedFile(
               identity: $0, fineTimestamps: fineTimestamps,
-              stamper: LedgerFileStamper(url: url, verifiedFiles: verifiedFiles))
+              stamper: LedgerFileStamper(
+                url: url, verifiedFiles: verifiedFiles, fineTimestamps: fineTimestamps))
           } : nil)
       store.rememberCoreSnapshot(checked.snapshot, readFrom: stateBeforeCheck)
       return store
