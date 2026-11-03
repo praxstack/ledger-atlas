@@ -113,7 +113,7 @@ Swift Charts. One question per chart, and every chart has an accessible table or
 
 ## 8. Keyboard
 
-`⌘N` new transaction · `⇧⌘N` new ledger · `⌘O` open ledger · `⇧⌘I` import Money Manager backup · `⌘F` search · `⌥⌘F` filters · `⌥⌘I` inspector · `⌘Z` / `⇧⌘Z` undo, redo · Return edits the selected row · Space previews · Delete asks first. Every shortcut also exists in a menu.
+`⇧⌘N` new ledger · `⌘O` open ledger · `⇧⌘I` import Money Manager backup · `⌘F` search · `⌥⌘F` filters · `⌥⌘I` inspector · `⌘Z` / `⇧⌘Z` undo, redo · Return edits the selected row · Space previews · Delete asks first. Every shortcut also exists in a menu.
 
 ## 9. Motion
 
