@@ -18,7 +18,7 @@ import Testing
 func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) async throws {
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
-  let elements = await mounted.accessibilityElements()
+  let elements = mounted.accessibilityElements()
   let summary = Dictionary(grouping: elements, by: \.role).mapValues(\.count)
     .sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
   print("A11Y \(destination.rawValue): \(elements.count) elements: \(summary)")
@@ -87,7 +87,10 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
       visit(child, depth: depth + 1)
     }
   }
-  for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] {
+  var windows: CFTypeRef?
+  let status = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
+  if status != .success { print("A11Y windows attribute failed: \(status.rawValue)") }
+  for window in (windows as? [AXUIElement]) ?? [] {
     visit(window, depth: 0)
   }
   return found
@@ -130,7 +133,7 @@ final class MountedRoot {
     for _ in 0..<30 {
       try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
-      let count = await accessibilityElements().count
+      let count = accessibilityElements().count
       if count == previous, count > 5 { break }
       previous = count
     }
@@ -145,10 +148,28 @@ final class MountedRoot {
   }
 
   /// Every element in this window's tree, read the way VoiceOver reads it.
-  func accessibilityElements() async -> [SpokenElement] {
+  /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
+  /// there, so pump it until the background read finishes.
+  func accessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
-    return await Task.detached { accessibilityTree(of: pid) }.value
+    let result = TreeBox()
+    Thread.detachNewThread { result.finish(accessibilityTree(of: pid)) }
+    let deadline = Date().addingTimeInterval(20)
+    while !result.isDone, Date() < deadline {
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    return result.elements
   }
+}
+
+/// Hands the tree from the reader thread back to the main thread.
+final class TreeBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var done = false
+  private var found: [SpokenElement] = []
+  var isDone: Bool { lock.withLock { done } }
+  var elements: [SpokenElement] { lock.withLock { found } }
+  func finish(_ elements: [SpokenElement]) { lock.withLock { found = elements; done = true } }
 }
 
 /// CI runners have a small virtual display; keep the requested window size.
