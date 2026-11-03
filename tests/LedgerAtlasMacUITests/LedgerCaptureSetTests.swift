@@ -76,7 +76,12 @@ import Testing
     log("sheet \(record.number) \(record.key)")
     let root = try await MountedRoot(
       showing: sheet.destination, size: captureSize, appWindow: true)
-    defer { root.close() }
+    defer {
+      // Closing a window with a sheet still attached ended the whole test process.
+      if let attached = root.window.attachedSheet { root.window.endSheet(attached) }
+      pump(0.3)
+      root.close()
+    }
     log("mounted \(sheet.destination)")
     guard let sheetWindow = try await sheet.open(in: root) else {
       Issue.record("\(record.key): the \(sheet.title) did not open")
@@ -480,8 +485,10 @@ private func pump(_ seconds: TimeInterval) {
 private func accessibleText(of element: Any, depth: Int = 0) -> [String] {
   guard depth < 40, let element = element as? NSObject else { return [] }
   // The attribute API reaches SwiftUI's elements too; AppKit bridges it to their properties.
+  // SwiftUI often answers titles and descriptions with attributed strings.
   func string(_ attribute: NSAccessibility.Attribute) -> String? {
-    element.accessibilityAttributeValue(attribute) as? String
+    let value = element.accessibilityAttributeValue(attribute)
+    return value as? String ?? (value as? NSAttributedString)?.string
   }
   let own = [string(.description), string(.title), string(.value)]
     .compactMap { $0 }.filter { !$0.isEmpty }

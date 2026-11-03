@@ -103,8 +103,16 @@ jobs:
       # waitUntilExit) while another test-side task finishes the work. On a 3-core
       # runner the parallel Swift Testing pool runs out of threads and every test
       # stalls (seen on run 41355070020). Serial runs keep a free thread.
+      # A test process that quits early (exit 0, no summary) must not pass: require Swift
+      # Testing's closing "Test run with N tests ... passed" line.
       - name: swift test
-        run: swift test --no-parallel
+        run: |
+          set -o pipefail
+          swift test --no-parallel 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          grep -qE "Test run with [0-9]+ tests? .*passed" "$RUNNER_TEMP/swift-test.log" || {
+            echo "::error::swift test ended without its passing summary; the test process stopped early"
+            exit 1
+          }
         timeout-minutes: 30
         env:
           LEDGER_ATLAS_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
