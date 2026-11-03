@@ -32,9 +32,15 @@ RAW=$(mktemp -d)/tour-recording.mov
 # not recorded. Both videos are optional, so a failed install only skips them.
 if ! command -v ffmpeg >/dev/null; then brew install ffmpeg >/dev/null 2>&1 || true; fi
 
-# Record the screen for at most 150 s (longer than the 120 s tour wait); SIGINT below stops it early and finalises the file.
-screencapture -x -v -V 150 "$RAW" >/dev/null 2>"$OUT/recording.log" &
+# Record the screen for at most 150 s (longer than the 120 s tour wait). screencapture -v
+# stops on a key press on stdin, not on SIGINT, so feed it a newline through a FIFO when the
+# tour ends. The video is also trimmed to the tour's length in case that stop is missed.
+KEYS=$(mktemp -d)/keys
+mkfifo "$KEYS"
+screencapture -x -v -V 150 "$RAW" <"$KEYS" >/dev/null 2>"$OUT/recording.log" &
 REC=$!
+exec 3>"$KEYS"
+STARTED=$SECONDS
 sleep 1
 LEDGER_ATLAS_DEMO_TOUR=1 "$APP/Contents/MacOS/LedgerAtlas" >"$LOG" 2>&1 &
 PID=$!
@@ -52,6 +58,16 @@ done
 kill "$PID" 2>/dev/null || true
 PID=
 sleep 1
+TOUR_SECONDS=$((SECONDS - STARTED + 2))
+# If screencapture already quit, the write fails; don't let SIGPIPE end the script.
+trap '' PIPE
+echo >&3 2>/dev/null || true
+exec 3>&-
+# Give it time to write the file, then stop it the hard way.
+for _ in $(seq 1 15); do
+  kill -0 "$REC" 2>/dev/null || break
+  sleep 1
+done
 kill -INT "$REC" 2>/dev/null || true
 wait "$REC" 2>/dev/null || true
 REC=
@@ -70,6 +86,7 @@ grep -q "ledger opened" "$LOG" || { echo "demo ledger did not open"; exit 1; }
 [ "$count" -ge 10 ] || { echo "too few screens captured"; exit 1; }
 # A blank or single-colour window compresses to a few KB; a real screen is far larger.
 blank=0
+# Word splitting is fine: screen names come from AppDestination raw values, which have no spaces.
 for f in $(screens); do
   size=$(stat -f%z "$f")
   if [ "$size" -lt 25000 ]; then echo "looks blank: $(basename "$f") ($size bytes)"; blank=$((blank + 1)); fi
@@ -86,7 +103,7 @@ command -v ffmpeg >/dev/null || { echo "ffmpeg unavailable: no videos"; exit 0; 
 # often the picture changes: the tour moves through 16 screens, so a real recording changes
 # many times, while a desktop-only one barely changes.
 if [ -s "$RAW" ]; then
-  if ffmpeg -y -loglevel error -i "$RAW" \
+  if ffmpeg -y -loglevel error -i "$RAW" -t "$TOUR_SECONDS" \
     -vf "scale=1280:-2:flags=lanczos,fps=15,format=yuv420p" -c:v libx264 -crf 26 \
     -movflags +faststart -an "$OUT/tour-recording.mp4"; then
     seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/tour-recording.mp4" | cut -d. -f1 || true)
