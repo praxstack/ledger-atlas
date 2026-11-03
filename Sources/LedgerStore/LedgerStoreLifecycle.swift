@@ -298,7 +298,7 @@ public enum LedgerStoreLifecycle {
       let store: LedgerStore
       do {
         store = try openPublished(
-          at: url, expected: source.identity, contentDigest: source.contentDigest)
+          at: url, expected: source.identity, contentDigest: source.identityBoundDigest)
       } catch {
         if recovered != nil {
           let recoveryLeaf = recovered!.url.lastPathComponent
@@ -1774,16 +1774,20 @@ public enum LedgerStoreLifecycle {
     let url: URL
     let contentDigest: String
     let inactiveCompanions: InactiveCompanions?
+    /// `contentDigest`, when the file's change time is old enough that an unchanged identity
+    /// proves unchanged bytes (see `openPinned`); otherwise nil.
+    let identityBoundDigest: String?
 
     init(
       descriptor: Int32, identity: stat, url: URL, contentDigest: String,
-      inactiveCompanions: InactiveCompanions? = nil
+      inactiveCompanions: InactiveCompanions? = nil, identityBoundDigest: String? = nil
     ) {
       self.descriptor = descriptor
       self.identity = identity
       self.url = url
       self.contentDigest = contentDigest
       self.inactiveCompanions = inactiveCompanions
+      self.identityBoundDigest = identityBoundDigest
     }
   }
 
@@ -1818,11 +1822,17 @@ public enum LedgerStoreLifecycle {
       try requirePath(url, matches: value)
       // The digest must be of the bytes the file had at `value`, the identity callers check
       // against later.
+      let digestStarted = time(nil)
       let digested = try digestedState(descriptor)
       guard sameFile(value, digested.identity) else { throw Error.pathChanged }
+      // An unchanged identity proves unchanged bytes only if any later write must move the
+      // change time. A write lands at or after `digestStarted`, so it does on any volume whose
+      // timestamps are finer than two seconds, once the file's change time is older than that.
+      let identityBound =
+        value.st_ctimespec.tv_sec + 2 < digestStarted ? digested.digest : nil
       return PinnedFile(
         descriptor: descriptor, identity: value, url: url, contentDigest: digested.digest,
-        inactiveCompanions: companions)
+        inactiveCompanions: companions, identityBoundDigest: identityBound)
     } catch {
       Darwin.close(descriptor)
       throw error

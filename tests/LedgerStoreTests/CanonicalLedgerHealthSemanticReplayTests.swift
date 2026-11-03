@@ -184,7 +184,16 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
           contentDigest: digest.map { String(format: "%02x", $0) }.joined(), trustKey: key))
     }
 
+    // A stamp is only made or trusted once the file's change time is more than two seconds old,
+    // so that any later write must move it.
+    func letChangeTimeAge() { Thread.sleep(forTimeInterval: 3.2) }
+
+    // A file written just now gets the full check but no stamp.
+    do { _ = try LedgerStoreLifecycle.open(at: url) }
+    #expect(!CanonicalLedgerHealth.verifiedFiles.contains(try fileStamp(key)))
+
     // A full open of a healthy file remembers its bytes.
+    letChangeTimeAge()
     do { _ = try LedgerStoreLifecycle.open(at: url) }
     #expect(CanonicalLedgerHealth.verifiedFiles.contains(try fileStamp(key)))
     #expect(try fileStamp(Data(repeating: 7, count: 32)) != fileStamp(key))
@@ -199,6 +208,7 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
             AND event_id=\(quote(fixture.eventID)) AND semantic='kind';
         """,
       overrides: fixture.digestOverrides())
+    letChangeTimeAge()
     #expect(throws: (any Error).self) { try LedgerStoreLifecycle.open(at: url) }
     let brokenStamp = try fileStamp(key)
     #expect(!CanonicalLedgerHealth.verifiedFiles.contains(brokenStamp))
@@ -210,7 +220,11 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
     #expect(throws: (any Error).self) { try LedgerStore.openForMutation(at: url) }
 
     // Any write changes the bytes, even one that puts a value back, and the full check runs
-    // again.
+    // again. A caller holding the old identity and digest is refused too.
+    var oldIdentity = stat()
+    #expect(lstat(url.path, &oldIdentity) == 0)
+    let oldDigest = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }
+      .joined()
     try withSQLite(url) { database in
       try execute(
         database,
@@ -221,6 +235,10 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
     }
     #expect(try fileStamp(key) != brokenStamp)
     #expect(throws: (any Error).self) { try LedgerStoreLifecycle.open(at: url) }
+    #expect(throws: (any Error).self) {
+      try LedgerStore.openForMutation(
+        at: url, expectedIdentity: oldIdentity, contentDigest: oldDigest, testing: nil)
+    }
   }
 }
 

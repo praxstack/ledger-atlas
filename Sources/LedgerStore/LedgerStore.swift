@@ -375,7 +375,7 @@ public final class LedgerStore {
   }
 
   /// `contentDigest` is the SHA-256 of the file's bytes, read by the caller while the file had
-  /// `expectedIdentity`. When this build has already fully checked those exact bytes under the
+  /// `expectedIdentity`, whose change time is old enough that any later write would move it. When this build has already fully checked those exact bytes under the
   /// ledger's trust key (`CanonicalLedgerHealth.verifiedFiles`), and the file still has that
   /// identity once the check holds its read lock, the slow checks are skipped.
   package static func openForMutation(
@@ -486,9 +486,9 @@ public final class LedgerStore {
         sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
         throw error
       }
-      if let fileStamp, !alreadyVerified { CanonicalLedgerHealth.verifiedFiles.insert(fileStamp) }
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
+      if let fileStamp, !alreadyVerified { CanonicalLedgerHealth.verifiedFiles.insert(fileStamp) }
       let store = LedgerStore(
         mutableDatabase: database, identity: identity, url: url,
         registration: registration, mutationTestHook: mutationTestHook,
