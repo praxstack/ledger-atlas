@@ -54,6 +54,8 @@ func unusableBackupsAreRefusedWithoutTouchingAnything(_ bad: BadBackup) async th
   let openURL = journey.ledgerURL
   let openChecksum = try journey.checksum()
   let originalBytes = try Data(contentsOf: original)
+  // The open ledger keeps its own lock and journal files here; only new files count.
+  let filesBefore = Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
 
   let restoreTarget = directory.appendingPathComponent("restored.sqlite")
   #expect(throws: (any Error).self) {
@@ -76,9 +78,9 @@ func unusableBackupsAreRefusedWithoutTouchingAnything(_ bad: BadBackup) async th
   #expect(try journey.checksum() == openChecksum)
   #expect(try Data(contentsOf: original) == originalBytes)
   #expect((try? Data(contentsOf: source)) == sourceBytes)
-  let leftovers = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-    .filter { !["original.sqlite", "backup.sqlite", source.lastPathComponent].contains($0) }
-  #expect(leftovers.allSatisfy { $0.hasPrefix("original.sqlite") }, "\(leftovers)")
+  let leftovers = Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
+    .subtracting(filesBefore)
+  #expect(leftovers.isEmpty, "\(leftovers.sorted())")
 }
 
 enum BadBackup: String, CaseIterable, Sendable {
