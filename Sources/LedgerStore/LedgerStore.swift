@@ -210,6 +210,15 @@ public final class LedgerStore {
   /// When the import graph was last fully replayed on this connection. A write that leaves it
   /// unchanged skips the replay, which on a large import is most of a save's time.
   private var importGraphVerifiedAt: CanonicalLedgerHealth.ImportGraphMark?
+  /// The preserved source rows, which only an import writes, from the last committed read.
+  /// On a large import they are most of a snapshot's time, and every screen refresh takes one.
+  private var preservedSourceCache: PreservedSourceCache?
+
+  private struct PreservedSourceCache {
+    let mark: CanonicalLedgerHealth.ImportGraphMark
+    let importGraphWrites: Int
+    let rows: [LedgerPreservedSourceRecord]
+  }
 
   /// Internal seam for the future pinned canonical opener and typed mutation implementation.
   init(takingOwnershipOfValidatedCanonicalDatabase database: OpaquePointer?) throws {
@@ -399,7 +408,7 @@ public final class LedgerStore {
   public func readSnapshot() throws -> LedgerReadSnapshot {
     do {
       try Self.execute("BEGIN", on: database)
-      let snapshot = try readSnapshotContents()
+      let snapshot = try readSnapshotContents(reusingPreservedSource: true)
       try Self.execute("COMMIT", on: database)
       if let descriptor = pinnedIdentity, let url {
         if isMutable {
@@ -470,7 +479,11 @@ public final class LedgerStore {
     }
   }
 
-  private func readSnapshotContents(forPortableExport: Bool = false) throws -> LedgerReadSnapshot {
+  /// `reusingPreservedSource` only from a read transaction this store began itself, so the
+  /// rows it caches are committed ones.
+  private func readSnapshotContents(
+    forPortableExport: Bool = false, reusingPreservedSource: Bool = false
+  ) throws -> LedgerReadSnapshot {
     let snapshot = try CanonicalLedgerHealth.readSnapshot(database)
     try mutationTestHook?(
       forPortableExport ? .afterPortableExportSnapshotRead : .afterReadSnapshotCoreRead)
@@ -486,11 +499,30 @@ public final class LedgerStore {
       recurrenceRules: try Self.loadRecurrenceRules(on: database),
       budgets: try Self.loadBudgets(on: database),
       installmentPlans: try Self.loadInstallmentPlans(on: database),
-      preservedSource: try Self.loadPreservedSource(on: database),
+      preservedSource: reusingPreservedSource
+        ? try cachedPreservedSource() : try Self.loadPreservedSource(on: database),
       tags: try Self.loadTags(on: database),
       transactionTemplates: try Self.loadTransactionTemplates(on: database),
       memos: try Self.loadMemos(on: database),
       revisionTags: try Self.loadRevisionTags(on: database))
+  }
+
+  /// Preserved source rows live in import-only tables and `ledger_meta`. They are reloaded when
+  /// another connection committed (`data_version`), when this connection wrote any of those
+  /// tables, even in a transaction it rolled back, or when a row count or meta row differs
+  /// (which also covers a whole-table delete the update hook does not report).
+  private func cachedPreservedSource() throws -> [LedgerPreservedSourceRecord] {
+    let mark: CanonicalLedgerHealth.ImportGraphMark
+    do { mark = try CanonicalLedgerHealth.importGraphMark(database) } catch {
+      throw Error.incompatibleCanonicalStore
+    }
+    let writes = writeWatch?.importGraphWrites ?? 0
+    if let cache = preservedSourceCache, cache.mark == mark, cache.importGraphWrites == writes {
+      return cache.rows
+    }
+    let rows = try Self.loadPreservedSource(on: database)
+    preservedSourceCache = PreservedSourceCache(mark: mark, importGraphWrites: writes, rows: rows)
+    return rows
   }
 
   public func createTransaction(_ request: CreateTransactionRequest) throws -> MutationResult {
@@ -3745,7 +3777,11 @@ extension LedgerStore {
 /// misses a whole-table delete, which the import-graph mark's row counts catch.
 final class TableWriteWatch {
   private static let importOnlyTables = Set(CanonicalLedgerHealth.importOnlyTables)
+  private static let importGraphInputs = importOnlyTables.union(["ledger_meta"])
   private(set) var writtenTables: Set<String> = []
+  /// Counts row writes to import-only tables and `ledger_meta` for the connection's lifetime;
+  /// `reset` and `restore` leave it alone.
+  private(set) var importGraphWrites = 0
 
   var wroteImportGraph: Bool { !writtenTables.isDisjoint(with: Self.importOnlyTables) }
 
@@ -3758,7 +3794,9 @@ final class TableWriteWatch {
       { context, _, _, table, _ in
         guard let context, let table else { return }
         let watch = Unmanaged<TableWriteWatch>.fromOpaque(context).takeUnretainedValue()
-        watch.writtenTables.insert(String(cString: table))
+        let name = String(cString: table)
+        watch.writtenTables.insert(name)
+        if TableWriteWatch.importGraphInputs.contains(name) { watch.importGraphWrites &+= 1 }
       }, Unmanaged.passUnretained(self).toOpaque())
   }
 }
