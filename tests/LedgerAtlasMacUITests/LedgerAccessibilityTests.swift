@@ -77,6 +77,102 @@ private func expectEveryControlIsNamed(_ elements: [SpokenElement], on screen: S
     "Tab never reached a list: \(visited)")
 }
 
+/// Keyboard completion on every screen: with Full Keyboard Access on (System Settings >
+/// Keyboard > Keyboard navigation, which keyboard-only users turn on), Tab walks through the
+/// screen's controls in a cycle, leaves the sidebar for the screen itself, and every control it
+/// lands on is on screen and has a name VoiceOver can speak.
+@MainActor
+@Test(arguments: LedgerDemoTour.destinations)
+func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) async throws {
+  // The app reads this setting from its defaults; the argument domain wins over the global one
+  // and lasts only for this process.
+  let defaults = UserDefaults.standard
+  let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+  var withAccess = arguments
+  withAccess["AppleKeyboardUIMode"] = 2
+  defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
+  defaults.setVolatileDomain(withAccess, forName: UserDefaults.argumentDomain)
+  defer {
+    defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
+    defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+  }
+  let mounted = try await MountedRoot(showing: destination)
+  defer { mounted.close() }
+  print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(NSApp.isFullKeyboardAccessEnabled)")
+  let sidebar = mounted.sidebarList()
+  mounted.window.makeFirstResponder(nil)
+  var visited: [(id: ObjectIdentifier, name: String)] = []
+  var cycled = false
+  for _ in 0..<60 {
+    mounted.press("\t", keyCode: 48)
+    guard let responder = mounted.window.firstResponder, responder !== mounted.window else { continue }
+    let id = ObjectIdentifier(responder)
+    if visited.first?.id == id, visited.count > 1 {
+      cycled = true
+      break
+    }
+    if visited.contains(where: { $0.id == id }) { continue }
+    let name = focusName(of: responder)
+    visited.append((id, name))
+    if let view = responder as? NSView {
+      let frame = view.convert(view.bounds, to: nil)
+      #expect(
+        !view.isHiddenOrHasHiddenAncestor && frame.width > 0 && frame.height > 0
+          && mounted.window.contentView?.frame.intersects(frame) == true,
+        "\(destination.rawValue): Tab landed on \(name), which isn't on screen")
+    }
+    #expect(!name.isEmpty, "\(destination.rawValue): Tab landed on a control with no name: \(type(of: responder))")
+  }
+  print("A11Y KEYBOARD \(destination.rawValue) tab order: \(visited.map(\.name))")
+  #expect(cycled, "\(destination.rawValue): Tab never came back round to the first control")
+  let outsideSidebar = visited.filter { $0.id != sidebar.map { ObjectIdentifier($0) } }
+  #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
+}
+
+/// What VoiceOver would say for the control that has keyboard focus.
+@MainActor
+private func focusName(of responder: NSResponder) -> String {
+  let element = responder as NSObject
+  for getter in ["accessibilityLabel", "accessibilityTitle", "accessibilityPlaceholderValue"] {
+    if let text = inProcessProperty(element, getter) as? String,
+      !text.trimmingCharacters(in: .whitespaces).isEmpty
+    {
+      return text
+    }
+  }
+  if let table = responder as? NSTableView {
+    return "list of \(table.numberOfRows) rows"
+  }
+  return ""
+}
+
+/// Visible focus: the app never turns off the system focus ring, so whatever has keyboard
+/// focus is always drawn as focused.
+@Test func focusIsAlwaysVisible() throws {
+  let hiding = [".focusEffectDisabled(", "focusRingType = .none", ".focusable(false", "focusRingType: .none"]
+  var offenders: [String] = []
+  for (file, lines) in try appSources() {
+    for (index, line) in lines.enumerated() where hiding.contains(where: codePart(of: line).contains) {
+      offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
+    }
+  }
+  #expect(offenders.isEmpty, "\(offenders)")
+}
+
+/// Row-level VoiceOver on every screen: each row of every list says something when VoiceOver
+/// moves onto it, through the macOS Accessibility API.
+@MainActor
+@Test(arguments: LedgerDemoTour.destinations)
+func everyListRowOnEveryScreenIsSpoken(_ destination: AppDestination) async throws {
+  let mounted = try await MountedRoot(showing: destination)
+  defer { mounted.close() }
+  let rows = mounted.accessibilityRows()
+  let silent = rows.filter { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+  print("A11Y ROWS \(destination.rawValue): \(rows.count) rows, \(silent.count) silent")
+  #expect(!rows.isEmpty, "\(destination.rawValue): no list rows at all (not even the sidebar)")
+  #expect(silent.isEmpty, "\(destination.rawValue): \(silent.count) of \(rows.count) rows say nothing")
+}
+
 /// Keyboard: the sidebar moves between screens with the arrow keys.
 @MainActor
 @Test func arrowKeysMoveBetweenScreensInTheSidebar() async throws {
@@ -505,6 +601,23 @@ final class MountedRoot {
 
   nonisolated(unsafe) private static var systemReadDone = false
 
+  /// What VoiceOver says for each list row in this window: the row's own text plus the text
+  /// of everything inside it, read through the system Accessibility API.
+  func accessibilityRows() -> [String] {
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let result = RowsBox()
+    let identifier = identifier
+    Thread.detachNewThread {
+      result.finish(accessibilityRowTexts(of: pid, windowIdentifier: identifier))
+    }
+    let deadline = Date().addingTimeInterval(20)
+    while !result.isDone, Date() < deadline {
+      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    if !result.isDone { readTimedOut = true }
+    return result.rows
+  }
+
   private func systemAccessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
@@ -519,6 +632,55 @@ final class MountedRoot {
     if !result.isDone { readTimedOut = true }
     return result.elements
   }
+}
+
+/// Hands the row texts from the reader thread back to the main thread.
+final class RowsBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var done = false
+  private var found: [String] = []
+  var isDone: Bool { lock.withLock { done } }
+  var rows: [String] { lock.withLock { found } }
+  func finish(_ rows: [String]) { lock.withLock { found = rows; done = true } }
+}
+
+/// Each AXRow in the window, as the text VoiceOver can read from it and its descendants.
+func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] {
+  let app = AXUIElementCreateApplication(pid)
+  AXUIElementSetMessagingTimeout(app, 5)
+  func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+  func text(_ element: AXUIElement, _ name: String) -> String {
+    guard let value = attribute(element, name) else { return "" }
+    return (value as? String) ?? ""
+  }
+  func children(_ element: AXUIElement) -> [AXUIElement] {
+    (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+  }
+  func spoken(_ element: AXUIElement, depth: Int) -> String {
+    guard depth < 20 else { return "" }
+    let own = [kAXDescriptionAttribute, kAXTitleAttribute, kAXValueAttribute]
+      .map { text(element, $0) }.filter { !$0.isEmpty }
+    return (own + children(element).map { spoken($0, depth: depth + 1) })
+      .filter { !$0.isEmpty }.joined(separator: " ")
+  }
+  var rows: [String] = []
+  func visit(_ element: AXUIElement, depth: Int) {
+    guard depth < 80 else { return }
+    if text(element, kAXRoleAttribute) == kAXRowRole {
+      rows.append(spoken(element, depth: 0))
+      return
+    }
+    for child in children(element) { visit(child, depth: depth + 1) }
+  }
+  var windows: CFTypeRef?
+  AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
+  for window in (windows as? [AXUIElement]) ?? [] where text(window, kAXIdentifierAttribute) == windowIdentifier {
+    visit(window, depth: 0)
+  }
+  return rows
 }
 
 /// Hands the tree from the reader thread back to the main thread.
