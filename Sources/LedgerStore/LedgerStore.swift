@@ -375,11 +375,13 @@ public final class LedgerStore {
   }
 
   /// `contentDigest` is the SHA-256 of the file's bytes, read by the caller while the file had
-  /// `expectedIdentity`, whose change time is old enough that any later write would move it. When this build has already fully checked those exact bytes under the
-  /// ledger's trust key (`CanonicalLedgerHealth.verifiedFiles`), and the file still has that
-  /// identity once the check holds its read lock, the slow checks are skipped.
+  /// `expectedIdentity`, whose change time is old enough that any later write would move it.
+  /// When this build has already fully checked those exact bytes under the ledger's trust key
+  /// (a stamp in `verifiedFiles`), and the file still has that identity once the check holds
+  /// its read lock, the slow checks are skipped.
   package static func openForMutation(
     at url: URL, expectedIdentity: stat? = nil, contentDigest: String? = nil,
+    verifiedFiles: CanonicalLedgerHealth.VerifiedImportGraphs = CanonicalLedgerHealth.verifiedFiles,
     testing mutationTestHook: MutationTestHook?
   ) throws -> LedgerStore {
     if let expectedIdentity { try validatePath(url, matches: expectedIdentity) }
@@ -466,7 +468,8 @@ public final class LedgerStore {
           on: database, checkingForeignKeys: false, checkingIntegrity: false)
         // The reads above hold the shared lock. A file with the same inode, size, modification
         // and change time as when it was digested still has the digested bytes: any write moves
-        // its change time, which only a change to the system clock could set back.
+        // its change time (the caller only passes a digest for a file whose change time is old
+        // enough for that to hold), and only a change to the system clock could set it back.
         var current = stat()
         fileStamp =
           if let expectedIdentity, let contentDigest, let trustKey,
@@ -476,7 +479,7 @@ public final class LedgerStore {
           } else {
             nil
           }
-        alreadyVerified = fileStamp.map(CanonicalLedgerHealth.verifiedFiles.contains) ?? false
+        alreadyVerified = fileStamp.map(verifiedFiles.contains) ?? false
         if !alreadyVerified { try validateCanonicalSchema(on: database) }
         stateBeforeCheck = fileState(of: database)
         checked = try CanonicalLedgerHealth.validateReading(
@@ -488,7 +491,7 @@ public final class LedgerStore {
       }
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
-      if let fileStamp, !alreadyVerified { CanonicalLedgerHealth.verifiedFiles.insert(fileStamp) }
+      if let fileStamp, !alreadyVerified { verifiedFiles.insert(fileStamp) }
       let store = LedgerStore(
         mutableDatabase: database, identity: identity, url: url,
         registration: registration, mutationTestHook: mutationTestHook,

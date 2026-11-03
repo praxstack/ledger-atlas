@@ -177,6 +177,12 @@ func rememberedImportGraphSkipsReplayOnlyWhenUnchanged() throws {
 func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, fixture in
     let key = try #require(try LedgerReceiptTrust.key(for: url, create: false))
+    // Its own stamps: a stamp for the broken file below must never reach other tests, whose
+    // fixtures can have the same bytes.
+    let remembered = CanonicalLedgerHealth.VerifiedImportGraphs(defaults: nil)
+    func open() throws -> LedgerStoreLifecycle.Result {
+      try LedgerStoreLifecycle.open(at: url, testing: nil, verifiedFiles: remembered)
+    }
     func fileStamp(_ key: Data) throws -> String {
       let digest = SHA256.hash(data: try Data(contentsOf: url))
       return try #require(
@@ -189,13 +195,13 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
     func letChangeTimeAge() { Thread.sleep(forTimeInterval: 3.2) }
 
     // A file written just now gets the full check but no stamp.
-    do { _ = try LedgerStoreLifecycle.open(at: url) }
-    #expect(!CanonicalLedgerHealth.verifiedFiles.contains(try fileStamp(key)))
+    do { _ = try open() }
+    #expect(!remembered.contains(try fileStamp(key)))
 
     // A full open of a healthy file remembers its bytes.
     letChangeTimeAge()
-    do { _ = try LedgerStoreLifecycle.open(at: url) }
-    #expect(CanonicalLedgerHealth.verifiedFiles.contains(try fileStamp(key)))
+    do { _ = try open() }
+    #expect(remembered.contains(try fileStamp(key)))
     #expect(try fileStamp(Data(repeating: 7, count: 32)) != fileStamp(key))
     #expect(CanonicalLedgerHealth.verifiedFileStamp(contentDigest: "00", trustKey: key) == nil)
 
@@ -209,14 +215,14 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
         """,
       overrides: fixture.digestOverrides())
     letChangeTimeAge()
-    #expect(throws: (any Error).self) { try LedgerStoreLifecycle.open(at: url) }
+    #expect(throws: (any Error).self) { try open() }
     let brokenStamp = try fileStamp(key)
-    #expect(!CanonicalLedgerHealth.verifiedFiles.contains(brokenStamp))
+    #expect(!remembered.contains(brokenStamp))
 
     // Remembering these exact bytes skips the checks. An open that did not digest the file
     // never trusts a stamp.
-    CanonicalLedgerHealth.verifiedFiles.insert(brokenStamp)
-    #expect(throws: Never.self) { _ = try LedgerStoreLifecycle.open(at: url) }
+    remembered.insert(brokenStamp)
+    #expect(throws: Never.self) { _ = try open() }
     #expect(throws: (any Error).self) { try LedgerStore.openForMutation(at: url) }
 
     // Any write changes the bytes, even one that puts a value back, and the full check runs
@@ -234,10 +240,11 @@ func rememberedLedgerFileSkipsChecksOnlyWhileUnchanged() throws {
         """)
     }
     #expect(try fileStamp(key) != brokenStamp)
-    #expect(throws: (any Error).self) { try LedgerStoreLifecycle.open(at: url) }
+    #expect(throws: (any Error).self) { try open() }
     #expect(throws: (any Error).self) {
       try LedgerStore.openForMutation(
-        at: url, expectedIdentity: oldIdentity, contentDigest: oldDigest, testing: nil)
+        at: url, expectedIdentity: oldIdentity, contentDigest: oldDigest,
+        verifiedFiles: remembered, testing: nil)
     }
   }
 }
