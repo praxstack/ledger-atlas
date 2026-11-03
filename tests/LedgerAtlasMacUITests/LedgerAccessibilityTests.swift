@@ -490,7 +490,22 @@ final class MountedRoot {
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
   /// there, so pump it until the background read finishes.
   func accessibilityElements() -> [SpokenElement] {
-    if readsInProcess { return inProcessAccessibilityTree(of: window) }
+    if readsInProcess {
+      // SwiftUI only builds its accessibility elements once an Accessibility client has asked
+      // for them. Run alone, nothing else in the process has, and the in-process tree is
+      // just the window title; so ask once through the system API first.
+      if !Self.systemReadDone {
+        Self.systemReadDone = true
+        _ = systemAccessibilityElements()
+      }
+      return inProcessAccessibilityTree(of: window)
+    }
+    return systemAccessibilityElements()
+  }
+
+  nonisolated(unsafe) private static var systemReadDone = false
+
+  private func systemAccessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
     let identifier = identifier
