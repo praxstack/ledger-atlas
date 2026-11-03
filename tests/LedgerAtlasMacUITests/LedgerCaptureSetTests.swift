@@ -354,7 +354,7 @@ let capturePlan: [String: CapturePlan] = [
   "accounts.add/group_picker.open": .init(
     shot: .sheet(.newAccount), expects: ["Group"],
     note: "Shows the group picker closed; an open menu is a separate window."),
-  "accounts.add/name.focused": .init(shot: .sheet(.newAccount), expects: ["Save"]),
+  "accounts.add/name.focused": .init(shot: .sheet(.newAccount), expects: ["Account name", "Create"]),
   "accounts.account_info/savings.edit": .init(
     shot: .sheet(.editAccount(row: 4, name: "Emergency Savings")),
     expects: ["Emergency Savings"]),
@@ -534,7 +534,7 @@ private func inProcessFrame(in window: NSWindow, named name: String) -> CGRect? 
 private final class PickBox {
   let menu: NSMenu
   var ticks = 0
-  var item: NSMenuItem?
+  var chosen = false
   var titles: [String] = []
   init(menu: NSMenu) { self.menu = menu }
 }
@@ -614,32 +614,26 @@ extension MountedRoot {
       let finished = MainActor.assumeIsolated { () -> Bool in
         let menu = picked.menu
         picked.ticks += 1
-        if let item = menu.items.first(where: { $0.title == title }) {
+        if let index = menu.items.firstIndex(where: { $0.title == title }) {
           picked.titles = menu.items.map(\.title)
-          picked.item = item
-        } else if picked.ticks > 20 {
+          // Choose the item while the menu is open, as a click on it does. SwiftUI's item
+          // action closes the menu itself by stopping the run loop the menu runs in; run
+          // anywhere else, that stop ends the test's own run loop and the test process.
+          menu.performActionForItem(at: index)
+          picked.chosen = true
+          return true
+        }
+        if picked.ticks > 20 {
           picked.titles = menu.items.map(\.title)
-        } else {
-          return false
+          return true
         }
-        // Close the menu with Escape, as a person would. (`cancelTracking()` also stopped
-        // the main run loop, which ended the test process with status 0.)
-        if let escape = NSEvent.keyEvent(
-          with: .keyDown, location: .zero, modifierFlags: [],
-          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
-          characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false,
-          keyCode: 53)
-        {
-          NSApplication.shared.postEvent(escape, atStart: false)
-        }
-        return true
+        return false
       }
       if finished { timer.invalidate() }
     }
     RunLoop.main.add(timer, forMode: .common)
     let location = popUp.convert(NSPoint(x: popUp.bounds.midX, y: popUp.bounds.midY), to: nil)
-    // The press returns once the timer closes the menu; the item's action is sent after
-    // that, as AppKit does when a menu closes on a chosen item.
+    // The press returns once the menu closes.
     if let press = NSEvent.mouseEvent(
       with: .leftMouseDown, location: location, modifierFlags: [],
       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
@@ -647,16 +641,15 @@ extension MountedRoot {
     {
       window.sendEvent(press)
     }
+    log("press returned; chosen \(picked.chosen) after \(picked.ticks) ticks")
     let deadline = Date().addingTimeInterval(8)
-    while picked.item == nil, timer.isValid, Date() < deadline { pump(0.1) }
+    while !picked.chosen, timer.isValid, Date() < deadline { pump(0.1) }
     timer.invalidate()
-    guard let item = picked.item, let action = item.action else {
+    drainLog("menu closed")
+    guard picked.chosen else {
       log("pop-up \(row) has \(picked.titles), not \(title)")
       return false
     }
-    drainLog("menu closed")
-    NSApplication.shared.sendAction(action, to: item.target, from: item)
-    drainLog("action sent")
     return true
   }
 }
