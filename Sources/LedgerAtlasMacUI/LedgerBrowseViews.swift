@@ -22,6 +22,8 @@ struct LedgerBrowseList: View {
   var editSplit: ((LedgerSplitPurchase) -> Void)?
   var closeSplit: ((LedgerSplitPurchase) -> Void)?
 
+  @Environment(\.ledgerFormatter) private var formatter
+  @State private var showsInspector = true
   @State private var browser = LedgerBrowser(transactions: [])
   @State private var mode: LedgerBrowseMode = .daily
   @State private var filter = LedgerBrowseFilter()
@@ -47,6 +49,11 @@ struct LedgerBrowseList: View {
     Dictionary(tags.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
   }
 
+  private var selectedEntry: LedgerBrowseEntry? {
+    guard let selectedID else { return nil }
+    return page?.entries.first { $0.id == selectedID }
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Picker("Ledger view", selection: $mode) {
@@ -62,6 +69,25 @@ struct LedgerBrowseList: View {
       totalsLine.padding(.horizontal, 16)
       content
       pager.padding(.horizontal, 16)
+    }
+    .ledgerCanvas()
+    .inspector(isPresented: $showsInspector) {
+      LedgerTransactionInspector(
+        entry: selectedEntry, accountNames: accountNames, categoryNames: categoryNames,
+        tagNames: tagNames)
+        .inspectorColumnWidth(min: 260, ideal: LedgerTheme.Metrics.inspectorWidth, max: 400)
+    }
+    .toolbar {
+      ToolbarItem {
+        Button {
+          showsInspector.toggle()
+        } label: {
+          Label("Inspector", systemImage: "sidebar.trailing")
+        }
+        .accessibilityLabel(showsInspector ? "Hide inspector" : "Show inspector")
+        .help("Show or hide transaction details (⌥⌘I)")
+        .keyboardShortcut("i", modifiers: [.command, .option])
+      }
     }
     .onAppear { rebuild() }
     .onChange(of: transactions) { _, _ in rebuild() }
@@ -135,7 +161,7 @@ struct LedgerBrowseList: View {
   }
 
   private var totalsLine: some View {
-    let text = Self.describe(totals)
+    let text = Self.describe(totals, formatter: formatter)
     return Text(page.map { "\($0.matchCount) transactions" } ?? "")
       + Text(text.isEmpty ? "" : " · \(text)")
   }
@@ -298,12 +324,19 @@ struct LedgerBrowseList: View {
   }
 
   private func sectionHeader(_ section: LedgerBrowseSection) -> some View {
-    let title = section.id == "total" ? "All transactions" : section.id
-    let totals = Self.describe(section.totals)
-    return HStack {
+    let title = Self.sectionTitle(section.id, formatter: formatter)
+    let totals = Self.describe(section.totals, formatter: formatter)
+    return HStack(alignment: .firstTextBaseline) {
       Text(title)
+        .font(LedgerTheme.Typeface.captionEmphasis)
+        .foregroundStyle(LedgerTheme.inkSecondary)
       Spacer()
-      if !totals.isEmpty { Text(totals).font(.caption.monospacedDigit()) }
+      if !totals.isEmpty {
+        Text(totals)
+          .font(LedgerTheme.Typeface.caption)
+          .monospacedDigit()
+          .foregroundStyle(LedgerTheme.inkTertiary)
+      }
     }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(totals.isEmpty ? title : "\(title), \(totals)")
@@ -313,49 +346,103 @@ struct LedgerBrowseList: View {
     let category = entry.categoryID.flatMap { categoryNames[$0] }
     let account = entry.accountIDs.compactMap { accountNames[$0] }.joined(separator: " → ")
     let title = category ?? entry.kind.rawValue.capitalized
-    let amount = "\(entry.amount.amount.rawLiteral) \(entry.amount.unitCode)"
+    let signed = Self.signedAmount(entry)
+    let amountText = formatter.parts(signed.amount, sign: signed.sign).text
     let time = String(format: "%02d:%02d", entry.occurredAt.hour, entry.occurredAt.minute)
     // Say the kind in words when the title is a category, so income and expense never rely on
     // colour or category names alone.
     let kind = category == nil ? nil : entry.kind.rawValue.capitalized
-    let detail = [kind, amount, account.isEmpty ? nil : account, time].compactMap { $0 }
+    let detail = [kind, account.isEmpty ? nil : account, time].compactMap { $0 }
       .joined(separator: " · ")
     let markers = entry.indicators.map(Self.indicatorLabel).joined(separator: ", ")
     let tagLine = entry.tagIDs.compactMap { tagNames[$0] }.sorted {
       $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
     }.map { "#\($0)" }.joined(separator: " ")
-    return HStack(alignment: .firstTextBaseline, spacing: 8) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title).strikethrough(entry.lifecycle == .tombstoned)
-        Text(detail).font(.caption).foregroundStyle(.secondary)
+    return HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(.symbol(Self.kindSymbol(entry.kind)), swatch: LedgerTheme.swatch(for: title))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+        Text(title)
+          .font(LedgerTheme.Typeface.body)
+          .foregroundStyle(LedgerTheme.ink)
+          .strikethrough(entry.lifecycle == .tombstoned)
+          .lineLimit(1)
+        Text(detail)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkTertiary)
+          .lineLimit(1)
         if let conversion = entry.conversion {
-          Text(conversion).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            .lineLimit(1)
+          Text(conversion).font(LedgerTheme.Typeface.caption).monospacedDigit()
+            .foregroundStyle(LedgerTheme.inkTertiary).lineLimit(1)
         }
         if let note = entry.note {
-          Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          Text(note).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+            .lineLimit(1)
         }
         if !tagLine.isEmpty {
-          Text(tagLine).font(.caption).foregroundStyle(.tint).lineLimit(1)
+          Text(tagLine).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.accent).lineLimit(1)
         }
       }
-      Spacer()
-      HStack(spacing: 4) {
+      Spacer(minLength: LedgerTheme.Space.s)
+      HStack(spacing: LedgerTheme.Space.xs) {
         ForEach(entry.indicators, id: \.self) { indicator in
           Image(systemName: Self.indicatorSymbol(indicator))
-            .foregroundStyle(.secondary)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
             .help(Self.indicatorLabel(indicator))
         }
       }
       .accessibilityHidden(true)
+      MoneyText(signed.amount, size: .row, sign: signed.sign)
     }
+    .frame(minHeight: LedgerTheme.Metrics.tableRow - 8)
+    .padding(.vertical, LedgerTheme.Space.xxs)
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
       [
-        title, detail, entry.conversion, entry.note, tagLine.isEmpty ? nil : "tags \(tagLine)",
-        markers.isEmpty ? nil : markers,
+        title, detail.isEmpty ? nil : detail, amountText, entry.conversion, entry.note,
+        tagLine.isEmpty ? nil : "tags \(tagLine)", markers.isEmpty ? nil : markers,
       ].compactMap { $0 }
         .joined(separator: ", "))
+  }
+
+  /// Money in shows "+", spending "−"; transfers and adjustments move money without a sign.
+  static func signedAmount(_ entry: LedgerBrowseEntry) -> (
+    amount: CurrencyAmount, sign: LedgerDisplayFormatter.SignStyle
+  ) {
+    switch entry.kind {
+    case .income:
+      return (entry.amount, .always)
+    case .expense:
+      guard let zero = try? ExactDecimal("0"),
+        let negative = try? zero.subtracting(entry.amount.amount),
+        let amount = try? CurrencyAmount(unitCode: entry.amount.unitCode, amount: negative)
+      else { return (entry.amount, .never) }
+      return (amount, .always)
+    case .transfer, .adjustment:
+      return (entry.amount, .never)
+    }
+  }
+
+  static func kindSymbol(_ kind: LedgerTransactionKind) -> String {
+    switch kind {
+    case .income: "arrow.down.left"
+    case .expense: "arrow.up.right"
+    case .transfer: "arrow.left.arrow.right"
+    case .adjustment: "slider.horizontal.3"
+    }
+  }
+
+  /// "Monday, 2 November 2026" for a day, "November 2026" for a month.
+  static func sectionTitle(_ id: String, formatter: LedgerDisplayFormatter) -> String {
+    if id == "total" { return "All transactions" }
+    let parts = id.split(separator: "-").compactMap { Int($0) }
+    if parts.count == 3, let date = try? SourceLocalDate(year: parts[0], month: parts[1], day: parts[2]) {
+      return formatter.date(date, style: .full)
+    }
+    if parts.count == 2, let date = try? SourceLocalDate(year: parts[0], month: parts[1], day: 1) {
+      return formatter.monthTitle(date)
+    }
+    return id
   }
 
   private func splitRow(_ purchase: LedgerSplitPurchase) -> some View {
@@ -457,6 +544,19 @@ struct LedgerBrowseList: View {
   }
 
   // MARK: Text
+
+  /// "In ₹78,000.00 · Out ₹4,862.50" per currency, in the display formatter's style.
+  static func describe(_ totals: [LedgerBrowseTotal], formatter: LedgerDisplayFormatter) -> String {
+    totals.map { total in
+      func text(_ value: ExactDecimal?) -> String {
+        guard let value, let amount = try? CurrencyAmount(unitCode: total.unitCode, amount: value)
+        else { return "unavailable" }
+        return formatter.parts(amount, sign: .never).text
+      }
+      return "In \(text(total.income)) · Out \(text(total.expense))"
+    }
+    .joined(separator: "; ")
+  }
 
   static func describe(_ totals: [LedgerBrowseTotal]) -> String {
     totals.map { total in
