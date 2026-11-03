@@ -442,9 +442,12 @@ final class MountedRoot {
   /// process with status 0 partway through. This watches the main run loop and, when that
   /// outermost run ends, logs it and runs the loop again. Nested runs are counted and left
   /// alone. The outermost run was entered before this observer existed, so it sits at -1.
+  /// Run loop observers aren't called while they are already firing, so each restart hands
+  /// over to a fresh observer before running the loop again.
   private static func keepTestRunLoopAlive() {
     let activities = CFRunLoopActivity.entry.rawValue | CFRunLoopActivity.exit.rawValue
-    let observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) { _, activity in
+    let observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) {
+      observer, activity in
       if activity == .entry {
         loopDepth += 1
         return
@@ -452,6 +455,8 @@ final class MountedRoot {
       loopDepth -= 1
       guard loopDepth < 0 else { return }
       print("CAPTURE the test runner's run of the main loop was stopped; running it again")
+      CFRunLoopObserverInvalidate(observer)
+      keepTestRunLoopAlive()
       CFRunLoopRun()
     }
     CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
