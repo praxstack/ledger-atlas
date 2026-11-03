@@ -241,7 +241,7 @@ struct InsightsSurface: View {
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     .accessibilityElement(children: .combine)
   }
 
