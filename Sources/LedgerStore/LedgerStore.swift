@@ -318,7 +318,11 @@ public final class LedgerStore {
 
   public static func openReadOnly(at url: URL) throws -> LedgerStore {
     try validateNoSQLiteCompanions(at: url)
-    let descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    // EXPERIMENT (#140): a read-write description, so a writer on this file in the same process
+    // never ends up taking a write lock through a read-only descriptor. SQLite still opens the
+    // connection read-only.
+    var descriptor = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+    if descriptor < 0 { descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW) }
     guard descriptor >= 0 else { throw Error.incompatibleCanonicalStore }
     var identity = stat()
     var atPath = stat()
