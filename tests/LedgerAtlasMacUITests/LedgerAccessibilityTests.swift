@@ -271,7 +271,8 @@ final class MountedRoot {
 
   /// `withLedger: false` shows the empty state; `appLock` lets a test show the lock screen.
   init(
-    showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil
+    showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
+    size: NSSize = NSSize(width: 1100, height: 900)
   ) async throws {
     Self.launchOnce()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -295,7 +296,7 @@ final class MountedRoot {
       productSettings: .init(startScreen: destination), bookmarkStore: bookmarks,
       scopeStarter: { _ in true }, scopeStopper: { _ in })
     window = FullSizeTestWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 1100, height: 900),
+      contentRect: NSRect(origin: .zero, size: size),
       styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.setAccessibilityIdentifier(identifier)

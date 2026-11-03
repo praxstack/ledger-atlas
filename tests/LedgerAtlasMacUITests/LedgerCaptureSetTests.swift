@@ -38,22 +38,27 @@ import Testing
   for (screen, group) in Dictionary(grouping: screens, by: { ScreenKey($0.1) })
     .sorted(by: { $0.value[0].0.number < $1.value[0].0.number })
   {
-    let root = try await MountedRoot(showing: screen.destination)
+    log("screen \(screen.destination) editing=\(screen.editing)")
+    let root = try await MountedRoot(showing: screen.destination, size: captureSize)
     defer { root.close() }
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
-      #expect(root.pressButton(named: "Begin editing accounts"), "no Begin editing button")
+      log("pressing Begin editing")
+    #expect(root.pressButton(named: "Begin editing accounts"), "no Begin editing button")
       try await root.settle()
     }
+    // What the screen says, read once before scrolling: SwiftUI drops a scrolled list's rows
+    // from the Accessibility tree until they are laid out again.
+    let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     for (record, shot) in group.sorted(by: { $0.0.number < $1.0.number }) {
       let plan = try #require(capturePlan[record.key])
+      log("record \(record.number) \(record.key)")
       var pair: [Data] = []
       for appearance in CaptureAppearance.allCases {
         root.window.appearance = NSAppearance(named: appearance.name)
         scroll(root.window, to: shot.scroll)
         pump(0.6)
-        let png = try #require(pngData(of: root.window), "\(record.key) could not be captured")
-        let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+        let png = try #require(windowPNG(root.window), "\(record.key) could not be captured")
         expectUsable(png, text: text, expecting: plan.expects, for: record.key)
         let name = record.fileName(appearance)
         try png.write(to: output.appendingPathComponent(name))
@@ -70,6 +75,7 @@ import Testing
     guard let plan = capturePlan[record.key], case .sheet(let sheet) = plan.shot else { continue }
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
+      log("sheet \(record.number) \(record.key) \(appearance)")
       let png = try await capture(sheet.view(snapshot), appearance: appearance, size: sheet.size)
       expectUsable(png.data, text: png.text, expecting: plan.expects, for: record.key)
       let name = record.fileName(appearance)
@@ -101,12 +107,13 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     index.append(["file": file, "state": name, "appearance": appearance.rawValue, "note": note])
   }
 
-  let empty = try await MountedRoot(showing: .ledger, withLedger: false)
+  log("empty state")
+  let empty = try await MountedRoot(showing: .ledger, withLedger: false, size: captureSize)
   defer { empty.close() }
   for appearance in CaptureAppearance.allCases {
     empty.window.appearance = NSAppearance(named: appearance.name)
     pump(0.6)
-    let png = try #require(pngData(of: empty.window))
+    let png = try #require(windowPNG(empty.window))
     let text = empty.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     expectUsable(png, text: text, expecting: ["Open a ledger"], for: "empty")
     try save(png, "empty", appearance, "No ledger open yet: the first-run prompt.")
@@ -115,12 +122,13 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
   try lock.setPasscode("2468")
   lock.lock()
-  let locked = try await MountedRoot(showing: .ledger, appLock: lock)
+  log("lock screen")
+  let locked = try await MountedRoot(showing: .ledger, appLock: lock, size: captureSize)
   defer { locked.close() }
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
     pump(0.6)
-    let png = try #require(pngData(of: locked.window))
+    let png = try #require(windowPNG(locked.window))
     let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     expectUsable(png, text: text, expecting: ["Ledger Atlas is locked"], for: "lock")
     #expect(!text.contains { $0.contains("Everyday Bank") }, "the lock screen shows ledger content")
@@ -132,7 +140,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
     pump(0.6)
-    let png = try #require(pngData(of: locked.window))
+    let png = try #require(windowPNG(locked.window))
     let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     expectUsable(png, text: text, expecting: ["That passcode was not accepted."], for: "error")
     try save(png, "error", appearance, "A refused passcode, shown in words as well as colour.")
@@ -250,7 +258,7 @@ struct CapturePlan: Sendable {
 /// that does the same job. Notes say where the Mac app has no exact counterpart.
 let capturePlan: [String: CapturePlan] = [
   "transactions.daily/dark.populated.root": .init(
-    shot: .screen(.ledger), expects: ["Monthly salary"]),
+    shot: .screen(.ledger), expects: ["Salary, Income"]),
   "statistics.overview/monthly.expense": .init(
     shot: .screen(.insights), expects: ["Accessible table"],
     note: "Insights shows every period in one table instead of a month/year toggle."),
@@ -265,7 +273,7 @@ let capturePlan: [String: CapturePlan] = [
     shot: .screen(.categories, .middle), expects: ["Salary"],
     note: "The anomaly was in the source app's capture; the synthetic ledger has none."),
   "statistics.category_detail/annual.expense.subcategory": .init(
-    shot: .screen(.categories, .bottom), expects: ["Groceries"]),
+    shot: .screen(.categories, .bottom), expects: ["Open subcategories of Food"]),
   "statistics.total_balance/monthly.trend": .init(
     shot: .screen(.budgets), expects: ["Groceries"],
     note: "Monthly progress is shown by budgets; there is no separate balance-trend chart."),
@@ -370,6 +378,40 @@ private func distinctColours(in image: NSBitmapImageRep) -> Int {
   return seen.count
 }
 
+/// Window size for captures: it fits on the runner's 1024 x 768 display, so the window server
+/// has drawn all of it.
+private let captureSize = NSSize(width: 1000, height: 700)
+
+private func log(_ line: String) {
+  FileHandle.standardError.write(Data("CAPTURE \(line)\n".utf8))
+}
+
+/// The window as the window server draws it, the way a screenshot of it looks. AppKit's own
+/// cached drawing leaves out much of SwiftUI (the sidebar, most labels), so it is only the
+/// fallback for a Mac without Screen Recording permission.
+@MainActor
+private func windowPNG(_ window: NSWindow) -> Data? {
+  window.contentView?.layoutSubtreeIfNeeded()
+  window.displayIfNeeded()
+  let file = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "capture-\(UUID().uuidString).png")
+  defer { try? FileManager.default.removeItem(at: file) }
+  let process = Process()
+  process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+  process.arguments = ["-x", "-o", "-l", String(window.windowNumber), file.path]
+  if (try? process.run()) != nil {
+    let deadline = Date().addingTimeInterval(15)
+    while process.isRunning, Date() < deadline { pump(0.05) }
+    if !process.isRunning, process.terminationStatus == 0,
+      let data = try? Data(contentsOf: file), data.count > 1_000
+    {
+      return data
+    }
+  }
+  log("screencapture failed for window \(window.windowNumber); using AppKit's drawing")
+  return pngData(of: window)
+}
+
 @MainActor
 private func pngData(of window: NSWindow) -> Data? {
   window.contentView?.layoutSubtreeIfNeeded()
@@ -400,7 +442,7 @@ private func capture(
     window.close()
   }
   pump(0.8)
-  let data = try #require(pngData(of: window))
+  let data = try #require(windowPNG(window))
   let text = readTree(windowIdentifier: identifier).map { "\($0.spokenName) \($0.value)" }
   return (data, text)
 }
