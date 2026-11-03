@@ -57,14 +57,26 @@ import Testing
       var pair: [Data] = []
       for appearance in CaptureAppearance.allCases {
         root.window.appearance = NSAppearance(named: appearance.name)
-        scroll(root.window, to: shot.scroll)
+        let scrolled = scroll(root.window, to: shot.scroll)
+        if shot.scroll != .top {
+          // A scroll that didn't move would give the top picture under another state's name.
+          #expect(
+            scrolled == .moved || scrolled == .contentFits,
+            "\(record.key): scrolling to the \(shot.scroll.rawValue) didn't move: \(scrolled.rawValue)"
+          )
+        }
         pump(0.6)
         let text = before + root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
-        let png = try #require(windowPNG(root.window), "\(record.key) could not be captured")
+        let (png, method) = try #require(
+          windowPNG(root.window), "\(record.key) could not be captured")
         expectUsable(png, text: text, expecting: plan.expects, for: record.key)
         let name = record.fileName(appearance)
         try png.write(to: output.appendingPathComponent(name))
-        index.append(record.indexEntry(file: name, appearance: appearance, plan: plan))
+        var entry = record.indexEntry(
+          file: name, appearance: appearance, plan: plan, method: method)
+        entry["scroll"] =
+          shot.scroll == .top ? "top" : "\(shot.scroll.rawValue): \(scrolled.rawValue)"
+        index.append(entry)
         pair.append(png)
       }
       #expect(pair[0] != pair[1], "\(record.key): light and dark captures are identical")
@@ -125,11 +137,13 @@ import Testing
       root.window.appearance = NSAppearance(named: appearance.name)
       sheetWindow.appearance = NSAppearance(named: appearance.name)
       pump(0.6)
-      let png = try #require(windowPNG(sheetWindow), "\(record.key) could not be captured")
+      let (png, method) = try #require(
+        windowPNG(sheetWindow), "\(record.key) could not be captured")
       expectUsable(png, text: text, expecting: plan.expects, for: record.key)
       let name = record.fileName(appearance)
       try png.write(to: output.appendingPathComponent(name))
-      index.append(record.indexEntry(file: name, appearance: appearance, plan: plan))
+      index.append(
+        record.indexEntry(file: name, appearance: appearance, plan: plan, method: method))
       pair.append(png)
     }
     #expect(pair[0] != pair[1], "\(record.key): light and dark captures are identical")
@@ -153,10 +167,17 @@ import Testing
 @MainActor
 private func captureKeyStates(into output: URL) async throws -> [[String: String]] {
   var index: [[String: String]] = []
-  func save(_ png: Data, _ name: String, _ appearance: CaptureAppearance, _ note: String) throws {
+  func save(
+    _ capture: (png: Data, method: String), _ name: String, _ appearance: CaptureAppearance,
+    _ note: String
+  ) throws {
+    let png = capture.png
     let file = "key-\(name)-\(appearance.rawValue).png"
     try png.write(to: output.appendingPathComponent(file))
-    index.append(["file": file, "state": name, "appearance": appearance.rawValue, "note": note])
+    index.append([
+      "file": file, "state": name, "appearance": appearance.rawValue, "note": note,
+      "capture_method": capture.method,
+    ])
   }
 
   log("empty state")
@@ -167,10 +188,10 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   for appearance in CaptureAppearance.allCases {
     empty.window.appearance = NSAppearance(named: appearance.name)
     pump(0.6)
-    let png = try #require(windowPNG(empty.window))
+    let capture = try #require(windowPNG(empty.window))
     let text = empty.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
-    expectUsable(png, text: text, expecting: ["Open a ledger"], for: "empty")
-    try save(png, "empty", appearance, "No ledger open yet: the first-run prompt.")
+    expectUsable(capture.png, text: text, expecting: ["Open a ledger"], for: "empty")
+    try save(capture, "empty", appearance, "No ledger open yet: the first-run prompt.")
   }
 
   let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
@@ -183,11 +204,11 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
     pump(0.6)
-    let png = try #require(windowPNG(locked.window))
+    let capture = try #require(windowPNG(locked.window))
     let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
-    expectUsable(png, text: text, expecting: ["Ledger Atlas is locked"], for: "lock")
+    expectUsable(capture.png, text: text, expecting: ["Ledger Atlas is locked"], for: "lock")
     #expect(!text.contains { $0.contains("Everyday Bank") }, "the lock screen shows ledger content")
-    try save(png, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
+    try save(capture, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
   }
   // An error: Unlock with no passcode is refused.
   log("clicking Unlock with no passcode")
@@ -196,10 +217,11 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
     pump(0.6)
-    let png = try #require(windowPNG(locked.window))
+    let capture = try #require(windowPNG(locked.window))
     let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
-    expectUsable(png, text: text, expecting: ["That passcode was not accepted."], for: "error")
-    try save(png, "error", appearance, "A refused passcode, shown in words as well as colour.")
+    expectUsable(
+      capture.png, text: text, expecting: ["That passcode was not accepted."], for: "error")
+    try save(capture, "error", appearance, "A refused passcode, shown in words as well as colour.")
   }
   return index
 }
@@ -220,12 +242,12 @@ struct CaptureRecord: Sendable {
   }
 
   func indexEntry(
-    file: String, appearance: CaptureAppearance, plan: CapturePlan
+    file: String, appearance: CaptureAppearance, plan: CapturePlan, method: String
   ) -> [String: String] {
     [
       "file": file, "record": String(number), "route_id": route, "state_id": state,
       "appearance": appearance.rawValue, "ledger_atlas": plan.shot.description,
-      "note": plan.note ?? "",
+      "note": plan.note ?? "", "capture_method": method,
     ]
   }
 }
@@ -408,6 +430,11 @@ private func captureDirectory() throws -> URL {
 }
 
 /// Not blank, not tiny, the expected text on screen, and no home-folder path.
+///
+/// Limits: the text comes from the Accessibility tree, not the pixels. For a scrolled shot it
+/// also includes what the screen said before scrolling, so it shows the screen's content, not
+/// that the scrolled part is in view (the scroll itself is checked where it happens). The
+/// home-folder check likewise reads that text, so a path drawn only as pixels would pass.
 private func expectUsable(_ png: Data, text: [String], expecting: [String], for key: String) {
   #expect(png.count > 20_000, "\(key): capture is only \(png.count) bytes; it looks blank")
   if let image = NSBitmapImageRep(data: png) {
@@ -446,7 +473,10 @@ private func log(_ line: String) {
 /// cached drawing leaves out much of SwiftUI (the sidebar, most labels), so it is only the
 /// fallback for a Mac without Screen Recording permission.
 @MainActor
-private func windowPNG(_ window: NSWindow) -> Data? {
+/// The window as a PNG, and how it was taken. `screencapture` shows what the window server
+/// composited, which is what a person sees. AppKit's own drawing is only a fallback for local
+/// runs: it can miss layers and still pass the size and colour checks, so CI fails on it.
+private func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
   window.contentView?.layoutSubtreeIfNeeded()
   window.displayIfNeeded()
   let file = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -461,11 +491,14 @@ private func windowPNG(_ window: NSWindow) -> Data? {
     if !process.isRunning, process.terminationStatus == 0,
       let data = try? Data(contentsOf: file), data.count > 1_000
     {
-      return data
+      return (data, "screencapture")
     }
   }
   log("screencapture failed for window \(window.windowNumber); using AppKit's drawing")
-  return pngData(of: window)
+  if ProcessInfo.processInfo.environment["CI"] != nil {
+    Issue.record("screencapture failed on CI; AppKit's drawing is not accepted there")
+  }
+  return pngData(of: window).map { ($0, "appkit-drawing") }
 }
 
 @MainActor
@@ -479,16 +512,17 @@ private func pngData(of window: NSWindow) -> Data? {
 }
 
 /// Scrolls the main content (the widest scroll view, not the sidebar) to the top, middle or
-/// bottom.
+/// bottom, and says whether the view really moved away from the top.
 @MainActor
-private func scroll(_ window: NSWindow, to position: CaptureScroll) {
+@discardableResult
+private func scroll(_ window: NSWindow, to position: CaptureScroll) -> ScrollOutcome {
   func scrollViews(in view: NSView) -> [NSScrollView] {
     ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
   }
   guard let content = window.contentView,
     let main = scrollViews(in: content).max(by: { $0.frame.width < $1.frame.width }),
     let document = main.documentView
-  else { return }
+  else { return .noScrollView }
   let clip = main.contentView
   // The window's content runs under the title bar and the sidebar, so the clip view is
   // inset: its resting origin is (-left, -top), not (0, 0). Keep x as it is, or the rows
@@ -506,6 +540,13 @@ private func scroll(_ window: NSWindow, to position: CaptureScroll) {
     ? -insets.top + travel * fraction : -insets.bottom + travel * (1 - fraction)
   clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
   main.reflectScrolledClipView(clip)
+  let top = document.isFlipped ? -insets.top : -insets.bottom + travel
+  if travel < 1 { return .contentFits }
+  return abs(clip.bounds.origin.y - top) > 1 ? .moved : .atTop
+}
+
+enum ScrollOutcome: String {
+  case moved, atTop = "at top", contentFits = "content fits", noScrollView = "no scroll view"
 }
 
 /// Runs the main run loop briefly and logs any run that ends early, so a stray stop of the
