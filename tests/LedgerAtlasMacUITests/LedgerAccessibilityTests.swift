@@ -453,6 +453,20 @@ final class MountedRoot {
     launched = true
     NSApplication.shared.setActivationPolicy(.accessory)
     NSApplication.shared.finishLaunching()
+    guardTestRunLoop()
+  }
+
+  /// AppKit calls `NSApplication.stop(_:)` in some places (such as ending a sheet) to leave
+  /// `NSApp.run()`. The tests never call `run()`: the test runner's own run of the main run
+  /// loop is what keeps the process alive, so a stop there ended the whole test process with
+  /// status 0. While the app isn't running, a stop is logged and dropped.
+  private static func guardTestRunLoop() {
+    let app = NSApplication.self
+    guard
+      let original = class_getInstanceMethod(app, #selector(NSApplication.stop(_:))),
+      let guarded = class_getInstanceMethod(app, #selector(NSApplication.testGuardedStop(_:)))
+    else { return }
+    method_exchangeImplementations(original, guarded)
   }
 
   func close() {
@@ -551,3 +565,14 @@ private final class FullSizeTestWindow: NSWindow {
   #expect(offenders.isEmpty, "\(offenders)")
 }
 
+extension NSApplication {
+  /// Swapped in for `stop(_:)` by `MountedRoot`; after the swap this name calls AppKit's own.
+  @objc fileprivate func testGuardedStop(_ sender: Any?) {
+    if isRunning {
+      testGuardedStop(sender)
+      return
+    }
+    let caller = Thread.callStackSymbols.dropFirst().prefix(8).joined(separator: "\n")
+    print("CAPTURE dropped NSApplication.stop while not running, from:\n\(caller)")
+  }
+}
