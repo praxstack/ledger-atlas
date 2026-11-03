@@ -90,9 +90,8 @@ import Testing
     }
     log("opened \(sheet.title)")
     pump(0.6)
-    // Read the sheet's Accessibility tree on the main thread. (Reading it from another thread,
-    // as the screen checks do, makes SwiftUI trap once a sheet is up.)
-    let text = accessibleText(of: sheetWindow)
+    // A sheet is read as part of its parent window, as VoiceOver reads it, on the main thread.
+    let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     log("read \(text.count) elements")
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
@@ -483,45 +482,6 @@ private func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
-/// Every label, title and value in an element's Accessibility tree, read in-process on the
-/// main thread.
-@MainActor
-private func accessibleText(of element: Any, depth: Int = 0) -> [String] {
-  guard depth < 40, let element = element as? NSObject else { return [] }
-  // The attribute API reaches SwiftUI's elements too; AppKit bridges it to their properties.
-  // SwiftUI often answers titles and descriptions with attributed strings.
-  func string(_ attribute: NSAccessibility.Attribute) -> String? {
-    let value = element.accessibilityAttributeValue(attribute)
-    return value as? String ?? (value as? NSAttributedString)?.string
-  }
-  let own = [string(.description), string(.title), string(.value)]
-    .compactMap { $0 }.filter { !$0.isEmpty }
-  let children = element.accessibilityAttributeValue(.children) as? [Any] ?? []
-  return [own.joined(separator: " ")].filter { !$0.isEmpty }
-    + children.flatMap { accessibleText(of: $0, depth: depth + 1) }
-}
-
-/// The AppKit screen frame (bottom-left origin) of the first element in the window whose
-/// label or title is `name`, read in-process on the main thread.
-@MainActor
-private func inProcessFrame(in window: NSWindow, named name: String) -> CGRect? {
-  func find(_ element: NSObject, depth: Int) -> CGRect? {
-    guard depth < 80 else { return nil }
-    let names = [NSAccessibility.Attribute.description, .title].compactMap {
-      let value = element.accessibilityAttributeValue($0)
-      return value as? String ?? (value as? NSAttributedString)?.string
-    }
-    if names.contains(name), let element = element as? any NSAccessibilityElementProtocol {
-      return element.accessibilityFrame()
-    }
-    for child in element.accessibilityAttributeValue(.children) as? [NSObject] ?? [] {
-      if let found = find(child, depth: depth + 1) { return found }
-    }
-    return nil
-  }
-  return find(window, depth: 0)
-}
-
 /// What the menu timer saw, shared with the code waiting for it on the main thread.
 @MainActor
 private final class PickBox {
@@ -537,12 +497,12 @@ extension MountedRoot {
   /// Accessibility tree (reading only), then sends a mouse down and up at its centre.
   /// Returns false if there is no such control.
   func click(named name: String) -> Bool {
-    let frame: CGRect?
+    let pid = ProcessInfo.processInfo.processIdentifier
+    let identifier = identifier
+    let found: CGRect?
     if readsInProcess {
-      frame = inProcessFrame(in: window, named: name)
+      found = accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name)
     } else {
-      let pid = ProcessInfo.processInfo.processIdentifier
-      let identifier = identifier
       let result = FrameBox()
       Thread.detachNewThread {
         result.finish(accessibilityFrame(pid: pid, windowIdentifier: identifier, named: name))
@@ -551,14 +511,13 @@ extension MountedRoot {
       while !result.isDone, Date() < deadline {
         RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
       }
-      frame = result.frame.flatMap { found in
-        // System Accessibility frames are in screen points from the top left; AppKit's from
-        // the bottom left.
-        NSScreen.screens.first.map {
-          CGRect(
-            x: found.minX, y: $0.frame.maxY - found.maxY, width: found.width,
-            height: found.height)
-        }
+      found = result.frame
+    }
+    // Accessibility frames are in screen points from the top left; AppKit's from the bottom left.
+    let frame = found.flatMap { found in
+      NSScreen.screens.first.map {
+        CGRect(
+          x: found.minX, y: $0.frame.maxY - found.maxY, width: found.width, height: found.height)
       }
     }
     guard let frame else {
