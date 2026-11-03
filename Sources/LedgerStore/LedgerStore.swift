@@ -291,7 +291,8 @@ public final class LedgerStore {
       // The descriptor was authenticated before opening and the path is revalidated below.
       try validateCanonicalSchema(on: database)
       try CanonicalLedgerHealth.validate(
-        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
+        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
+        remembering: .shared)
       try validatePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(database: database, identity: identity, url: url)
@@ -381,7 +382,8 @@ public final class LedgerStore {
       try validateCanonicalJournalMode(on: database)
       try validateCanonicalSchema(on: database)
       let importGraphVerifiedAt = try CanonicalLedgerHealth.validate(
-        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false))
+        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
+        remembering: .shared)
       try validateMutablePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(
