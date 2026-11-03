@@ -32,8 +32,8 @@ RAW=$(mktemp -d)/tour-recording.mov
 # not recorded. Both videos are optional, so a failed install only skips them.
 if ! command -v ffmpeg >/dev/null; then brew install ffmpeg >/dev/null 2>&1 || true; fi
 
-# Record the screen for at most 90 s; SIGINT below stops it early and finalises the file.
-screencapture -x -v -V 90 "$RAW" >/dev/null 2>"$OUT/recording.log" &
+# Record the screen for at most 150 s (longer than the 120 s tour wait); SIGINT below stops it early and finalises the file.
+screencapture -x -v -V 150 "$RAW" >/dev/null 2>"$OUT/recording.log" &
 REC=$!
 sleep 1
 LEDGER_ATLAS_DEMO_TOUR=1 "$APP/Contents/MacOS/LedgerAtlas" >"$LOG" 2>&1 &
@@ -109,4 +109,4 @@ FRAMES=$(mktemp -d)
 for f in $(screens); do cp "$f" "$FRAMES/"; done
 ffmpeg -y -loglevel error -framerate 0.5 -pattern_type glob -i "$FRAMES/*.png" \
   -vf "scale=1280:-2:flags=lanczos,format=yuv420p" -r 30 -c:v libx264 -movflags +faststart \
-  "$OUT/walkthrough.mp4" && echo "video: $OUT/walkthrough.mp4"
+  "$OUT/walkthrough.mp4" && echo "video: $OUT/walkthrough.mp4" || echo "walkthrough video: ffmpeg failed"
