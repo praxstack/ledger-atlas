@@ -123,7 +123,7 @@ final class MountedRoot {
             title: element.accessibilityTitle() ?? "",
             value: (element.accessibilityValue()).map { "\($0)" } ?? "",
             placeholder: element.accessibilityPlaceholderValue() ?? "",
-            identifier: element.accessibilityIdentifier()))
+            identifier: element.accessibilityIdentifier() ?? ""))
       }
       for child in element.accessibilityChildren() ?? [] { visit(child, depth: depth + 1) }
     }
