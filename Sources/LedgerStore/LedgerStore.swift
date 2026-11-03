@@ -2405,7 +2405,7 @@ public final class LedgerStore {
         }
       }
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   private static func updateChecksum(_ hasher: inout SHA256, _ data: Data) {

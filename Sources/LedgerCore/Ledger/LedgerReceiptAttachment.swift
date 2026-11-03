@@ -75,6 +75,6 @@ public struct LedgerReceiptAttachment: Equatable, Sendable {
   }
 
   public static func digest(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    CanonicalReceiptDigest.hex(SHA256.hash(data: data))
   }
 }
