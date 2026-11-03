@@ -469,13 +469,11 @@ private func log(_ line: String) {
   FileHandle.standardError.write(Data("CAPTURE \(line)\n".utf8))
 }
 
-/// The window as the window server draws it, the way a screenshot of it looks. AppKit's own
-/// cached drawing leaves out much of SwiftUI (the sidebar, most labels), so it is only the
-/// fallback for a Mac without Screen Recording permission.
-@MainActor
 /// The window as a PNG, and how it was taken. `screencapture` shows what the window server
-/// composited, which is what a person sees. AppKit's own drawing is only a fallback for local
-/// runs: it can miss layers and still pass the size and colour checks, so CI fails on it.
+/// composited, which is what a person sees. AppKit's own cached drawing leaves out much of
+/// SwiftUI (the sidebar, most labels) yet still passes the size and colour checks, so it is
+/// only a fallback for a local Mac without Screen Recording permission, and CI fails on it.
+@MainActor
 private func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
   window.contentView?.layoutSubtreeIfNeeded()
   window.displayIfNeeded()
