@@ -276,12 +276,24 @@ package enum LedgerReceiptTrust {
   }
 
   private static func persistedReceiptIdentity(at url: URL) -> String? {
+    // Read-write but query-only, as `LedgerStore.openReadOnly` and the file stamper do. Closing
+    // a read-only description of the ledger made a save on another connection in this process
+    // fail to take its write lock on macOS (SQLITE_IOERR_LOCK), and the stamper reads this
+    // while saves run. A file the process can only read falls back to read-only.
     var database: OpaquePointer?
-    guard
-      sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
-      let database
-    else {
-      if let database { sqlite3_close(database) }
+    var opened = sqlite3_open_v2(
+      url.path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW, nil) == SQLITE_OK
+    if opened, sqlite3_exec(database, "PRAGMA query_only=1", nil, nil, nil) != SQLITE_OK {
+      opened = false
+    }
+    if !opened {
+      sqlite3_close(database)
+      database = nil
+      opened = sqlite3_open_v2(
+        url.path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOFOLLOW, nil) == SQLITE_OK
+    }
+    guard opened, let database else {
+      sqlite3_close(database)
       return nil
     }
     defer { sqlite3_close(database) }
