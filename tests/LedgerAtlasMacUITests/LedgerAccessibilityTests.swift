@@ -39,35 +39,75 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   #expect(offenders.isEmpty, "\(offenders)")
 }
 
-/// The theme's colours follow Increase Contrast: each token resolves differently under the
-/// high-contrast appearances, like the system colours do.
+/// The theme's colours follow Increase Contrast: every token resolves differently under the
+/// high-contrast appearances, like the system colours do. The few that may not are listed,
+/// with the reason, in `LedgerTheme.increaseContrastExceptions`.
 @MainActor
 @Test func themeColoursHaveIncreaseContrastValues() throws {
-  let tokens: [(String, Color)] = [
-    ("ink", LedgerTheme.ink), ("inkSecondary", LedgerTheme.inkSecondary),
-    ("inkTertiary", LedgerTheme.inkTertiary), ("inkQuiet", LedgerTheme.inkQuiet),
-    ("hairline", LedgerTheme.hairline), ("fieldFill", LedgerTheme.fieldFill),
-    ("accent", LedgerTheme.accent), ("accentSoft", LedgerTheme.accentSoft),
-    ("positive", LedgerTheme.positive), ("positiveQuiet", LedgerTheme.positiveQuiet),
-    ("negative", LedgerTheme.negative), ("warning", LedgerTheme.warning), ("track", LedgerTheme.track),
-  ]
-  func resolved(_ color: Color, _ name: NSAppearance.Name) throws -> NSColor {
-    let appearance = try #require(NSAppearance(named: name))
-    var result = NSColor.clear
-    appearance.performAsCurrentDrawingAppearance {
-      result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
-    }
-    return result
-  }
-  for (name, color) in tokens {
-    for (normal, high) in [
-      (NSAppearance.Name.aqua, NSAppearance.Name.accessibilityHighContrastAqua),
-      (.darkAqua, .accessibilityHighContrastDarkAqua),
-    ] {
-      let a = try resolved(color, normal), b = try resolved(color, high)
+  for (name, color) in LedgerTheme.allTokens {
+    for (normal, high) in themeAppearancePairs {
+      let a = try resolvedThemeColor(color, normal), b = try resolvedThemeColor(color, high)
+      if a == b, let reason = LedgerTheme.increaseContrastExceptions[name] {
+        print("A11Y CONTRAST \(name) unchanged in \(high.rawValue): \(reason)")
+        continue
+      }
       #expect(a != b, "\(name) looks the same with Increase Contrast in \(normal.rawValue)")
     }
   }
+}
+
+/// Text colours are readable: 4.5:1 against the canvas and cards (WCAG AA for body text), and
+/// 7:1 with Increase Contrast. Translucent tokens are measured over each background.
+@MainActor
+@Test func themeTextColoursMeetContrastMinimums() throws {
+  for (name, color) in LedgerTheme.textTokens {
+    for (normal, high) in themeAppearancePairs {
+      for (appearance, minimum) in [(normal, 4.5), (high, 7.0)] {
+        for (surfaceName, surface) in [("canvas", LedgerTheme.canvas), ("card", LedgerTheme.card)] {
+          let background = try resolvedThemeColor(surface, appearance)
+          let ratio = contrastRatio(try resolvedThemeColor(color, appearance), over: background)
+          #expect(
+            ratio >= minimum,
+            "\(name) on \(surfaceName) in \(appearance.rawValue) is \(ratio):1, needs \(minimum):1")
+        }
+      }
+    }
+  }
+}
+
+private let themeAppearancePairs: [(NSAppearance.Name, NSAppearance.Name)] = [
+  (.aqua, .accessibilityHighContrastAqua), (.darkAqua, .accessibilityHighContrastDarkAqua),
+]
+
+@MainActor
+private func resolvedThemeColor(_ color: Color, _ name: NSAppearance.Name) throws -> NSColor {
+  let appearance = try #require(NSAppearance(named: name))
+  var result = NSColor.clear
+  appearance.performAsCurrentDrawingAppearance {
+    result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
+  }
+  return result
+}
+
+/// WCAG 2 contrast of `foreground` composited over an opaque `background`.
+private func contrastRatio(_ foreground: NSColor, over background: NSColor) -> Double {
+  func channel(_ f: CGFloat, _ b: CGFloat) -> Double {
+    let value = Double(f * foreground.alphaComponent + b * (1 - foreground.alphaComponent))
+    return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+  }
+  func backgroundChannel(_ b: CGFloat) -> Double {
+    let value = Double(b)
+    return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+  }
+  let fg =
+    0.2126 * channel(foreground.redComponent, background.redComponent)
+    + 0.7152 * channel(foreground.greenComponent, background.greenComponent)
+    + 0.0722 * channel(foreground.blueComponent, background.blueComponent)
+  let bg =
+    0.2126 * backgroundChannel(background.redComponent)
+    + 0.7152 * backgroundChannel(background.greenComponent)
+    + 0.0722 * backgroundChannel(background.blueComponent)
+  return (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
 }
 
 @MainActor

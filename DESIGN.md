@@ -23,7 +23,7 @@ Product promises the interface makes visible:
 
 ## 3. Tokens
 
-Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Increase Contrast appearances.
+Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Increase Contrast appearances. Every text colour reaches 4.5:1 on the canvas and cards, and 7:1 with Increase Contrast (`themeTextColoursMeetContrastMinimums`).
 
 ### 3.1 Colour
 
@@ -34,15 +34,15 @@ Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Inc
 | `card` | `#FFFFFF` | `#232326` | Cards on the canvas |
 | `ink` | `#1D1D1F` | `#F5F5F7` | Primary text, spending amounts |
 | `inkSecondary` | `#515154` | `#C7C7CC` | Secondary text |
-| `inkTertiary` | `#86868B` | `#8E8E93` | Labels, captions, axis text |
+| `inkTertiary` | `#6E6E72` | `#8E8E93` | Labels, captions, axis text |
 | `hairline` | black 8% | white 9% | Separators (22% / 26% with Increase Contrast) |
-| `inkQuiet`, `positiveQuiet`, `negativeQuiet` | 50–62% of their colour | same | The currency symbol and paise of a figure |
+| `inkQuiet`, `positiveQuiet`, `negativeQuiet` | their colour, faded only as far as 4.5:1 allows | same | The currency symbol and paise of a figure |
 | `fieldFill` | black 4.5% | white 7% | Fields, chips, segmented items |
-| `accent` | `#0A7C86` | `#4FC3CE` | Selection, focus, primary action |
+| `accent` | `#09747D` | `#4FC3CE` | Selection, focus, primary action |
 | `accentSoft` | accent 11% | accent 16% | Selected rows, provenance note |
-| `positive` | `#1F8A55` | `#4CC985` | Money in |
-| `negative` | `#C2412D` | `#FF7A66` | Over budget, negative balance, errors |
-| `warning` | `#B26B00` | `#F0A83C` | Needs review |
+| `positive` | `#1B774A` | `#4CC985` | Money in |
+| `negative` | `#BA3E2B` | `#FF7A66` | Over budget, negative balance, errors |
+| `warning` | `#975B00` | `#F0A83C` | Needs review |
 
 Category palette (muted, equal perceived lightness), light / dark: blue `#5B7FB8`/`#7D9FD6`, copper `#C27A46`/`#DF9764`, sage `#6E9E72`/`#8CBF90`, ochre `#C2A245`/`#DCBD60`, mauve `#A7709D`/`#C690BB`, teal `#5E9EA3`/`#7DBDC2`, rose `#B5666A`/`#D68589`, slate `#8B8F97`/`#A3A7AE`. A name always maps to the same colour (`LedgerTheme.paletteColor(for:)`).
 
@@ -150,4 +150,5 @@ Every surface defines: no ledger (import first), empty ledger, no results (keep 
 | 2026-11-03 | Accent moves from mineral green to deep teal | Green is reserved for money in; the accent must not read as income. |
 | 2026-11-03 | Spending in ink by default (`AmountColors.incomeGreen`) | Red only signals a problem. The old red-for-spending styles stay available in Settings. |
 | 2026-11-03 | Rupees always use Indian grouping | ₹4,83,676.30 is how rupee figures are read, whatever the display locale. |
+| 2026-11-03 | Text colours tuned to 4.5:1 (7:1 with Increase Contrast) | Review of #161: the quiet symbol and paise and the light-mode green fell below AA. |
 | 2026-11-03 | Sidebar reduced to six areas plus accounts | The sixteen equal destinations were a development inventory. |

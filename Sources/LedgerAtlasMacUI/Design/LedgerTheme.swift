@@ -19,7 +19,7 @@ public enum LedgerTheme {
 
   public static let ink = dynamic(light: 0x1D1D1F, dark: 0xF5F5F7, highContrastLight: 0x000000, highContrastDark: 0xFFFFFF)
   public static let inkSecondary = dynamic(light: 0x515154, dark: 0xC7C7CC, highContrastLight: 0x2C2C2E, highContrastDark: 0xE5E5EA)
-  public static let inkTertiary = dynamic(light: 0x86868B, dark: 0x8E8E93, highContrastLight: 0x515154, highContrastDark: 0xC7C7CC)
+  public static let inkTertiary = dynamic(light: 0x6E6E72, dark: 0x8E8E93, highContrastLight: 0x515154, highContrastDark: 0xC7C7CC)
 
   /// Hairline separators. Increase Contrast doubles their strength.
   public static let hairline = dynamic(
@@ -34,40 +34,42 @@ public enum LedgerTheme {
     highContrastLightAlpha: 0.09, highContrastDarkAlpha: 0.14)
 
   /// The single accent: selection, focus and the one primary action per surface.
-  public static let accent = dynamic(light: 0x0A7C86, dark: 0x4FC3CE, highContrastLight: 0x005A62, highContrastDark: 0x7FDDE6)
+  public static let accent = dynamic(light: 0x09747D, dark: 0x4FC3CE, highContrastLight: 0x005A62, highContrastDark: 0x7FDDE6)
   public static let onAccent = dynamic(light: 0xFFFFFF, dark: 0x062024)
   public static let accentSoft = dynamic(
-    light: 0x0A7C86, dark: 0x4FC3CE, lightAlpha: 0.11, darkAlpha: 0.16,
+    light: 0x09747D, dark: 0x4FC3CE, lightAlpha: 0.11, darkAlpha: 0.16,
     highContrastLightAlpha: 0.2, highContrastDarkAlpha: 0.26)
 
   /// Money in. Spending stays in `ink`; colour is never the only signal (signs always show).
-  public static let positive = dynamic(light: 0x1F8A55, dark: 0x4CC985, highContrastLight: 0x0E6B3C, highContrastDark: 0x7BE0A8)
+  public static let positive = dynamic(light: 0x1B774A, dark: 0x4CC985, highContrastLight: 0x0C5F35, highContrastDark: 0x7BE0A8)
   /// Over budget, negative balances, destructive actions and errors.
-  public static let negative = dynamic(light: 0xC2412D, dark: 0xFF7A66, highContrastLight: 0x9C2A18, highContrastDark: 0xFF9C8C)
-  public static let warning = dynamic(light: 0xB26B00, dark: 0xF0A83C, highContrastLight: 0x8A5200, highContrastDark: 0xFFC266)
+  public static let negative = dynamic(light: 0xBA3E2B, dark: 0xFF7A66, highContrastLight: 0x992918, highContrastDark: 0xFF9D8D)
+  public static let warning = dynamic(light: 0x975B00, dark: 0xF0A83C, highContrastLight: 0x784700, highContrastDark: 0xFFC266)
   /// Blue alternative for money in, for the "income blue" amount-colour setting.
-  public static let positiveBlue = dynamic(light: 0x2F6FD0, dark: 0x6FA8FF)
+  public static let positiveBlue = dynamic(light: 0x2B67C0, dark: 0x6FA8FF, highContrastLight: 0x225198, highContrastDark: 0x8AB9FF)
 
   /// The quiet half of a figure (currency symbol, paise). One per amount colour, so the
-  /// de-emphasis follows Increase Contrast instead of fading a colour by hand.
+  /// de-emphasis follows Increase Contrast instead of fading a colour by hand. Each still
+  /// reaches 4.5:1 on the canvas and cards (7:1 with Increase Contrast), checked by
+  /// `themeTextColoursMeetContrastMinimums`.
   public static let inkQuiet = dynamic(
-    light: 0x1D1D1F, dark: 0xF5F5F7, lightAlpha: 0.5, darkAlpha: 0.5,
-    highContrastLightAlpha: 0.75, highContrastDarkAlpha: 0.78)
+    light: 0x1D1D1F, dark: 0xF5F5F7, highContrastLight: 0x000000, highContrastDark: 0xFFFFFF,
+    lightAlpha: 0.64, darkAlpha: 0.52, highContrastLightAlpha: 0.68, highContrastDarkAlpha: 0.67)
   public static let positiveQuiet = dynamic(
-    light: 0x1F8A55, dark: 0x4CC985, highContrastLight: 0x0E6B3C, highContrastDark: 0x7BE0A8,
-    lightAlpha: 0.6, darkAlpha: 0.6, highContrastLightAlpha: 0.8, highContrastDarkAlpha: 0.82)
+    light: 0x1B774A, dark: 0x4CC985, highContrastLight: 0x0C5F35, highContrastDark: 0x7BE0A8,
+    lightAlpha: 0.97, darkAlpha: 0.75, highContrastLightAlpha: 0.99, highContrastDarkAlpha: 0.87)
   public static let positiveBlueQuiet = dynamic(
-    light: 0x2F6FD0, dark: 0x6FA8FF, lightAlpha: 0.6, darkAlpha: 0.6,
-    highContrastLightAlpha: 0.8, highContrastDarkAlpha: 0.82)
+    light: 0x2B67C0, dark: 0x6FA8FF, highContrastLight: 0x225198, highContrastDark: 0x8AB9FF,
+    lightAlpha: 0.97, darkAlpha: 0.81, highContrastLightAlpha: 0.99, highContrastDarkAlpha: 0.98)
   public static let negativeQuiet = dynamic(
-    light: 0xC2412D, dark: 0xFF7A66, highContrastLight: 0x9C2A18, highContrastDark: 0xFF9C8C,
-    lightAlpha: 0.62, darkAlpha: 0.62, highContrastLightAlpha: 0.82, highContrastDarkAlpha: 0.84)
+    light: 0xBA3E2B, dark: 0xFF7A66, highContrastLight: 0x992918, highContrastDark: 0xFF9D8D,
+    lightAlpha: 0.96, darkAlpha: 0.85, highContrastLightAlpha: 0.98, highContrastDarkAlpha: 0.98)
   public static let inkSecondaryQuiet = dynamic(
-    light: 0x515154, dark: 0xC7C7CC, lightAlpha: 0.6, darkAlpha: 0.6,
-    highContrastLightAlpha: 0.8, highContrastDarkAlpha: 0.82)
+    light: 0x515154, dark: 0xC7C7CC, highContrastLight: 0x2C2C2E, highContrastDark: 0xE5E5EA,
+    lightAlpha: 0.85, darkAlpha: 0.66, highContrastLightAlpha: 0.82, highContrastDarkAlpha: 0.75)
 
   /// Pressed states for the two button styles.
-  public static let accentPressed = dynamic(light: 0x086770, dark: 0x3FAAB4, highContrastLight: 0x00474D, highContrastDark: 0x9FE8EE)
+  public static let accentPressed = dynamic(light: 0x07636B, dark: 0x3FAAB4, highContrastLight: 0x00474D, highContrastDark: 0x9FE8EE)
   public static let fieldFillPressed = dynamic(
     light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.09, darkAlpha: 0.13,
     highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.22)
@@ -75,6 +77,33 @@ public enum LedgerTheme {
   public static let track = dynamic(
     light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.06, darkAlpha: 0.08,
     highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.2)
+
+  /// Colours that draw text. Each reaches 4.5:1 on the canvas and on cards, and 7:1 with
+  /// Increase Contrast (`themeTextColoursMeetContrastMinimums`).
+  static let textTokens: [(name: String, color: Color)] = [
+    ("ink", ink), ("inkSecondary", inkSecondary), ("inkTertiary", inkTertiary),
+    ("inkQuiet", inkQuiet), ("inkSecondaryQuiet", inkSecondaryQuiet), ("accent", accent),
+    ("positive", positive), ("positiveQuiet", positiveQuiet), ("positiveBlue", positiveBlue),
+    ("positiveBlueQuiet", positiveBlueQuiet), ("negative", negative), ("negativeQuiet", negativeQuiet),
+    ("warning", warning),
+  ]
+
+  /// Every token, for the Increase Contrast check (`themeColoursHaveIncreaseContrastValues`).
+  static let allTokens: [(name: String, color: Color)] =
+    textTokens + [
+      ("canvas", canvas), ("recessed", recessed), ("card", card), ("hairline", hairline),
+      ("hairlineSoft", hairlineSoft), ("fieldFill", fieldFill), ("fieldFillPressed", fieldFillPressed),
+      ("accentSoft", accentSoft), ("accentPressed", accentPressed), ("onAccent", onAccent),
+      ("track", track),
+    ]
+
+  /// Tokens that keep their colour under Increase Contrast, and why. The window surfaces
+  /// already sit at the ends of the range, white on the accent is already above 7:1 there,
+  /// and the category palette is decorative (keys and bars, never text alone).
+  static let increaseContrastExceptions: [String: String] = [
+    "canvas": "window background", "recessed": "window background",
+    "card": "already white in light mode (dark mode changes)", "onAccent": "label on the accent",
+  ]
 
   /// A palette colour with its soft fill (icon tiles, selected chips).
   public struct Swatch: Sendable {

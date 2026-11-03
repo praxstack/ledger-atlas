@@ -69,10 +69,18 @@ struct LedgerGlassModifier: ViewModifier {
   private func glass<S: Shape>(_ content: Content, in shape: S) -> some View {
     if reduceTransparency {
       content.background(LedgerTheme.card, in: shape).overlay(shape.stroke(LedgerTheme.hairline, lineWidth: 0.5))
-    } else if #available(macOS 26, *) {
-      content.glassEffect(.regular, in: shape)
     } else {
-      content.background(.regularMaterial, in: shape).overlay(shape.stroke(LedgerTheme.hairline, lineWidth: 0.5))
+      // Swift 6.2 ships with the macOS 26 SDK, the first with `glassEffect`; older
+      // toolchains build the material fallback only.
+      #if compiler(>=6.2)
+        if #available(macOS 26, *) {
+          content.glassEffect(.regular, in: shape)
+        } else {
+          content.background(.regularMaterial, in: shape).overlay(shape.stroke(LedgerTheme.hairline, lineWidth: 0.5))
+        }
+      #else
+        content.background(.regularMaterial, in: shape).overlay(shape.stroke(LedgerTheme.hairline, lineWidth: 0.5))
+      #endif
     }
   }
 }
