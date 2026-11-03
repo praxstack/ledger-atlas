@@ -1,4 +1,5 @@
 import LedgerCore
+import LedgerStore
 import SwiftUI
 
 struct LockedSurface: View {
@@ -58,6 +59,8 @@ struct SettingsSurface: View {
   let exportDiagnostics: () -> Void
   @State private var passcodeForm: PasscodeForm.Mode?
   @State private var message: String?
+  @State private var secretStorage = LedgerSecretStorage.current
+  @State private var pendingStorage: LedgerSecretStorage?
   @State private var draft = LedgerProductSettings()
   @State private var invalid: (field: LedgerProductSettings.Field, message: String)?
   @FocusState private var focusedField: LedgerProductSettings.Field?
@@ -75,6 +78,23 @@ struct SettingsSurface: View {
     settings.save()
     if candidate.remindersEnabled != before.remindersEnabled || candidate.reminderHour != before.reminderHour {
       scheduleReminder(enabled: candidate.remindersEnabled, hour: candidate.reminderHour)
+    }
+  }
+
+  /// Moves the passcode and receipt keys, then records the choice. A failure keeps the old
+  /// choice; every secret is still readable, because each is copied before its old copy goes.
+  private func moveSecrets(to choice: LedgerSecretStorage) {
+    do {
+      try LedgerReceiptTrust.moveKeys(to: choice)
+      try LedgerAppLock.Storage().move(to: choice)
+      LedgerSecretStorage.record(choice)
+      secretStorage = choice
+      message =
+        choice == .deviceKeychain
+        ? "The passcode and receipt keys are now in this Mac's Keychain."
+        : "The passcode and receipt keys are now in the app's private storage."
+    } catch {
+      message = "The passcode and receipt keys could not be moved, so they stay where they were."
     }
   }
 
@@ -148,6 +168,21 @@ struct SettingsSurface: View {
         } else {
           Button("Set passcode…") { passcodeForm = .set }
         }
+        Picker(
+          "Keep passcode and receipt keys in",
+          selection: Binding(
+            get: { secretStorage }, set: { if $0 != secretStorage { pendingStorage = $0 } })
+        ) {
+          Text("App's private storage (recommended)").tag(LedgerSecretStorage.appFiles)
+          Text("This Mac's Keychain").tag(LedgerSecretStorage.deviceKeychain)
+        }
+        .accessibilityIdentifier("settings.secretStorage")
+        Text(
+          secretStorage == .deviceKeychain
+            ? "Keychain: macOS asks for your Mac password after each Ledger Atlas update, because each free build is signed differently."
+            : "Private files only your Mac account can read, inside the app's storage. No password prompts after updates."
+        )
+        .font(.caption).foregroundStyle(.secondary)
       }
       Section("Accessibility") {
         Picker("Motion", selection: $draft.motion) {
@@ -233,6 +268,22 @@ struct SettingsSurface: View {
     .onAppear { draft = settings }
     .onChange(of: settings) { _, value in if draft != value { draft = value } }
     .onChange(of: draft) { _, candidate in commit(candidate) }
+    .confirmationDialog(
+      "Move the passcode and receipt keys?",
+      isPresented: Binding(get: { pendingStorage != nil }, set: { if !$0 { pendingStorage = nil } }),
+      presenting: pendingStorage
+    ) { choice in
+      Button(choice == .deviceKeychain ? "Use Keychain" : "Use private storage") {
+        moveSecrets(to: choice)
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { choice in
+      Text(
+        choice == .deviceKeychain
+          ? "After each update, macOS will ask for your Mac password before Ledger Atlas can read them."
+          : "macOS may ask for your Mac password once, to move them out of the Keychain."
+      )
+    }
     .sheet(item: $passcodeForm) { mode in
       PasscodeForm(mode: mode) { current, passcode in
         do {

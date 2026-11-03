@@ -16,31 +16,23 @@ package enum LedgerReceiptTrust {
   ) throws -> Data? {
     let identity = persistedReceiptIdentity(at: url) ?? stableIdentity ?? "empty-ledger"
     let currentAccount = account(for: identity, namespace: currentNamespace)
-    // A Keychain key wins over a file key. Only one is ever created for an account: the file is
-    // written only when the Keychain refused the key, and a refusing build can't read or write
-    // the Keychain later, so the two can't disagree in practice.
+    // An iCloud Keychain key wins. Only signed builds can make one, and those never write a
+    // file or device-only key, so in practice an account has a key in one place only.
     if let value = try read(account: currentAccount, synchronizable: true) { return value }
-    if let fileValue = try LedgerReceiptKeyFile.read(
-      account: currentAccount, in: keyDirectory())
-    {
-      return fileValue
-    }
-    if let localValue = try read(account: currentAccount, synchronizable: false) {
-      // A current local-only key can only be accepted by the unsigned package-test fallback. A
-      // signed production build must never publish a backup whose trust root cannot migrate.
-      #if DEBUG
-        return localValue
-      #else
-        throw LedgerReceiptTrustError.nonSynchronizableKey
-      #endif
-    }
+    // Then the place chosen in Settings, then the other one, so a key is still found while a
+    // move between them is unfinished. A move checks a key at its new place before removing
+    // the old copy, so both copies are always the same key.
+    let directory = try keyDirectory()
+    if let value = try readLocal(account: currentAccount, directory: directory) { return value }
 
     // Migrate keys created before the synchronizable namespace was introduced. The old item is
     // retained until the new item is durably present, so a Keychain failure cannot strand the
     // existing ledger. The new account is distinct, avoiding a duplicate-item race with the old
     // device-only record.
     let legacyAccount = account(for: identity, namespace: legacyNamespace)
-    if let legacyValue = try read(account: legacyAccount, synchronizable: nil) {
+    if let legacyValue = try read(account: legacyAccount, synchronizable: nil)
+      ?? LedgerReceiptKeyFile.read(account: legacyAccount, in: directory)
+    {
       do { return try storeNew(legacyValue, account: currentAccount) } catch {
         #if DEBUG
           return legacyValue
@@ -65,22 +57,98 @@ package enum LedgerReceiptTrust {
   nonisolated(unsafe) package static var keyDirectory: () throws -> URL =
     LedgerReceiptKeyFile.defaultDirectory
 
-  /// Stores a new key in iCloud Keychain when the build may use it. The free ad-hoc signed app
-  /// may not (errSecMissingEntitlement), so the key goes to a private file instead.
-  private static func storeNew(_ value: Data, account: String) throws -> Data {
-    try storeNew(value, account: account, keychain: store, directory: keyDirectory)
+  /// The device-only key for `account`: from the place chosen in Settings first, then the other.
+  private static func readLocal(account: String, directory: URL) throws -> Data? {
+    let fromFile = { try LedgerReceiptKeyFile.read(account: account, in: directory) }
+    let fromKeychain = { try read(account: account, synchronizable: false) }
+    switch LedgerSecretStorage.current {
+    case .appFiles: return try fromFile() ?? fromKeychain()
+    case .deviceKeychain: return try fromKeychain() ?? fromFile()
+    }
   }
 
-  /// `storeNew` with its Keychain write and key folder passed in, so tests can make the Keychain
-  /// refuse the key the way the ad-hoc app's Keychain does.
+  /// Stores a new key in iCloud Keychain when the build may use it. The free ad-hoc signed app
+  /// may not (errSecMissingEntitlement). The key then goes where Settings says: a private file
+  /// by default, or this Mac's Keychain.
+  private static func storeNew(_ value: Data, account: String) throws -> Data {
+    let deviceKeychain: ((Data, String) throws -> Data)? =
+      LedgerSecretStorage.current == .deviceKeychain
+      ? { value, account in try storeLocal(value, account: account) } : nil
+    return try storeNew(
+      value, account: account, keychain: { value, account in try store(value, account: account) },
+      directory: { try keyDirectory() }, deviceKeychain: deviceKeychain)
+  }
+
+  /// `storeNew` with its Keychain writes and key folder passed in, so tests can make the Keychain
+  /// refuse the key the way the ad-hoc app's Keychain does. `deviceKeychain` is nil when keys
+  /// belong in files.
   package static func storeNew(
     _ value: Data, account: String, keychain: (Data, String) throws -> Data,
-    directory: () throws -> URL
+    directory: () throws -> URL, deviceKeychain: ((Data, String) throws -> Data)? = nil
   ) throws -> Data {
     do {
       return try keychain(value, account)
     } catch LedgerReceiptTrustError.keychain(let status) where status == errSecMissingEntitlement {
+      if let deviceKeychain { return try deviceKeychain(value, account) }
       return try LedgerReceiptKeyFile.store(value, account: account, in: directory())
+    }
+  }
+
+  /// Device-only Keychain items for receipt keys. Replaceable in tests.
+  package struct DeviceKeys {
+    package var accounts: () throws -> [String]
+    package var read: (String) throws -> Data?
+    /// Adds the key unless one exists, and returns the key that is kept.
+    package var add: (Data, String) throws -> Data
+    package var delete: (String) throws -> Void
+
+    package init(
+      accounts: @escaping () throws -> [String], read: @escaping (String) throws -> Data?,
+      add: @escaping (Data, String) throws -> Data, delete: @escaping (String) throws -> Void
+    ) {
+      self.accounts = accounts
+      self.read = read
+      self.add = add
+      self.delete = delete
+    }
+
+    package static var live: DeviceKeys {
+      DeviceKeys(
+        accounts: localAccounts, read: { try LedgerReceiptTrust.read(account: $0, synchronizable: false) },
+        add: { try storeLocal($0, account: $1) }, delete: deleteLocal)
+    }
+  }
+
+  /// Moves every device-only receipt key to `destination`. iCloud Keychain keys stay where
+  /// they are. Each key is copied and checked before its old copy is removed, so a failure part
+  /// way leaves every key readable, and running the move again finishes it. A different key
+  /// already at the destination stops the move.
+  package static func moveKeys(to destination: LedgerSecretStorage) throws {
+    try moveKeys(to: destination, keychain: .live, directory: keyDirectory())
+  }
+
+  package static func moveKeys(
+    to destination: LedgerSecretStorage, keychain: DeviceKeys, directory: URL
+  ) throws {
+    switch destination {
+    case .deviceKeychain:
+      for account in try LedgerReceiptKeyFile.accounts(in: directory) {
+        guard let value = try LedgerReceiptKeyFile.read(account: account, in: directory) else {
+          continue
+        }
+        guard try keychain.add(value, account) == value else {
+          throw LedgerReceiptTrustError.conflictingKeys
+        }
+        try LedgerReceiptKeyFile.remove(account: account, in: directory)
+      }
+    case .appFiles:
+      for account in try keychain.accounts() {
+        guard let value = try keychain.read(account) else { continue }
+        guard try LedgerReceiptKeyFile.store(value, account: account, in: directory) == value else {
+          throw LedgerReceiptTrustError.conflictingKeys
+        }
+        try keychain.delete(account)
+      }
     }
   }
 
@@ -152,27 +220,56 @@ package enum LedgerReceiptTrust {
     return existing
   }
 
-  #if DEBUG
-    /// Like `store`, but always device-only: a test key must never reach iCloud Keychain.
-    private static func storeLocal(_ value: Data, account: String) throws -> Data {
-      guard value.count == 32 else { throw LedgerReceiptTrustError.invalidKey }
-      let attributes: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: service,
-        kSecAttrAccount as String: account,
-        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-        kSecAttrSynchronizable as String: false,
-        kSecValueData as String: value,
-      ]
-      let status = SecItemAdd(attributes as CFDictionary, nil)
-      if status == errSecSuccess { return value }
-      guard status == errSecDuplicateItem else { throw LedgerReceiptTrustError.keychain(status) }
-      guard let existing = try read(account: account, synchronizable: nil) else {
-        throw LedgerReceiptTrustError.keychain(errSecItemNotFound)
-      }
-      return existing
+  /// Like `store`, but always device-only. Used when Settings keeps keys in this Mac's
+  /// Keychain, and for test keys, which must never reach iCloud Keychain.
+  private static func storeLocal(_ value: Data, account: String) throws -> Data {
+    guard value.count == 32 else { throw LedgerReceiptTrustError.invalidKey }
+    let attributes: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+      kSecAttrSynchronizable as String: false,
+      kSecValueData as String: value,
+    ]
+    let status = SecItemAdd(attributes as CFDictionary, nil)
+    if status == errSecSuccess { return value }
+    guard status == errSecDuplicateItem else { throw LedgerReceiptTrustError.keychain(status) }
+    guard let existing = try read(account: account, synchronizable: nil) else {
+      throw LedgerReceiptTrustError.keychain(errSecItemNotFound)
     }
-  #endif
+    return existing
+  }
+
+  /// Accounts of the device-only receipt keys. Listing reads no key, so it never prompts.
+  private static func localAccounts() throws -> [String] {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrSynchronizable as String: false,
+      kSecReturnAttributes as String: true,
+      kSecMatchLimit as String: kSecMatchLimitAll,
+    ]
+    var items: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &items)
+    if status == errSecItemNotFound || status == errSecMissingEntitlement { return [] }
+    guard status == errSecSuccess else { throw LedgerReceiptTrustError.keychain(status) }
+    let rows = items as? [[String: Any]] ?? []
+    return rows.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
+  }
+
+  private static func deleteLocal(_ account: String) throws {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+      kSecAttrSynchronizable as String: false,
+    ]
+    let status = SecItemDelete(query as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+      throw LedgerReceiptTrustError.keychain(status)
+    }
+  }
 
   private static func persistedReceiptIdentity(at url: URL) -> String? {
     var database: OpaquePointer?
@@ -234,6 +331,7 @@ package enum LedgerReceiptTrust {
 package enum LedgerReceiptTrustError: Error, Equatable, Sendable {
   case keychain(OSStatus)
   case invalidKey
-  case nonSynchronizableKey
+  /// Moving keys found a different key already at the destination.
+  case conflictingKeys
   case file(Int32)
 }

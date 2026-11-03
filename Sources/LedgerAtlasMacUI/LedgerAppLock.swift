@@ -1,5 +1,6 @@
 import CommonCrypto
 import Foundation
+import LedgerStore
 import LocalAuthentication
 import Observation
 import Security
@@ -48,8 +49,8 @@ public final class LedgerAppLock {
     authenticate: (@MainActor () async -> Bool)? = nil,
     kdfIterations: UInt32 = LedgerAppLock.defaultKDFIterations
   ) {
-    let reader = reader ?? Self.readKeychain
-    write = writer ?? Self.writeKeychain
+    let reader = reader ?? { try Storage().read($0) }
+    write = writer ?? { try Storage().write($0, $1) }
     self.now = now
     self.kdfIterations = max(1, kdfIterations)
     self.authenticate = authenticate ?? Self.authenticateWithBiometrics
@@ -222,6 +223,70 @@ public final class LedgerAppLock {
   private static func validPasscode(_ passcode: String) -> Bool {
     let count = passcode.unicodeScalars.count
     return (4...128).contains(count) && passcode.unicodeScalars.allSatisfy(\.isASCII)
+  }
+
+  /// Where the passcode verifier and lock state are kept: the place chosen in Settings
+  /// (`LedgerSecretStorage`). Every part can be replaced in tests.
+  @MainActor struct Storage {
+    var choice: @MainActor () -> LedgerSecretStorage = { LedgerSecretStorage.current }
+    var readKeychain: @MainActor (String) throws -> Data? = LedgerAppLock.readKeychain
+    var writeKeychain: @MainActor (String, Data?) throws -> Void = LedgerAppLock.writeKeychain
+    var directory: @MainActor () throws -> URL = { try LedgerPrivateFile.directory(named: "AppLock") }
+
+    func read(_ account: String) throws -> Data? {
+      switch choice() {
+      case .deviceKeychain:
+        return try readKeychain(account)
+      case .appFiles:
+        if let data = try readFile(account) { return data }
+        // A passcode set by an earlier version is in the Keychain. It moves to a file the first
+        // time it is read; macOS may ask for the Mac password that one time.
+        guard let legacy = try readKeychain(account) else { return nil }
+        try writeFile(account, legacy)
+        try writeKeychain(account, nil)
+        return legacy
+      }
+    }
+
+    func write(_ account: String, _ data: Data?) throws {
+      switch choice() {
+      case .deviceKeychain:
+        try writeKeychain(account, data)
+      case .appFiles:
+        try writeFile(account, data)
+        // A removed passcode must not come back from an earlier version's Keychain item.
+        if data == nil { try writeKeychain(account, nil) }
+      }
+    }
+
+    /// Copies the lock state and passcode to `destination`, then removes the old copies, so a
+    /// failure part way still leaves the passcode in place. The destination ends up exactly
+    /// like the source, including having no passcode.
+    func move(to destination: LedgerSecretStorage) throws {
+      let accounts = [LedgerAppLock.stateAccount, LedgerAppLock.digestAccount]
+      switch destination {
+      case .appFiles:
+        let values = try accounts.map { ($0, try readKeychain($0)) }
+        for (account, value) in values { try writeFile(account, value) }
+        for (account, _) in values { try writeKeychain(account, nil) }
+      case .deviceKeychain:
+        let values = try accounts.map { ($0, try readFile($0)) }
+        for (account, value) in values { try writeKeychain(account, value) }
+        for (account, _) in values { try writeFile(account, nil) }
+      }
+    }
+
+    private func readFile(_ account: String) throws -> Data? {
+      do { return try LedgerPrivateFile.read(account, in: directory()) } catch {
+        throw Error.storageFailure
+      }
+    }
+
+    private func writeFile(_ account: String, _ data: Data?) throws {
+      do { try LedgerPrivateFile.write(data, to: account, in: directory()) } catch {
+        throw Error.storageFailure
+      }
+    }
   }
 
   private static func readKeychain(_ account: String) throws -> Data? {

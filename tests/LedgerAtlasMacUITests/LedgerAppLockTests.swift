@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import LedgerAtlasMacUI
+import LedgerStore
 
 /// Low work factor keeps the suite fast; production uses `defaultKDFIterations`.
 private let testIterations: UInt32 = 1_000
@@ -274,4 +275,83 @@ private func hex(_ data: Data) -> String {
 @MainActor
 private final class AppLockTestFailure {
   var account: String?
+}
+
+/// App-lock storage with an in-memory Keychain and a scratch folder for files.
+@MainActor
+private final class FakeLockStorage {
+  var keychain: [String: Data] = [:]
+  var choice: LedgerSecretStorage = .appFiles
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("app-lock-\(UUID().uuidString)", isDirectory: true)
+
+  var storage: LedgerAppLock.Storage {
+    LedgerAppLock.Storage(
+      choice: { self.choice }, readKeychain: { self.keychain[$0] },
+      writeKeychain: { account, value in self.keychain[account] = value },
+      directory: { self.directory })
+  }
+
+  func lock() -> LedgerAppLock {
+    let storage = storage
+    return LedgerAppLock(
+      reader: { try storage.read($0) }, writer: { try storage.write($0, $1) },
+      kdfIterations: testIterations)
+  }
+
+  deinit { try? FileManager.default.removeItem(at: directory) }
+}
+
+@MainActor
+@Test func appLockKeepsItsPasscodeInAFileByDefault() throws {
+  let fake = FakeLockStorage()
+  try fake.lock().setPasscode("1234")
+  #expect(fake.keychain.isEmpty)
+  #expect(try LedgerPrivateFile.read("passcode-digest", in: fake.directory) != nil)
+  let reopened = fake.lock()
+  #expect(reopened.hasPasscode)
+  #expect(reopened.unlock(with: "1234"))
+}
+
+@MainActor
+@Test func appLockMovesAnEarlierKeychainPasscodeToAFileOnce() throws {
+  let fake = FakeLockStorage()
+  fake.choice = .deviceKeychain
+  try fake.lock().setPasscode("1234")
+  #expect(fake.keychain["passcode-digest"] != nil)
+
+  // An update with files as the default finds the earlier passcode and moves it.
+  fake.choice = .appFiles
+  let updated = fake.lock()
+  #expect(updated.hasPasscode)
+  #expect(fake.keychain.isEmpty)
+  #expect(try LedgerPrivateFile.read("passcode-digest", in: fake.directory) != nil)
+  #expect(updated.unlock(with: "1234"))
+
+  // Removing the passcode removes it everywhere, so it can't come back.
+  try updated.removePasscode(current: "1234")
+  #expect(!fake.lock().hasPasscode)
+}
+
+@MainActor
+@Test func appLockStorageMovesBothWaysAndMirrorsAMissingPasscode() throws {
+  let fake = FakeLockStorage()
+  try fake.lock().setPasscode("1234")
+  try fake.storage.move(to: .deviceKeychain)
+  fake.choice = .deviceKeychain
+  #expect(fake.keychain["passcode-digest"] != nil)
+  #expect(try LedgerPrivateFile.read("passcode-digest", in: fake.directory) == nil)
+  #expect(fake.lock().unlock(with: "1234"))
+
+  try fake.storage.move(to: .appFiles)
+  fake.choice = .appFiles
+  #expect(fake.keychain.isEmpty)
+  #expect(fake.lock().unlock(with: "1234"))
+
+  // With no passcode in the Keychain, a stale file passcode does not survive a move to files.
+  try LedgerPrivateFile.write(nil, to: "passcode-digest", in: fake.directory)
+  try LedgerPrivateFile.write(Data(repeating: 1, count: 32), to: "passcode-digest", in: fake.directory)
+  fake.keychain = [:]
+  try fake.storage.move(to: .appFiles)
+  #expect(!fake.lock().hasPasscode)
 }
