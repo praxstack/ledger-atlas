@@ -13,6 +13,10 @@ mmctl certify --input <backup.mmbak> --work-dir <empty-dir> \
   [--oracle <oracle.json>] [--json]
 ```
 
+- `sourceSHA256` names the file as given. `importedArtifactSHA256` is the hash the
+  ledger's import receipt records: equal for a plain backup, the SQLite member for a ZIP.
+- `locale` is the supported locale the import was certified for. `sourceLocales` lists the
+  backup's own `android_metadata.locale` values, so a mismatch is visible.
 - The source is only read. It is hashed before and after; any change fails
   `source_unchanged`.
 - The work directory must exist and be empty (exit 65 otherwise). Scratch ledgers
@@ -74,4 +78,5 @@ Ledger Atlas v1 never writes Money Manager files. Import is one way: the source 
 opened read-only and `source_unchanged` proves it was not touched. An export the app
 cannot read (a newer schema, a missing contract table, an unknown container) is refused
 with a visible reason before anything is staged, and no partial import is kept.
-Writing a Money Manager backup back out is out of scope for v1.
+Writing a Money Manager backup back out is out of scope for v1. An explicit refusal of a
+Money Manager format export request, with its own test, is tracked in #135.

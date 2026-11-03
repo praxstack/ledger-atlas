@@ -214,7 +214,10 @@ struct MoneyManagerV19CertificationTests {
       #expect(certificate.sourceByteCount == sourceBefore.count)
       #expect(certificate.profileID == "realbyte-android-sqlite-v19-observed")
       #expect(certificate.adapterVersion == MoneyManagerV19Adapter.version)
+      #expect(certificate.importedArtifactSHA256 == certificate.sourceSHA256)
       #expect(certificate.locale == "en-IN")
+      // The backup's own locale is recorded next to the one certified, never replaced by it.
+      #expect(certificate.sourceLocales == ["en_US"])
       #expect(certificate.sourceTimeZone == "fixed:19800")
       #expect(certificate.oracleID == oracle.oracleID)
       #expect(certificate.eventCount == 8)
@@ -226,6 +229,39 @@ struct MoneyManagerV19CertificationTests {
       for secret in ["Wallet", "Salary", "Snacks", "synthetic", "acct-a", "tx-income", "40.00"] {
         #expect(!json.contains(secret))
       }
+    }
+  }
+
+  @Test("a ZIP certificate names the wrapper and the imported SQLite member")
+  func zipCertificateNamesWrapperAndMember() throws {
+    try withDirectory { directory in
+      let plain = directory.appendingPathComponent("MM(synthetic).mmbak")
+      try writeCertifiableBackup(to: plain)
+      let zipped = directory.appendingPathComponent("MM(synthetic-zip).mmbak")
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+      process.arguments = ["-q", "-j", zipped.path, plain.path]
+      try process.run()
+      process.waitUntilExit()
+      try #require(process.terminationStatus == 0)
+      func certify(_ source: URL, _ name: String) throws -> MoneyManagerV19ImportCertificate {
+        let work = directory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
+        return try MoneyManagerV19ImportCertifier.certify(
+          sourceURL: source, workDirectory: work,
+          sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 19_800), locale: "en-IN",
+          oracle: nil)
+      }
+      let direct = try certify(plain, "work-plain")
+      let zip = try certify(zipped, "work-zip")
+
+      #expect(zip.achievedLevel == .l2LosslessStaging)
+      #expect(zip.container == "zip")
+      #expect(zip.sourceSHA256 == CanonicalReceiptDigest.sha256(try Data(contentsOf: zipped)))
+      #expect(zip.importedArtifactSHA256 != zip.sourceSHA256)
+      #expect(zip.importedArtifactSHA256 == direct.sourceSHA256)
+      #expect(zip.eventSetHash == direct.eventSetHash)
+      #expect(zip.sourceLocales == ["en_US"])
     }
   }
 

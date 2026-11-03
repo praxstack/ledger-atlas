@@ -35,12 +35,19 @@ public struct MoneyManagerV19ImportCertificate: Codable, Equatable, Sendable {
   }
 
   public let certificateVersion: Int
+  /// SHA-256 and size of the file as given. For a ZIP this is the wrapper.
   public let sourceSHA256: String
   public let sourceByteCount: Int
+  /// The artifact hash the ledger's import receipt records. For a ZIP this is the SQLite
+  /// member, so it differs from `sourceSHA256`; for a plain backup the two are equal.
+  public let importedArtifactSHA256: String
   public let container: String
   public let profileID: String
   public let adapterVersion: String
+  /// The locale the import was certified for, from the supported corpus.
   public let locale: String
+  /// The backup's own `android_metadata.locale` values, sorted; empty when it has none.
+  public let sourceLocales: [String]
   public let sourceTimeZone: String
   public let oracleID: String?
   public let achievedLevel: CompatibilityLevel
@@ -102,6 +109,7 @@ public enum MoneyManagerV19ImportCertifier {
     let (_, independent) = try runImport("b", canonical: second)
     let after = try sourceDigest(sourceURL)
 
+    let sourceLocales = try stagedLocales(workDirectory.appendingPathComponent("a-stage.sqlite"))
     let ledgerA = try CanonicalAggregates(first)
     let ledgerB = try CanonicalAggregates(second)
 
@@ -149,8 +157,9 @@ public enum MoneyManagerV19ImportCertifier {
     return MoneyManagerV19ImportCertificate(
       certificateVersion: MoneyManagerV19ImportCertificate.version,
       sourceSHA256: before.sha256, sourceByteCount: before.count,
+      importedArtifactSHA256: ledgerA.artifactSHA256,
       container: review.container.rawValue, profileID: review.profileID ?? "",
-      adapterVersion: MoneyManagerV19Adapter.version, locale: locale,
+      adapterVersion: MoneyManagerV19Adapter.version, locale: locale, sourceLocales: sourceLocales,
       sourceTimeZone: sourceTimeZone.certificateLabel, oracleID: oracle?.oracleID,
       achievedLevel: level,
       tableCount: review.tableCount ?? 0, recordCount: review.recordCount ?? 0,
@@ -158,6 +167,20 @@ public enum MoneyManagerV19ImportCertifier {
       excludedCount: excluded, eventCount: ledgerA.eventCount, eventsByKind: ledgerA.eventsByKind,
       transferPairs: ledgerA.transferPairs, eventSetHash: ledgerA.eventSetHash,
       reconciliationHash: ledgerA.reconciliationHash, checks: checks)
+  }
+
+  /// The locale values Money Manager wrote into the backup, read from the staged copy.
+  private static func stagedLocales(_ staging: URL) throws -> [String] {
+    let rows = try readOnlyRows(
+      staging,
+      """
+      SELECT DISTINCT CAST(f.payload AS TEXT) FROM staged_field f
+      JOIN staged_record r ON r.record_id = f.record_id
+      JOIN staged_table t ON t.table_id = r.table_id
+      WHERE t.table_name = 'android_metadata' AND f.column_name = 'locale'
+        AND f.storage_class = 'text'
+      """)
+    return rows.compactMap(\.first).sorted()
   }
 
   private static func sourceDigest(_ url: URL) throws -> (sha256: String, count: Int) {
@@ -182,36 +205,13 @@ private struct CanonicalAggregates {
   let transferPairs: Int
   let eventSetHash: String
   let reconciliationHash: String
+  let artifactSHA256: String
   let duplicateSourceRecords: Int
   let integrityOK: Bool
   let foreignKeysOK: Bool
 
   init(_ url: URL) throws {
-    var database: OpaquePointer?
-    guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
-      let database
-    else {
-      if database != nil { sqlite3_close(database) }
-      throw MoneyManagerV19ImportCertifierError.unreadableCanonical
-    }
-    defer { sqlite3_close(database) }
-    func rows(_ sql: String) throws -> [[String]] {
-      var statement: OpaquePointer?
-      guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement
-      else { throw MoneyManagerV19ImportCertifierError.unreadableCanonical }
-      defer { sqlite3_finalize(statement) }
-      var result: [[String]] = []
-      while true {
-        let rc = sqlite3_step(statement)
-        if rc == SQLITE_DONE { break }
-        guard rc == SQLITE_ROW else { throw MoneyManagerV19ImportCertifierError.unreadableCanonical }
-        result.append(
-          (0..<sqlite3_column_count(statement)).map { column in
-            sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
-          })
-      }
-      return result
-    }
+    func rows(_ sql: String) throws -> [[String]] { try readOnlyRows(url, sql) }
     func int(_ sql: String) throws -> Int { Int(try rows(sql).first?.first ?? "") ?? -1 }
 
     eventCount = try int("SELECT count(*) FROM economic_event")
@@ -220,14 +220,43 @@ private struct CanonicalAggregates {
         "SELECT event_kind, count(*) FROM economic_event GROUP BY event_kind"
       ).map { ($0[0], Int($0[1]) ?? -1) })
     transferPairs = try int("SELECT count(*) FROM economic_event_transfer")
-    let receipts = try rows("SELECT event_set_hash, reconciliation_hash FROM import_receipt")
+    let receipts = try rows(
+      "SELECT event_set_hash, reconciliation_hash, artifact_sha256 FROM import_receipt")
     guard receipts.count == 1 else { throw MoneyManagerV19ImportCertifierError.unreadableCanonical }
     eventSetHash = receipts[0][0]
     reconciliationHash = receipts[0][1]
+    artifactSHA256 = receipts[0][2]
     duplicateSourceRecords = try int(
       "SELECT count(*) FROM (SELECT source_record_id FROM economic_event GROUP BY source_record_id HAVING count(*) > 1)"
     )
     integrityOK = try rows("PRAGMA integrity_check").map { $0.first ?? "" } == ["ok"]
     foreignKeysOK = try rows("PRAGMA foreign_key_check").isEmpty
   }
+}
+
+/// Runs one query against a database opened read-only and returns every row as text.
+private func readOnlyRows(_ url: URL, _ sql: String) throws -> [[String]] {
+  var database: OpaquePointer?
+  guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+    let database
+  else {
+    if database != nil { sqlite3_close(database) }
+    throw MoneyManagerV19ImportCertifierError.unreadableCanonical
+  }
+  defer { sqlite3_close(database) }
+  var statement: OpaquePointer?
+  guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement
+  else { throw MoneyManagerV19ImportCertifierError.unreadableCanonical }
+  defer { sqlite3_finalize(statement) }
+  var result: [[String]] = []
+  while true {
+    let rc = sqlite3_step(statement)
+    if rc == SQLITE_DONE { break }
+    guard rc == SQLITE_ROW else { throw MoneyManagerV19ImportCertifierError.unreadableCanonical }
+    result.append(
+      (0..<sqlite3_column_count(statement)).map { column in
+        sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+      })
+  }
+  return result
 }
