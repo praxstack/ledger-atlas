@@ -76,9 +76,18 @@ import Testing
     }
   }
 
+  index += try await captureKeyStates(into: output)
+
   // Sheets: opened in the real app window the way a person opens them, then the sheet
-  // window itself is captured.
-  for record in records {
+  // window itself is captured. Sheets opened from a menu go last.
+  let sheetRecords = records.sorted {
+    func fromMenu(_ record: CaptureRecord) -> Bool {
+      if case .sheet(.editAccount) = capturePlan[record.key]?.shot { return true }
+      return false
+    }
+    return (fromMenu($0) ? 1 : 0, $0.number) < (fromMenu($1) ? 1 : 0, $1.number)
+  }
+  for record in sheetRecords {
     guard let plan = capturePlan[record.key], case .sheet(let sheet) = plan.shot else { continue }
     log("sheet \(record.number) \(record.key)")
     let root = try await MountedRoot(
@@ -86,8 +95,9 @@ import Testing
     defer {
       // Closing a window with a sheet still attached ended the whole test process.
       if let attached = root.window.attachedSheet { root.window.endSheet(attached) }
-      pump(0.3)
+      drainLog("sheet ended")
       root.close()
+      drainLog("window closed")
     }
     log("mounted \(sheet.destination)")
     guard let sheetWindow = try await sheet.open(in: root) else {
@@ -115,7 +125,6 @@ import Testing
     #expect(pair[0] != pair[1], "\(record.key): light and dark captures are identical")
   }
 
-  index += try await captureKeyStates(into: output)
   let data = try JSONSerialization.data(
     withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
   try data.write(to: output.appendingPathComponent("index.json"))
@@ -485,6 +494,16 @@ private func scroll(_ window: NSWindow, to position: CaptureScroll) {
   main.reflectScrolledClipView(clip)
 }
 
+/// Runs the main run loop briefly and logs any run that ends early, so a stray stop of the
+/// main run loop (which ends the test process) shows where it came from.
+@MainActor
+private func drainLog(_ step: String) {
+  for _ in 0..<6 {
+    let result = CFRunLoopRunInMode(.defaultMode, 0.05, false)
+    if result != .timedOut { log("\(step): run loop returned \(result.rawValue)") }
+  }
+}
+
 private func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
@@ -635,9 +654,9 @@ extension MountedRoot {
       log("pop-up \(row) has \(picked.titles), not \(title)")
       return false
     }
-    pump(0.3)
+    drainLog("menu closed")
     NSApplication.shared.sendAction(action, to: item.target, from: item)
-    pump(0.5)
+    drainLog("action sent")
     return true
   }
 }
