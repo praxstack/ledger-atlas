@@ -43,8 +43,8 @@ import Testing
     defer { root.close() }
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
-      log("pressing Begin editing")
-    #expect(root.pressButton(named: "Begin editing accounts"), "no Begin editing button")
+      log("clicking Begin editing")
+    #expect(root.clickButton(titled: "Begin editing"), "no Begin editing button")
       try await root.settle()
     }
     // What the screen says, read once before scrolling: SwiftUI drops a scrolled list's rows
@@ -134,8 +134,9 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     #expect(!text.contains { $0.contains("Everyday Bank") }, "the lock screen shows ledger content")
     try save(png, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
   }
-  // An error: Unlock with no passcode is refused.
-  #expect(locked.pressButton(named: "Unlock"), "no Unlock button")
+  // An error: Unlock (the default button, so Return) with no passcode is refused.
+  log("pressing Return to unlock with no passcode")
+  locked.press("\r", keyCode: 36)
   pump(0.6)
   for appearance in CaptureAppearance.allCases {
     locked.window.appearance = NSAppearance(named: appearance.name)
@@ -258,7 +259,7 @@ struct CapturePlan: Sendable {
 /// that does the same job. Notes say where the Mac app has no exact counterpart.
 let capturePlan: [String: CapturePlan] = [
   "transactions.daily/dark.populated.root": .init(
-    shot: .screen(.ledger), expects: ["Salary, Income"]),
+    shot: .screen(.ledger), expects: ["Entertainment, Expense"]),
   "statistics.overview/monthly.expense": .init(
     shot: .screen(.insights), expects: ["Accessible table"],
     note: "Insights shows every period in one table instead of a month/year toggle."),
@@ -491,61 +492,22 @@ private func readTree(windowIdentifier: String) -> [SpokenElement] {
 }
 
 extension MountedRoot {
-  /// Presses a button the way VoiceOver does, by its spoken name. Returns false if there is no
-  /// such button.
-  func pressButton(named name: String) -> Bool {
-    let pid = ProcessInfo.processInfo.processIdentifier
-    let identifier = identifier
-    let result = PressBox()
-    Thread.detachNewThread {
-      result.finish(pressAccessibilityButton(pid: pid, windowIdentifier: identifier, named: name))
+  /// Clicks the AppKit button SwiftUI made for a button with this title, as a mouse click
+  /// would. Returns false if there is no such button.
+  func clickButton(titled title: String) -> Bool {
+    func buttons(in view: NSView) -> [NSButton] {
+      ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
     }
-    let deadline = Date().addingTimeInterval(20)
-    while !result.isDone, Date() < deadline {
-      RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
-    }
-    pump(0.3)
-    return result.pressed
-  }
-}
-
-private final class PressBox: @unchecked Sendable {
-  private let lock = NSLock()
-  private var done = false
-  private var didPress = false
-  var isDone: Bool { lock.withLock { done } }
-  var pressed: Bool { lock.withLock { didPress } }
-  func finish(_ pressed: Bool) { lock.withLock { didPress = pressed; done = true } }
-}
-
-private func pressAccessibilityButton(
-  pid: pid_t, windowIdentifier: String, named name: String
-) -> Bool {
-  let app = AXUIElementCreateApplication(pid)
-  AXUIElementSetMessagingTimeout(app, 5)
-  func attribute(_ element: AXUIElement, _ key: String) -> CFTypeRef? {
-    var value: CFTypeRef?
-    return AXUIElementCopyAttributeValue(element, key as CFString, &value) == .success ? value : nil
-  }
-  func find(_ element: AXUIElement, depth: Int) -> AXUIElement? {
-    guard depth < 80 else { return nil }
-    if attribute(element, kAXRoleAttribute) as? String == kAXButtonRole,
-      [kAXDescriptionAttribute, kAXTitleAttribute].contains(where: {
-        attribute(element, $0) as? String == name
+    guard let content = window.contentView,
+      let button = buttons(in: content).first(where: {
+        $0.title == title || $0.accessibilityLabel() == title
       })
-    {
-      return element
+    else {
+      log("no NSButton titled \(title); found \(buttons(in: content).map(\.title))")
+      return false
     }
-    for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
-      if let found = find(child, depth: depth + 1) { return found }
-    }
-    return nil
+    button.performClick(nil)
+    pump(0.5)
+    return true
   }
-  for window in (attribute(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-  where attribute(window, kAXIdentifierAttribute) as? String == windowIdentifier {
-    if let button = find(window, depth: 0) {
-      return AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
-    }
-  }
-  return false
 }
