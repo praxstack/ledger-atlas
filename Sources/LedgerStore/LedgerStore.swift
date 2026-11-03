@@ -2673,9 +2673,12 @@ public final class LedgerStore {
         // codes and errno are printed: never values.
         if code & 0xff == SQLITE_IOERR {
           let verb = sql.split(separator: " ").first.map(String.init) ?? ""
+          let systemErrno = sqlite3_system_errno(database)
+          var described = [CChar](repeating: 0, count: 1024)
+          csqlite_debug_describe_main_descriptor(database, &described, described.count)
           FileHandle.standardError.write(
             Data(
-              "LedgerStore: \(verb) failed with SQLite \(code), errno \(sqlite3_system_errno(database))\n"
+              "LedgerStore: \(verb) failed with SQLite \(code), errno \(systemErrno); \(String(cString: described))\n"
                 .utf8))
         }
       #endif
