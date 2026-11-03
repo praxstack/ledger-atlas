@@ -338,6 +338,7 @@ private struct InstallmentForm: View {
 }
 
 struct BudgetsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let budgets: [LedgerBudget]
   let categories: [LedgerCategory]
@@ -361,21 +362,30 @@ struct BudgetsView: View {
           state: state, isEditing: isEditing, failure: lastFailure, open: open)
       } else {
         List(budgets, id: \.id) { budget in
-          HStack {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(budget.name)
-              Text("\(budget.amount.amount.rawLiteral) \(budget.amount.unitCode) · \(budget.period.rawValue)")
-                .font(.caption).foregroundStyle(.secondary)
-              Text(categories.first(where: { $0.id == budget.categoryID })?.name ?? "Unknown category")
-                .font(.caption).foregroundStyle(.secondary)
-              if let status = status(of: budget) {
-                Text(Self.describe(status, unit: budget.amount.unitCode))
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(status.isOverBudget ? .red : .primary)
+          let budgetStatus = status(of: budget)
+          let category = categories.first(where: { $0.id == budget.categoryID })?.name ?? "Unknown category"
+          HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
+            LedgerIconTile(.initials(AccountRow.initials(category)), swatch: LedgerTheme.swatch(for: category))
+            VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
+              HStack(alignment: .firstTextBaseline) {
+                Text(budget.name).font(LedgerTheme.Typeface.body).foregroundStyle(LedgerTheme.ink)
+                  .strikethrough(budget.lifecycle == .tombstoned)
+                Spacer(minLength: LedgerTheme.Space.s)
+                MoneyText(budget.amount, size: .row, sign: .never, tone: .neutral)
+              }
+              Text(
+                [category, budget.period.rawValue.capitalized, budget.rollover ? "Rolls over" : nil]
+                  .compactMap { $0 }.joined(separator: " · ")
+              )
+              .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
+              if let status = budgetStatus {
+                LedgerProgressTrack(
+                  fraction: Self.fraction(status), tint: LedgerTheme.ink, height: 6)
+                Text(Self.describe(status, formatter: formatter, unit: budget.amount.unitCode))
+                  .font(LedgerTheme.Typeface.caption)
+                  .foregroundStyle(status.isOverBudget ? LedgerTheme.negative : LedgerTheme.inkSecondary)
               }
             }
-            Spacer()
-            if budget.rollover { Text("Rollover").font(.caption) }
             if isEditing {
               Button(budget.lifecycle == .active ? "Close" : "Restore") {
                 guard let revised = try? LedgerBudget(
@@ -388,10 +398,11 @@ struct BudgetsView: View {
               .buttonStyle(.borderless)
             }
           }
+          .padding(.vertical, LedgerTheme.Space.xs)
           .accessibilityElement(children: .combine)
           .accessibilityLabel(
-            "Budget \(budget.name), \(budget.amount.amount.rawLiteral) \(budget.amount.unitCode)"
-              + (status(of: budget).map { ". " + Self.describe($0, unit: budget.amount.unitCode) }
+            "Budget \(budget.name), \(formatter.parts(budget.amount, sign: .never).text)"
+              + (budgetStatus.map { ". " + Self.describe($0, formatter: formatter, unit: budget.amount.unitCode) }
                 ?? ""))
         }
       }
@@ -412,6 +423,27 @@ struct BudgetsView: View {
   private func status(of budget: LedgerBudget) -> LedgerBudgetStatus? {
     guard let today else { return nil }
     return try? budget.status(on: today, transactions: transactions)
+  }
+
+  static func fraction(_ status: LedgerBudgetStatus) -> Double {
+    let available = Double(status.available.description) ?? 0
+    let spent = Double(status.spent.description) ?? 0
+    return available > 0 ? spent / available : (spent > 0 ? 2 : 0)
+  }
+
+  /// "Spent ₹4,200.00 of ₹6,000.00 · ₹1,800.00 left · ends 30 Nov 2026", in the display style.
+  static func describe(
+    _ status: LedgerBudgetStatus, formatter: LedgerDisplayFormatter, unit: String
+  ) -> String {
+    func money(_ value: ExactDecimal) -> String {
+      (try? CurrencyAmount(unitCode: unit, amount: value)).map {
+        formatter.parts($0, sign: .never).text
+      } ?? "\(value.rawLiteral) \(unit)"
+    }
+    let left = status.overspent.map { "over by \(money($0))" } ?? "\(money(status.remaining)) left"
+    let carried = status.carried.isPositive ? " (includes \(money(status.carried)) rolled over)" : ""
+    return
+      "Spent \(money(status.spent)) of \(money(status.available)), \(left)\(carried), ends \(formatter.date(status.periodEnd))"
   }
 
   static func describe(_ status: LedgerBudgetStatus, unit: String) -> String {
