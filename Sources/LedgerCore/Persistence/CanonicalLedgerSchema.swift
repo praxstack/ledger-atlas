@@ -786,7 +786,7 @@ public enum CanonicalLedgerSchema {
         update(&hasher, Data(component.utf8))
       }
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   public static let legacyV10ChecksumQueries: [String] = [

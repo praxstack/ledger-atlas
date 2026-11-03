@@ -870,7 +870,7 @@ public struct LedgerApplication: LedgerClient {
     guard payload.count <= maximumPortablePackageBytes else {
       throw export.hasImportHistory ? Error.packageTooLarge : Error.invalidCommand
     }
-    let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    let digest = CanonicalReceiptDigest.hex(SHA256.hash(data: payload))
     let manifest = LedgerExportManifest(
       formatVersion: LedgerPortablePackageFormat.version,
       formatFingerprint: LedgerPortablePackageFormat.fingerprint, payloadSHA256: digest,
@@ -884,7 +884,7 @@ public struct LedgerApplication: LedgerClient {
 
   public func importPackage(manifest: LedgerExportManifest, payload: Data) throws {
     guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
-    let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    let digest = CanonicalReceiptDigest.hex(SHA256.hash(data: payload))
     guard digest == manifest.payloadSHA256, supportedPackageManifest(manifest)
     else { throw Error.invalidCommand }
     guard try store.isEmptyForPortablePackageImport() else { throw Error.invalidCommand }
@@ -1961,7 +1961,7 @@ extension LedgerApplication {
   {
     let payload = try encode(package)
     guard payload.count <= maximumPortablePackageBytes else { throw Error.invalidCommand }
-    let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    let digest = CanonicalReceiptDigest.hex(SHA256.hash(data: payload))
     return (
       LedgerExportManifest(
         formatVersion: LedgerPortablePackageFormat.version,

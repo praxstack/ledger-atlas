@@ -129,7 +129,7 @@ package enum CanonicalLedgerHealth {
       ]
       .joined(separator: "\n").utf8)
     let code = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: trustKey))
-    return Data(code).map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(Data(code))
   }
 
   /// The keyed stamp of everything the import-graph replay reads (see `importOnlyTables`):
@@ -201,7 +201,7 @@ package enum CanonicalLedgerHealth {
         ]
           .joined(separator: "\n").utf8) + digest
     let code = HMAC<SHA256>.authenticationCode(for: message, using: SymmetricKey(data: trustKey))
-    return Data(code).map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(Data(code))
   }
 
   /// Bump this whenever `validateImportGraph`, or anything it calls, changes what it accepts.

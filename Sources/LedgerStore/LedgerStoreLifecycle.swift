@@ -1881,7 +1881,7 @@ public enum LedgerStoreLifecycle {
         url.lastPathComponent != ".", url.lastPathComponent != ".."
       else { throw Error.unsafePath }
       leaf = url.lastPathComponent
-      namespace = SHA256.hash(data: Data(leaf.utf8)).map { String(format: "%02x", $0) }.joined()
+      namespace = CanonicalReceiptDigest.hex(SHA256.hash(data: Data(leaf.utf8)))
       parentDescriptor = Darwin.open(
         url.deletingLastPathComponent().path,
         O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
@@ -2409,11 +2409,11 @@ public enum LedgerStoreLifecycle {
     guard safeFile(retained), sameFile(value, retained) else { throw Error.pathChanged }
     return AuthoredState(
       identity: retained,
-      digest: hasher.finalize().map { String(format: "%02x", $0) }.joined())
+      digest: CanonicalReceiptDigest.hex(hasher.finalize()))
   }
 
   private static func digest(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    CanonicalReceiptDigest.hex(SHA256.hash(data: data))
   }
 
   private static func write(

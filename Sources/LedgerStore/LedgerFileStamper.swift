@@ -1,6 +1,7 @@
 import CSQLite
 import CryptoKit
 import Foundation
+import LedgerCore
 
 /// Remembers a ledger file after this app's own checked saves, so the next open of those bytes
 /// can skip the slow checks (see `CanonicalLedgerHealth.verifiedFiles`).
@@ -182,7 +183,7 @@ package final class LedgerFileStamper: @unchecked Sendable {
       }
       offset += sqlite3_int64(count)
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 
   private func failed(_ step: String, _ database: OpaquePointer?) -> String? {

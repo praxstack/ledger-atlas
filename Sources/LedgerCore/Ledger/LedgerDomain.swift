@@ -402,7 +402,7 @@ public enum StableLedgerID {
       withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
       hasher.update(data: Data(component.utf8))
     }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return CanonicalReceiptDigest.hex(hasher.finalize())
   }
 }
 

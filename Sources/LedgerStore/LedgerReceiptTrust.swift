@@ -194,7 +194,7 @@ package enum LedgerReceiptTrust {
   }
 
   private static func hex(_ bytes: some Collection<UInt8>) -> String {
-    bytes.map { String(format: "%02x", $0) }.joined()
+    CanonicalReceiptDigest.hex(bytes)
   }
 
   private static let service = "com.praxstack.ledger-atlas.receipt-integrity.v1"

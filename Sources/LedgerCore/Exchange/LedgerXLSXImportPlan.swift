@@ -225,7 +225,7 @@ public struct LedgerXLSXImportPlan: Equatable, Sendable {
   }
 
   static func hex(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    CanonicalReceiptDigest.hex(SHA256.hash(data: data))
   }
 
   static func parentsFirst(_ categories: [LedgerCategory]) -> [LedgerCategory] {
