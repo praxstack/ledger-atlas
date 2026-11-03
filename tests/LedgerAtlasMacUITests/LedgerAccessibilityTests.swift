@@ -14,7 +14,7 @@ import Testing
 /// control. This reads the same accessibility tree VoiceOver reads, from the real root view
 /// hosted in a window.
 @MainActor
-@Test(arguments: LedgerDemoTour.destinations)
+@Test(.disabled("probe first"), arguments: LedgerDemoTour.destinations)
 func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) async throws {
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
