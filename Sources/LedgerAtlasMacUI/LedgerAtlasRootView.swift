@@ -15,9 +15,7 @@ public struct LedgerAtlasRootView: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
-  @State private var session = LedgerSession(
-    testingScopeStarter: { LedgerLocations.startAccess($0) },
-    testingScopeStopper: { LedgerLocations.stopAccess($0) })
+  @State private var session: LedgerSession
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
   @State private var portal = LedgerPortalController()
@@ -68,6 +66,8 @@ public struct LedgerAtlasRootView: View {
     scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) }
   ) {
     _selection = State(initialValue: initialSelection)
+    _session = State(
+      initialValue: LedgerSession(testingScopeStarter: scopeStarter, testingScopeStopper: scopeStopper))
     _appLock = State(initialValue: appLock)
     _productSettings = State(initialValue: productSettings)
     self.importReviewSummary = importReviewSummary ?? .awaitingSyntheticMetadata

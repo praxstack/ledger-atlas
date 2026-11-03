@@ -18,6 +18,8 @@ import Testing
 func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) async throws {
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
+  #expect(!mounted.readTimedOut, "the Accessibility read timed out")
+  #expect(!mounted.showsNoLedgerPrompt, "\(destination) still shows the open-a-ledger prompt")
   expectEveryControlIsNamed(mounted.accessibilityElements(), on: "\(destination.rawValue)")
 }
 
@@ -216,7 +218,7 @@ struct SpokenElement: Sendable {
 /// Reads this process's windows through the Accessibility API. It must run off the main
 /// thread: the app answers these requests on its main run loop, so a call made from the main
 /// thread can't complete.
-func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
+func accessibilityTree(of pid: pid_t, windowIdentifier: String) -> [SpokenElement] {
   let app = AXUIElementCreateApplication(pid)
   AXUIElementSetMessagingTimeout(app, 5)
   func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -248,7 +250,8 @@ func accessibilityTree(of pid: pid_t) -> [SpokenElement] {
   var windows: CFTypeRef?
   let status = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
   if status != .success { print("A11Y windows attribute failed: \(status.rawValue)") }
-  for window in (windows as? [AXUIElement]) ?? [] {
+  // Only this test's window, so a window left over from another test can't count.
+  for window in (windows as? [AXUIElement]) ?? [] where text(window, kAXIdentifierAttribute) == windowIdentifier {
     visit(window, depth: 0)
   }
   return found
@@ -260,11 +263,19 @@ final class MountedRoot {
   let window: NSWindow
   private let directory: URL
   private let suite: String
+  private let identifier = "a11y-window-\(UUID().uuidString)"
+  /// Set when an Accessibility read ran out of time; its reader thread may still be running.
+  private(set) var readTimedOut = false
+  /// The empty-ledger prompt is showing instead of the screen.
+  private(set) var showsNoLedgerPrompt = false
 
   init(showing destination: AppDestination) async throws {
     Self.launchOnce()
-    directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
+    self.directory = directory
+    var mounted = false
+    defer { if !mounted { try? FileManager.default.removeItem(at: directory) } }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let ledger = directory.appendingPathComponent("Demo Household.sqlite")
     try LedgerDemoTour.makeDemoLedger(at: ledger)
@@ -283,9 +294,11 @@ final class MountedRoot {
       contentRect: NSRect(x: 0, y: 0, width: 1100, height: 900),
       styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
+    window.setAccessibilityIdentifier(identifier)
     window.contentView = NSHostingView(rootView: root)
     window.makeKeyAndOrderFront(nil)
-    try await settle()
+    mounted = true
+    do { try await settle() } catch { close(); throw error }
   }
 
   /// Waits for the ledger to open and the screen to settle.
@@ -294,9 +307,14 @@ final class MountedRoot {
     for _ in 0..<30 {
       try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
-      let count = accessibilityElements().count
-      if count == previous, count > 5 { break }
-      previous = count
+      let elements = accessibilityElements()
+      if readTimedOut { break }
+      // Keep waiting while the saved ledger is still opening.
+      showsNoLedgerPrompt = elements.contains {
+        "\($0.spokenName) \($0.value)".contains("Open a ledger")
+      }
+      if elements.count == previous, elements.count > 5, !showsNoLedgerPrompt { break }
+      previous = elements.count
     }
   }
 
@@ -350,11 +368,15 @@ final class MountedRoot {
   func accessibilityElements() -> [SpokenElement] {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = TreeBox()
-    Thread.detachNewThread { result.finish(accessibilityTree(of: pid)) }
+    let identifier = identifier
+    Thread.detachNewThread {
+      result.finish(accessibilityTree(of: pid, windowIdentifier: identifier))
+    }
     let deadline = Date().addingTimeInterval(20)
     while !result.isDone, Date() < deadline {
       RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
     }
+    if !result.isDone { readTimedOut = true }
     return result.elements
   }
 }
