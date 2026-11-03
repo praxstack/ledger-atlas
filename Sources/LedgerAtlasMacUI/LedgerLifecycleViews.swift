@@ -40,14 +40,20 @@ struct LedgerLifecycleClosedSessionView: View {
   let failure: String?
   let retryOperation: LedgerLifecycleOperation
   let retry: (LedgerLifecycleOperation) -> Void
+  var importBackup: (() -> Void)? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text(title).font(.largeTitle.bold())
       LedgerLifecycleGuidanceView(
         guidance: guidance, failure: failure, retryOperation: retryOperation)
-      Button(retryOperation.retryButtonTitle) { retry(retryOperation) }
-        .accessibilityLabel(retryOperation.retryAccessibilityLabel)
+      HStack {
+        Button(retryOperation.retryButtonTitle) { retry(retryOperation) }
+          .accessibilityLabel(retryOperation.retryAccessibilityLabel)
+        if let importBackup {
+          Button(LedgerAtlasRootView.importBackupActionTitle, action: importBackup)
+        }
+      }
     }
     .padding(32)
     .accessibilityElement(children: .contain)

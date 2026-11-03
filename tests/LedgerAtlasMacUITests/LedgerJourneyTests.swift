@@ -19,19 +19,7 @@ import Testing
 }
 
 @MainActor
-@Test func widgetPublicationFailureKeepsTheWidgetAndFlowFailuresTogetherOnce() {
-  #expect(
-    LedgerAtlasRootView.failureMessage(
-      widgetPublished: false, flowFailure: "Ledger access was not granted.")
-      == "Widget status could not be published. Ledger access was not granted.")
-  #expect(
-    LedgerAtlasRootView.failureMessage(
-      widgetPublished: true, flowFailure: "Ledger access was not granted.")
-      == "Ledger access was not granted.")
-}
-
-@MainActor
-@Test func failedWidgetPublicationClosesTheSessionAndOpenedJourney() async throws {
+@Test func failedWidgetPublicationKeepsTheSessionAndOpenedJourney() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
@@ -57,15 +45,20 @@ import Testing
   let publisher = RedactedWidgetProjectionPublisher(write: { _ in
     throw CocoaError(.fileWriteNoPermission)
   })
-  #expect(
-    !LedgerAtlasRootView.publishWidget(
-      .ready, publisher: publisher, journey: journey, session: session))
+  let ledgerURL = journey.ledgerURL
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: publisher, journey: journey))
 
-  #expect(session.screen == .noLedger)
-  #expect(stops.value == 1)
-  #expect(journey.ledgerURL == nil)
-  #expect(journey.snapshot == nil)
-  #expect(!journey.isEditing)
+  // The widget is a convenience; failing to update it never closes the ledger (P0, 2026-11-03).
+  #expect(session.screen == .loaded)
+  #expect(stops.value == 0)
+  #expect(journey.ledgerURL == ledgerURL)
+  #expect(journey.snapshot != nil)
+  #expect(journey.isEditing)
+  #expect(journey.lastFailure == nil)
+  // A build without a widget (the ad-hoc DMG) has no publisher, and nothing is reported.
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: nil, journey: journey))
+  #expect(journey.lastFailure == nil)
+  #expect(LedgerWidgetAvailability.publisherForThisBuild(teamIdentifier: nil) == nil)
 }
 
 @MainActor
@@ -98,14 +91,14 @@ import Testing
     !LedgerAtlasRootView.publishWidget(
       .ready,
       publisher: .init(write: { _ in throw CocoaError(.fileWriteNoPermission) }),
-      journey: journey, session: session, closeLedgerOnFailure: false))
+      journey: journey))
 
   #expect(bookmarks.reopen(.canonicalLedger) == .resolved(ledgerURL))
   #expect(session.screen == .loaded)
   #expect(journey.phase == .imported)
   #expect(journey.ledgerURL == ledgerURL)
   #expect(journey.snapshot != nil)
-  #expect(journey.lastFailure == "Widget status could not be published.")
+  #expect(journey.lastFailure == nil)
 }
 
 @MainActor
@@ -1400,4 +1393,41 @@ private func waitForBackgroundWork(
     try #require(Date() < deadline, "background work \(work) never started")
     await Task.yield()
   }
+}
+
+@MainActor
+@Test func aFailedNonReadyWidgetStatusRemovesTheOldSummary() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let store = RedactedWidgetProjectionStore(containerURL: directory)
+  try store.write(.init(state: .ready))
+  let real = RedactedWidgetProjectionPublisher(store: store)
+  let failing = RedactedWidgetProjectionPublisher(
+    write: { _ in throw CocoaError(.fileWriteNoPermission) }, remove: { real.clear() })
+  let journey = LedgerJourney()
+
+  // A failed refresh of an open ledger keeps the last summary.
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: failing, journey: journey))
+  #expect(store.readOnly().state == .ready)
+  // A failed "locked" must not leave it showing: the widget falls back to reopen-required.
+  #expect(!LedgerAtlasRootView.publishWidget(.locked, publisher: failing, journey: journey))
+  #expect(!FileManager.default.fileExists(atPath: store.url.path))
+  #expect(store.readOnly().state == .reopenRequired)
+}
+
+@Test func removingARefusedCopyLeavesLedgersWithASimilarName() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let copy = directory.appendingPathComponent("Home.sqlite")
+  let names = ["Home.sqlite", "Home.sqlite-journal", "Home.sqlite-wal", "Home.sqlite-shm",
+    "Home.sqlite 2.sqlite", "Home.sqlite.v10-recovery"]
+  for name in names { try Data("x".utf8).write(to: directory.appendingPathComponent(name)) }
+
+  LedgerLocations.removeLedgerFiles(at: copy)
+
+  #expect(
+    try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+      == ["Home.sqlite 2.sqlite", "Home.sqlite.v10-recovery"])
 }

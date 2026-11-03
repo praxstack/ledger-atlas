@@ -74,6 +74,14 @@ package enum LedgerLocations {
   /// Copies a ledger the person picked into app storage and returns the copy. The original is
   /// only read. The caller opens (and if needed upgrades) the copy through the normal lifecycle,
   /// which validates it.
+  /// Removes a ledger file in app storage and the files SQLite keeps beside it. Only those
+  /// exact names, so a ledger whose name starts the same ("Home" and "Home 2") is never touched.
+  package static func removeLedgerFiles(at url: URL) {
+    for suffix in ["", "-journal", "-wal", "-shm"] {
+      try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + suffix))
+    }
+  }
+
   package static func importCopy(of source: URL, into directory: URL) throws -> URL {
     let destination = availableURL(
       named: source.deletingPathExtension().lastPathComponent, in: directory)

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Launch the app from a built DMG in demo-tour mode. The app writes a synthetic demo ledger,
-# opens it, shows every main screen for 1.5 s, saves a PNG of each, then quits. This script:
+# opens it, shows every main screen for 1.5 s, saves a PNG of each, imports a made-up Money
+# Manager backup and reopens the result as the next launch would, then quits. This script:
 #   - records the whole screen while the tour runs (tour-recording.mp4),
 #   - collects the PNGs into dist/demo-tour and checks they are real, distinct screens,
 #   - turns the PNGs into a slideshow (walkthrough.mp4).
@@ -83,6 +84,10 @@ screens() { ls "$OUT"/[0-9][0-9]-*.png 2>/dev/null | grep -v '/00-' || true; }
 count=$(screens | wc -l | tr -d ' ')
 echo "demo tour: $count screens"
 grep -q "ledger opened" "$LOG" || { echo "demo ledger did not open"; exit 1; }
+# The import check: a made-up Money Manager backup, imported and reopened by the shipped app.
+grep -q "import check: backup recognised true" "$LOG" || { echo "import check: Open Ledger did not recognise the backup"; exit 1; }
+grep -q "import check: approve imported, 1 transactions" "$LOG" || { echo "import check: the import did not finish"; exit 1; }
+grep -q "import check: reopen opened failure=none" "$LOG" || { echo "import check: the imported ledger did not reopen"; exit 1; }
 [ "$count" -ge 10 ] || { echo "too few screens captured"; exit 1; }
 # A blank or single-colour window compresses to a few KB; a real screen is far larger.
 blank=0
