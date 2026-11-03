@@ -121,6 +121,11 @@ jobs:
       - name: Show test crash report
         if: failure()
         run: |
+          # The crash reporter writes the report a few seconds after the process dies.
+          for _ in $(seq 1 20); do
+            ls ~/Library/Logs/DiagnosticReports/*.ips >/dev/null 2>&1 && break
+            sleep 2
+          done
           for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -1); do
             echo "== $f"
             python3 scripts/ci/print-crash.py "$f" || head -c 20000 "$f"
