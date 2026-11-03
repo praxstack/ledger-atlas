@@ -97,7 +97,9 @@ import Testing
       if let attached = root.window.attachedSheet { root.window.endSheet(attached) }
       drainLog("sheet ended")
       root.close()
-      drainLog("window closed")
+      // A menu-opened sheet leaves a stop of the main run loop behind a little later; run
+      // the loop here so the stop lands in this run and not in the test's own.
+      drainLog("window closed", seconds: 3)
     }
     log("mounted \(sheet.destination)")
     guard let sheetWindow = try await sheet.open(in: root) else {
@@ -497,8 +499,8 @@ private func scroll(_ window: NSWindow, to position: CaptureScroll) {
 /// Runs the main run loop briefly and logs any run that ends early, so a stray stop of the
 /// main run loop (which ends the test process) shows where it came from.
 @MainActor
-private func drainLog(_ step: String) {
-  for _ in 0..<6 {
+private func drainLog(_ step: String, seconds: Double = 0.3) {
+  for _ in 0..<Int(seconds / 0.05) {
     let result = CFRunLoopRunInMode(.defaultMode, 0.05, false)
     if result != .timedOut { log("\(step): run loop returned \(result.rawValue)") }
   }
