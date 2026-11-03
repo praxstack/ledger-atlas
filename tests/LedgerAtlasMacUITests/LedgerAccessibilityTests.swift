@@ -410,7 +410,8 @@ func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
 @MainActor
 final class MountedRoot {
   let window: NSWindow
-  private let directory: URL
+  /// The test's own folder: the ledger, its SQLite files and the widget store.
+  let directory: URL
   private let suite: String
   let identifier = "a11y-window-\(UUID().uuidString)"
   /// Set when an Accessibility read ran out of time; its reader thread may still be running.
@@ -428,7 +429,7 @@ final class MountedRoot {
   init(
     showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
     size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
-    readsInProcess: Bool = false
+    readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
@@ -439,7 +440,10 @@ final class MountedRoot {
     defer { if !mounted { try? FileManager.default.removeItem(at: directory) } }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let ledger = directory.appendingPathComponent("Demo Household.sqlite")
-    if withLedger { try LedgerDemoTour.makeDemoLedger(at: ledger) }
+    if withLedger {
+      try LedgerDemoTour.makeDemoLedger(at: ledger)
+      try prepareLedger?(ledger)
+    }
     suite = "LedgerAtlasMacUITests.a11y.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     let bookmarks = SecurityScopedBookmarkStore(
