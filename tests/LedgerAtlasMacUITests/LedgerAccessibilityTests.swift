@@ -1,3 +1,4 @@
+import ApplicationServices
 import AppKit
 import Foundation
 import LedgerCore
@@ -169,4 +170,40 @@ private final class FullSizeTestWindow: NSWindow {
   }
   #expect(checked > 0, "no animations found; is the Sources path right?")
   #expect(offenders.isEmpty, "\(offenders)")
+}
+
+// TEMPORARY probe: which way of reading the accessibility tree works on CI.
+@MainActor
+@Test func accessibilityTreeProbe() async throws {
+  let mounted = try await MountedRoot(showing: .accounts)
+  defer { mounted.close() }
+  let view = try #require(mounted.window.contentView)
+  func count(_ node: Any?, _ depth: Int = 0) -> Int {
+    guard depth < 60, let element = node as? NSAccessibilityProtocol & NSObject else { return 0 }
+    return 1 + (element.accessibilityChildren() ?? []).reduce(0) { $0 + count($1, depth + 1) }
+  }
+  print("A11YPROBE contentView children: \(view.accessibilityChildren()?.count ?? -1) total \(count(view))")
+  print("A11YPROBE window total \(count(mounted.window))")
+  print("A11YPROBE subviews \(view.subviews.map { String(describing: type(of: $0)) })")
+  _ = view.accessibilityHitTest(NSPoint(x: 500, y: 400))
+  _ = NSApplication.shared.accessibilityFocusedUIElement()
+  try await Task.sleep(for: .milliseconds(500))
+  print("A11YPROBE after hit test total \(count(view))")
+  let app = AXUIElementCreateApplication(getpid())
+  var windows: CFTypeRef?
+  let windowsError = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
+  print("A11YPROBE AX windows error \(windowsError.rawValue) count \((windows as? [AXUIElement])?.count ?? -1) trusted \(AXIsProcessTrusted())")
+  let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+  let enhanced = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+  print("A11YPROBE set manual \(manual.rawValue) enhanced \(enhanced.rawValue)")
+  try await Task.sleep(for: .milliseconds(1000))
+  view.layoutSubtreeIfNeeded()
+  print("A11YPROBE after AX enable total \(count(view)) window \(count(mounted.window))")
+  func axCount(_ element: AXUIElement, _ depth: Int = 0) -> Int {
+    guard depth < 60 else { return 0 }
+    var children: CFTypeRef?
+    _ = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+    return 1 + ((children as? [AXUIElement]) ?? []).reduce(0) { $0 + axCount($1, depth + 1) }
+  }
+  print("A11YPROBE AXUIElement app total \(axCount(app))")
 }
