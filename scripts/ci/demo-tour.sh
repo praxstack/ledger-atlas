@@ -135,7 +135,7 @@ echo "demo tour: $distinct distinct screens"
 command -v ffmpeg >/dev/null || { echo "ffmpeg unavailable: no videos"; exit 0; }
 
 # The screen recording. A recording without permission shows only the desktop, so count how
-# often the picture changes: the tour moves through 16 screens, so a real recording changes
+# often the picture changes: the tour moves through 17 screens, so a real recording changes
 # many times, while a desktop-only one barely changes.
 if [ -s "$RAW" ]; then
   if ffmpeg -y -loglevel error -i "$RAW" -t "$TOUR_SECONDS" \

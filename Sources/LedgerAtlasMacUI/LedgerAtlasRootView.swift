@@ -34,6 +34,10 @@ public struct LedgerAtlasRootView: View {
   /// Starts as this Mac's zone, which is where a phone backup was usually made; the import
   /// screen shows it and it can be changed before the backup is read.
   @State private var sourceTimeZoneIdentifier = TimeZone.current.identifier
+  /// The account picked in the sidebar, shown on the Accounts screen.
+  @State private var focusedAccountID: String?
+  /// Sidebar accounts with balances, rebuilt once per snapshot rather than on every render.
+  @State private var sidebarAccounts: [LedgerSidebarAccount] = []
   private let bookmarkStore: SecurityScopedBookmarkStore
   private let intentConsumer: () -> LedgerIntentRequest?
   private let widgetProjectionPublisher: RedactedWidgetProjectionPublisher?
@@ -81,14 +85,14 @@ public struct LedgerAtlasRootView: View {
 
   public var body: some View {
     NavigationSplitView {
-      List(AppDestination.allCases, selection: $selection) { destination in
-        Label(destination.title, systemImage: destination.systemImageName)
-          .tag(destination)
-          .accessibilityLabel(destination.accessibilityLabel)
-          .accessibilityHint(destination.accessibilityHint)
-      }
+      LedgerSidebar(
+        selection: $selection, focusedAccountID: $focusedAccountID,
+        accounts: appLock.isLocked ? [] : sidebarAccounts,
+        showsImportCard: !appLock.isLocked && session.screen != .loaded,
+        importDisabled: journey.backgroundWork != nil,
+        importBackup: chooseImportSource)
       .navigationTitle("Ledger Atlas")
-      .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+      .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
     } detail: {
       if appLock.isLocked {
         LockedSurface(
@@ -104,8 +108,34 @@ public struct LedgerAtlasRootView: View {
       }
     }
     .preferredColorScheme(productSettings.colorScheme)
+    .environment(\.ledgerFormatter, LedgerDisplayFormatter(settings: productSettings))
+    .environment(\.ledgerAmountColors, productSettings.amountColors)
+    .tint(LedgerTheme.accent)
+    .task(id: journey.snapshotGeneration) {
+      // The balance sheet walks every entry, so it is built off the main thread; a newer
+      // snapshot cancels this task and its result is dropped.
+      let snapshot = journey.snapshot
+      let listed = await Task.detached(priority: .userInitiated) {
+        snapshot.map {
+          LedgerSidebarAccount.list(
+            accounts: $0.accounts, groups: $0.accountGroups, transactions: $0.transactions)
+        } ?? []
+      }.value
+      guard !Task.isCancelled else { return }
+      sidebarAccounts = listed
+      if let focused = focusedAccountID, !listed.contains(where: { $0.id == focused }) {
+        focusedAccountID = nil
+      }
+    }
     .toolbar {
       ToolbarItemGroup {
+        Button(action: chooseImportSource) {
+          Label("Import", systemImage: "square.and.arrow.down")
+        }
+        .accessibilityLabel(Self.importBackupActionTitle)
+        .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
+        .help("Import a Money Manager backup (⇧⌘I)")
+        .disabled(appLock.isLocked || journey.backgroundWork != nil)
         Button("Create Ledger…", action: createLedger)
           .accessibilityLabel(Self.createLedgerActionLabel)
           .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
@@ -116,9 +146,6 @@ public struct LedgerAtlasRootView: View {
           .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
           .keyboardShortcut("o", modifiers: .command)
           .disabled(appLock.isLocked)
-        Button(Self.importBackupActionTitle, action: chooseImportSource)
-          .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
-          .disabled(appLock.isLocked || journey.backgroundWork != nil)
       }
     }
     .fileImporter(
@@ -160,7 +187,7 @@ public struct LedgerAtlasRootView: View {
       Self.publishWidget(.ready, publisher: widgetProjectionPublisher, journey: journey)
     }
     .onDisappear { lifecycleTask?.cancel() }
-    .frame(minWidth: 720, minHeight: 480)
+    .frame(minWidth: 900, minHeight: 560)
   }
 
   private static var importTypes: [UTType] {
@@ -263,6 +290,24 @@ public struct LedgerAtlasRootView: View {
       .create, url: LedgerLocations.availableURL(named: field.stringValue, in: directory))
   }
 
+  /// Makes the made-up demo household in app storage and opens it, so a new person can look
+  /// around before importing. It is an ordinary ledger they can delete.
+  private func openSampleLedger() {
+    guard !appLock.isLocked else { return }
+    guard let directory = try? LedgerLocations.ledgersDirectory() else {
+      journey.recordFailure("Ledger Atlas could not prepare its ledger storage.")
+      return
+    }
+    let url = LedgerLocations.availableURL(named: "Sample Household", in: directory)
+    do {
+      try LedgerDemoTour.makeDemoLedger(at: url)
+    } catch {
+      journey.recordFailure("The sample ledger could not be made.")
+      return
+    }
+    performLedgerSelection(.open, url: url)
+  }
+
   /// A ledger already in app storage opens in place. One from anywhere else is copied in first,
   /// because the sandbox will not let SQLite write its journal next to a picked file.
   private func openLedger() {
@@ -341,7 +386,9 @@ public struct LedgerAtlasRootView: View {
       }
       lifecycleMessage = outcome.message
       lifecycleRetryOperation = outcome.retryOperation
-      if [.created, .opened, .upgraded].contains(outcome.kind) { selection = .ledger }
+      if [.created, .opened, .upgraded].contains(outcome.kind) {
+        selection = productSettings.startScreen
+      }
     }
   }
 
@@ -1187,7 +1234,7 @@ public struct LedgerAtlasRootView: View {
         return
       }
     }
-    selection = .ledger
+    selection = productSettings.startScreen
   }
 
   @ViewBuilder
@@ -1208,6 +1255,14 @@ public struct LedgerAtlasRootView: View {
         failure: lifecycleMessage ?? journey.lastFailure,
         retryOperation: lifecycleRetryOperation ?? .open, retry: retryLedger,
         importBackup: chooseImportSource)
+    } else if selection != .importReview, selection != .onboarding, selection != .settings,
+      session.screen == .noLedger
+    {
+      LedgerWelcomeView(
+        sourceTimeZoneIdentifier: $sourceTimeZoneIdentifier, failure: nil,
+        importDisabled: journey.backgroundWork != nil,
+        importBackup: chooseImportSource, createLedger: createLedger, openLedger: openLedger,
+        trySampleData: openSampleLedger)
     } else if selection == .importReview || selection == .onboarding {
       VStack(alignment: .leading, spacing: 16) {
         ImportReviewView(summary: journey.phase == .idle ? importReviewSummary : journey.summary)
@@ -1240,6 +1295,10 @@ public struct LedgerAtlasRootView: View {
         }
       }
       .id(selection)
+    } else if selection == .overview {
+      OverviewSurface(
+        snapshot: journey.snapshot, generation: journey.snapshotGeneration,
+        settings: productSettings, show: { selection = $0 })
     } else if selection == .ledger {
       let listing = splitListing
       LedgerView(

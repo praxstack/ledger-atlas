@@ -42,7 +42,7 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
 
   /// Destinations a user can pick as the screen shown after a ledger opens.
   public static let startScreenChoices: [AppDestination] = [
-    .ledger, .accounts, .insights, .budgets, .categories,
+    .overview, .ledger, .accounts, .insights, .budgets, .categories,
   ]
 
   public static let periodStartDays = 1...31
@@ -68,7 +68,7 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
     appearance: Appearance = .system, localeIdentifier: String = "en_US",
     timeZoneIdentifier: String? = nil,
     firstWeekday: Int = 1, periodStartDay: Int = 1,
-    startScreen: AppDestination = .ledger, amountColors: AmountColors = .incomeGreen,
+    startScreen: AppDestination = .overview, amountColors: AmountColors = .incomeGreen,
     carryOverEnabled: Bool = false, motion: Motion = .followSystem,
     remindersEnabled: Bool = false, reminderHour: Int = 9
   ) {

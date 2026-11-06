@@ -68,6 +68,14 @@ public enum LedgerTheme {
     light: 0x515154, dark: 0xC7C7CC, highContrastLight: 0x2C2C2E, highContrastDark: 0xE5E5EA,
     lightAlpha: 0.85, darkAlpha: 0.66, highContrastLightAlpha: 0.82, highContrastDarkAlpha: 0.75)
 
+  /// Fills for past months in the cash-flow chart; the current month uses the full colour.
+  public static let positiveSoft = dynamic(
+    light: 0x1B774A, dark: 0x4CC985, highContrastLight: 0x0C5F35, highContrastDark: 0x7BE0A8,
+    lightAlpha: 0.35, darkAlpha: 0.4, highContrastLightAlpha: 0.55, highContrastDarkAlpha: 0.6)
+  public static let inkSoft = dynamic(
+    light: 0x1D1D1F, dark: 0xF5F5F7, highContrastLight: 0x000000, highContrastDark: 0xFFFFFF,
+    lightAlpha: 0.22, darkAlpha: 0.26, highContrastLightAlpha: 0.4, highContrastDarkAlpha: 0.45)
+
   /// Pressed states for the two button styles.
   public static let accentPressed = dynamic(light: 0x07636B, dark: 0x3FAAB4, highContrastLight: 0x00474D, highContrastDark: 0x9FE8EE)
   public static let fieldFillPressed = dynamic(
@@ -94,7 +102,7 @@ public enum LedgerTheme {
       ("canvas", canvas), ("recessed", recessed), ("card", card), ("hairline", hairline),
       ("hairlineSoft", hairlineSoft), ("fieldFill", fieldFill), ("fieldFillPressed", fieldFillPressed),
       ("accentSoft", accentSoft), ("accentPressed", accentPressed), ("onAccent", onAccent),
-      ("track", track),
+      ("track", track), ("positiveSoft", positiveSoft), ("inkSoft", inkSoft),
     ]
 
   /// Tokens that keep their colour under Increase Contrast, and why. The window surfaces

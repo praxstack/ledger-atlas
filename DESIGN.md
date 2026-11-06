@@ -86,7 +86,7 @@ All in `Sources/LedgerAtlasMacUI/Design/`.
 ## 5. Layout
 
 - **Window**: `NavigationSplitView`. Sidebar is a floating glass panel (system sidebar style on macOS 26). Minimum window 1000 × 640; the inspector collapses before the table truncates.
-- **Sidebar**: search, then Money (Overview, Transactions, Budgets, Insights, Recurring, Categories & tags), then Accounts with live balances grouped by account group, then a pinned Import Money Manager backup card, then Backup and Settings. Everything else (receipts, transfers, installments, local access, import review) is reached from these screens, the toolbar or the menu bar, not as peers.
+- **Sidebar**: Money (Transactions, Accounts, Budgets, Insights, Recurring), then Accounts with live balances in the person's group order (closed and hidden accounts left out; a negative balance on an asset account is red), then Organise (Categories, Tags & Memos, Transfers, Installments, Receipts, Search), then Ledger (Import Review, Backup & Restore, Local Access, Get Started, Settings). Until a ledger is open, an import card is pinned at the bottom (solid, since the sidebar is already glass); after that, Import lives in the toolbar and the File menu (⇧⌘I). Every screen stays in the sidebar so the keyboard reaches all of them.
 - **Toolbar**: screen title and subtitle on the left; on the right, glass capsule groups: period (‹ October 2026 ›), scope (Month / Quarter / Year), view controls, then Import and **+ New** (primary).
 - **Overview**: left column net-worth card (hero figure, change badge, 12-month line chart, In / Out / Saved strip) and Recent transactions; right column (330 pt) Cash flow, Spending by category, Budgets.
 - **Transactions**: filter chips, In / Out / Net summary line, a table grouped by day with day totals, and a 320 pt inspector showing amount, payee, category, account, tags, note, budget, receipt and provenance ("Imported, unchanged" with backup date and source row).
@@ -113,7 +113,7 @@ Swift Charts. One question per chart, and every chart has an accessible table or
 
 ## 8. Keyboard
 
-`⌘N` new transaction · `⇧⌘N` new ledger · `⌘O` open ledger · `⇧⌘I` import Money Manager backup · `⌘F` search · `⌥⌘F` filters · `⌥⌘I` inspector · `⌘Z` / `⇧⌘Z` undo, redo · Return edits the selected row · Space previews · Delete asks first. Every shortcut also exists in a menu.
+`⇧⌘N` new ledger · `⌘O` open ledger · `⇧⌘I` import Money Manager backup · `⌘F` search · `⌥⌘F` filters · `⌥⌘I` inspector · `⌘Z` / `⇧⌘Z` undo, redo · Return edits the selected row · Space previews · Delete asks first. Every shortcut also exists in a menu.
 
 ## 9. Motion
 
@@ -151,4 +151,5 @@ Every surface defines: no ledger (import first), empty ledger, no results (keep 
 | 2026-11-03 | Spending in ink by default (`AmountColors.incomeGreen`) | Red only signals a problem. The old red-for-spending styles stay available in Settings. |
 | 2026-11-03 | Rupees always use Indian grouping | ₹4,83,676.30 is how rupee figures are read, whatever the display locale. |
 | 2026-11-03 | Text colours tuned to 4.5:1 (7:1 with Increase Contrast) | Review of #161: the quiet symbol and paise and the light-mode green fell below AA. |
-| 2026-11-03 | Sidebar reduced to six areas plus accounts | The sixteen equal destinations were a development inventory. |
+| 2026-11-03 | Sidebar grouped into Money, Accounts, Organise and Ledger | The sixteen equal destinations read as a development inventory; grouping keeps every screen one click and one arrow key away. |
+| 2026-11-03 | The backup's time zone starts at this Mac's zone | Import used to fail with "Choose the backup's source time zone" after the file was picked. The zone is shown on the welcome screen and in the review before anything is written. |

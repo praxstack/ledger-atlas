@@ -49,7 +49,7 @@ private func day(_ year: Int, _ month: Int, _ day: Int) -> SourceLocalDate {
   let upgraded = try JSONDecoder().decode(LedgerProductSettings.self, from: v1)
   #expect(upgraded.appearance == .dark && upgraded.localeIdentifier == "en_GB")
   #expect(upgraded.firstWeekday == 2 && upgraded.periodStartDay == 25 && upgraded.remindersEnabled)
-  #expect(upgraded.startScreen == .ledger && upgraded.reminderHour == 9 && upgraded.timeZoneIdentifier == nil)
+  #expect(upgraded.startScreen == .overview && upgraded.reminderHour == 9 && upgraded.timeZoneIdentifier == nil)
 
   // One bad field falls back alone; the others survive.
   let damaged = Data(
