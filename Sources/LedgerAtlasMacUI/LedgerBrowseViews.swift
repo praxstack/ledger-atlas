@@ -48,6 +48,8 @@ struct LedgerBrowseList: View {
   /// inspector starts hidden; ⌥⌘I still shows it.
   static let inspectorAutoShowWidth: CGFloat = 780
   static let inspectorDefaultsKey = "transactions.inspector"
+  static let showInspectorTitle = "Show Inspector"
+  static let hideInspectorTitle = "Hide Inspector"
 
   private var inspectorChoice: Bool? {
     get { inspectorChoiceRaw < 0 ? nil : inspectorChoiceRaw == 1 }
@@ -115,12 +117,17 @@ struct LedgerBrowseList: View {
     }
     .toolbar {
       ToolbarItem {
+        // A toolbar item speaks its label's title (an accessibility label is not used there), so
+        // the title itself says what pressing it does.
         Button {
           showsInspector.wrappedValue.toggle()
         } label: {
-          Label("Inspector", systemImage: "sidebar.trailing")
+          Label(
+            showsInspector.wrappedValue ? Self.hideInspectorTitle : Self.showInspectorTitle,
+            systemImage: "sidebar.trailing")
         }
-        .accessibilityLabel(showsInspector.wrappedValue ? "Hide inspector" : "Show inspector")
+        .accessibilityLabel(
+          showsInspector.wrappedValue ? Self.hideInspectorTitle : Self.showInspectorTitle)
         .help("Show or hide transaction details (⌥⌘I)")
         .keyboardShortcut("i", modifiers: [.command, .option])
       }

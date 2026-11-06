@@ -58,12 +58,17 @@ import Testing
       // The inspector hides itself in a narrow window, so it is opened from the toolbar.
       let selected = selectFirstEntry(in: root.window)
       #expect(selected, "no entry row to select on the Transactions screen")
-      if !root.accessibilityElements().contains(where: { $0.spokenName == "Hide inspector" }) {
-        _ = root.click(named: "Show inspector")
+      let hide = LedgerBrowseList.hideInspectorTitle
+      captureLog("ledger window before inspector \(root.window.frame)")
+      if !root.accessibilityElements().contains(where: { $0.spokenName == hide }) {
+        #expect(root.click(named: LedgerBrowseList.showInspectorTitle), "no Show Inspector button")
       }
       try await root.settle()
+      captureLog(
+        "ledger window with inspector \(root.window.frame), content min \(root.window.contentMinSize), "
+          + "fitting \(root.window.contentView?.fittingSize ?? .zero)")
       #expect(
-        root.accessibilityElements().contains(where: { $0.spokenName == "Hide inspector" }),
+        root.accessibilityElements().contains(where: { $0.spokenName == hide }),
         "the inspector did not open, so this capture would repeat the plain Transactions shot")
       try record(
         root, String(format: "%02d-%@-inspector", number + 1, destination.rawValue),
@@ -110,10 +115,14 @@ private func reviewDirectory() throws -> URL {
 
 /// Brings the app and the window to the front, so the window draws as the active one (full
 /// title and toolbar colour, accent selection) instead of the dimmed inactive look.
+/// The app is activated only when it isn't already: each activation can end the test runner's
+/// run of the main loop (see `MountedRoot.keepTestRunLoopAlive`).
 @MainActor
 private func activate(_ window: NSWindow) {
-  NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
-  NSApplication.shared.activate(ignoringOtherApps: true)
+  if !NSApplication.shared.isActive {
+    NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+    NSApplication.shared.activate(ignoringOtherApps: true)
+  }
   window.makeKeyAndOrderFront(nil)
   window.makeMain()
   pump(0.2)

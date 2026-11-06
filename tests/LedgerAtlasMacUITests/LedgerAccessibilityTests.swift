@@ -444,6 +444,9 @@ final class MountedRoot {
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
+    // The Transactions inspector remembers its state in the standard defaults; every mount
+    // starts undecided, so it picks its default by width as on a first launch.
+    UserDefaults.standard.removeObject(forKey: LedgerBrowseList.inspectorDefaultsKey)
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
     self.directory = directory
@@ -548,7 +551,9 @@ final class MountedRoot {
   nonisolated(unsafe) private static var loopDepth = 0
   /// How many times the test runner's run of the main loop was stopped and run again.
   nonisolated(unsafe) static var runLoopRestarts = 0
-  static let maxRunLoopRestarts = 20
+  /// Each restart costs a few stack frames; the design-review set alone mounts 20 windows,
+  /// some of which stop the loop once each.
+  static let maxRunLoopRestarts = 60
 
   /// The test process lives inside the test runner's own run of the main run loop, and that
   /// run should never end: when the tests finish, the runner calls exit() itself. Something in
