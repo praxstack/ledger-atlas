@@ -13,7 +13,7 @@ struct LockedSurface: View {
   var body: some View {
     VStack(spacing: LedgerTheme.Space.l) {
       ZStack {
-        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(LedgerTheme.accentSoft)
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.accentSoft)
         Image(systemName: "lock.shield")
           .font(LedgerTheme.Typeface.figureLarge)
           .foregroundStyle(LedgerTheme.accent)
@@ -366,7 +366,7 @@ struct PasscodeForm: View {
 
   var body: some View {
     Form {
-      Text(mode.title).font(.headline)
+      Text(mode.title).font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       if mode.needsCurrent {
         SecureField("Current passcode", text: $current).textContentType(.password)
       }

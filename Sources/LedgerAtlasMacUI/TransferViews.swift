@@ -137,18 +137,18 @@ struct NativeTransferForm: View {
               destinationLiteral: destinationAmount, destinationUnit: destinationUnit)
           {
             Text("Rate: \(preview)")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
               .accessibilityLabel("Exchange rate \(preview)")
           } else {
             Text("The exchange rate is worked out from the two amounts.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
           }
         } else {
           Text("Destination amount equals the amount sent.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
         }
         TextField("Fee (optional)", text: $feeAmount)
           .accessibilityLabel("Transfer fee")

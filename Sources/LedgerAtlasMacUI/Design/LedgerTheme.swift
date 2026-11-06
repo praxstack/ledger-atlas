@@ -176,6 +176,8 @@ public enum LedgerTheme {
     public static let card: CGFloat = 14
     /// Floating sidebar and sheets (concentric with the window corner).
     public static let panel: CGFloat = 16
+    /// The 44 pt icon tile of empty states and the lock screen.
+    public static let tile: CGFloat = 12
   }
 
   /// Standard row heights.
@@ -210,6 +212,10 @@ public enum LedgerTheme {
     public static let secondary = Font.callout
     public static let caption = Font.subheadline
     public static let captionEmphasis = Font.system(.subheadline, weight: .semibold)
+    /// Addresses, digests and the accessible table: body size, fixed pitch.
+    public static let mono = Font.body.monospaced()
+    /// The symbol in a badge.
+    public static let badgeSymbol = Font.system(.caption2, weight: .semibold)
   }
 
   /// Tracking for figures by role: large figures tighten like SF Pro Display.

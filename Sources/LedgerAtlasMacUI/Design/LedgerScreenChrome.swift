@@ -23,7 +23,7 @@ struct LedgerEmptyState<Actions: View>: View {
   var body: some View {
     VStack(spacing: LedgerTheme.Space.m) {
       ZStack {
-        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(LedgerTheme.fieldFill)
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.fieldFill)
         Image(systemName: systemImage)
           .font(LedgerTheme.Typeface.figure)
           .foregroundStyle(LedgerTheme.inkSecondary)
@@ -175,7 +175,7 @@ struct LedgerBadge: View {
   var body: some View {
     HStack(spacing: LedgerTheme.Space.xs) {
       if let systemImage {
-        Image(systemName: systemImage).font(.system(.caption2, weight: .semibold))
+        Image(systemName: systemImage).font(LedgerTheme.Typeface.badgeSymbol)
       }
       Text(text).font(LedgerTheme.Typeface.captionEmphasis)
     }
@@ -236,6 +236,7 @@ struct LedgerKeyValue: View {
         .multilineTextAlignment(.trailing)
     }
     .padding(.vertical, LedgerTheme.Space.s)
+    .accessibilityElement(children: .combine)
   }
 }
 

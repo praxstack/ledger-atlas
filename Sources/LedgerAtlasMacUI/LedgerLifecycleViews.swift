@@ -51,7 +51,7 @@ struct LedgerLifecycleClosedSessionView: View {
   var body: some View {
     VStack(spacing: LedgerTheme.Space.m) {
       ZStack {
-        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(LedgerTheme.fieldFill)
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.fieldFill)
         Image(systemName: "exclamationmark.triangle")
           .font(LedgerTheme.Typeface.figure)
           .foregroundStyle(LedgerTheme.warning)
@@ -95,7 +95,7 @@ struct EmptyLedgerPrompt: View {
   var body: some View {
     VStack(spacing: LedgerTheme.Space.m) {
       ZStack {
-        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(LedgerTheme.fieldFill)
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.fieldFill)
         Image(systemName: "folder")
           .font(LedgerTheme.Typeface.figure)
           .foregroundStyle(LedgerTheme.inkSecondary)

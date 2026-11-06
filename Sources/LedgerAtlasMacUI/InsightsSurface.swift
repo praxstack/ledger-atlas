@@ -390,7 +390,7 @@ struct InsightsSurface: View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
       LedgerCardHeader("Accessible table")
       Text(table)
-        .font(.body.monospaced())
+        .font(LedgerTheme.Typeface.mono)
         .foregroundStyle(LedgerTheme.ink)
         .textSelection(.enabled)
         .accessibilityLabel(table)

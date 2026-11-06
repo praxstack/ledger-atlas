@@ -383,7 +383,7 @@ struct TagNameForm: View {
 
   var body: some View {
     Form {
-      Text(title).font(.headline)
+      Text(title).font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       TextField(fieldLabel, text: $name)
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
@@ -419,10 +419,10 @@ struct TagPickerForm: View {
 
   var body: some View {
     Form {
-      Text("Tags").font(.headline)
+      Text("Tags").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       let choices = AnnotationPresentation.selectableTags(tags, keeping: original)
       if choices.isEmpty {
-        Text("No tags yet. Create tags under Tags & Memos.").foregroundStyle(.secondary)
+        Text("No tags yet. Create tags under Tags & Memos.").font(LedgerTheme.Typeface.secondary).foregroundStyle(LedgerTheme.inkSecondary)
       }
       ForEach(choices, id: \.id) { tag in
         Toggle(
@@ -497,7 +497,7 @@ struct TemplateForm: View {
 
   var body: some View {
     Form {
-      Text(template == nil ? "New template" : "Edit template").font(.headline)
+      Text(template == nil ? "New template" : "Edit template").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       TextField("Template name", text: $name)
       if template == nil {
         Picker("Kind", selection: $kind) {
@@ -605,7 +605,7 @@ struct MemoForm: View {
 
   var body: some View {
     Form {
-      Text(memo == nil ? "New memo" : "Edit memo").font(.headline)
+      Text(memo == nil ? "New memo" : "Edit memo").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       DatePicker("Day", selection: $day, displayedComponents: .date)
       TextEditor(text: $text)
         .frame(minHeight: 120)

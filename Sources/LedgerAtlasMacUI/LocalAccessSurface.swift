@@ -30,7 +30,7 @@ struct LocalAccessSurface: View {
           }
           .accessibilityElement(children: .combine)
           Text(portalURL.absoluteString)
-            .font(.body.monospaced())
+            .font(LedgerTheme.Typeface.mono)
             .foregroundStyle(LedgerTheme.ink)
             .textSelection(.enabled)
             .padding(.horizontal, LedgerTheme.Space.m)
