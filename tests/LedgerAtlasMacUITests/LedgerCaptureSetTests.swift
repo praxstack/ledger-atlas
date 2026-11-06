@@ -463,9 +463,9 @@ private func distinctColours(in image: NSBitmapImageRep) -> Int {
 
 /// Window size for captures: it fits on the runner's 1024 x 768 display, so the window server
 /// has drawn all of it.
-private let captureSize = NSSize(width: 1000, height: 700)
+let captureSize = NSSize(width: 1000, height: 700)
 
-private func log(_ line: String) {
+func log(_ line: String) {
   FileHandle.standardError.write(Data("CAPTURE \(line)\n".utf8))
 }
 
@@ -474,7 +474,7 @@ private func log(_ line: String) {
 /// SwiftUI (the sidebar, most labels) yet still passes the size and colour checks, so it is
 /// only a fallback for a local Mac without Screen Recording permission, and CI fails on it.
 @MainActor
-private func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
+func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
   window.contentView?.layoutSubtreeIfNeeded()
   window.displayIfNeeded()
   let file = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -557,7 +557,7 @@ private func drainLog(_ step: String, seconds: Double = 0.3) {
   }
 }
 
-private func pump(_ seconds: TimeInterval) {
+func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
