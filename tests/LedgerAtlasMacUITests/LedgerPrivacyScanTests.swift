@@ -11,9 +11,10 @@ import Testing
 
 /// #57 privacy scan: no ledger data leaves the device or lands in logs.
 ///
-/// A synthetic ledger gets an account and a category with unique marker names. The real app
-/// root view then shows that ledger on every screen, and diagnostics are exported from it.
-/// The markers must show on screen (so the scan isn't vacuous) and must never appear in the
+/// A synthetic ledger gets an account, a category and a transaction note with unique marker
+/// names. The real app root view then shows that ledger on every screen, and diagnostics are
+/// exported from it. A marker must show on every screen, and the note on the ledger screen's
+/// rows (so the scan isn't vacuous), and the markers must never appear in the
 /// process's console output, in the widget's shared file, in the diagnostics export, or in any
 /// file written under the temporary, Logs, Caches, Preferences or Application Support folders
 /// outside the ledger's own folder.
@@ -23,7 +24,8 @@ import Testing
   let started = Date()
   let console = try ConsoleCapture()
   var ledgerFolders: [URL] = []
-  var shownOnScreen = false
+  var screensWithoutMarker: [String] = []
+  var noteShownInLedger = false
   var exportedDiagnostics: Data?
   var widgetFiles: [Data] = []
   do {
@@ -33,7 +35,8 @@ import Testing
       ledgerFolders.append(mounted.directory.standardizedFileURL)
       let text = mounted.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
         .joined(separator: "\n")
-      if markers.all.contains(where: text.contains) { shownOnScreen = true }
+      if !markers.all.contains(where: text.contains) { screensWithoutMarker.append(destination.rawValue) }
+      if destination == .ledger, text.contains(markers.note) { noteShownInLedger = true }
       let widget = mounted.directory.appendingPathComponent(RedactedWidgetProjectionStore.filename)
       if let data = try? Data(contentsOf: widget) { widgetFiles.append(data) }
       mounted.close()
@@ -55,7 +58,8 @@ import Testing
   let output = console.output
   print("PRIVACY console bytes \(output.count), widget files \(widgetFiles.count)")
 
-  #expect(shownOnScreen, "the marker account never showed on screen, so the scan proves nothing")
+  #expect(screensWithoutMarker.isEmpty, "no marker on screen \(screensWithoutMarker), so the scan proves nothing there")
+  #expect(noteShownInLedger, "the marker transaction never showed in the ledger rows, so the scan proves nothing")
   #expect(markers.found(in: output).isEmpty, "ledger data reached the console: \(markers.found(in: output))")
   for data in widgetFiles {
     #expect(markers.found(in: data).isEmpty, "ledger data reached the widget's shared file")
@@ -80,7 +84,8 @@ import Testing
     for file in filesWritten(under: root, since: started) {
       let path = file.standardizedFileURL.path
       if ledgerFolders.contains(where: { path.hasPrefix($0.path + "/") }) { continue }
-      guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { continue }
+      // Read, not mapped: another process truncating a cache or temp file would fault a mapping.
+      guard let data = try? Data(contentsOf: file) else { continue }
       scanned += 1
       if !markers.found(in: data).isEmpty { leaks.append(path) }
     }
@@ -89,21 +94,25 @@ import Testing
   #expect(leaks.isEmpty, "ledger data was written outside the ledger's folder: \(leaks)")
 }
 
-/// Leaving the device: the signed app's sandbox has no outgoing-network entitlement, so macOS
-/// refuses any connection it tries to make. The one incoming one is the Local Web Access server.
-@Test func theAppCannotOpenNetworkConnections() throws {
-  let url = repositoryRoot().appendingPathComponent("LedgerAtlas.entitlements")
+/// Leaving the device: the signed app's and widget's sandboxes have no outgoing-network
+/// entitlement, so macOS refuses any connection they try to make. The one incoming one is the
+/// app's Local Web Access server.
+@Test(arguments: ["LedgerAtlas.entitlements", "LedgerAtlasWidget.entitlements"])
+func theAppCannotOpenNetworkConnections(_ file: String) throws {
+  let url = repositoryRoot().appendingPathComponent(file)
   let data = try Data(contentsOf: url)
   let entitlements = try #require(
     try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
-  #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true)
-  #expect(entitlements["com.apple.security.network.client"] == nil, "the app may connect out")
-  let allowed: Set<String> = [
-    "com.apple.security.app-sandbox", "com.apple.security.application-groups",
-    "com.apple.security.files.user-selected.read-write",
-    "com.apple.security.files.bookmarks.app-scope", "com.apple.security.network.server",
-  ]
-  #expect(Set(entitlements.keys).subtracting(allowed).isEmpty, "new entitlements: review them")
+  #expect(entitlements["com.apple.security.app-sandbox"] as? Bool == true, "\(file): sandbox off")
+  #expect(entitlements["com.apple.security.network.client"] == nil, "\(file): may connect out")
+  var allowed: Set<String> = ["com.apple.security.app-sandbox", "com.apple.security.application-groups"]
+  if file == "LedgerAtlas.entitlements" {
+    allowed.formUnion([
+      "com.apple.security.files.user-selected.read-write",
+      "com.apple.security.files.bookmarks.app-scope", "com.apple.security.network.server",
+    ])
+  }
+  #expect(Set(entitlements.keys).subtracting(allowed).isEmpty, "\(file): new entitlements, review them")
 }
 
 /// Leaving the device, in the code: only the Local Web Access server touches the network, and
@@ -123,27 +132,57 @@ import Testing
   let portal = try #require(try shippedSources().first { $0.0 == "LedgerLoopbackPortal.swift" })
   let source = portal.1.joined(separator: "\n")
   #expect(source.contains("host: .ipv4(.loopback)"), "the server no longer binds to loopback")
-  #expect(!source.contains(".any"), "the server may listen on every address")
+  let anyAddress = try Regex(#"host:\s*\.any\b|\.ipv[46]\(\.any\)|IPv[46]Address\.any\b|Host\.any\b|host:\s*nil"#)
+  #expect(!source.contains(anyAddress), "the server may listen on every address")
 }
 
-/// Logs: shipped code never writes to the console or the system log. Two exceptions, both
-/// without ledger values: a debug-build line in LedgerStore (SQLite codes and errno), and the
-/// demo tour's progress lines, which run only on a Mac with no ledgers and describe the
-/// synthetic demo ledger.
-@Test func shippedCodeDoesNotLog() throws {
-  let logging = try Regex(
-    #"(?<![A-Za-z_.])(print|NSLog|os_log|debugPrint|dump|fputs)\(|\bLogger\(|\bOSLog\(|FileHandle\.standard(Error|Output)"#)
-  let allowed = ["[demo-tour]"]
+/// Logs: shipped code never writes to the console, and writes to the system log only fixed
+/// status words, never a value from the ledger. Allowed: the demo tour's progress lines, which
+/// run only on a Mac with no ledgers and describe the synthetic demo ledger; `Logger`
+/// declarations (they log nothing by themselves); and log calls whose message is a literal with
+/// no interpolation, plus the listed exceptions.
+@Test func shippedCodeDoesNotLogLedgerData() throws {
+  let console = try Regex(
+    #"(?<![A-Za-z_.])(print|NSLog|os_log|debugPrint|dump|fputs)\(|\bOSLog\(|FileHandle\.standard(Error|Output)"#)
+  let logCall = try Regex(#"\b\w*[lL]og(ger)?\.(log|trace|debug|info|notice|warning|error|critical|fault)\("#)
+  let allowedConsole = ["[demo-tour]"]
+  // Log calls that interpolate, each with why it carries no ledger value.
+  let allowedInterpolation = [
+    // The operation name and a lifecycle error's case; LedgerStoreLifecycle.Error has no payload.
+    "LedgerAtlasRootView.swift: lifecycleLog.error("
+  ]
   var offenders: [String] = []
   for (file, lines) in try shippedSources() {
-    var debugDepth = 0
+    // Each open `#if`, and whether the branch the scan is in is debug-only. `#else` after
+    // `#if DEBUG` is release code; `#else` after `#if !DEBUG` is debug code.
+    struct Branch { var debugOnly: Bool; var elseIsDebug: Bool }
+    var branches: [Branch] = []
     for (index, line) in lines.enumerated() {
       let code = line.trimmingCharacters(in: .whitespaces)
-      if code.hasPrefix("#if DEBUG") { debugDepth += 1 }
-      if code.hasPrefix("#endif"), debugDepth > 0 { debugDepth -= 1 }
-      if code.hasPrefix("//") || debugDepth > 0 { continue }
-      if code.contains(logging), !allowed.contains(where: code.contains) {
+      func condition(after prefix: String) -> String {
+        code.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+      }
+      if code.hasPrefix("#if ") {
+        let condition = condition(after: "#if ")
+        branches.append(Branch(debugOnly: condition == "DEBUG", elseIsDebug: condition == "!DEBUG"))
+      } else if code.hasPrefix("#elseif "), !branches.isEmpty {
+        branches[branches.count - 1].debugOnly = condition(after: "#elseif ") == "DEBUG"
+      } else if code.hasPrefix("#else"), !branches.isEmpty {
+        branches[branches.count - 1].debugOnly = branches[branches.count - 1].elseIsDebug
+      } else if code.hasPrefix("#endif"), !branches.isEmpty {
+        branches.removeLast()
+      }
+      if code.hasPrefix("//") || branches.contains(where: \.debugOnly) { continue }
+      if code.contains(console), !allowedConsole.contains(where: code.contains) {
         offenders.append("\(file):\(index + 1): \(code)")
+      }
+      if code.contains(logCall) {
+        // The message may start on the next line.
+        let statement = lines[index..<min(index + 3, lines.count)].joined(separator: " ")
+        let interpolates = statement.contains("\\(")
+        if interpolates, !allowedInterpolation.contains(where: { "\(file): \(code)".hasPrefix($0) }) {
+          offenders.append("\(file):\(index + 1): log message interpolates a value: \(code)")
+        }
       }
     }
   }
@@ -156,7 +195,8 @@ import Testing
 private struct PrivacyMarkers: Sendable {
   let account = "Marker Account Q7X3VZ"
   let category = "Marker Category Q7X3VZ"
-  var all: [String] { [account, category] }
+  let note = "Marker Memo Q7X3VZ"
+  var all: [String] { [account, category, note] }
 
   func found(in data: Data) -> [String] {
     let text = String(decoding: data, as: UTF8.self)
@@ -169,15 +209,30 @@ private struct PrivacyMarkers: Sendable {
     let store = try LedgerStoreLifecycle.open(at: ledger).store
     let app = LedgerApplication(store: store)
     let origin = try LedgerOrigin(id: hash("privacy-origin"), label: "local")
+    let accountID = try StableLedgerID.account(origin: origin, localKey: hash("privacy-account"))
     try app.createAccount(
       LedgerAccount(
-        id: StableLedgerID.account(origin: origin, localKey: hash("privacy-account")),
-        name: account, currencyUnit: "INR", origin: origin, groupID: nil, displayOrder: 9,
-        hidden: false, variant: .standard))
+        id: accountID, name: account, currencyUnit: "INR", origin: origin, groupID: nil,
+        displayOrder: 9, hidden: false, variant: .standard))
+    let categoryID = try StableLedgerID.category(origin: origin, localKey: hash("privacy-category"))
     try app.createCategory(
-      LedgerCategory(
-        id: StableLedgerID.category(origin: origin, localKey: hash("privacy-category")),
-        name: category, kind: .expense, origin: origin, parentID: nil))
+      LedgerCategory(id: categoryID, name: category, kind: .expense, origin: origin, parentID: nil))
+    // One expense inside the demo ledger's months, so it sits among the ledger's rows.
+    let occurredAt = try SourceTemporal(
+      resolving: SourceLocalDateTime(
+        date: SourceLocalDate(year: 2026, month: 10, day: 20), hour: 12, minute: 0, second: 0,
+        millisecond: 0),
+      in: try SourceTimeZone(ianaIdentifier: "Asia/Kolkata"), precision: .minute,
+      ambiguityPolicy: .reject)
+    let draft = try LedgerTransactionDraft(
+      effects: [
+        try LedgerTransactionEffect(
+          accountID: accountID, direction: .decrease,
+          amount: try CurrencyAmount(unitCode: "INR", amount: try ExactDecimal("123.45")))
+      ], categoryID: categoryID, kind: .expense, occurredAt: occurredAt, note: note, origin: origin)
+    _ = try app.createTransaction(
+      idempotencyKey: hash("privacy-transaction"), draft: draft,
+      createdAt: UTCInstant(epochMilliseconds: 1_790_000_100_000))
   }
 
   private func hash(_ text: String) -> String {
@@ -239,11 +294,15 @@ private final class ConsoleCapture: @unchecked Sendable {
       dup2(savedOut, STDOUT_FILENO)
       dup2(savedErr, STDERR_FILENO)
       try? pipe.fileHandleForWriting.close()
-      // Let the reader drain what is left in the pipe.
-      let deadline = Date().addingTimeInterval(2)
+      // Let the reader drain what is left in the pipe. The saved descriptors stay open while
+      // it may still forward to them; if it never finishes, leaking two descriptors is safer
+      // than writing to a closed one.
+      let deadline = Date().addingTimeInterval(5)
       while !reader.isFinished, Date() < deadline { usleep(10_000) }
-      close(savedOut)
-      close(savedErr)
+      if reader.isFinished {
+        close(savedOut)
+        close(savedErr)
+      }
     }
     return output
   }
@@ -253,7 +312,7 @@ private func filesWritten(under root: URL, since date: Date) -> [URL] {
   let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey, .fileSizeKey]
   guard
     let files = FileManager.default.enumerator(
-      at: root, includingPropertiesForKeys: keys, options: [.skipsPackageDescendants])
+      at: root, includingPropertiesForKeys: keys)
   else { return [] }
   var result: [URL] = []
   while let file = files.nextObject() as? URL {
