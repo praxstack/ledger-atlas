@@ -151,7 +151,8 @@ func theAppCannotOpenNetworkConnections(_ file: String) throws {
   let allowedConsole = ["[demo-tour]"]
   // Log calls that interpolate, each with why it carries no ledger value.
   let allowedInterpolation = [
-    // The operation name and a lifecycle error's case; LedgerStoreLifecycle.Error has no payload.
+    // The operation name ("create" or "open") is public; the error's description, which for a
+    // file error carries the ledger's path, is `privacy: .private`, so the system log redacts it.
     "LedgerAtlasRootView.swift: lifecycleLog.error("
   ]
   var offenders: [String] = []

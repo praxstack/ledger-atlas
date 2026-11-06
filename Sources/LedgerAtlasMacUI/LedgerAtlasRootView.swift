@@ -1173,7 +1173,7 @@ public struct LedgerAtlasRootView: View {
           : lifecycleFailureMessage(operation, error)
       }
       lifecycleLog.error(
-        "\(operation == .create ? "create" : "open", privacy: .public) failed: \(String(describing: error), privacy: .public)")
+        "\(operation == .create ? "create" : "open", privacy: .public) failed: \(String(describing: error), privacy: .private)")
       publishWidget(
         permissionDenied ? .permissionDenied : .reopenRequired, publisher: widgetPublisher,
         journey: journey)
