@@ -264,6 +264,8 @@ package enum CanonicalLedgerHealth {
     // ledger keeps evicting the pages the next query needs. A caller already inside a
     // transaction keeps its own.
     let ownsTransaction = sqlite3_get_autocommit(database) != 0
+    let ownsStatementCache = HealthStatementCache.begin(database)
+    defer { if ownsStatementCache { HealthStatementCache.end(database) } }
     let previousCacheSize = try rows(database, "PRAGMA cache_size", { $0.int64(0) }).first
     guard let previousCacheSize,
       sqlite3_exec(database, "PRAGMA cache_size=-262144", nil, nil, nil) == SQLITE_OK
@@ -777,8 +779,8 @@ package enum CanonicalLedgerHealth {
       // SQLite use the primary key instead of scanning every sidecar for each field.
       let represented = try !rows(
         database,
-        "SELECT 1 FROM sidecar_reference WHERE sidecar_id='\(field.text(0))' AND provenance_id='\(field.text(0))' UNION ALL SELECT 1 FROM receipt_preservation_payload WHERE idempotency_key='\(receipt)' AND provenance_id='\(field.text(0))' LIMIT 1",
-        { _ in true }
+        "SELECT 1 FROM sidecar_reference WHERE sidecar_id=?1 AND provenance_id=?1 UNION ALL SELECT 1 FROM receipt_preservation_payload WHERE idempotency_key=?2 AND provenance_id=?1 LIMIT 1",
+        binding: [field.text(0), receipt], { _ in true }
       ).isEmpty
       guard represented else { throw HealthError.invalid }
     }
@@ -801,8 +803,8 @@ package enum CanonicalLedgerHealth {
         try hasTransferTable
         ? rows(
           database,
-          "SELECT transfer_id FROM economic_event_transfer WHERE debit_event_id='\(eventID)' OR credit_event_id='\(eventID)'",
-          { $0.text(0) }
+          "SELECT transfer_id FROM economic_event_transfer WHERE debit_event_id=?1 OR credit_event_id=?1",
+          binding: [eventID], { $0.text(0) }
         ).first ?? eventID
         : eventID
       func field(_ name: String) -> String {
@@ -811,13 +813,15 @@ package enum CanonicalLedgerHealth {
       let sourceRecordID = event.text(17)
       let commitments = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.temporalCommitmentField))'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id=?1 AND l.field=?2",
+        binding: [transactionID, field(MoneyManagerV19Semantics.temporalCommitmentField)],
         { $0.text(0) })
       guard commitments.count <= 1 else { throw HealthError.invalid }
       if generation == .current, commitments.count > 1 { throw HealthError.invalid }
       let temporalAnchors = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.temporalAnchorField))'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id=?1 AND l.field=?2",
+        binding: [transactionID, field(MoneyManagerV19Semantics.temporalAnchorField)],
         { $0.text(0) })
       guard temporalAnchors.count <= 1 else { throw HealthError.invalid }
       if generation == .current {
@@ -854,29 +858,31 @@ package enum CanonicalLedgerHealth {
         else { throw HealthError.invalid }
         let committedAnchors = try rows(
           database,
-          "SELECT 1 FROM receipt_preservation_anchor a JOIN receipt_preservation_membership m ON m.idempotency_key=a.idempotency_key AND m.anchor_id=a.anchor_id AND m.source_subject_id=a.source_subject_id AND m.subject_kind='record' AND m.payload_id IS NULL WHERE a.idempotency_key='\(receipt)' AND a.subject_kind='record' AND a.source_subject_id='\(sourceRecordID)'",
-          { _ in true })
+          "SELECT 1 FROM receipt_preservation_anchor a JOIN receipt_preservation_membership m ON m.idempotency_key=a.idempotency_key AND m.anchor_id=a.anchor_id AND m.source_subject_id=a.source_subject_id AND m.subject_kind='record' AND m.payload_id IS NULL WHERE a.idempotency_key=?1 AND a.subject_kind='record' AND a.source_subject_id=?2",
+          binding: [receipt, sourceRecordID], { _ in true })
         guard committedAnchors.count == 1 else { throw HealthError.invalid }
       }
       let hasAnchor = try !rows(
         database,
-        "SELECT 1 FROM receipt_preservation_anchor WHERE idempotency_key='\(receipt)' AND subject_kind='record' AND source_subject_id='\(sourceRecordID)' LIMIT 1",
-        { _ in true }
+        "SELECT 1 FROM receipt_preservation_anchor WHERE idempotency_key=?1 AND subject_kind='record' AND source_subject_id=?2 LIMIT 1",
+        binding: [receipt, sourceRecordID], { _ in true }
       ).isEmpty
       guard hasAnchor || commitments.isEmpty else { throw HealthError.invalid }
       let sourceSubjectSetMarkers = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.sourceSubjectSetField))'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id=?1 AND l.field=?2",
+        binding: [transactionID, field(MoneyManagerV19Semantics.sourceSubjectSetField)],
         { $0.text(0) })
       let sourceTimeZoneMarkers = try rows(
         database,
-        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id='\(transactionID)' AND l.field='\(field(MoneyManagerV19Semantics.sourceTimeZoneField))'",
+        "SELECT l.literal FROM ledger_transaction_source_literal l JOIN ledger_transaction_revision v ON v.revision_id=l.revision_id WHERE v.transaction_id=?1 AND l.field=?2",
+        binding: [transactionID, field(MoneyManagerV19Semantics.sourceTimeZoneField)],
         { $0.text(0) })
       if generation == .current && requireCurrentMarkers {
         let fieldIDs = try rows(
           database,
-          "SELECT sidecar_id FROM sidecar_reference WHERE event_id='\(eventID)' ORDER BY sidecar_id",
-          { $0.text(0) })
+          "SELECT sidecar_id FROM sidecar_reference WHERE event_id=?1 ORDER BY sidecar_id",
+          binding: [eventID], { $0.text(0) })
         let expectedSubjectSet = MoneyManagerV19Semantics.sourceSubjectSetCommitment(
           sourceRecordID: sourceRecordID, fieldIDs: fieldIDs)
         let expectedTimeZone = MoneyManagerV19Semantics.sourceTimeZoneLiteral(
@@ -898,8 +904,8 @@ package enum CanonicalLedgerHealth {
       // provenance_id by table CHECK); otherwise SQLite scans every payload for each record.
       let missingSidecar = try rows(
         database,
-        "SELECT 1 FROM receipt_preservation_anchor a CROSS JOIN receipt_preservation_payload p ON p.idempotency_key=a.idempotency_key AND p.anchor_id=a.anchor_id LEFT JOIN sidecar_reference s ON s.sidecar_id=p.provenance_id AND s.provenance_id=p.provenance_id LEFT JOIN receipt_event r ON r.idempotency_key=p.idempotency_key AND r.event_id=s.event_id LEFT JOIN event_source_binding b ON b.event_id=s.event_id AND b.provenance_id=s.provenance_id WHERE p.idempotency_key='\(receipt)' AND a.source_subject_id='\(sourceRecordID)' AND s.sidecar_id IS NULL AND b.provenance_id IS NULL LIMIT 1",
-        { _ in true })
+        "SELECT 1 FROM receipt_preservation_anchor a CROSS JOIN receipt_preservation_payload p ON p.idempotency_key=a.idempotency_key AND p.anchor_id=a.anchor_id LEFT JOIN sidecar_reference s ON s.sidecar_id=p.provenance_id AND s.provenance_id=p.provenance_id LEFT JOIN receipt_event r ON r.idempotency_key=p.idempotency_key AND r.event_id=s.event_id LEFT JOIN event_source_binding b ON b.event_id=s.event_id AND b.provenance_id=s.provenance_id WHERE p.idempotency_key=?1 AND a.source_subject_id=?2 AND s.sidecar_id IS NULL AND b.provenance_id IS NULL LIMIT 1",
+        binding: [receipt, sourceRecordID], { _ in true })
       guard missingPreservation.isEmpty, missingSidecar.isEmpty else { throw HealthError.invalid }
     }
   }
@@ -1062,8 +1068,8 @@ package enum CanonicalLedgerHealth {
       var bindings: [CanonicalEventSourceBinding] = []
       for binding in try rows(
         database,
-        "SELECT b.semantic, b.provenance_id, b.declared_type, b.storage_class, p.artifact_sha256, p.profile_id, p.adapter_version, p.container_member, p.source_table, p.source_record_key, p.source_column_ordinal, p.source_column_name FROM event_source_binding b JOIN provenance_reference p ON p.provenance_id=b.provenance_id WHERE b.event_id='\(eventID)' ORDER BY b.semantic",
-        { $0 }
+        "SELECT b.semantic, b.provenance_id, b.declared_type, b.storage_class, p.artifact_sha256, p.profile_id, p.adapter_version, p.container_member, p.source_table, p.source_record_key, p.source_column_ordinal, p.source_column_name FROM event_source_binding b JOIN provenance_reference p ON p.provenance_id=b.provenance_id WHERE b.event_id=?1 ORDER BY b.semantic",
+        binding: [eventID], { $0 }
       ) {
         guard binding.textColumns([0, 1, 3, 4, 5, 6, 8, 9]), binding.nullOrText(2),
           binding.nullOrText(7), binding.nullOrInteger(10), binding.nullOrText(11)
@@ -1090,8 +1096,8 @@ package enum CanonicalLedgerHealth {
       var retainedSidecars: [MoneyManagerV19Semantics.RetainedSidecar] = []
       for sidecar in try rows(
         database,
-        "SELECT s.sidecar_id, s.provenance_id, s.format_version, s.declared_type, s.storage_class, s.payload, p.artifact_sha256, p.profile_id, p.adapter_version, p.container_member, p.source_table, p.source_record_key, p.source_column_ordinal, p.source_column_name FROM sidecar_reference s JOIN provenance_reference p ON p.provenance_id=s.provenance_id WHERE s.event_id='\(eventID)' ORDER BY s.sidecar_id",
-        { $0 }
+        "SELECT s.sidecar_id, s.provenance_id, s.format_version, s.declared_type, s.storage_class, s.payload, p.artifact_sha256, p.profile_id, p.adapter_version, p.container_member, p.source_table, p.source_record_key, p.source_column_ordinal, p.source_column_name FROM sidecar_reference s JOIN provenance_reference p ON p.provenance_id=s.provenance_id WHERE s.event_id=?1 ORDER BY s.sidecar_id",
+        binding: [eventID], { $0 }
       ) {
         guard sidecar.textColumns([0, 1, 4, 6, 7, 8, 10, 11]),
           sidecar.integerColumns([2]), sidecar.blobColumns([5]), sidecar.nullOrText(3),
@@ -1176,13 +1182,13 @@ package enum CanonicalLedgerHealth {
     for binding in bindings {
       let sidecars = try rows(
         database,
-        "SELECT declared_type, storage_class, payload FROM sidecar_reference WHERE event_id='\(eventID)' AND provenance_id='\(binding.provenance.deterministicID)'",
-        { $0 })
+        "SELECT declared_type, storage_class, payload FROM sidecar_reference WHERE event_id=?1 AND provenance_id=?2",
+        binding: [eventID, binding.provenance.deterministicID], { $0 })
       guard sidecars.count <= 1 else { throw HealthError.invalid }
       let payloads = try rows(
         database,
-        "SELECT declared_type, storage_class, payload FROM receipt_preservation_payload WHERE idempotency_key='\(receipt)' AND provenance_id='\(binding.provenance.deterministicID)'",
-        { $0 })
+        "SELECT declared_type, storage_class, payload FROM receipt_preservation_payload WHERE idempotency_key=?1 AND provenance_id=?2",
+        binding: [receipt, binding.provenance.deterministicID], { $0 })
       guard payloads.count <= 1 else { throw HealthError.invalid }
       guard let source = sidecars.first ?? payloads.first else { continue }
       guard source.nullOrText(0), source.textColumns([1]), source.blobColumns([2]),
@@ -1396,14 +1402,42 @@ package enum CanonicalLedgerHealth {
     }
   }
 
-  private static func rows<T>(_ database: OpaquePointer, _ sql: String, _ body: (Row) throws -> T)
-    throws -> [T]
-  {
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      throw HealthError.invalid
+  private static func rows<T>(
+    _ database: OpaquePointer, _ sql: String, binding parameters: [String] = [],
+    _ body: (Row) throws -> T
+  ) throws -> [T] {
+    // A query with bound values runs once per row of a large import, so it reuses a statement
+    // prepared once per check. Anything else is prepared and finalized here.
+    let cached = parameters.isEmpty ? nil : HealthStatementCache.take(database, sql)
+    var statement = cached
+    if statement == nil {
+      guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, statement != nil
+      else {
+        sqlite3_finalize(statement)
+        throw HealthError.invalid
+      }
     }
-    defer { sqlite3_finalize(statement) }
+    guard let statement else { throw HealthError.invalid }
+    defer {
+      if let cached {
+        sqlite3_reset(cached)
+        sqlite3_clear_bindings(cached)
+        HealthStatementCache.give(database, sql, cached)
+      } else {
+        sqlite3_finalize(statement)
+      }
+    }
+    for (index, value) in parameters.enumerated() {
+      // Bound with its byte length, so a value with a NUL inside is compared whole rather than
+      // cut short at the NUL (and possibly matching another row).
+      // withCString's buffer holds every UTF-8 byte, embedded NULs included.
+      let bound = value.withCString {
+        sqlite3_bind_text(
+          statement, Int32(index + 1), $0, Int32(value.utf8.count),
+          unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+      }
+      guard bound == SQLITE_OK else { throw HealthError.invalid }
+    }
     var values: [T] = []
     while sqlite3_step(statement) == SQLITE_ROW {
       values.append(try body(Row(statement: statement)))
@@ -1461,5 +1495,65 @@ package enum CanonicalLedgerHealth {
     }
     let category = try require(categories[id])
     guard kind != .transfer, category.kind.accepts(kind) else { throw HealthError.invalid }
+  }
+}
+
+/// Statements with bound values, prepared once for the length of one health check. A real
+/// backup runs the same per-row lookups hundreds of thousands of times. A statement is taken
+/// out while a query runs, so a nested query with the same text prepares its own.
+private enum HealthStatementCache {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var caches: [OpaquePointer: [String: OpaquePointer]] = [:]
+  nonisolated(unsafe) private static var prepared: [OpaquePointer: Int] = [:]
+  private static let limit = 64
+
+  /// Starts a cache for `database`. False when one is already running; only its owner ends it.
+  static func begin(_ database: OpaquePointer) -> Bool {
+    lock.withLock {
+      guard caches[database] == nil else { return false }
+      caches[database] = [:]
+      prepared[database] = 0
+      return true
+    }
+  }
+
+  static func end(_ database: OpaquePointer) {
+    let statements = lock.withLock { () -> [String: OpaquePointer] in
+      prepared.removeValue(forKey: database)
+      return caches.removeValue(forKey: database) ?? [:]
+    }
+    for statement in statements.values { sqlite3_finalize(statement) }
+  }
+
+  /// A statement for `sql` to use and hand back with `give`, or nil when `database` has no
+  /// cache or it is full.
+  static func take(_ database: OpaquePointer, _ sql: String) -> OpaquePointer? {
+    lock.withLock {
+      guard caches[database] != nil else { return nil }
+      if let statement = caches[database]?.removeValue(forKey: sql) { return statement }
+      guard let count = prepared[database], count < limit else { return nil }
+      var statement: OpaquePointer?
+      guard
+        sqlite3_prepare_v3(
+          database, sql, -1, UInt32(SQLITE_PREPARE_PERSISTENT), &statement, nil) == SQLITE_OK,
+        let statement
+      else {
+        sqlite3_finalize(statement)
+        return nil
+      }
+      prepared[database] = count + 1
+      return statement
+    }
+  }
+
+  /// Returns a statement from `take`. It is finalized when the cache has ended meanwhile or
+  /// already holds one for the same text.
+  static func give(_ database: OpaquePointer, _ sql: String, _ statement: OpaquePointer) {
+    let kept = lock.withLock { () -> Bool in
+      guard caches[database] != nil, caches[database]?[sql] == nil else { return false }
+      caches[database]?[sql] = statement
+      return true
+    }
+    if !kept { sqlite3_finalize(statement) }
   }
 }

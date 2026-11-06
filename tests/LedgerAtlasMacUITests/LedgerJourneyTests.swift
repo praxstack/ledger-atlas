@@ -19,19 +19,7 @@ import Testing
 }
 
 @MainActor
-@Test func widgetPublicationFailureKeepsTheWidgetAndFlowFailuresTogetherOnce() {
-  #expect(
-    LedgerAtlasRootView.failureMessage(
-      widgetPublished: false, flowFailure: "Ledger access was not granted.")
-      == "Widget status could not be published. Ledger access was not granted.")
-  #expect(
-    LedgerAtlasRootView.failureMessage(
-      widgetPublished: true, flowFailure: "Ledger access was not granted.")
-      == "Ledger access was not granted.")
-}
-
-@MainActor
-@Test func failedWidgetPublicationClosesTheSessionAndOpenedJourney() async throws {
+@Test func failedWidgetPublicationKeepsTheSessionAndOpenedJourney() async throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
@@ -57,15 +45,20 @@ import Testing
   let publisher = RedactedWidgetProjectionPublisher(write: { _ in
     throw CocoaError(.fileWriteNoPermission)
   })
-  #expect(
-    !LedgerAtlasRootView.publishWidget(
-      .ready, publisher: publisher, journey: journey, session: session))
+  let ledgerURL = journey.ledgerURL
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: publisher, journey: journey))
 
-  #expect(session.screen == .noLedger)
-  #expect(stops.value == 1)
-  #expect(journey.ledgerURL == nil)
-  #expect(journey.snapshot == nil)
-  #expect(!journey.isEditing)
+  // The widget is a convenience; failing to update it never closes the ledger (P0, 2026-11-03).
+  #expect(session.screen == .loaded)
+  #expect(stops.value == 0)
+  #expect(journey.ledgerURL == ledgerURL)
+  #expect(journey.snapshot != nil)
+  #expect(journey.isEditing)
+  #expect(journey.lastFailure == nil)
+  // A build without a widget (the ad-hoc DMG) has no publisher, and nothing is reported.
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: nil, journey: journey))
+  #expect(journey.lastFailure == nil)
+  #expect(LedgerWidgetAvailability.publisherForThisBuild(teamIdentifier: nil) == nil)
 }
 
 @MainActor
@@ -98,14 +91,14 @@ import Testing
     !LedgerAtlasRootView.publishWidget(
       .ready,
       publisher: .init(write: { _ in throw CocoaError(.fileWriteNoPermission) }),
-      journey: journey, session: session, closeLedgerOnFailure: false))
+      journey: journey))
 
   #expect(bookmarks.reopen(.canonicalLedger) == .resolved(ledgerURL))
   #expect(session.screen == .loaded)
   #expect(journey.phase == .imported)
   #expect(journey.ledgerURL == ledgerURL)
   #expect(journey.snapshot != nil)
-  #expect(journey.lastFailure == "Widget status could not be published.")
+  #expect(journey.lastFailure == nil)
 }
 
 @MainActor
@@ -1287,4 +1280,154 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   let checksum = try journey.checksum()
   try journey.generateOccurrences(rule, through: end, createdAt: UTCInstant(epochMilliseconds: 2))
   #expect(try journey.checksum() == checksum)
+}
+
+@MainActor
+@Test func backgroundImportPreparesAndApprovesOffTheMainThreadAndOpensTheLedger() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+
+  let journey = LedgerJourney()
+  let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
+  let session = LedgerSession()
+  #expect(journey.backgroundWork == nil)
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: utc)
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.lastFailure == nil)
+  #expect(journey.phase == .reviewing)
+  #expect(journey.summary.decision == .reviewable)
+
+  await journey.approveInBackground(into: session)
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.lastFailure == nil)
+  #expect(journey.phase == .imported)
+  #expect(journey.ledgerURL == directory.appendingPathComponent("canonical.sqlite"))
+  #expect(!journey.rows(for: .ledger).isEmpty)
+  #expect(session.screen != .loading)
+
+  // Approving again without a new preparation fails visibly instead of importing twice.
+  await journey.approveInBackground(into: session)
+  #expect(journey.lastFailure == "Import could not be approved.")
+}
+
+@MainActor
+@Test func backgroundImportShowsAFileThatIsNotABackupAsBlocked() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("not-a-backup.sqlite")
+  try Data("not sqlite".utf8).write(to: source)
+  let journey = LedgerJourney()
+  let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: directory.appendingPathComponent("canonical.sqlite"),
+    sourceTimeZone: utc)
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.phase == .blocked)
+  await journey.approveInBackground(into: LedgerSession())
+  #expect(journey.lastFailure == "Import could not be approved.")
+}
+
+@Test func elapsedTimeReadsInSecondsThenMinutes() {
+  let start = Date(timeIntervalSince1970: 0)
+  #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(12.7)) == "12 s")
+  #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(65)) == "1 min 05 s")
+  #expect(LedgerElapsedTime.text(since: start, now: start.addingTimeInterval(-3)) == "0 s")
+}
+
+@MainActor
+@Test func backgroundImportResultIsDroppedWhenTheLedgerIsClosedMeanwhile() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+
+  // Closed while the backup is being read: the review is not adopted.
+  let journey = LedgerJourney()
+  let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
+  let preparing = Task {
+    await journey.selectSourceInBackground(
+      source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+      canonicalDatabaseURL: canonical, sourceTimeZone: utc)
+  }
+  try await waitForBackgroundWork(.preparingImport, in: journey)
+  journey.closeLedger()
+  await preparing.value
+  #expect(journey.phase == .idle)
+  #expect(journey.lastFailure == nil)
+  #expect(journey.backgroundWork == nil)
+
+  // Closed while importing: the new ledger isn't adopted or shown, and the caller learns it.
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage2.sqlite"),
+    canonicalDatabaseURL: canonical, sourceTimeZone: utc)
+  #expect(journey.phase == .reviewing)
+  let session = LedgerSession()
+  let importing = Task { await journey.approveInBackground(into: session) }
+  try await waitForBackgroundWork(.importing, in: journey)
+  journey.closeLedger()
+  #expect(await importing.value == false)
+  #expect(journey.phase == .idle)
+  #expect(journey.ledgerURL == nil)
+  #expect(journey.snapshot == nil)
+  #expect(session.screen == .noLedger)
+}
+
+/// Yields until the journey reports `work`, failing (not hanging) if it never does, for example
+/// because the step already finished.
+@MainActor
+private func waitForBackgroundWork(
+  _ work: LedgerJourney.BackgroundWork, in journey: LedgerJourney
+) async throws {
+  let deadline = Date().addingTimeInterval(10)
+  while journey.backgroundWork != work {
+    try #require(Date() < deadline, "background work \(work) never started")
+    await Task.yield()
+  }
+}
+
+@MainActor
+@Test func aFailedNonReadyWidgetStatusRemovesTheOldSummary() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let store = RedactedWidgetProjectionStore(containerURL: directory)
+  try store.write(.init(state: .ready))
+  let real = RedactedWidgetProjectionPublisher(store: store)
+  let failing = RedactedWidgetProjectionPublisher(
+    write: { _ in throw CocoaError(.fileWriteNoPermission) }, remove: { real.clear() })
+  let journey = LedgerJourney()
+
+  // A failed refresh of an open ledger keeps the last summary.
+  #expect(!LedgerAtlasRootView.publishWidget(.ready, publisher: failing, journey: journey))
+  #expect(store.readOnly().state == .ready)
+  // A failed "locked" must not leave it showing: the widget falls back to reopen-required.
+  #expect(!LedgerAtlasRootView.publishWidget(.locked, publisher: failing, journey: journey))
+  #expect(!FileManager.default.fileExists(atPath: store.url.path))
+  #expect(store.readOnly().state == .reopenRequired)
+}
+
+@Test func removingARefusedCopyLeavesLedgersWithASimilarName() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let copy = directory.appendingPathComponent("Home.sqlite")
+  let names = ["Home.sqlite", "Home.sqlite-journal", "Home.sqlite-wal", "Home.sqlite-shm",
+    "Home.sqlite 2.sqlite", "Home.sqlite.v10-recovery"]
+  for name in names { try Data("x".utf8).write(to: directory.appendingPathComponent(name)) }
+
+  LedgerLocations.removeLedgerFiles(at: copy)
+
+  #expect(
+    try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+      == ["Home.sqlite 2.sqlite", "Home.sqlite.v10-recovery"])
 }

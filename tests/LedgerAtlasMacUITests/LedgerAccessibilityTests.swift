@@ -24,18 +24,111 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
 }
 
 /// Guard for Increase Contrast: macOS raises contrast for system colours by itself, so the app may only
-/// use system colours. A hand-mixed colour or a faded one (`opacity`) wouldn't follow the
-/// setting and fails here.
+/// use system colours or the theme's tokens. A hand-mixed colour or a faded one (`opacity`)
+/// wouldn't follow the setting and fails here. `LedgerTheme.swift` is the one exemption: it
+/// defines every token with its own Increase Contrast value (`themeColoursHaveIncreaseContrastValues`).
 @Test func everyColourFollowsIncreaseContrast() throws {
   let custom = ["Color(red:", "Color(white:", "Color(hue:", "NSColor(red:", "NSColor(white:",
-                "Color(\"", "Color(#", ".opacity("]
+                "NSColor(srgbRed:", "NSColor(name:", "Color(\"", "Color(#", ".opacity("]
   var offenders: [String] = []
-  for (file, lines) in try appSources() {
+  for (file, lines) in try appSources() where file != "LedgerTheme.swift" {
     for (index, line) in lines.enumerated() where custom.contains(where: line.contains) {
       offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
     }
   }
   #expect(offenders.isEmpty, "\(offenders)")
+}
+
+/// The theme's colours follow Increase Contrast: every token resolves differently under the
+/// high-contrast appearances, like the system colours do. The few that may not are listed,
+/// with the reason, in `LedgerTheme.increaseContrastExceptions`.
+@MainActor
+@Test func themeColoursHaveIncreaseContrastValues() throws {
+  for (name, color) in LedgerTheme.allTokens {
+    for (normal, high) in themeAppearancePairs {
+      let a = try resolvedThemeColor(color, normal), b = try resolvedThemeColor(color, high)
+      if a == b, let reason = LedgerTheme.increaseContrastExceptions[name] {
+        print("A11Y CONTRAST \(name) unchanged in \(high.rawValue): \(reason)")
+        continue
+      }
+      #expect(a != b, "\(name) looks the same with Increase Contrast in \(normal.rawValue)")
+    }
+  }
+}
+
+/// Text colours are readable: 4.5:1 against the canvas and cards (WCAG AA for body text), and
+/// 7:1 with Increase Contrast. Translucent tokens are measured over each background.
+@MainActor
+@Test func themeTextColoursMeetContrastMinimums() throws {
+  for (name, color) in LedgerTheme.textTokens {
+    for (normal, high) in themeAppearancePairs {
+      for (appearance, minimum) in [(normal, 4.5), (high, 7.0)] {
+        for (surfaceName, surface) in [("canvas", LedgerTheme.canvas), ("card", LedgerTheme.card)] {
+          let background = try resolvedThemeColor(surface, appearance)
+          let ratio = contrastRatio(try resolvedThemeColor(color, appearance), over: background)
+          #expect(
+            ratio >= minimum,
+            "\(name) on \(surfaceName) in \(appearance.rawValue) is \(ratio):1, needs \(minimum):1")
+        }
+      }
+    }
+  }
+}
+
+/// Each appearance picks its own look, and the test switch picks the high-contrast one.
+@MainActor
+@Test func themeVariantFollowsTheAppearance() throws {
+  let aqua = try #require(NSAppearance(named: .aqua))
+  let dark = try #require(NSAppearance(named: .darkAqua))
+  #expect(LedgerTheme.variant(of: aqua) == .aqua)
+  #expect(LedgerTheme.variant(of: dark) == .darkAqua)
+  LedgerTheme.$resolvesIncreaseContrast.withValue(true) {
+    #expect(LedgerTheme.variant(of: aqua) == .accessibilityHighContrastAqua)
+    #expect(LedgerTheme.variant(of: dark) == .accessibilityHighContrastDarkAqua)
+  }
+}
+
+/// One look of the theme: a base appearance, with or without Increase Contrast.
+private struct ThemeLook: Sendable {
+  let base: NSAppearance.Name
+  let increaseContrast: Bool
+  var rawValue: String { base.rawValue + (increaseContrast ? " + Increase Contrast" : "") }
+}
+
+private let themeAppearancePairs: [(ThemeLook, ThemeLook)] = [NSAppearance.Name.aqua, .darkAqua]
+  .map { (ThemeLook(base: $0, increaseContrast: false), ThemeLook(base: $0, increaseContrast: true)) }
+
+@MainActor
+private func resolvedThemeColor(_ color: Color, _ look: ThemeLook) throws -> NSColor {
+  let appearance = try #require(NSAppearance(named: look.base))
+  var result = NSColor.clear
+  LedgerTheme.$resolvesIncreaseContrast.withValue(look.increaseContrast) {
+    appearance.performAsCurrentDrawingAppearance {
+      result = NSColor(color).usingColorSpace(.sRGB) ?? .clear
+    }
+  }
+  return result
+}
+
+/// WCAG 2 contrast of `foreground` composited over an opaque `background`.
+private func contrastRatio(_ foreground: NSColor, over background: NSColor) -> Double {
+  func channel(_ f: CGFloat, _ b: CGFloat) -> Double {
+    let value = Double(f * foreground.alphaComponent + b * (1 - foreground.alphaComponent))
+    return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+  }
+  func backgroundChannel(_ b: CGFloat) -> Double {
+    let value = Double(b)
+    return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+  }
+  let fg =
+    0.2126 * channel(foreground.redComponent, background.redComponent)
+    + 0.7152 * channel(foreground.greenComponent, background.greenComponent)
+    + 0.0722 * channel(foreground.blueComponent, background.blueComponent)
+  let bg =
+    0.2126 * backgroundChannel(background.redComponent)
+    + 0.7152 * backgroundChannel(background.greenComponent)
+    + 0.0722 * backgroundChannel(background.blueComponent)
+  return (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
 }
 
 @MainActor
@@ -87,16 +180,21 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
   // Full Keyboard Access is a per-user macOS setting that AppKit reads at launch. CI turns it on
   // for the runner (`defaults write -g AppleKeyboardUIMode -int 2`) before the tests start.
   // Without it, Tab only visits text fields and lists, as on any Mac.
+  // The flag says the runner was set up for it (ci.yml sets both); other runs, such as a stress
+  // soak, check what they can with Full Keyboard Access as they find it.
   let fullKeyboardAccess = NSApplication.shared.isFullKeyboardAccessEnabled
-  if !fullKeyboardAccess, ProcessInfo.processInfo.environment["CI"] != nil {
-    Issue.record("Full Keyboard Access is off on CI; the workflow should turn it on")
+  if !fullKeyboardAccess, ProcessInfo.processInfo.environment["LEDGER_EXPECT_FULL_KEYBOARD_ACCESS"] == "1" {
+    Issue.record("Full Keyboard Access is off although the workflow turned it on")
   }
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
   print("A11Y KEYBOARD \(destination.rawValue): Full Keyboard Access \(fullKeyboardAccess)")
   let sidebar = mounted.sidebarList()
+  let sidebarFrame = sidebar.flatMap { list in
+    list.window?.convertToScreen(list.convert(list.bounds, to: nil))
+  }
   mounted.window.makeFirstResponder(nil)
-  var visited: [(id: ObjectIdentifier, name: String)] = []
+  var visited: [(id: ObjectIdentifier, name: String, isProxy: Bool)] = []
   var cycled = false
   for _ in 0..<60 {
     mounted.press("\t", keyCode: 48)
@@ -107,31 +205,40 @@ func tabWalksEveryScreenWithFullKeyboardAccess(_ destination: AppDestination) as
       break
     }
     if visited.contains(where: { $0.id == id }) { continue }
-    // SwiftUI puts placeholder key views (`KeyViewProxy`) into the window's key loop, off
-    // screen and outside the Accessibility tree, to hand focus between its hosting views. They
-    // aren't controls, so they're counted but not checked.
-    if String(describing: type(of: responder)).contains("KeyViewProxy") {
-      visited.append((id, "(SwiftUI key-view placeholder)"))
-      continue
+    // A SwiftUI control drawn by SwiftUI itself (a Button, say) has no view of its own: AppKit's
+    // key loop holds a `KeyViewProxy` for it, and SwiftUI moves the Accessibility focus onto the
+    // control. So for a proxy, the control is what the system Accessibility API reports as focused.
+    let isProxy = String(describing: type(of: responder)).contains("KeyViewProxy")
+    var name = isProxy ? "" : focusName(of: responder)
+    var frame: NSRect?
+    if let view = responder as? NSView, !isProxy {
+      frame = view.window?.convertToScreen(view.convert(view.bounds, to: nil))
+      #expect(!view.isHiddenOrHasHiddenAncestor, "\(destination.rawValue): Tab landed on hidden \(type(of: responder))")
     }
-    var name = focusName(of: responder)
-    // Some SwiftUI form controls (a Picker's popup, a Stepper) carry their label only in the
-    // system Accessibility tree, so ask the system what VoiceOver hears for the focused element.
-    if name.isEmpty { name = mounted.systemFocusedName() }
-    visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name))
-    if let view = responder as? NSView {
-      let frame = view.convert(view.bounds, to: nil)
-      #expect(
-        !view.isHiddenOrHasHiddenAncestor && frame.width > 0 && frame.height > 0
-          && mounted.window.contentView?.frame.intersects(frame) == true,
-        "\(destination.rawValue): Tab landed on \(name), which isn't on screen")
+    if name.isEmpty {
+      // A Picker's popup or a Stepper carries its label only in the system tree. The system's
+      // name counts only if its focused element is the one Tab reached: the same place on screen
+      // as the responder, or, for a proxy, anywhere in this window.
+      // A proxy whose Accessibility focus is still on the sidebar reached nothing.
+      let focus = mounted.systemFocus()
+      if let focused = focus.frame,
+        frame.map({ focused.insetBy(dx: -2, dy: -2).intersects($0) }) ?? !(sidebarFrame?.intersects(focused) ?? false)
+      {
+        name = focus.name
+        if frame == nil { frame = focused }
+      }
     }
+    visited.append((id, name.isEmpty ? "<unnamed \(type(of: responder))>" : name, isProxy))
+    let windowFrame = mounted.window.frame
+    #expect(
+      frame.map { $0.width > 0 && $0.height > 0 && windowFrame.intersects($0) } == true,
+      "\(destination.rawValue): Tab landed on \(name.isEmpty ? "\(type(of: responder))" : name), which isn't on screen (\(String(describing: frame)))")
     #expect(!name.isEmpty, "\(destination.rawValue): Tab landed on a control with no name: \(type(of: responder))")
   }
   print("A11Y KEYBOARD \(destination.rawValue) tab order: \(visited.map(\.name))")
   #expect(cycled, "\(destination.rawValue): Tab never came back round to the first control")
   if fullKeyboardAccess {
-    let outsideSidebar = visited.filter { $0.id != sidebar.map { ObjectIdentifier($0) } }
+    let outsideSidebar = visited.filter { !$0.name.hasPrefix("<unnamed") && $0.id != sidebar.map { ObjectIdentifier($0) } }
     #expect(!outsideSidebar.isEmpty, "\(destination.rawValue): Tab never left the sidebar")
   }
 }
@@ -203,12 +310,27 @@ private func ownName(of element: NSObject) -> String? {
 func everyListRowOnEveryScreenIsSpoken(_ destination: AppDestination) async throws {
   let mounted = try await MountedRoot(showing: destination)
   defer { mounted.close() }
+  let sidebarRows = mounted.sidebarList()?.numberOfRows ?? 0
   let rows = mounted.accessibilityRows()
-  let silent = rows.filter { $0.trimmingCharacters(in: .whitespaces).isEmpty }
-  print("A11Y ROWS \(destination.rawValue): \(rows.count) rows, \(silent.count) silent")
+  // "Says something" means at least one word or a date (a day's section header), not only
+  // punctuation or a lone number.
+  let silent = rows.filter {
+    $0.range(of: #"\p{L}{2,}|\d{4}-\d{2}-\d{2}"#, options: .regularExpression) == nil
+  }
+  print("A11Y ROWS \(destination.rawValue): \(rows.count) rows (\(sidebarRows) in the sidebar), \(silent.count) silent")
   #expect(!rows.isEmpty, "\(destination.rawValue): no list rows at all (not even the sidebar)")
-  #expect(silent.isEmpty, "\(destination.rawValue): \(silent.count) of \(rows.count) rows say nothing")
+  #expect(silent.isEmpty, "\(destination.rawValue): \(silent.count) of \(rows.count) rows say nothing: \(silent)")
+  // Screens whose demo data fills a list must expose its rows, not only the sidebar's.
+  if screensWithDemoLists.contains(destination) {
+    #expect(rows.count > sidebarRows, "\(destination.rawValue): only the sidebar's rows are readable")
+  }
 }
+
+/// The screens whose list the demo ledger fills (seen in the capture set).
+private let screensWithDemoLists: Set<AppDestination> = [
+  .ledger, .accounts, .categories, .tags, .transfers, .recurrence, .budgets, .insights, .search,
+  .receipts, .backupRestore,
+]
 
 /// Keyboard: the sidebar moves between screens with the arrow keys.
 @MainActor
@@ -659,19 +781,26 @@ final class MountedRoot {
     return result.rows
   }
 
-  /// The name the system Accessibility API gives the focused element, read off the main thread.
-  func systemFocusedName() -> String {
+  /// The element the system Accessibility API reports as focused (what VoiceOver follows): its
+  /// name, and its frame in AppKit screen coordinates. Read off the main thread.
+  func systemFocus() -> (name: String, frame: NSRect?) {
     let pid = ProcessInfo.processInfo.processIdentifier
     let result = RowsBox()
     Thread.detachNewThread {
-      result.finish([accessibilityFocusedName(of: pid)])
+      result.finish(accessibilityFocus(of: pid))
     }
     let deadline = Date().addingTimeInterval(10)
     while !result.isDone, Date() < deadline {
       RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
     }
     if !result.isDone { readTimedOut = true }
-    return result.rows.first ?? ""
+    let parts = result.rows
+    guard parts.count == 5, let x = Double(parts[1]), let y = Double(parts[2]), let w = Double(parts[3]),
+      let h = Double(parts[4])
+    else { return (parts.first ?? "", nil) }
+    // The system API measures from the top of the main screen; AppKit from the bottom.
+    let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+    return (parts[0], NSRect(x: x, y: screenHeight - y - h, width: w, height: h))
   }
 
   private func systemAccessibilityElements() -> [SpokenElement] {
@@ -749,7 +878,9 @@ func accessibilityRowTexts(of pid: pid_t, windowIdentifier: String) -> [String] 
 }
 
 /// What VoiceOver names the focused element: its description or title, else the label next to it.
-func accessibilityFocusedName(of pid: pid_t) -> String {
+/// The focused element's name (its description or title, else the label next to it) and its
+/// frame, as [name, x, y, width, height] in the system's top-left screen coordinates.
+func accessibilityFocus(of pid: pid_t) -> [String] {
   let app = AXUIElementCreateApplication(pid)
   AXUIElementSetMessagingTimeout(app, 5)
   func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -761,16 +892,27 @@ func accessibilityFocusedName(of pid: pid_t) -> String {
       .compactMap { attribute(element, $0) as? String }
       .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
   }
-  guard let focused = attribute(app, kAXFocusedUIElementAttribute) else { return "" }
-  let element = focused as! AXUIElement
-  if let own = name(element) { return own }
-  if let label = attribute(element, kAXTitleUIElementAttribute) {
-    let labelElement = label as! AXUIElement
-    if let text = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String), !text.isEmpty {
-      return text
-    }
+  func axElement(_ value: CFTypeRef?) -> AXUIElement? {
+    guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return unsafeDowncast(value, to: AXUIElement.self)
   }
-  return ""
+  func frame(_ element: AXUIElement) -> CGRect? {
+    var origin = CGPoint.zero
+    var size = CGSize.zero
+    guard let position = attribute(element, kAXPositionAttribute), let extent = attribute(element, kAXSizeAttribute),
+      CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(extent) == AXValueGetTypeID(),
+      AXValueGetValue(unsafeDowncast(position, to: AXValue.self), .cgPoint, &origin),
+      AXValueGetValue(unsafeDowncast(extent, to: AXValue.self), .cgSize, &size)
+    else { return nil }
+    return CGRect(origin: origin, size: size)
+  }
+  guard let element = axElement(attribute(app, kAXFocusedUIElementAttribute)) else { return [""] }
+  var spoken = name(element) ?? ""
+  if spoken.isEmpty, let labelElement = axElement(attribute(element, kAXTitleUIElementAttribute)) {
+    spoken = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String) ?? ""
+  }
+  guard let box = frame(element) else { return [spoken] }
+  return [spoken] + [box.minX, box.minY, box.width, box.height].map { String(Double($0)) }
 }
 
 /// Hands the tree from the reader thread back to the main thread.

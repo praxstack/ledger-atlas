@@ -18,6 +18,6 @@ import Testing
   }
 }
 
-@Test func ledgerIsTheDeterministicDefaultSelection() {
-  #expect(AppDestination.defaultSelection == .ledger)
+@Test func overviewIsTheDeterministicDefaultSelection() {
+  #expect(AppDestination.defaultSelection == .overview)
 }

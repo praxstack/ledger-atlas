@@ -6,6 +6,9 @@ Manager compatibility boundary, a versioned canonical-ledger backend, and an
 early SwiftUI shell. Both tracks are kept in this repository; neither implies a
 universal compatibility or release claim.
 
+**Installing the Mac app:** see [docs/INSTALL.md](docs/INSTALL.md) (download, first launch,
+where your ledgers live, backups and updates).
+
 ## Development
 
 ```bash
@@ -65,4 +68,4 @@ read-only research repository described by `EVIDENCE.md`.
 ## License
 
 GPL-3.0-only. See [LICENSE](LICENSE). Anyone who distributes a modified version must also release its source under GPL-3.0. The app icon source is `Assets/Brand/ledger-atlas-app-icon.svg`;
-`Assets/AppIcon.xcassets` holds the rendered macOS sizes.
+`Assets/AppIcon.xcassets` holds the rendered macOS sizes. Brand guidelines: `docs/brand/BRAND.md`.

@@ -21,19 +21,66 @@ public struct LedgerDisplayFormatter: Sendable {
   /// so no displayed amount is rounded.
   public func amount(_ value: CurrencyAmount) -> String {
     let canonical = value.amount.description
+    guard let prepared = numberFormatter(for: value) else { return "\(value.unitCode) \(canonical)" }
+    return prepared.formatter.string(from: prepared.decimal as NSDecimalNumber) ?? "\(value.unitCode) \(canonical)"
+  }
+
+  /// How a signed amount shows its direction.
+  public enum SignStyle: Sendable {
+    /// Only negative amounts get a sign (balances, totals).
+    case negativeOnly
+    /// Every non-zero amount gets "+" or "−" (transactions, cash flow).
+    case always
+    /// No sign at all (a budget's limit, an amount already labelled "spent").
+    case never
+  }
+
+  /// The amount split for the money typography (`MoneyText`). The sign is the true minus
+  /// sign (U+2212), never a hyphen, and `parts.text` is what VoiceOver reads.
+  public func parts(_ value: CurrencyAmount, sign style: SignStyle = .negativeOnly) -> MoneyParts {
+    let negative = value.amount.isNegative
+    let sign: MoneyParts.Sign =
+      switch style {
+      case .never: .none
+      case .negativeOnly: negative ? .minus : .none
+      case .always: negative ? .minus : (value.amount.isPositive ? .plus : .none)
+      }
+    let canonical = value.amount.description
+    let magnitude = canonical.hasPrefix("-") ? String(canonical.dropFirst()) : canonical
+    guard let unsigned = try? CurrencyAmount(unitCode: value.unitCode, amount: ExactDecimal(magnitude)),
+      let prepared = numberFormatter(for: unsigned),
+      let text = prepared.formatter.string(from: prepared.decimal as NSDecimalNumber)
+    else {
+      return MoneyParts(sign: sign, leading: "\(value.unitCode) ", whole: magnitude, fraction: "", trailing: "")
+    }
+    return MoneyParts(
+      formatted: text, decimalSeparator: prepared.formatter.currencyDecimalSeparator, sign: sign)
+  }
+
+  /// Rupee amounts always use Indian digit grouping (₹4,83,676.30), whatever the display
+  /// locale, because that is how rupee figures are read. Other currencies follow `locale`.
+  func numberingLocale(for unitCode: String) -> Locale {
+    guard unitCode == "INR", locale.region?.identifier != "IN" else { return locale }
+    let language = locale.language.languageCode?.identifier ?? "en"
+    return Locale(identifier: "\(language)_IN")
+  }
+
+  private func numberFormatter(for value: CurrencyAmount) -> (formatter: NumberFormatter, decimal: Decimal)? {
+    let canonical = value.amount.description
     let digits = canonical.filter(\.isNumber)
     guard digits.count <= Self.maximumFormattedDigits,
       let decimal = Decimal(string: canonical, locale: Locale(identifier: "en_US_POSIX"))
-    else { return "\(value.unitCode) \(canonical)" }
+    else { return nil }
     let scale = canonical.split(separator: ".", maxSplits: 1).dropFirst().first?.count ?? 0
     let formatter = NumberFormatter()
-    formatter.locale = locale
+    formatter.locale = numberingLocale(for: value.unitCode)
     formatter.numberStyle = .currency
     formatter.currencyCode = value.unitCode
+    if value.unitCode == "INR" { formatter.currencySymbol = "₹" }
     let fraction = max(formatter.maximumFractionDigits, scale)
     formatter.minimumFractionDigits = fraction
     formatter.maximumFractionDigits = fraction
-    return formatter.string(from: decimal as NSDecimalNumber) ?? "\(value.unitCode) \(canonical)"
+    return (formatter, decimal)
   }
 
   /// A localized date. The civil date is formatted as itself: no time zone can move it to
@@ -46,6 +93,51 @@ public struct LedgerDisplayFormatter: Sendable {
     formatter.dateStyle = style
     formatter.timeStyle = .none
     return formatter.string(from: Self.instant(atNoonOf: date))
+  }
+
+  /// "Nov" for chart axes, in the display locale.
+  public func shortMonth(_ date: SourceLocalDate) -> String {
+    templated("MMM", date)
+  }
+
+  /// "November 2026" for screen subtitles.
+  public func monthTitle(_ date: SourceLocalDate) -> String {
+    templated("MMMMyyyy", date)
+  }
+
+  private func templated(_ template: String, _ date: SourceLocalDate) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = locale
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = Self.utc
+    formatter.setLocalizedDateFormatFromTemplate(template)
+    return formatter.string(from: Self.instant(atNoonOf: date))
+  }
+
+  /// A short axis label: lakh and crore for rupees ("₹4.5L", "₹1.2Cr"), thousands and
+  /// millions otherwise ("$450K", "$1.2M"). Only for chart axes; figures use `parts`.
+  public func compactAxis(_ value: Double, unitCode: String) -> String {
+    let symbol = currencySymbol(for: unitCode)
+    let sign = value < 0 ? "\u{2212}" : ""
+    let magnitude = abs(value)
+    let steps: [(Double, String)] =
+      unitCode == "INR" ? [(1e7, "Cr"), (1e5, "L"), (1e3, "K")] : [(1e9, "B"), (1e6, "M"), (1e3, "K")]
+    for (size, suffix) in steps where magnitude >= size {
+      let scaled = magnitude / size
+      let text = scaled >= 10 ? String(Int(scaled.rounded())) : String(format: "%.1f", scaled)
+      return sign + symbol + text.replacingOccurrences(of: ".0", with: "") + suffix
+    }
+    return sign + symbol + String(Int(magnitude.rounded()))
+  }
+
+  /// The currency symbol the formatter uses for `unitCode` ("₹", "$", "€").
+  public func currencySymbol(for unitCode: String) -> String {
+    guard let amount = try? CurrencyAmount(unitCode: unitCode, amount: ExactDecimal("0")) else {
+      return unitCode
+    }
+    let parts = parts(amount, sign: .never)
+    let symbol = parts.leading.isEmpty ? parts.trailing : parts.leading
+    return symbol.trimmingCharacters(in: .whitespaces)
   }
 
   private static let utc = TimeZone(identifier: "UTC")!

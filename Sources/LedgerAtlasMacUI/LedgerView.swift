@@ -17,6 +17,8 @@ struct LedgerView: View {
   let intentRequest: LedgerIntentRequest?
   let consumeIntent: () -> Void
   let open: () -> Void
+  /// Starts a Money Manager import; offered wherever the ledger is empty or missing.
+  var importBackup: (() -> Void)? = nil
   let lifecycleMessage: String?
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -78,68 +80,20 @@ struct LedgerView: View {
             .accessibilityLabel(lastFailure)
             .padding(.horizontal, 16)
         }
-        if isEditing {
-          HStack {
-            Button("New transaction") { showingTransactionForm = true }
-              .accessibilityLabel("New income or expense")
-            Button("New split purchase") { showingSplitForm = true }
-              .accessibilityLabel("New split purchase")
-          }
-          .padding(.horizontal, 16)
-          HStack {
-            TextField("Amount", text: $amountLiteral)
-            Button("Save") {
-              guard let selectedID, !amountLiteral.isEmpty else { return }
-              saveAmount(selectedID, amountLiteral)
-            }
-            .accessibilityLabel("Save amount")
-          }
-          .padding(.horizontal, 16)
-          HStack {
-            Button("Copy selected") {
-              guard let selectedID else { return }
-              copy(selectedID)
-            }
-            .disabled(selectedID == nil)
-            Button("Close selected", role: .destructive) {
-              guard let selectedID else { return }
-              tombstone(selectedID)
-            }
-            .disabled(selectedID == nil)
-            if saveTags != nil {
-              Button("Edit tags…") { taggingID = selectedID }
-                .disabled(selectedID == nil)
-            }
-            if saveAsTemplate != nil {
-              Button("Save as template…") { templatingID = selectedID }
-                .disabled(selectedID == nil)
-            }
-          }
-          .padding(.horizontal, 16)
-          HStack {
-            TextField("Mac amount", text: $macAmountLiteral)
-            Button("Add Mac transaction") {
-              guard !macAmountLiteral.isEmpty else { return }
-              addMacTransaction(macAmountLiteral)
-            }
-            .accessibilityLabel("Add Mac transaction")
-          }
-          .padding(.horizontal, 16)
-          .padding(.bottom, 12)
-        } else {
-          Button("Begin editing", action: beginEditing)
-            .accessibilityLabel("Begin editing")
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+        editBar
+          .padding(.horizontal, LedgerTheme.Space.l)
+          .padding(.vertical, LedgerTheme.Space.s)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(LedgerTheme.recessed)
+          .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
         }
-        }
-        .navigationTitle("Ledger")
+        .navigationTitle("Transactions")
       } else {
         switch state {
         case .noLedger:
           openPrompt(
             title: "Open a ledger", icon: "folder",
-            description: "Choose a Ledger Atlas ledger to view its native transactions.",
+            description: "Choose a Ledger Atlas ledger, or import a Money Manager backup.",
             buttonTitle: "Open Ledger…", guidance: .noLedger,
             failure: lifecycleMessage ?? lastFailure)
         case .loading:
@@ -173,6 +127,9 @@ struct LedgerView: View {
             } else {
               Button("Begin editing", action: beginEditing)
                 .accessibilityLabel("Begin editing")
+            }
+            if let importBackup {
+              Button(LedgerAtlasRootView.importBackupActionTitle, action: importBackup)
             }
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -249,6 +206,98 @@ struct LedgerView: View {
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
   }
 
+  /// The actions under the list: new entries, then what to do with the selected one.
+  @ViewBuilder private var editBar: some View {
+    if isEditing {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: LedgerTheme.Space.s) {
+          createButtons
+          Divider().frame(height: 20)
+          selectionActions
+          Spacer(minLength: 0)
+          quickAdd
+        }
+        VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+          HStack(spacing: LedgerTheme.Space.s) { createButtons }
+          HStack(spacing: LedgerTheme.Space.s) { selectionActions }
+          quickAdd
+        }
+      }
+    } else {
+      HStack(spacing: LedgerTheme.Space.s) {
+        Button("Begin editing", action: beginEditing)
+          .buttonStyle(LedgerSecondaryButtonStyle())
+          .accessibilityLabel("Begin editing")
+        Text("The ledger is read-only until you begin editing.")
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkTertiary)
+      }
+    }
+  }
+
+  @ViewBuilder private var createButtons: some View {
+    Button {
+      showingTransactionForm = true
+    } label: {
+      Label("New Transaction", systemImage: "plus")
+    }
+    .buttonStyle(LedgerPrimaryButtonStyle())
+    .accessibilityLabel("New income or expense")
+    Button("New Split…") { showingSplitForm = true }
+      .buttonStyle(LedgerSecondaryButtonStyle())
+      .accessibilityLabel("New split purchase")
+  }
+
+  @ViewBuilder private var selectionActions: some View {
+    TextField("Amount", text: $amountLiteral)
+      .textFieldStyle(.roundedBorder)
+      .frame(width: 110)
+      .disabled(selectedID == nil)
+      .accessibilityLabel("Corrected amount for the selected transaction")
+    Button("Save") {
+      guard let selectedID, !amountLiteral.isEmpty else { return }
+      saveAmount(selectedID, amountLiteral)
+    }
+    .buttonStyle(LedgerSecondaryButtonStyle())
+    .disabled(selectedID == nil)
+    .accessibilityLabel("Save amount")
+    Menu("Selected") {
+      Button("Copy") {
+        guard let selectedID else { return }
+        copy(selectedID)
+      }
+      if saveTags != nil {
+        Button("Edit Tags…") { taggingID = selectedID }
+      }
+      if saveAsTemplate != nil {
+        Button("Save as Template…") { templatingID = selectedID }
+      }
+      Divider()
+      Button("Close Transaction", role: .destructive) {
+        guard let selectedID else { return }
+        tombstone(selectedID)
+      }
+    }
+    .fixedSize()
+    .disabled(selectedID == nil)
+    .accessibilityLabel("Actions for the selected transaction")
+  }
+
+  @ViewBuilder private var quickAdd: some View {
+    HStack(spacing: LedgerTheme.Space.xs) {
+      TextField("Quick add amount", text: $macAmountLiteral)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 130)
+        .accessibilityLabel("Quick add amount")
+      Button("Add") {
+        guard !macAmountLiteral.isEmpty else { return }
+        addMacTransaction(macAmountLiteral)
+      }
+      .buttonStyle(LedgerSecondaryButtonStyle())
+      .accessibilityLabel("Add Mac transaction")
+    }
+  }
+
   /// Opens the form for a Shortcuts request once the ledger's accounts have loaded, so the
   /// form never opens empty on a cold launch.
   private func presentIntentIfNeeded() {
@@ -268,7 +317,12 @@ struct LedgerView: View {
       Text(title).font(.title2.bold())
       Text(description).foregroundStyle(.secondary)
       if let guidance { LedgerLifecycleGuidanceView(guidance: guidance, failure: failure) }
-      Button(buttonTitle, action: open)
+      HStack {
+        Button(buttonTitle, action: open)
+        if let importBackup {
+          Button(LedgerAtlasRootView.importBackupActionTitle, action: importBackup)
+        }
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(32)

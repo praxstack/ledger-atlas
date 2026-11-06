@@ -1,327 +1,155 @@
 # Ledger Atlas Design System
 
-Status: proposed design contract for the native macOS product. This file governs visual and interaction decisions; it does not certify import compatibility or product readiness.
+Status: **accepted 2026-11-03** (Prax approved the "Pro look", mock at https://claude.ai/artifact/V1TbBn828ASQ1BBokD91Qc). This file governs every visual and interaction decision in the Mac app. Code tokens live in `Sources/LedgerAtlasMacUI/Design/`; when this file and the code disagree, fix one of them in the same pull request.
 
 ## 1. Product intent
 
-Ledger Atlas is a private, local-first personal-finance workbench for people who want the speed and control of a Mac without surrendering the exact history of their existing Money Manager data.
-
-The product must feel like a trusted financial instrument, not a fintech advertisement. Its memorable quality is calm command: a dense financial history becomes legible, editable, and safe without feeling clinical or intimidating.
-
-The first client is a native macOS application. Vendor formats remain at the import perimeter. All screenshots, prompts, prototypes, and fixtures use synthetic data only.
-
-### Product promises visible in the interface
+Ledger Atlas is a private, local-first money manager for people who want the speed and exactness of a Mac app and keep their whole Money Manager history. It should look like a shipping, award-level pro app: calm, precise and dense, with numbers as the hero.
+
+Product promises the interface makes visible:
+
+- Every amount is exact, aligned, and carries its currency.
+- Every import is reviewed before it writes. Imported rows say where they came from.
+- Every destructive or history-changing action states its consequence.
+- Source files stay read-only. Nothing leaves the Mac.
+
+## 2. The look in five rules
+
+1. **Glass on navigation only.** The sidebar floats as a glass panel and toolbar controls sit in glass capsules (macOS 26 Liquid Glass; system materials on macOS 15). Content (cards, tables, the inspector) is solid, so figures stay crisp. Never stack glass on glass.
+2. **One accent, used sparingly.** Deep teal marks selection, focus and the single primary action on a surface. Neutral greys do everything else.
+3. **Colour means something.** Green = money in. Red = over budget, a negative balance, an error or a destructive action. Spending is plain ink. Category colours appear only as 8 pt keys and thin bars.
+4. **Numbers set like a bank's.** Tabular figures, tight tracking on large figures, the currency symbol and fraction at reduced strength so whole units read first, a true minus sign (−, U+2212), rupees always in Indian grouping (₹4,83,676.30).
+5. **Density with air.** 40 pt table rows, hairline separators, a 4 pt grid, shared left edges from sidebar to inspector.
 
-- Every amount is exact, aligned, and paired with its currency.
-- Every import is reviewed before it writes.
-- Every unsupported item is mapped, preserved, deliberately excluded with a reason, or blocks the import.
-- Every destructive or history-changing action explains its consequence and supports recovery where possible.
-- Imported source files remain read-only.
-- The interface never implies compatibility beyond a named, tested profile.
-
-### Design quality bar
-
-“Award-winning” is an aspiration, not a label. The measurable bar is:
-
-1. A first-time user can import or open a ledger without reading documentation.
-2. A daily user can create, correct, search, and reconcile transactions mostly from the keyboard.
-3. A reviewer can understand import loss, preservation, timezone, and destination before approval.
-4. Money, dates, provenance, warnings, and empty states remain unambiguous at every window size.
-5. VoiceOver, Full Keyboard Access, Reduce Motion, increased contrast, and text scaling remain first-class.
-6. The visual identity is recognizable without copying Money Manager branding, proprietary assets, or pixel layouts.
-
-## 2. Visual thesis
-
-### Direction: Quiet Financial Instrument
-
-Ledger Atlas combines the economy of a well-made ledger, the tactility of a drafting table, and the clarity of native Mac software. It is balanced rather than airy, structured rather than card-heavy, and warm enough to invite daily use.
-
-- **Density:** 7/10, daily-app dense. Transactions and accounts should scan quickly without becoming a cockpit.
-- **Variance:** 4/10. Strong hierarchy and occasional asymmetric inspector layouts; never decorative chaos.
-- **Motion:** 2/10. Motion explains state changes and never animates continuously.
-- **Decoration:** intentional and restrained. Fine rules, subtle material shifts, careful type, and excellent spacing do the work.
-- **Personality:** exact, humane, private, durable, quietly confident.
-
-### Safe choices
-
-- Native macOS sidebar, toolbar, tables, sheets, inspectors, menus, and keyboard commands.
-- Conventional debit/credit and income/expense semantic colors, always reinforced by signs and labels.
-- Right-aligned tabular money, predictable selection, undo, and familiar search behavior.
-
-### Deliberate risks
-
-- Use a mineral green accent rather than category-standard fintech blue. It signals permanence and calm without resembling Money Manager.
-- Treat provenance and reconciliation as visible product features, not developer metadata. Users can inspect why a row exists and what was preserved.
-- Prefer flat, rule-separated financial surfaces over a dashboard made from identical rounded cards.
-
-## 3. Native platform posture
-
-The production app uses SwiftUI and AppKit conventions. Do not reproduce web patterns inside a Mac window.
-
-- Use `NavigationSplitView` for primary hierarchy and a contextual inspector for detail.
-- Use `Table` for transaction-dense views when column behavior matters; use `List` for short collections and navigation.
-- Use standard menu commands, toolbar customization, sheets, confirmation dialogs, search fields, focus rings, context menus, drag and drop, and Quick Look where appropriate.
-- Respect system light/dark appearance, accent preferences, reduced motion, increased contrast, keyboard navigation, and localization.
-- Use system typography in production. SF Pro is the correct native Mac typeface. Do not bundle a decorative font merely to look “designed.”
-- Stitch or web prototypes may use Geist and Geist Mono only as cross-platform approximations of SF Pro and SF Mono.
-
-## 4. Token architecture
-
-Use three layers: primitives define raw values; semantic tokens express meaning; component tokens specialize a control. Production Swift should centralize these values once rather than scatter literals through views.
-
-### 4.1 Primitive tokens
-
-#### Light appearance
-
-| Token | Value | Purpose |
-|---|---:|---|
-| `canvas-0` | `#F4F3EF` | Warm application background |
-| `surface-0` | `#FBFBF8` | Primary work surface |
-| `surface-1` | `#ECEBE6` | Sidebar, recessed controls, selected-neutral state |
-| `ink-950` | `#1B1D1C` | Primary text; never pure black |
-| `ink-700` | `#454A47` | Secondary labels |
-| `ink-500` | `#727873` | Tertiary metadata |
-| `rule-200` | `#D7D8D2` | Structural dividers |
-| `rule-300` | `#C5C8C1` | Strong dividers and control borders |
-| `mineral-600` | `#1F7668` | Single brand accent and focus emphasis |
-| `mineral-700` | `#165F54` | Pressed/selected accent |
-| `positive-600` | `#2D7252` | Income/success, paired with `+` and a label |
-| `negative-600` | `#A8453D` | Expense/error, paired with `−` and a label |
-| `warning-600` | `#9A651D` | Review required or uncertain |
-| `info-600` | `#426A86` | Informational state, not primary action |
-
-#### Dark appearance
-
-| Token | Value | Purpose |
-|---|---:|---|
-| `canvas-0-dark` | `#171A18` | Application background |
-| `surface-0-dark` | `#1E211F` | Primary work surface |
-| `surface-1-dark` | `#272B28` | Sidebar and recessed surfaces |
-| `ink-950-dark` | `#F1F2ED` | Primary text |
-| `ink-700-dark` | `#C5C9C4` | Secondary labels |
-| `ink-500-dark` | `#969C96` | Tertiary metadata |
-| `rule-200-dark` | `#343A36` | Structural dividers |
-| `rule-300-dark` | `#454D48` | Strong dividers |
-| `mineral-600-dark` | `#62B6A4` | Accent, desaturated for dark surfaces |
-| `positive-600-dark` | `#71BE91` | Income/success |
-| `negative-600-dark` | `#E18479` | Expense/error |
-| `warning-600-dark` | `#D5A45B` | Review required |
-| `info-600-dark` | `#82ADCA` | Informational state |
+## 3. Tokens
 
-Semantic colors must pass WCAG AA for text at their actual sizes. Color never carries meaning alone.
+Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Increase Contrast appearances. Every text colour reaches 4.5:1 on the canvas and cards, and 7:1 with Increase Contrast (`themeTextColoursMeetContrastMinimums`).
 
-### 4.2 Semantic tokens
+### 3.1 Colour
 
-- `background-app` → `canvas-0`
-- `background-workspace` → `surface-0`
-- `background-recessed` → `surface-1`
-- `text-primary` → `ink-950`
-- `text-secondary` → `ink-700`
-- `text-tertiary` → `ink-500`
-- `border-subtle` → `rule-200`
-- `border-strong` → `rule-300`
-- `action-primary` → `mineral-600`
-- `focus-ring` → system focus ring, with `mineral-600` used only where custom focus is unavoidable
-- `amount-inflow` → `positive-600`
-- `amount-outflow` → `negative-600`
-- `state-warning` → `warning-600`
-- `state-information` → `info-600`
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `canvas` | `#FBFBFA` | `#1C1C1E` | Window content background |
+| `recessed` | `#F4F4F2` | `#232325` | Inspector, drop zones, day headers |
+| `card` | `#FFFFFF` | `#232326` | Cards on the canvas |
+| `ink` | `#1D1D1F` | `#F5F5F7` | Primary text, spending amounts |
+| `inkSecondary` | `#515154` | `#C7C7CC` | Secondary text |
+| `inkTertiary` | `#6E6E72` | `#8E8E93` | Labels, captions, axis text |
+| `hairline` | black 8% | white 9% | Separators (22% / 26% with Increase Contrast) |
+| `inkQuiet`, `positiveQuiet`, `negativeQuiet` | their colour, faded only as far as 4.5:1 allows | same | The currency symbol and paise of a figure |
+| `fieldFill` | black 4.5% | white 7% | Fields, chips, segmented items |
+| `accent` | `#09747D` | `#4FC3CE` | Selection, focus, primary action |
+| `accentSoft` | accent 11% | accent 16% | Selected rows, provenance note |
+| `positive` | `#1B774A` | `#4CC985` | Money in |
+| `negative` | `#BA3E2B` | `#FF7A66` | Over budget, negative balance, errors |
+| `warning` | `#975B00` | `#F0A83C` | Needs review |
 
-### 4.3 Component tokens
+Category palette (muted, equal perceived lightness), light / dark: blue `#5B7FB8`/`#7D9FD6`, copper `#C27A46`/`#DF9764`, sage `#6E9E72`/`#8CBF90`, ochre `#C2A245`/`#DCBD60`, mauve `#A7709D`/`#C690BB`, teal `#5E9EA3`/`#7DBDC2`, rose `#B5666A`/`#D68589`, slate `#8B8F97`/`#A3A7AE`. A name always maps to the same colour (`LedgerTheme.paletteColor(for:)`).
 
-- **Sidebar selection:** system selection material with mineral accent indicator; no filled pill rows.
-- **Transaction row:** transparent background, 1 px subtle rule, 8 px vertical and 12 px horizontal padding.
-- **Inspector:** recessed background, 16 px section gap, 12 px field gap.
-- **Primary button:** native bordered-prominent control; one per decision surface.
-- **Destructive button:** native destructive role; never visually compete with the primary action.
-- **Status badge:** 6 px vertical, 8 px horizontal, 6 px corner radius; label plus icon, never color alone.
-- **Review panel:** 12 px corner radius, 1 px rule, no floating shadow unless presented as a sheet.
+### 3.2 Type
 
-## 5. Typography and numeric treatment
+SF Pro only (system font); no bundled faces. Every style is a **system text style**, never a fixed point size, so text follows the Mac's text size and display zoom (enforced by `everyFontIsASystemTextStyle`). Money uses `MoneyText`, which adds tabular figures and tightens large figures.
 
-### Production typography
+| Style | Text style | Use |
+|---|---|---|
+| `hero` | Large Title, semibold | The one hero figure on a screen (net worth) |
+| `display` | Large Title, bold | Welcome and empty-state titles |
+| `figureLarge` | Title, semibold | Inspector amount |
+| `figure` | Title 2, semibold | Key figures in cards |
+| `screenTitle` | Title 3, bold | Screen titles |
+| `cardTitle` | Headline | Card and section titles |
+| `body` / `bodyEmphasis` | Body / Body medium | Rows, labels, row amounts |
+| `secondary` | Callout | Secondary lines, sidebar balances |
+| `caption` | Subheadline | Captions, axis labels |
 
-- **Window title:** SF Pro Display, 26 px equivalent, semibold.
-- **Section title:** SF Pro Text, 15 px, semibold.
-- **Body:** SF Pro Text, 13 px regular.
-- **Secondary:** SF Pro Text, 12 px regular.
-- **Caption/metadata:** SF Pro Text, 11 px medium.
-- **Money and counts:** SF Pro Text with tabular figures; use SF Mono only for hashes, receipt fragments, and developer-level identifiers.
+### 3.3 Space, shape, size
 
-Use Dynamic Type/system text styles where SwiftUI supports them. Never rasterize text into visual assets.
+- Spacing: 2, 4, 8, 12, 16, 20, 24, 32.
+- Radius: control 7, row 8, group 10, card 14, panel (sidebar, sheets) 16. Corners are concentric with the window.
+- Rows: table 40, compact 28, sidebar 27. Icon tile 28. Inspector width 320. Sidebar 240–300.
 
-### Money rules
+## 4. Components
 
-- Right-align amounts and decimal separators in tables.
-- Always render the currency unit or establish it unambiguously in the column header/account context.
-- Preserve source precision; do not add decorative decimals.
-- Use `+` and `−` signs for direction. Do not rely on red/green.
-- Never abbreviate a value if the abbreviation could change financial interpretation.
-- Parentheses may represent negative accounting values only when a user setting explicitly selects that style.
+All in `Sources/LedgerAtlasMacUI/Design/`.
 
-## 6. Spacing, shape, and material
+- **MoneyText**: sizes `hero`, `large`, `figure`, `row`, `small`, `caption`; sign styles `negativeOnly` (balances), `always` (transactions, cash flow), `never` (limits). Tone `automatic` colours only money in, and red for negative balances when `negativeIsAlert` is set. VoiceOver reads the plain formatted amount.
+- **ledgerCard()**: solid card, hairline edge, 14 pt corners, 20 pt padding.
+- **ledgerGroupBox()**: key-value box inside cards, sheets and the inspector.
+- **ledgerGlassCapsule() / ledgerGlassPanel()**: floating glass; solid card fill under Reduce Transparency.
+- **LedgerPrimaryButtonStyle**: one per surface. **LedgerSecondaryButtonStyle** for the rest. Destructive actions use the system destructive role.
+- **LedgerChip**: filter tokens above tables.
+- **LedgerCardHeader**: title left (header trait), quiet detail or link right.
+- **LedgerColorKey**: 8 pt rounded square for categories and accounts.
+- **LedgerIconTile**: 28 pt tile with an SF Symbol or payee initials on a 16% tint.
+- **LedgerProgressTrack**: budgets and shares; over 100% turns red and marks the limit.
 
-- Base unit: 4 px.
-- Scale: 4, 8, 12, 16, 20, 24, 32, 48.
-- Table row minimum: 28 px compact, 34 px comfortable. User preference may switch density.
-- Primary content margin: 20 px; large empty/onboarding surfaces: 32 px.
-- Inspector width: 300–380 px.
-- Sidebar ideal width: 220–260 px.
-- Main window minimum: 900 × 620 px for the complete workbench. Narrower windows collapse the inspector before truncating the ledger.
-- Radius scale: 4 px controls, 8 px groups, 12 px sheets/review panels. Avoid bubble-shaped containers.
-- Shadows: use native window/sheet shadow only. Within the app, use hierarchy, material, and rules before elevation.
+## 5. Layout
 
-## 7. Information architecture
+- **Window**: `NavigationSplitView`. Sidebar is a floating glass panel (system sidebar style on macOS 26). Minimum window 1000 × 640; the inspector collapses before the table truncates.
+- **Sidebar**: Money (Transactions, Accounts, Budgets, Insights, Recurring), then Accounts with live balances in the person's group order (closed and hidden accounts left out; a negative balance on an asset account is red), then Organise (Categories, Tags & Memos, Transfers, Installments, Receipts, Search), then Ledger (Import Review, Backup & Restore, Local Access, Get Started, Settings). Until a ledger is open, an import card is pinned at the bottom (solid, since the sidebar is already glass); after that, Import lives in the toolbar and the File menu (⇧⌘I). Every screen stays in the sidebar so the keyboard reaches all of them.
+- **Toolbar**: screen title and subtitle on the left; on the right, glass capsule groups: period (‹ October 2026 ›), scope (Month / Quarter / Year), view controls, then Import and **+ New** (primary).
+- **Overview**: left column net-worth card (hero figure, change badge, 12-month line chart, In / Out / Saved strip) and Recent transactions; right column (330 pt) Cash flow, Spending by category, Budgets.
+- **Transactions**: filter chips, In / Out / Net summary line, a table grouped by day with day totals, and a 320 pt inspector showing amount, payee, category, account, tags, note, budget, receipt and provenance ("Imported, unchanged" with backup date and source row).
+- **First launch**: one centred column: app mark, "Bring over your Money Manager history", a drop zone with **Choose backup…** (⇧⌘I), the three steps (Choose, Review, Approve), then quiet links (Start an empty ledger, Open a ledger…, Try sample data) and the privacy line.
 
-The current thirteen equal sidebar destinations are a development inventory, not the final navigation.
+## 6. Charts
 
-### Primary sidebar
+Swift Charts. One question per chart, and every chart has an accessible table or summary.
 
-1. **Overview** — balances, upcoming obligations, budget status, recent activity.
-2. **Transactions** — the canonical ledger and daily editing surface.
-3. **Accounts** — account balances, reconciliation, account settings.
-4. **Plans** — budgets, recurrence, and installments grouped under one parent.
-5. **Reports** — accessible charts plus exact tables.
+- Net worth: 1.75 pt accent line, accent area fading from 20% to 0, hairline grid, right-side axis in lakh (₹4.5L), month labels below, a ringed point on the latest value.
+- Cash flow: paired rounded bars per month, money in green, money out ink at 80%; past months at 35% / 22%.
+- Spending: horizontal 4 pt bars in category colours, share as a percentage.
+- No 3D, gauges, donuts with labels inside, decorative gradients or animated totals.
 
-### Utility destinations
+## 7. Accessibility
 
-- **Search** is a global toolbar field and command, not a permanent peer destination.
-- **Import & Migration** appears during onboarding and remains accessible from File > Import.
-- **Backup & Restore** lives in File and Settings, with last-backup status in Overview.
-- **Categories** are managed contextually from transaction editing and Settings.
-- **Settings** remains a standard macOS Settings scene, not a detail-page row.
+- **Colour guard**: only `LedgerTheme.swift` may define colours, and each token there carries its own Increase Contrast value (`themeColoursHaveIncreaseContrastValues`). Elsewhere, no hand-mixed colours and no `.opacity(` (`everyColourFollowsIncreaseContrast`); use a token such as `inkQuiet` or a swatch's `soft` instead.
+- **Reduce Transparency**: every glass surface turns solid (`card` fill + hairline). System materials do this themselves; custom glass checks `accessibilityReduceTransparency`.
+- **Increase Contrast**: dynamic colours switch to their high-contrast values; hairlines become 22–26%.
+- **Reduce Motion**: crossfade or no transition (`MotionPolicy`).
+- Colour is never the only signal: amounts carry + or −; over-budget rows say "over".
+- Minimum target 28 × 28 pt. Every icon-only button has a label, help text and a keyboard path.
+- VoiceOver: rows read payee, category, account, amount; charts expose a summary.
 
-### Main transaction workspace
+## 8. Keyboard
 
-- Sidebar: product navigation and account filter.
-- Main column: sortable transaction table with date, account, payee/note, category, status, and amount.
-- Inspector: selected transaction details, provenance, links, recurrence/installment context, and revision history.
-- Toolbar: New Transaction, filter/search, date range, density, inspector toggle.
-- Status area: reconciliation state, visible result count, selection summary.
+`⇧⌘N` new ledger · `⌘O` open ledger · `⇧⌘I` import Money Manager backup · `⌘F` search · `⌥⌘F` filters · `⌥⌘I` inspector · `⌘Z` / `⇧⌘Z` undo, redo · Return edits the selected row · Space previews · Delete asks first. Every shortcut also exists in a menu.
 
-## 8. Core screens
+## 9. Motion
 
-### 8.1 Onboarding
+80–120 ms for control feedback, 160–220 ms for inspector and selection. Native springs only where they explain spatial change. No perpetual animation, shimmer, parallax or animated money.
 
-Offer three plain choices: import Money Manager backup, open Ledger Atlas ledger, or create an empty local ledger. Explain local storage and read-only source handling in one sentence. Do not show feature marketing.
+## 10. Content style
 
-### 8.2 Import and migration review
+- Direct verbs: Import, Review, Approve, Back Up, Restore.
+- Say the consequence: "Your backup file is only read, never changed."
+- Plain words over system words: "money in", "spending", "saved", not "inflow", "debit", "delta".
+- No hype words (seamless, effortless, smart, AI-powered). No blame ("This backup isn't supported yet", not "Invalid backup").
 
-Use a step-based flow: Select Source → Identify Profile → Review Coverage → Choose Timezone → Choose Destination → Approve. Show named compatibility level, mapped/preserved/excluded/blocked counts, unknown semantics, destination state, and source immutability. Blocked conditions must be prominent and content-free.
+## 11. States
 
-### 8.3 Transactions
+Every surface defines: no ledger (import first), empty ledger, no results (keep filters, offer reset), loading (name the phase), unavailable or damaged (disable edits, explain recovery), permission denied (re-select the file).
 
-The table is the daily home. Support multi-selection, contextual actions, column customization, sticky dates, fast entry, keyboard navigation, undo, and an optional inspector. Inline editing is limited to unambiguous fields; complex edits use a sheet or inspector.
+## 12. Never
 
-### 8.4 Transaction editor
+- Glass behind tables or figures, or glass on glass.
+- More than one accent, or accent used for decoration.
+- Red for ordinary spending by default.
+- Purple/blue neon gradients, blobs, glowing buttons, emoji as icons.
+- A dashboard of identical statistic tiles.
+- Hyphen-minus in amounts, Western grouping for rupees, unlabelled currency.
+- A Money Manager clone or its branding.
 
-Use a single coherent form: kind, amount, account effects, category, date/time/timezone, note, tags, recurrence/installment association, and provenance. Transfer mode always shows both effects and any conversion/rounding rule. Validation appears beside the relevant field; failed saves change nothing.
-
-### 8.5 Accounts and reconciliation
-
-Show balance, currency, last reconciled balance/date, unreconciled count, and related activity. Reconciliation is a guided comparison, not a checkbox hidden in a row menu.
-
-### 8.6 Plans
-
-Budgets, recurrence, and installments share a planning workspace but retain distinct semantics. Use a timeline/list split, visible next occurrence, progress, exceptions, paused/completed states, and direct links to generated transactions.
-
-### 8.7 Reports
-
-Charts answer one question at a time and always provide the exact table used to derive them. Default to trends, category composition, cash flow, and budget variance. No 3D charts, gauges, decorative gradients, or unexplained net figures.
-
-### 8.8 Backup and restore
-
-Show last successful exact backup, destination, checksum verification, and restore validation. Imported ledgers must use exact canonical backup until a portable package can preserve the full provenance graph. Never label an unverified copy “safe.”
-
-## 9. Interaction contract
-
-### Keyboard
-
-- `⌘N`: new transaction.
-- `⌘F`: focus global search.
-- `⌥⌘F`: open advanced filters.
-- `⌘I`: toggle inspector.
-- `⌘Z` / `⇧⌘Z`: undo/redo supported mutations.
-- `Return`: edit selected row; `Space`: Quick Look details; `Delete`: confirmation for tombstone/archive.
-- Arrow keys move table selection; Shift extends selection; Tab follows visual order.
-
-Every command must also exist in a menu or visible control. Shortcuts are accelerators, not hidden capabilities.
-
-### Motion
-
-- 80–120 ms for control feedback; 160–220 ms for inspector and selection transitions.
-- Use native spring/easing where it clarifies spatial change.
-- No perpetual animation, shimmer after loading, bouncing icons, parallax, or animated money totals.
-- Under Reduce Motion, crossfade only or remove transition entirely.
-
-### Feedback
-
-- Optimistic UI is allowed only when rollback is guaranteed and visible.
-- Save success is quiet. Failure is explicit, field-local, and preserves the previous value.
-- Long operations show phase, cancellability, and whether any write has occurred.
-- Import and backup never use a generic spinner without explanatory text.
-
-## 10. Accessibility and privacy
-
-- Minimum target: 28 × 28 px on Mac; 44 × 44 px if a future touch client shares the design.
-- Every chart has a navigable table and spoken summary.
-- Every icon-only button has a label, help text, and keyboard equivalent.
-- Focus never disappears after a mutation or validation error.
-- Redacted import views never expose source paths, raw identifiers, notes, amounts, sidecar payloads, or private file names.
-- Prototypes use synthetic accounts, payees, dates, and non-round amounts. Never paste a real backup or screenshot into an external design tool.
-
-## 11. Content style
-
-- Direct verbs: Import, Review, Approve, Save Backup, Reconcile.
-- State the consequence: “Creates a local Ledger Atlas ledger. The source remains unchanged.”
-- Avoid hype: seamless, effortless, revolutionize, unleash, smart finance, AI-powered money.
-- Avoid blame: use “This backup profile is not yet certified,” not “Invalid backup.”
-- Prefer “transaction,” “account,” “source,” “preserved,” and “blocked” consistently.
-- Never promise universal compatibility or “1:1” without a named certification scope.
-
-## 12. Empty, loading, and failure states
-
-Every production surface must define:
-
-- **No ledger:** one primary action to open, import, or create.
-- **Empty ledger:** explain the difference from an unavailable ledger.
-- **No search results:** preserve filters and offer clear reset.
-- **Loading:** show the object and phase being loaded; use skeletons only if dimensions are stable.
-- **Unavailable/corrupt:** clear previous bound data, disable mutation, explain recovery choices.
-- **Partially displayable import:** show preserved but undisplayed count and link to coverage details.
-- **Permission denied:** explain how to reselect the file without exposing its full path.
-
-## 13. Anti-patterns
-
-Never use:
-
-- A pixel-for-pixel Money Manager clone, its branding, or proprietary assets.
-- Purple/blue neon gradients, glowing buttons, glassmorphism everywhere, or pure black.
-- A dashboard composed of equal rounded statistic cards.
-- Huge marketing typography inside the working app.
-- Floating action buttons, mobile tab bars, hamburger menus, or web-style fake title bars on macOS.
-- Emoji as interface icons; use SF Symbols with text alternatives.
-- Continuous motion, decorative confetti, animated charts on every navigation.
-- Red/green as the only representation of financial direction.
-- Hidden destructive gestures or a save that silently changes history.
-- Fake precision, rounded sample metrics, generic stock names, or real user data in prototypes.
-- Charts without exact tables, provenance hidden behind developer mode, or compatibility claims without evidence.
-
-## 14. Prototype and implementation discipline
-
-- Generate at least three materially different screen compositions before choosing one. Changing only color does not count.
-- Prototype one complete journey: open/import → review → ledger → edit → search/report → backup.
-- Treat generated HTML/CSS/Figma/Stitch code as disposable reference. Production remains native SwiftUI/AppKit.
-- Keep prototype artifacts outside the accepted product tree until a direction is approved. Record the decision, not the discarded implementation.
-- Validate the chosen direction with realistic synthetic dense, sparse, error, long-label, large-number, negative-number, and accessibility states.
-- Do not change this design contract and judge a candidate against that changed contract in the same acceptance run.
-
-## 15. Decision log
+## 13. Decision log
 
 | Date | Decision | Rationale |
 |---|---|---|
-| 2026-08-20 | Adopt Quiet Financial Instrument | Native precision and calm command fit daily personal-finance work better than fintech spectacle. |
-| 2026-08-20 | Use one mineral-green accent | Gives Ledger Atlas a distinct identity while keeping semantic financial colors legible. |
-| 2026-08-20 | Use Apple system typography in production | Native legibility, accessibility, localization, and platform fit outweigh novelty. |
-| 2026-08-20 | Replace thirteen peer destinations with five primary areas | Reduces development-inventory navigation and centers daily jobs. |
-| 2026-08-20 | Keep provenance visible | Migration trust is a core product capability, not implementation metadata. |
+| 2026-08-20 | Quiet Financial Instrument, system typography | Native precision over fintech spectacle. |
+| 2026-11-03 | Three concept directions (Double Rule, Strata, Contour) | Rejected by Prax as gimmicky; metaphors read as childish. |
+| 2026-11-03 | Adopt the "Pro look" | Approved by Prax. Follows Apple's Liquid Glass guidance (glass on navigation), Linear's colour restraint and the figure treatment of Mercury and Stripe. |
+| 2026-11-03 | Accent moves from mineral green to deep teal | Green is reserved for money in; the accent must not read as income. |
+| 2026-11-03 | Spending in ink by default (`AmountColors.incomeGreen`) | Red only signals a problem. The old red-for-spending styles stay available in Settings. |
+| 2026-11-03 | Rupees always use Indian grouping | ₹4,83,676.30 is how rupee figures are read, whatever the display locale. |
+| 2026-11-03 | Text colours tuned to 4.5:1 (7:1 with Increase Contrast) | Review of #161: the quiet symbol and paise and the light-mode green fell below AA. |
+| 2026-11-03 | Sidebar grouped into Money, Accounts, Organise and Ledger | The sixteen equal destinations read as a development inventory; grouping keeps every screen one click and one arrow key away. |
+| 2026-11-03 | The backup's time zone starts at this Mac's zone | Import used to fail with "Choose the backup's source time zone" after the file was picked. The zone is shown on the welcome screen and in the review before anything is written. |

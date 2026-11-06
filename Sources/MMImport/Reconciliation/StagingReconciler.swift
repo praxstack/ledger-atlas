@@ -57,7 +57,10 @@ public struct StagingReconciler: Sendable {
       throw ReconciliationError.invalidStagingDatabase
     }
     defer { sqlite3_close(database) }
-    guard sqlite3_db_readonly(database, "main") == 1,
+    // The staging copy of a real backup is a few hundred MB and is read in key order across
+    // several indexes; SQLite's default 2 MB page cache re-reads the same pages from disk.
+    guard sqlite3_exec(database, "PRAGMA cache_size=-262144", nil, nil, nil) == SQLITE_OK,
+      sqlite3_db_readonly(database, "main") == 1,
       scalarText(database, "PRAGMA quick_check") == "ok"
     else { throw ReconciliationError.invalidStagingDatabase }
     testingAfterDatabaseOpen?()

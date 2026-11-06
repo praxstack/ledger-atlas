@@ -6,6 +6,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct AccountsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let rows: [LedgerJourney.SurfaceRow]
   let accounts: [LedgerAccount]
@@ -66,7 +67,7 @@ struct AccountsView: View {
             HStack {
               Text("Ungrouped")
               Spacer()
-              Text(AccountAmountText.subtotal(sheet?.groupTotals[nil] ?? [:]))
+              Text(AccountAmountText.subtotal(sheet?.groupTotals[nil] ?? [:], formatter))
                 .monospacedDigit()
             }
             .accessibilityElement(children: .combine)
@@ -226,34 +227,41 @@ struct AccountsView: View {
   }
 }
 
-/// Plain-text amounts for the accounts screen. Exact decimals are shown as stored, with the
-/// currency code, so nothing is rounded for display.
+/// Text amounts for the accounts screen, in the display formatter's style ("₹4,83,676.30").
+/// The formatter keeps every stored decimal place, so nothing is rounded for display.
 enum AccountAmountText {
-  static func amount(_ value: CurrencyAmount) -> String {
-    "\(value.unitCode) \(value.amount.description)"
+  static func amount(_ value: CurrencyAmount, _ formatter: LedgerDisplayFormatter) -> String {
+    formatter.parts(value).text
   }
 
-  static func subtotal(_ byUnit: [String: ExactDecimal]) -> String {
-    byUnit.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value.description)" }
-      .joined(separator: " · ")
+  static func subtotal(_ byUnit: [String: ExactDecimal], _ formatter: LedgerDisplayFormatter) -> String {
+    byUnit.sorted { $0.key < $1.key }.compactMap { unit, value in
+      (try? CurrencyAmount(unitCode: unit, amount: value)).map { formatter.parts($0).text }
+    }
+    .joined(separator: " · ")
   }
 }
 
 struct AccountTotalsSummary: View {
   let sheet: LedgerAccountBalanceSheet
+  @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
       ForEach(sheet.summaries, id: \.unitCode) { summary in
-        HStack(spacing: 16) {
-          Text(summary.unitCode).font(.headline)
-          labeled("Assets", summary.assets)
-          labeled("Liabilities", summary.liabilities)
-          labeled("Net", summary.net)
+        HStack(alignment: .bottom, spacing: LedgerTheme.Space.xxl) {
+          figure("Net worth", summary.unitCode, summary.net, size: .figure, alert: true)
+          figure("Assets", summary.unitCode, summary.assets, size: .row, alert: false)
+          figure("Liabilities", summary.unitCode, summary.liabilities, size: .row, alert: false)
+          Spacer(minLength: 0)
+          Text("\(summary.accountCount) accounts")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
         }
+        .ledgerCard(padding: LedgerTheme.Space.l)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-          "\(summary.unitCode): assets \(summary.assets.description), liabilities \(summary.liabilities.description), net \(summary.net.description), \(summary.accountCount) accounts counted")
+          "\(summary.unitCode): assets \(text(summary.unitCode, summary.assets)), liabilities \(text(summary.unitCode, summary.liabilities)), net \(text(summary.unitCode, summary.net)), \(summary.accountCount) accounts counted")
       }
       if sheet.foreignCurrencyEffectCount > 0 {
         Label(
@@ -263,15 +271,27 @@ struct AccountTotalsSummary: View {
           .foregroundStyle(.orange)
       }
       Text("Totals count open, visible accounts that are included in totals.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.inkTertiary)
     }
   }
 
-  private func labeled(_ title: String, _ value: ExactDecimal) -> some View {
-    VStack(alignment: .leading, spacing: 1) {
-      Text(title).font(.caption).foregroundStyle(.secondary)
-      Text(value.description).monospacedDigit()
+  private func text(_ unit: String, _ value: ExactDecimal) -> String {
+    (try? CurrencyAmount(unitCode: unit, amount: value)).map { formatter.parts($0).text }
+      ?? value.description
+  }
+
+  @ViewBuilder
+  private func figure(
+    _ title: String, _ unit: String, _ value: ExactDecimal, size: MoneyText.Size, alert: Bool
+  ) -> some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+      Text(title).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
+      if let amount = try? CurrencyAmount(unitCode: unit, amount: value) {
+        MoneyText(amount, size: size, negativeIsAlert: alert)
+      } else {
+        Text(value.description).monospacedDigit()
+      }
     }
   }
 }
@@ -285,22 +305,28 @@ struct AccountRow: View {
   var moveUp: (() -> Void)? = nil
   var moveDown: (() -> Void)? = nil
 
+  @Environment(\.ledgerFormatter) private var formatter
+
   var body: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 3) {
+    HStack(spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(
+        .initials(Self.initials(account.name)), swatch: LedgerTheme.swatch(for: account.name))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text(account.name)
+          .font(LedgerTheme.Typeface.body)
+          .foregroundStyle(LedgerTheme.ink)
         Text("\(account.currencyUnit) · \(account.variant.rawValue) · \(account.lifecycle.rawValue)")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkTertiary)
       }
       Spacer()
       if account.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
       if !account.includeInTotals { Label("Excluded from totals", systemImage: "minus.circle").font(.caption) }
       if account.lifecycle == .tombstoned { Label("Closed", systemImage: "archivebox").font(.caption) }
       if let balance {
-        Text(AccountAmountText.amount(balance))
-          .monospacedDigit()
-          .foregroundStyle(account.countsInTotals ? HierarchicalShapeStyle.primary : HierarchicalShapeStyle.secondary)
+        MoneyText(
+          balance, size: .row, tone: account.countsInTotals ? .automatic : .secondary,
+          negativeIsAlert: account.accountClass == .asset)
       }
       Menu("Actions") {
         Button("Edit account") { edit(account) }
@@ -325,10 +351,16 @@ struct AccountRow: View {
 
   private var accessibilityText: String {
     var parts = [account.name, account.variant.rawValue, account.lifecycle.rawValue]
-    if let balance { parts.insert("balance \(AccountAmountText.amount(balance))", at: 1) }
+    if let balance { parts.insert("balance \(AccountAmountText.amount(balance, formatter))", at: 1) }
     if account.hidden { parts.append("hidden") }
     if !account.includeInTotals { parts.append("excluded from totals") }
     return parts.joined(separator: ", ")
+  }
+
+  static func initials(_ name: String) -> String {
+    let words = name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).prefix(2)
+    let letters = words.compactMap(\.first).map { String($0).uppercased() }.joined()
+    return letters.isEmpty ? "·" : letters
   }
 
   private func update(
@@ -406,6 +438,7 @@ struct AccountEditForm: View {
 }
 
 struct AccountGroupHeader: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let group: LedgerAccountGroup
   var subtotal: [String: ExactDecimal] = [:]
   let isEditing: Bool
@@ -422,9 +455,9 @@ struct AccountGroupHeader: View {
       }
       Spacer()
       if !subtotal.isEmpty {
-        Text(AccountAmountText.subtotal(subtotal))
+        Text(AccountAmountText.subtotal(subtotal, formatter))
           .monospacedDigit()
-          .accessibilityLabel("Group total \(AccountAmountText.subtotal(subtotal))")
+          .accessibilityLabel("Group total \(AccountAmountText.subtotal(subtotal, formatter))")
       }
       if isEditing {
         if let rename {

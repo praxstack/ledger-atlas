@@ -347,11 +347,11 @@ let capturePlan: [String: CapturePlan] = [
   "transactions.daily/dark.populated.root": .init(
     shot: .screen(.ledger), expects: ["Entertainment, Expense"]),
   "statistics.overview/monthly.expense": .init(
-    shot: .screen(.insights), expects: ["Accessible table"],
-    note: "Insights shows every period in one table instead of a month/year toggle."),
+    shot: .screen(.insights), expects: ["Period", "Expense by category", "Income"],
+    note: "Insights opens on the newest month with entries; month and year share one picker instead of tabs."),
   "statistics.overview/annual.expense": .init(
-    shot: .screen(.insights, .middle), expects: ["Accessible table"],
-    note: "Insights shows every period in one table instead of a month/year toggle."),
+    shot: .screen(.insights, .middle), expects: ["Period", "Trend"],
+    note: "Shows the default month view; Year is one click away in the period picker, with the same sections."),
   "statistics.overview/annual.income.scrolled": .init(
     shot: .screen(.insights, .bottom), expects: ["Export PDF statement"]),
   "statistics.category_detail/annual.income.category": .init(
