@@ -792,10 +792,20 @@ extension ImportReviewSummary {
 
 struct ImportReviewView: View {
   let summary: ImportReviewSummary
+  /// The open ledger's balance-match receipt (#172), shown above the review when there is one.
+  var balanceReceipt: ImportBalanceReceipt?
+  var saveReceipt: () -> Void = {}
+  var continueTitle: String?
+  var continueAfterReceipt: () -> Void = {}
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 20) {
+        if let balanceReceipt {
+          ImportBalanceReceiptView(
+            receipt: balanceReceipt, saveAsPDF: saveReceipt, continueTitle: continueTitle,
+            continueAction: continueAfterReceipt)
+        }
         VStack(alignment: .leading, spacing: 8) {
           Label("Money Manager import review", systemImage: "eye")
             .font(.headline)

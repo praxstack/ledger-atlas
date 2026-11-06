@@ -279,6 +279,8 @@ public enum MoneyManagerV19Adapter {
     let pairs = pairTransfers(&events, preservedReasons: &preservedReasons)
     let opaqueTableNames = input.allTableNames.filter { !recognizedTables.contains($0) }
     let opaqueRecords = input.allRecords.filter { opaqueTableNames.contains($0.tableName) }
+    let sourceBalances = try MoneyManagerV19BalanceOracle.balances(
+      input, mappedRecordIDs: Set(events.map(\.sourceRecordID)))
     return MoneyManagerV19Plan(
       manifest: input.manifest, stagingDigest: input.stagingDigest,
       accounts: try input.assets.map { try entity(.account, $0) },
@@ -289,7 +291,7 @@ public enum MoneyManagerV19Adapter {
       opaqueTableNames: opaqueTableNames.sorted(),
       opaqueRecords: opaqueRecords.sorted { $0.sourceRecordID < $1.sourceRecordID },
       blockedRecords: blocked.sorted { $0.sourceRecordID < $1.sourceRecordID },
-      preservedReasons: preservedReasons)
+      preservedReasons: preservedReasons, sourceBalances: sourceBalances)
   }
 
   /// Matches transfer legs on their group id. A group that is not exactly one debit and one
@@ -873,6 +875,8 @@ public struct MoneyManagerV19Plan: Equatable, Sendable {
   public let opaqueRecords: [MoneyManagerV19SourceRecord]
   public let blockedRecords: [MoneyManagerV19BlockedRecord]
   public let preservedReasons: [String: MoneyManagerV19BlockReason]
+  /// What Money Manager shows for each account, from the backup's own rows (#172).
+  public let sourceBalances: MoneyManagerV19SourceBalances
   /// Raw v19 fields need a commit-layer semantic binding before a CanonicalCommitRequest can exist.
   public var requiresCanonicalSemanticBinding: Bool { true }
   public var isBlocked: Bool { false }
