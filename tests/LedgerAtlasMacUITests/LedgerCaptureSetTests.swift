@@ -29,6 +29,7 @@ import Testing
 
   let output = try captureDirectory()
   var index: [[String: String]] = []
+  let snapshots = CaptureSnapshots()
 
   // Screens: one window per screen (and editing mode), every record on it, both appearances.
   let screens = records.compactMap { record -> (CaptureRecord, CaptureShot.ScreenShot)? in
@@ -72,6 +73,7 @@ import Testing
         expectUsable(png, text: text, expecting: plan.expects, for: record.key)
         let name = record.fileName(appearance)
         try png.write(to: output.appendingPathComponent(name))
+        snapshots.add(file: name, png: png, text: text)
         var entry = record.indexEntry(
           file: name, appearance: appearance, plan: plan, method: method)
         entry["scroll"] =
@@ -83,7 +85,7 @@ import Testing
     }
   }
 
-  index += try await captureKeyStates(into: output)
+  index += try await captureKeyStates(into: output, snapshots: snapshots)
 
   // Sheets: opened in the real app window the way a person opens them, then the sheet
   // window itself is captured. Sheets opened from a menu go last.
@@ -142,6 +144,7 @@ import Testing
       expectUsable(png, text: text, expecting: plan.expects, for: record.key)
       let name = record.fileName(appearance)
       try png.write(to: output.appendingPathComponent(name))
+      snapshots.add(file: name, png: png, text: text)
       index.append(
         record.indexEntry(file: name, appearance: appearance, plan: plan, method: method))
       pair.append(png)
@@ -153,6 +156,7 @@ import Testing
     withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
+  try snapshots.verify(writingTo: output)
   // 25 records and 3 key states, each in light and dark.
   let expectedFiles: Int = 56
   #expect(index.count == expectedFiles)
@@ -165,15 +169,18 @@ import Testing
 /// The empty state, the lock screen and a refused passcode, in light and dark. (Loaded and the
 /// edit sheet are records 1 and 14 above.)
 @MainActor
-private func captureKeyStates(into output: URL) async throws -> [[String: String]] {
+private func captureKeyStates(
+  into output: URL, snapshots: CaptureSnapshots
+) async throws -> [[String: String]] {
   var index: [[String: String]] = []
   func save(
     _ capture: (png: Data, method: String), _ name: String, _ appearance: CaptureAppearance,
-    _ note: String
+    _ note: String, text: [String]
   ) throws {
     let png = capture.png
     let file = "key-\(name)-\(appearance.rawValue).png"
     try png.write(to: output.appendingPathComponent(file))
+    snapshots.add(file: file, png: png, text: text)
     index.append([
       "file": file, "state": name, "appearance": appearance.rawValue, "note": note,
       "capture_method": capture.method,
@@ -191,7 +198,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     let capture = try #require(windowPNG(empty.window))
     let text = empty.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     expectUsable(capture.png, text: text, expecting: ["Open a ledger"], for: "empty")
-    try save(capture, "empty", appearance, "No ledger open yet: the first-run prompt.")
+    try save(capture, "empty", appearance, "No ledger open yet: the first-run prompt.", text: text)
   }
 
   let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
@@ -208,7 +215,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     expectUsable(capture.png, text: text, expecting: ["Ledger Atlas is locked"], for: "lock")
     #expect(!text.contains { $0.contains("Everyday Bank") }, "the lock screen shows ledger content")
-    try save(capture, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
+    try save(capture, "lock", appearance, "App Lock on: ledger content is hidden until unlock.", text: text)
   }
   // An error: Unlock with no passcode is refused.
   log("clicking Unlock with no passcode")
@@ -221,7 +228,8 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     let text = locked.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     expectUsable(
       capture.png, text: text, expecting: ["That passcode was not accepted."], for: "error")
-    try save(capture, "error", appearance, "A refused passcode, shown in words as well as colour.")
+    try save(
+      capture, "error", appearance, "A refused passcode, shown in words as well as colour.", text: text)
   }
   return index
 }
