@@ -78,5 +78,6 @@ phase-2 goal either.
   trick that has never run under the iOS sandbox. A two-day spike after v1.0 (one
   `xcodebuild` job with an iOS destination) settles it.
 - Re-open this decision only if one of these becomes true: Android or Windows is
-  wanted before iOS; the ad-hoc path breaks on a macOS update; or the kernel cannot
-  be linked into an iOS app.
+  wanted before iOS; the ad-hoc path breaks on a macOS update; or the iOS build
+  spike (run after v1.0 and before phase-2 planning, by 2026-12-19) shows the kernel
+  cannot be linked into an iOS app.
