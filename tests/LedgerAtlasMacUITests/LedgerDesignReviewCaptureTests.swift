@@ -46,7 +46,7 @@ import Testing
 
   for (number, destination) in LedgerDemoTour.destinations.enumerated() {
     let name = String(format: "%02d-%@", number + 1, destination.rawValue)
-    log("review \(name)")
+    captureLog("review \(name)")
     let root = try await MountedRoot(
       showing: destination, size: captureSize, appWindow: true, readsInProcess: true)
     defer { root.close() }
@@ -62,13 +62,18 @@ import Testing
         _ = root.click(named: "Show inspector")
       }
       try await root.settle()
+      #expect(
+        root.accessibilityElements().contains(where: { $0.spokenName == "Hide inspector" }),
+        "the inspector did not open, so this capture would repeat the plain Transactions shot")
       try record(
         root, String(format: "%02d-%@-inspector", number + 1, destination.rawValue),
         note: "Transactions with an entry selected and the inspector open.")
+      // Showing it is remembered; later tests start undecided again.
+      UserDefaults.standard.removeObject(forKey: LedgerBrowseList.inspectorDefaultsKey)
     }
   }
 
-  log("review welcome")
+  captureLog("review welcome")
   let welcome = try await MountedRoot(
     showing: .overview, withLedger: false, size: captureSize, appWindow: true, readsInProcess: true)
   defer { welcome.close() }
@@ -77,7 +82,7 @@ import Testing
   let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
   try lock.setPasscode("2468")
   lock.lock()
-  log("review lock")
+  captureLog("review lock")
   let locked = try await MountedRoot(
     showing: .overview, appLock: lock, size: captureSize, appWindow: true, readsInProcess: true)
   defer { locked.close() }

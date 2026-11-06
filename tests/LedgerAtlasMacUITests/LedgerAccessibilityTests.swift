@@ -75,6 +75,21 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   }
 }
 
+/// Text on the accent (primary buttons, the active filter chip) is readable in every look:
+/// 4.5:1, and 7:1 with Increase Contrast.
+@MainActor
+@Test func onAccentTextMeetsContrastOverTheAccent() throws {
+  for (normal, high) in themeAppearancePairs {
+    for (appearance, minimum) in [(normal, 4.5), (high, 7.0)] {
+      let accent = try resolvedThemeColor(LedgerTheme.accent, appearance)
+      let ratio = contrastRatio(try resolvedThemeColor(LedgerTheme.onAccent, appearance), over: accent)
+      #expect(
+        ratio >= minimum,
+        "onAccent on accent in \(appearance.rawValue) is \(ratio):1, needs \(minimum):1")
+    }
+  }
+}
+
 /// Each appearance picks its own look, and the test switch picks the high-contrast one.
 @MainActor
 @Test func themeVariantFollowsTheAppearance() throws {

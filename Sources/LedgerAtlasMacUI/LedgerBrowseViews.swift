@@ -23,9 +23,14 @@ struct LedgerBrowseList: View {
   var closeSplit: ((LedgerSplitPurchase) -> Void)?
 
   @Environment(\.ledgerFormatter) private var formatter
-  /// The inspector as the person last left it. Until they touch it, the first layout picks a
-  /// default by width, so a small display is not left with a cramped table (see `body`).
-  @State private var inspectorChoice: Bool?
+  /// The inspector as the person last left it, kept across visits and launches: -1 until they
+  /// touch it, then 0 hidden or 1 shown. Until then the first settled layout picks a default by
+  /// width, so a small display is not left with a cramped table (see `body`).
+  @AppStorage(LedgerBrowseList.inspectorDefaultsKey) private var inspectorChoiceRaw = -1
+  /// The latest detail width, measured while the inspector is hidden.
+  @State private var measuredWidth: CGFloat = 0
+  @FocusState private var searchIsFocused: Bool
+  @FocusState private var focusedFilter: String?
   @State private var browser = LedgerBrowser(transactions: [])
   @State private var mode: LedgerBrowseMode = .daily
   @State private var filter = LedgerBrowseFilter()
@@ -42,6 +47,12 @@ struct LedgerBrowseList: View {
   /// The detail width that leaves room for the table beside a 320 pt inspector. Below it the
   /// inspector starts hidden; ⌥⌘I still shows it.
   static let inspectorAutoShowWidth: CGFloat = 780
+  static let inspectorDefaultsKey = "transactions.inspector"
+
+  private var inspectorChoice: Bool? {
+    get { inspectorChoiceRaw < 0 ? nil : inspectorChoiceRaw == 1 }
+    nonmutating set { inspectorChoiceRaw = newValue.map { $0 ? 1 : 0 } ?? -1 }
+  }
 
   private var accountNames: [String: String] {
     Dictionary(accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
@@ -82,11 +93,19 @@ struct LedgerBrowseList: View {
       pager
     }
     .ledgerCanvas()
-    // Measured while the inspector is still hidden, so this is the whole detail width. It
-    // decides the default once; after that only the toggle changes the inspector.
-    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-      guard inspectorChoice == nil, width > 0 else { return }
-      inspectorChoice = width >= Self.inspectorAutoShowWidth
+    // Measured while the inspector is still hidden, so this is the whole detail width.
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
+    .task(id: measuredWidth > 0) {
+      // The split view settles its columns over the first frames, so the default waits for a
+      // moment and reads the width then. It decides once; after that only the toggle counts.
+      guard inspectorChoice == nil, measuredWidth > 0 else { return }
+      try? await Task.sleep(for: .milliseconds(250))
+      guard !Task.isCancelled, inspectorChoice == nil, measuredWidth > 0 else { return }
+      var transaction = Transaction()
+      transaction.disablesAnimations = true
+      withTransaction(transaction) {
+        inspectorChoice = measuredWidth >= Self.inspectorAutoShowWidth
+      }
     }
     .inspector(isPresented: showsInspector) {
       LedgerTransactionInspector(
@@ -161,6 +180,7 @@ struct LedgerBrowseList: View {
       TextField("Search", text: $filter.text, prompt: Text("Search notes, amounts, accounts"))
         .textFieldStyle(.plain)
         .font(LedgerTheme.Typeface.secondary)
+        .focused($searchIsFocused)
         .accessibilityLabel("Search ledger")
       if !filter.text.isEmpty {
         Button {
@@ -177,9 +197,13 @@ struct LedgerBrowseList: View {
     .padding(.horizontal, LedgerTheme.Space.s)
     .frame(height: 26)
     .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.control))
-    .overlay(
-      RoundedRectangle(cornerRadius: LedgerTheme.Radius.control)
-        .strokeBorder(LedgerTheme.hairline, lineWidth: 0.5))
+    .overlay(focusRing(searchIsFocused))
+  }
+
+  /// The keyboard focus ring for the plain search field and chips (Full Keyboard Access).
+  private func focusRing(_ focused: Bool, ring: Color = LedgerTheme.accent) -> some View {
+    RoundedRectangle(cornerRadius: LedgerTheme.Radius.control)
+      .strokeBorder(focused ? ring : LedgerTheme.hairline, lineWidth: focused ? 2 : 0.5)
   }
 
   private var filterChips: some View {
@@ -254,8 +278,8 @@ struct LedgerBrowseList: View {
     return filter.includesClosed ? base : "\(base) · open only"
   }
 
-  /// A filter chip that opens a menu. An active filter is told twice: its own value as the title
-  /// and a check mark, with the tint as the third cue.
+  /// A filter chip that opens a menu. An active filter is told three ways: its own value as the
+  /// title, a check mark, and the solid accent fill (on-accent text keeps 4.5:1 and 7:1).
   private func filterMenu<Content: View>(
     _ title: String, active: Bool, label: String, @ViewBuilder content: () -> Content
   ) -> some View {
@@ -264,23 +288,25 @@ struct LedgerBrowseList: View {
     } label: {
       HStack(spacing: LedgerTheme.Space.xs) {
         if active {
-          Image(systemName: "checkmark").font(.system(.caption2, weight: .bold))
+          Image(systemName: "checkmark").font(LedgerTheme.Typeface.caption.weight(.bold))
         }
-        Text(title).font(.system(.callout, weight: .medium)).lineLimit(1)
-        Image(systemName: "chevron.down").font(.system(.caption2, weight: .semibold))
+        Text(title).font(LedgerTheme.Typeface.secondary.weight(.medium)).lineLimit(1)
+        Image(systemName: "chevron.down").font(LedgerTheme.Typeface.caption.weight(.semibold))
       }
-      .foregroundStyle(active ? LedgerTheme.accent : LedgerTheme.ink)
+      .foregroundStyle(active ? LedgerTheme.onAccent : LedgerTheme.ink)
       .padding(.horizontal, 10)
       .frame(height: 26)
       .background(
-        active ? LedgerTheme.accentSoft : LedgerTheme.fieldFill,
+        active ? LedgerTheme.accent : LedgerTheme.fieldFill,
         in: .rect(cornerRadius: LedgerTheme.Radius.control))
+      .overlay(focusRing(focusedFilter == label, ring: active ? LedgerTheme.ink : LedgerTheme.accent))
       .contentShape(.rect)
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
     .fixedSize()
+    .focused($focusedFilter, equals: label)
     .accessibilityLabel(label)
     .accessibilityValue(title)
   }
