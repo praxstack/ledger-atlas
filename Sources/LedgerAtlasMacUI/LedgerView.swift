@@ -49,12 +49,13 @@ struct LedgerView: View {
   var body: some View {
     Group {
       if !transactions.isEmpty {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
           if let splitNotice {
             Text(splitNotice)
-              .font(.caption)
-              .foregroundStyle(.orange)
-              .padding(.horizontal, 16)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+              .padding(.horizontal, LedgerTheme.Space.l)
+              .padding(.top, LedgerTheme.Space.s)
               .accessibilityLabel(splitNotice)
           }
           LedgerBrowseList(
@@ -70,15 +71,19 @@ struct LedgerView: View {
               ? { (purchase: LedgerSplitPurchase) in closeSplit?(purchase.id) } : nil)
         if let lifecycleMessage {
           Text(lifecycleMessage)
-            .foregroundStyle(.secondary)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
             .accessibilityLabel(lifecycleMessage)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, LedgerTheme.Space.l)
+            .padding(.vertical, LedgerTheme.Space.xs)
         }
         if let lastFailure {
-          Text(lastFailure)
-            .foregroundStyle(.red)
+          Label(lastFailure, systemImage: "exclamationmark.triangle")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.negative)
             .accessibilityLabel(lastFailure)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, LedgerTheme.Space.l)
+            .padding(.vertical, LedgerTheme.Space.xs)
         }
         editBar
           .padding(.horizontal, LedgerTheme.Space.l)

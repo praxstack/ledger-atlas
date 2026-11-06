@@ -136,16 +136,22 @@ public struct LedgerAtlasRootView: View {
         .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
         .help("Import a Money Manager backup (⇧⌘I)")
         .disabled(appLock.isLocked || journey.backgroundWork != nil)
-        Button("Create Ledger…", action: createLedger)
-          .accessibilityLabel(Self.createLedgerActionLabel)
-          .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
-          .keyboardShortcut("n", modifiers: [.command, .shift])
-          .disabled(appLock.isLocked)
-        Button("Open Ledger…", action: openLedger)
-          .accessibilityLabel(Self.openLedgerActionLabel)
-          .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
-          .keyboardShortcut("o", modifiers: .command)
-          .disabled(appLock.isLocked)
+        Button(action: createLedger) {
+          Label(Self.createLedgerActionLabel, systemImage: "doc.badge.plus")
+        }
+        .accessibilityLabel(Self.createLedgerActionLabel)
+        .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
+        .help("Create a new ledger (⇧⌘N)")
+        .keyboardShortcut("n", modifiers: [.command, .shift])
+        .disabled(appLock.isLocked)
+        Button(action: openLedger) {
+          Label(Self.openLedgerActionLabel, systemImage: "folder")
+        }
+        .accessibilityLabel(Self.openLedgerActionLabel)
+        .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
+        .help("Open an existing ledger (⌘O)")
+        .keyboardShortcut("o", modifiers: .command)
+        .disabled(appLock.isLocked)
       }
     }
     .fileImporter(
