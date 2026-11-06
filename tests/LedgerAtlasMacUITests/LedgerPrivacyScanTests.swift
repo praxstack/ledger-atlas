@@ -15,7 +15,8 @@ import Testing
 /// root view then shows that ledger on every screen, and diagnostics are exported from it.
 /// The markers must show on screen (so the scan isn't vacuous) and must never appear in the
 /// process's console output, in the widget's shared file, in the diagnostics export, or in any
-/// file written under the temporary, Logs or Caches folders outside the ledger's own folder.
+/// file written under the temporary, Logs, Caches, Preferences or Application Support folders
+/// outside the ledger's own folder.
 @MainActor
 @Test func ledgerDataNeverReachesTheConsoleOrStrayFiles() async throws {
   let markers = PrivacyMarkers()
@@ -64,10 +65,14 @@ import Testing
   #expect(markers.found(in: diagnostics).isEmpty, "ledger data reached the diagnostics export")
 
   let home = FileManager.default.homeDirectoryForCurrentUser
+  // Where an app's stray writes land: temp files, logs, caches, preferences (UserDefaults)
+  // and Application Support (app and app-group containers).
   let roots = [
     FileManager.default.temporaryDirectory,
     home.appendingPathComponent("Library/Logs"),
     home.appendingPathComponent("Library/Caches"),
+    home.appendingPathComponent("Library/Preferences"),
+    home.appendingPathComponent("Library/Application Support"),
   ]
   var scanned = 0
   var leaks: [String] = []
