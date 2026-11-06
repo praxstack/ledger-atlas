@@ -107,7 +107,10 @@ public struct LedgerAtlasRootView: View {
           )
       }
     }
-    .preferredColorScheme(productSettings.colorScheme)
+    // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
+    .onChange(of: productSettings.appearance, initial: true) { _, appearance in
+      LedgerAppearance.apply(appearance)
+    }
     .environment(\.ledgerFormatter, LedgerDisplayFormatter(settings: productSettings))
     .environment(\.ledgerAmountColors, productSettings.amountColors)
     .tint(LedgerTheme.accent)
