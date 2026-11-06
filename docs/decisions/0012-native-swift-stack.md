@@ -11,7 +11,7 @@ With v1.0 due 2026-12-07, Prax asked whether the app should stay native, move to
 Electron, or pivot to Rust/Tauri, to be "more compatible, more feature-full", and to
 avoid the problems hit while implementing certain things. The app is 100% Swift
 (Swift 6.2 package, macOS 15; SwiftUI + AppKit shell). There is no Electron build;
-the Next.js folder is a 530-line demo.
+the Next.js folder is a 660-line demo.
 
 Constraints: zero spend (no Apple Developer Program, ad-hoc signed DMG, free macOS
 runners on a public repo), cloud-first development (no Mac in the loop), and a
@@ -19,7 +19,7 @@ phase-2 wish for iOS, maybe other platforms later.
 
 Measured on main 0908ef1 (2026-11-04): about 44,000 lines of Swift and C
 (LedgerCore 7.1k, LedgerStore 11.0k, MMImport 11.8k, LedgerAtlasMacUI 13.0k,
-CSQLite 0.9k), 781 tests in 30,500 lines, import certificate L3 (#134), 51 PRs
+CSQLite 0.9k), 781 tests in 30,500 lines, import certificate L3 (#134), 82 PRs
 merged between 2026-11-02 and 2026-11-04.
 
 ## Evidence
@@ -29,7 +29,7 @@ by Swift:
 
 | Cause | Blockers | Would Electron or Tauri avoid it? |
 | --- | --- | --- |
-| macOS policy at zero spend | Keychain -34018 and password prompts after updates (#154, #156); App Sandbox blocks SQLite journals next to a picked file (#97); the widget needs an App Group, dead in an ad-hoc DMG | Keychain: no (safeStorage and keyring use the same Keychain). Sandbox: yes, by not sandboxing, which Swift could also do. Widget: no widget at all. |
+| macOS policy at zero spend | Keychain -34018 and password prompts after updates (#154, #156); App Sandbox blocks SQLite journals next to a picked file (#97); the widget needs an App Group, dead in an ad-hoc DMG | Keychain: partly; Electron's safeStorage uses a device-only item, so it avoids -34018, but without a Team ID that item still prompts for a password after every update (the cdhash partition, #154). Sandbox: yes, by not sandboxing, which Swift could also do. Widget: no widget at all. |
 | AppKit/SwiftUI test tooling | run loop exits after a sheet closes (#147, #151); AX reads crash; `swift test --no-parallel` on the 3-core runner | Yes, with browser test tooling, at the cost of hand-built accessibility |
 | Our own data and file design | 900 MB ledger, 70 s first open (#123, #125); pinned VFS zPath crash (#150); POSIX lock drop (#140) | No, same schema and the same SQLite semantics |
 | GitHub billing | 6-hour Actions lock on 2026-11-02 | No, the DMG still needs a Mac runner |
@@ -61,7 +61,7 @@ phase-2 goal either.
 3. `LedgerCore`, `LedgerStore` and `MMImport` stay free of AppKit and SwiftUI, and
    the Linux harness stays green, so the kernel remains portable.
 4. The UI complaints (theme selection not applying; "looks mid") are handled as
-   polish and bug work in the Pro-look thread (#161 merged, #163 open), not as a
+   polish and bug work in the Pro-look thread (#161 and #163 merged), not as a
    stack change.
 
 ## Consequences
