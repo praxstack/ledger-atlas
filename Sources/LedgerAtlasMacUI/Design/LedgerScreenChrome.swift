@@ -239,7 +239,8 @@ struct LedgerKeyValue: View {
   }
 }
 
-/// The scrolling column of cards most screens are made of.
+/// The scrolling column of cards most screens are made of. It is a plain `List` under the
+/// skin, so each card is a row VoiceOver can step through and the keyboard can reach.
 struct LedgerCardColumn<Content: View>: View {
   let maxWidth: CGFloat
   let content: Content
@@ -250,12 +251,19 @@ struct LedgerCardColumn<Content: View>: View {
   }
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: LedgerTheme.Space.l) { content }
+    List {
+      Group { content }
         .frame(maxWidth: maxWidth, alignment: .leading)
-        .padding(LedgerTheme.Space.xxl)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .listRowInsets(
+          EdgeInsets(
+            top: LedgerTheme.Space.s, leading: LedgerTheme.Space.xxl, bottom: LedgerTheme.Space.s,
+            trailing: LedgerTheme.Space.xxl))
     }
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .contentMargins(.vertical, LedgerTheme.Space.l, for: .scrollContent)
     .ledgerCanvas()
   }
 }
