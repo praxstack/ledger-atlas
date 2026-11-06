@@ -18,6 +18,9 @@ import Testing
 /// process's console output, in the widget's shared file, in the diagnostics export, or in any
 /// file written under the temporary, Logs, Caches, Preferences or Application Support folders
 /// outside the ledger's own folder.
+///
+/// The console capture redirects the whole process's stdout and stderr, including the test
+/// reporter's, so this relies on the serial run (`swift test --no-parallel`, as CI runs it).
 @MainActor
 @Test func ledgerDataNeverReachesTheConsoleOrStrayFiles() async throws {
   let markers = PrivacyMarkers()
