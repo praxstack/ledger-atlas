@@ -911,6 +911,18 @@ func accessibilityFocus(of pid: pid_t) -> [String] {
   if spoken.isEmpty, let labelElement = axElement(attribute(element, kAXTitleUIElementAttribute)) {
     spoken = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String) ?? ""
   }
+  // A focused wrapper (a SwiftUI button's group, say) is read by what is inside it, as
+  // VoiceOver does: the first named descendant, breadth first.
+  if spoken.isEmpty {
+    var queue = (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+    var looked = 0
+    while !queue.isEmpty, looked < 40, spoken.isEmpty {
+      let child = queue.removeFirst()
+      looked += 1
+      spoken = name(child) ?? ""
+      queue += (attribute(child, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+    }
+  }
   guard let box = frame(element) else { return [spoken] }
   return [spoken] + [box.minX, box.minY, box.width, box.height].map { String(Double($0)) }
 }
