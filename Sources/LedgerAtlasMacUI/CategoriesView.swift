@@ -126,6 +126,7 @@ struct CategoryBreadcrumbs: View {
     } else {
       Button(title) { select(id) }
         .buttonStyle(.link)
+        .accessibilityLabel(title)
         .font(LedgerTheme.Typeface.secondary)
     }
   }

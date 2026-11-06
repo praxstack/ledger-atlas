@@ -318,7 +318,9 @@ struct InsightsSurface: View {
         }
       }
       .frame(height: 180)
-      .accessibilityHidden(true)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Trend chart, income and expense by \(report.kind == .year ? "year" : "month")")
+      .accessibilityValue(trendSummary(report))
       Grid(alignment: .trailing, horizontalSpacing: LedgerTheme.Space.l, verticalSpacing: LedgerTheme.Space.s) {
         GridRow {
           Text("Period").gridColumnAlignment(.leading)
@@ -353,6 +355,12 @@ struct InsightsSurface: View {
       Text(money(value, unit)).font(LedgerTheme.Typeface.secondary).monospacedDigit()
         .foregroundStyle(LedgerTheme.ink)
     }
+  }
+
+  private func trendSummary(_ report: InsightsReport) -> String {
+    report.trend.map { point in
+      "\(label(point.period.start, report.kind)): income \(money(point.income, report.unitCode)), expense \(money(point.expense, report.unitCode))"
+    }.joined(separator: ". ")
   }
 
   private func legend(_ title: String, _ color: Color) -> some View {
