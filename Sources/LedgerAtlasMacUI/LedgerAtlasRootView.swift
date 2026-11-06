@@ -111,6 +111,13 @@ public struct LedgerAtlasRootView: View {
     .onChange(of: productSettings.appearance, initial: true) { _, appearance in
       LedgerAppearance.apply(appearance)
     }
+    .onReceive(
+      NSWorkspace.shared.notificationCenter.publisher(
+        for: NSWorkspace.didChangeAccessibilityDisplayOptionsNotification)
+    ) { _ in
+      // Increase Contrast turned on or off: a forced Light or Dark look must follow it.
+      LedgerAppearance.apply(productSettings.appearance)
+    }
     .environment(\.ledgerFormatter, LedgerDisplayFormatter(settings: productSettings))
     .environment(\.ledgerAmountColors, productSettings.amountColors)
     .tint(LedgerTheme.accent)

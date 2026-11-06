@@ -567,6 +567,8 @@ final class MountedRoot {
   }
 
   func close() {
+    // A forced appearance (the `appearance:` parameter) must not leak into later tests.
+    NSApplication.shared.appearance = nil
     window.orderOut(nil)
     autoreleasepool {
       window.contentViewController = nil

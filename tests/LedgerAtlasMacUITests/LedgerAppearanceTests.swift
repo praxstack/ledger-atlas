@@ -44,3 +44,31 @@ import Testing
   LedgerAppearance.apply(.system)
   #expect(app.appearance == nil)
 }
+
+/// With Increase Contrast on, Light and Dark keep the system's high-contrast look instead of
+/// forcing the plain one. The runner may hand back the plain appearance for a high-contrast
+/// name (`NSAppearance(named:)` does that when the setting is off), so the applied name is
+/// checked loosely and the mapping strictly.
+@MainActor
+@Test func forcedAppearanceKeepsIncreaseContrast() {
+  #expect(LedgerAppearance.appearanceName(for: .system, increaseContrast: true) == nil)
+  #expect(LedgerAppearance.appearanceName(for: .light, increaseContrast: false) == .aqua)
+  #expect(
+    LedgerAppearance.appearanceName(for: .light, increaseContrast: true) == .accessibilityHighContrastAqua)
+  #expect(LedgerAppearance.appearanceName(for: .dark, increaseContrast: false) == .darkAqua)
+  #expect(
+    LedgerAppearance.appearanceName(for: .dark, increaseContrast: true)
+      == .accessibilityHighContrastDarkAqua)
+
+  let app = NSApplication.shared
+  let before = app.appearance
+  defer { app.appearance = before }
+  LedgerAppearance.apply(.dark, to: app, increaseContrast: true)
+  let applied = app.appearance?.name
+  #expect(
+    applied == .accessibilityHighContrastDarkAqua || applied == .darkAqua,
+    "applied \(applied?.rawValue ?? "nothing")")
+  LedgerAppearance.apply(.light, to: app, increaseContrast: true)
+  let light = app.appearance?.name
+  #expect(light == .accessibilityHighContrastAqua || light == .aqua, "applied \(light?.rawValue ?? "nothing")")
+}
