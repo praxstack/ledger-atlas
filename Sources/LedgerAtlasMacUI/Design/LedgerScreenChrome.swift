@@ -259,3 +259,54 @@ struct LedgerCardColumn<Content: View>: View {
     .ledgerCanvas()
   }
 }
+
+/// A list of title-and-detail rows (the data-backed surfaces and the read-only fallbacks).
+struct LedgerSurfaceRowList: View {
+  let rows: [LedgerJourney.SurfaceRow]
+
+  var body: some View {
+    List(rows) { row in
+      LedgerRow(row.title, detail: row.detail)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(row.title), \(row.detail)")
+    }
+    .scrollContentBackground(.hidden)
+    .ledgerCanvas()
+  }
+}
+
+/// The empty, loading and unavailable states of a screen that needs an open ledger. The
+/// titles and the "Open Ledger…" button are what the empty-state checks look for.
+struct LedgerSessionEmptyState: View {
+  let state: LedgerSession.State
+  let title: String
+  let systemImage: String
+  let message: String
+  let failure: String?
+  let open: () -> Void
+
+  var body: some View {
+    switch state {
+    case .loaded:
+      LedgerEmptyState(title, systemImage: systemImage, message: message)
+    case .loading:
+      OpeningLedgerView().frame(maxWidth: .infinity, maxHeight: .infinity)
+    case .unavailable:
+      LedgerEmptyState(
+        "Ledger unavailable", systemImage: "exclamationmark.triangle",
+        message: [LedgerLifecycleGuidance.unavailable.text(retrying: nil), failure].compactMap { $0 }
+          .joined(separator: " ")
+      ) {
+        Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
+      }
+    case .noLedger:
+      LedgerEmptyState(
+        "Open a ledger", systemImage: "folder",
+        message: [LedgerLifecycleGuidance.noLedger.text(retrying: nil), failure].compactMap { $0 }
+          .joined(separator: " ")
+      ) {
+        Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
+      }
+    }
+  }
+}

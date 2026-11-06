@@ -62,42 +62,25 @@ struct InsightsSurface: View {
 
   var body: some View {
     if rows.isEmpty {
-      VStack(alignment: .leading, spacing: 12) {
-        Text("Insights").font(.largeTitle.bold())
-        Text(emptyMessage).foregroundStyle(.secondary)
-        Button("Open…", action: open)
+      LedgerEmptyState(
+        "Insights", systemImage: "chart.bar.xaxis", message: emptyMessage
+      ) {
+        Button("Open…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .padding(32)
+      .ledgerCanvas()
+      .navigationTitle("Insights")
     } else {
-      List {
+      LedgerCardColumn(maxWidth: 820) {
         if let report {
-          periodSections(report)
+          periodCard(report)
+          categoryCard("Expense by category", report.statistics.expenseCategories, report: report)
+          categoryCard("Income by category", report.statistics.incomeCategories, report: report)
+          trendCard(report)
+          statementCard(report)
         }
-        Section("Accessible table") {
-          Text(table)
-            .font(.body.monospaced())
-            .textSelection(.enabled)
-            .accessibilityLabel(table)
-            .accessibilityAddTraits(.isStaticText)
-        }
-        Section("Status") {
-          ForEach(rows) { row in
-            HStack {
-              Text(row.title)
-              Spacer()
-              Text(row.detail)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(row.title), \(row.detail)")
-          }
-        }
-        Section("Export") {
-          Button("Export PDF statement", action: exportPDF)
-            .accessibilityLabel("Export PDF statement")
-        }
+        accessibleTableCard
+        statusCard
+        exportCard
       }
       .navigationTitle("Insights")
       .task(id: reportKey) {
@@ -125,162 +108,322 @@ struct InsightsSurface: View {
     }
   }
 
-  @ViewBuilder
-  private func periodSections(_ report: InsightsReport) -> some View {
+  // MARK: Period
+
+  private func periodCard(_ report: InsightsReport) -> some View {
     let title = report.title(formatter)
     let s = report.statistics
-    Section {
-      HStack(spacing: 12) {
+    return VStack(alignment: .leading, spacing: LedgerTheme.Space.l) {
+      HStack(spacing: LedgerTheme.Space.m) {
+        Text("Period")
+          .font(LedgerTheme.Typeface.cardTitle)
+          .foregroundStyle(LedgerTheme.ink)
+          .accessibilityAddTraits(.isHeader)
         Picker("Period", selection: $kind) {
           ForEach(InsightsPeriodKind.allCases) { Text($0.title).tag($0) }
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: 180)
+        .labelsHidden()
+        .frame(maxWidth: 160)
         .accessibilityLabel("Period length")
-        Button {
-          move(-1)
-        } label: {
-          Image(systemName: "chevron.left")
-        }
-        .accessibilityLabel("Previous \(kind.title.lowercased())")
-        Text(title).font(.headline).frame(minWidth: 140)
-        Button {
-          move(1)
-        } label: {
-          Image(systemName: "chevron.right")
-        }
-        .accessibilityLabel("Next \(kind.title.lowercased())")
+        Spacer(minLength: LedgerTheme.Space.s)
         if report.units.count > 1 {
-          Picker("Currency", selection: Binding(
-            get: { report.unitCode }, set: { unitCode = $0 })
+          Picker(
+            "Currency",
+            selection: Binding(get: { report.unitCode }, set: { unitCode = $0 })
           ) {
             ForEach(report.units, id: \.self) { Text($0).tag($0) }
           }
-          .frame(maxWidth: 140)
+          .pickerStyle(.menu)
+          .fixedSize()
+          .accessibilityLabel("Currency")
         }
-        Spacer()
+        HStack(spacing: LedgerTheme.Space.xxs) {
+          Button {
+            move(-1)
+          } label: {
+            Image(systemName: "chevron.left").frame(width: 22, height: 22)
+          }
+          .accessibilityLabel("Previous \(kind.title.lowercased())")
+          Text(title)
+            .font(LedgerTheme.Typeface.bodyEmphasis)
+            .foregroundStyle(LedgerTheme.ink)
+            .monospacedDigit()
+            .frame(minWidth: 120)
+          Button {
+            move(1)
+          } label: {
+            Image(systemName: "chevron.right").frame(width: 22, height: 22)
+          }
+          .accessibilityLabel("Next \(kind.title.lowercased())")
+        }
+        .buttonStyle(LedgerSecondaryButtonStyle())
       }
-      HStack(spacing: 12) {
-        tile("Income", s.income, report.unitCode)
-        tile("Expense", s.expense, report.unitCode)
-        tile("Net", s.net, report.unitCode)
+      HStack(alignment: .top, spacing: LedgerTheme.Space.xxl) {
+        figure("Income", s.income, report.unitCode)
+        figure("Expense", s.expense, report.unitCode)
+        figure("Net", s.net, report.unitCode, negativeIsAlert: true)
         if let balance = s.closingBalance {
-          tile("Balance at end", balance.net, report.unitCode)
+          figure("Balance at end", balance.net, report.unitCode, negativeIsAlert: true)
         }
+        Spacer(minLength: 0)
       }
       Text(
         "\(s.incomeCount) income and \(s.expenseCount) expense entries. Transfers (\(s.transferCount)) and adjustments (\(s.adjustmentCount)) move money between accounts and are not counted as income or expense."
       )
-      .font(.caption)
-      .foregroundStyle(.secondary)
-    } header: {
-      Text("Period")
+      .font(LedgerTheme.Typeface.caption)
+      .foregroundStyle(LedgerTheme.inkTertiary)
+      .fixedSize(horizontal: false, vertical: true)
     }
+    .ledgerCard()
+  }
 
-    categorySection("Expense by category", s.expenseCategories, report: report)
-    categorySection("Income by category", s.incomeCategories, report: report)
+  @ViewBuilder
+  private func figure(
+    _ title: String, _ value: ExactDecimal, _ unit: String, negativeIsAlert: Bool = false
+  ) -> some View {
+    if let amount = try? CurrencyAmount(unitCode: unit, amount: value) {
+      LedgerFigure(title, amount: amount, size: .figure, negativeIsAlert: negativeIsAlert)
+    } else {
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+        Text(title).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
+        Text(money(value, unit)).font(LedgerTheme.Typeface.figure).foregroundStyle(LedgerTheme.ink)
+      }
+      .accessibilityElement(children: .combine)
+    }
+  }
 
-    Section("Trend") {
+  // MARK: Categories
+
+  @ViewBuilder
+  private func categoryCard(
+    _ title: String, _ rows: [LedgerCategoryStatistic], report: InsightsReport
+  ) -> some View {
+    if !rows.isEmpty {
+      let top = rows.filter { $0.depth == 0 }
+      let largest = top.map(\.totalAmount).max().map(Self.double) ?? 0
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+        LedgerCardHeader(title) { Text("\(top.count) categories") }
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(rows) { row in
+            Button {
+              drillDown = row
+            } label: {
+              categoryRow(row, in: rows, report: report, largest: largest)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+              "\(row.name), \(money(row.totalAmount, report.unitCode)), \(row.totalCount) entries"
+            )
+            .accessibilityHint("Shows the entries behind this amount.")
+            if row.id != rows.last?.id { LedgerRowDivider() }
+          }
+        }
+      }
+      .ledgerCard()
+    }
+  }
+
+  private func categoryRow(
+    _ row: LedgerCategoryStatistic, in rows: [LedgerCategoryStatistic], report: InsightsReport,
+    largest: Double
+  ) -> some View {
+    let topLevel = row.depth == 0
+    // A subcategory takes its parent's colour so the bars and the rows read as one family.
+    let key = topLevel ? row.name : (rows.first { $0.id == row.parentID }?.name ?? row.name)
+    let tint = LedgerTheme.paletteColor(for: key)
+    let share = largest > 0 ? Self.double(row.totalAmount) / largest : 0
+    return VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
+      HStack(spacing: LedgerTheme.Space.s) {
+        if topLevel {
+          LedgerColorKey(tint)
+        } else {
+          Image(systemName: "arrow.turn.down.right")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
+            .accessibilityHidden(true)
+        }
+        Text(row.name)
+          .font(topLevel ? LedgerTheme.Typeface.bodyEmphasis : LedgerTheme.Typeface.body)
+          .foregroundStyle(topLevel ? LedgerTheme.ink : LedgerTheme.inkSecondary)
+          .lineLimit(1)
+        Spacer(minLength: LedgerTheme.Space.s)
+        Text("\(row.totalCount)")
+          .font(LedgerTheme.Typeface.caption)
+          .monospacedDigit()
+          .foregroundStyle(LedgerTheme.inkTertiary)
+          .frame(minWidth: 28, alignment: .trailing)
+        if let amount = try? CurrencyAmount(unitCode: report.unitCode, amount: row.totalAmount) {
+          MoneyText(amount, size: .row, sign: .never, tone: topLevel ? .neutral : .secondary)
+            .frame(minWidth: 120, alignment: .trailing)
+        } else {
+          Text(money(row.totalAmount, report.unitCode))
+            .font(LedgerTheme.Typeface.bodyEmphasis)
+            .monospacedDigit()
+            .foregroundStyle(LedgerTheme.ink)
+            .frame(minWidth: 120, alignment: .trailing)
+        }
+      }
+      if topLevel {
+        LedgerProgressTrack(fraction: share, tint: tint, height: 4)
+      }
+    }
+    .padding(.leading, CGFloat(row.depth) * LedgerTheme.Space.l)
+    .padding(.vertical, LedgerTheme.Space.s)
+    .contentShape(.rect)
+  }
+
+  // MARK: Trend
+
+  private func trendCard(_ report: InsightsReport) -> some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Trend") { Text("\(report.trend.count) \(report.kind == .year ? "years" : "months")") }
+      HStack(spacing: LedgerTheme.Space.l) {
+        legend("Income", LedgerTheme.positive)
+        legend("Expense", LedgerTheme.ink)
+      }
       Chart {
         ForEach(report.trend) { point in
           BarMark(
             x: .value("Period", label(point.period.start, report.kind)),
-            y: .value("Amount", Self.double(point.income)))
+            y: .value("Amount", Self.double(point.income)), width: .ratio(0.7))
           .foregroundStyle(by: .value("Kind", "Income"))
           .position(by: .value("Kind", "Income"))
+          .cornerRadius(2.5)
           BarMark(
             x: .value("Period", label(point.period.start, report.kind)),
-            y: .value("Amount", Self.double(point.expense)))
+            y: .value("Amount", Self.double(point.expense)), width: .ratio(0.7))
           .foregroundStyle(by: .value("Kind", "Expense"))
           .position(by: .value("Kind", "Expense"))
+          .cornerRadius(2.5)
         }
       }
-      .chartForegroundStyleScale(["Income": Color.green, "Expense": Color.orange])
+      .chartForegroundStyleScale(["Income": LedgerTheme.positive, "Expense": LedgerTheme.ink])
+      .chartLegend(.hidden)
+      .chartXAxis {
+        AxisMarks { _ in
+          AxisValueLabel().font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
+        }
+      }
+      .chartYAxis {
+        AxisMarks(position: .leading) { value in
+          AxisGridLine().foregroundStyle(LedgerTheme.hairlineSoft)
+          AxisValueLabel {
+            if let number = value.as(Double.self) {
+              Text(formatter.compactAxis(number, unitCode: report.unitCode))
+                .font(LedgerTheme.Typeface.caption)
+                .foregroundStyle(LedgerTheme.inkTertiary)
+            }
+          }
+        }
+      }
       .frame(height: 180)
       .accessibilityHidden(true)
-      Grid(alignment: .trailing, horizontalSpacing: 16, verticalSpacing: 4) {
+      Grid(alignment: .trailing, horizontalSpacing: LedgerTheme.Space.l, verticalSpacing: LedgerTheme.Space.s) {
         GridRow {
           Text("Period").gridColumnAlignment(.leading)
           Text("Income")
           Text("Expense")
           Text("Net")
         }
-        .font(.caption.bold())
+        .font(LedgerTheme.Typeface.captionEmphasis)
+        .foregroundStyle(LedgerTheme.inkTertiary)
         ForEach(report.trend) { point in
           GridRow {
-            Text(label(point.period.start, report.kind)).gridColumnAlignment(.leading)
-            Text(money(point.income, report.unitCode))
-            Text(money(point.expense, report.unitCode))
-            Text(money(point.net, report.unitCode))
+            Text(label(point.period.start, report.kind))
+              .font(LedgerTheme.Typeface.secondary)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+              .gridColumnAlignment(.leading)
+            trendFigure(point.income, report.unitCode)
+            trendFigure(point.expense, report.unitCode)
+            trendFigure(point.net, report.unitCode, negativeIsAlert: true)
           }
           .accessibilityElement(children: .combine)
         }
       }
-      .font(.body.monospacedDigit())
     }
-
-    Section("Statement for \(title)") {
-      Toggle("Hide category names in the PDF", isOn: $hideNamesInPDF)
-      Button("Export PDF for \(title)") {
-        exportPeriodPDF?(report, title, hideNamesInPDF)
-      }
-      .disabled(exportPeriodPDF == nil)
-      Text("Snapshot \(s.snapshotDigest.prefix(16)). The screen and the PDF show the same snapshot.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
-    }
+    .ledgerCard()
   }
 
   @ViewBuilder
-  private func categorySection(
-    _ title: String, _ rows: [LedgerCategoryStatistic], report: InsightsReport
-  ) -> some View {
-    if !rows.isEmpty {
-      Section(title) {
-        // The eight largest top-level lines; every line is listed in the rows below.
-        let top = rows.filter { $0.depth == 0 }.sorted { $0.totalAmount > $1.totalAmount }
-        Chart(top.prefix(8)) { row in
-          BarMark(
-            x: .value("Amount", Self.double(row.totalAmount)),
-            y: .value("Category", row.name))
-        }
-        .frame(height: CGFloat(min(top.count, 8)) * 28 + 20)
-        .accessibilityHidden(true)
-        ForEach(rows) { row in
-          Button {
-            drillDown = row
-          } label: {
-            HStack {
-              Text(row.name)
-                .padding(.leading, CGFloat(row.depth) * 16)
-              Spacer()
-              Text("\(row.totalCount)").foregroundStyle(.secondary)
-              Text(money(row.totalAmount, report.unitCode))
-                .font(.body.monospacedDigit())
-                .frame(minWidth: 120, alignment: .trailing)
-            }
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel(
-            "\(row.name), \(money(row.totalAmount, report.unitCode)), \(row.totalCount) entries"
-          )
-          .accessibilityHint("Shows the entries behind this amount.")
-        }
-      }
+  private func trendFigure(_ value: ExactDecimal, _ unit: String, negativeIsAlert: Bool = false) -> some View {
+    if let amount = try? CurrencyAmount(unitCode: unit, amount: value) {
+      MoneyText(amount, size: .small, tone: .neutral, negativeIsAlert: negativeIsAlert)
+    } else {
+      Text(money(value, unit)).font(LedgerTheme.Typeface.secondary).monospacedDigit()
+        .foregroundStyle(LedgerTheme.ink)
     }
   }
 
-  private func tile(_ title: String, _ value: ExactDecimal, _ unit: String) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(title).font(.caption).foregroundStyle(.secondary)
-      Text(money(value, unit)).font(.title3.monospacedDigit().bold())
+  private func legend(_ title: String, _ color: Color) -> some View {
+    HStack(spacing: LedgerTheme.Space.xs) {
+      LedgerColorKey(color)
+      Text(title).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
     }
-    .padding(10)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-    .accessibilityElement(children: .combine)
+  }
+
+  // MARK: Statement, table, status, export
+
+  private func statementCard(_ report: InsightsReport) -> some View {
+    let title = report.title(formatter)
+    return VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Statement for \(title)")
+      Toggle("Hide category names in the PDF", isOn: $hideNamesInPDF)
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.ink)
+      HStack(spacing: LedgerTheme.Space.s) {
+        Button("Export PDF for \(title)") {
+          exportPeriodPDF?(report, title, hideNamesInPDF)
+        }
+        .buttonStyle(LedgerPrimaryButtonStyle())
+        .disabled(exportPeriodPDF == nil)
+      }
+      Text("Snapshot \(report.statistics.snapshotDigest.prefix(16)). The screen and the PDF show the same snapshot.")
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.inkTertiary)
+        .textSelection(.enabled)
+    }
+    .ledgerCard()
+  }
+
+  private var accessibleTableCard: some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Accessible table")
+      Text(table)
+        .font(.body.monospaced())
+        .foregroundStyle(LedgerTheme.ink)
+        .textSelection(.enabled)
+        .accessibilityLabel(table)
+        .accessibilityAddTraits(.isStaticText)
+    }
+    .ledgerCard()
+  }
+
+  private var statusCard: some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Status")
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(rows) { row in
+          LedgerKeyValue(row.title, row.detail)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(row.title), \(row.detail)")
+          if row.id != rows.last?.id { LedgerRowDivider() }
+        }
+      }
+      .padding(.horizontal, LedgerTheme.Space.m)
+      .ledgerGroupBox()
+    }
+    .ledgerCard()
+  }
+
+  private var exportCard: some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Export")
+      Button("Export PDF statement", action: exportPDF)
+        .buttonStyle(LedgerSecondaryButtonStyle())
+        .accessibilityLabel("Export PDF statement")
+    }
+    .ledgerCard()
   }
 
   private func money(_ value: ExactDecimal, _ unit: String) -> String {
@@ -318,31 +461,45 @@ struct InsightsDrillDown: View {
       ($0.currentRevision.draft.occurredAt.localDateTime, $0.id)
         > ($1.currentRevision.draft.occurredAt.localDateTime, $1.id)
     }
-    VStack(alignment: .leading, spacing: 12) {
-      Text(category.name).font(.title2.bold())
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      HStack(spacing: LedgerTheme.Space.s) {
+        LedgerColorKey(LedgerTheme.paletteColor(for: category.name))
+        Text(category.name).font(LedgerTheme.Typeface.screenTitle).foregroundStyle(LedgerTheme.ink)
+      }
       Text("\(entries.count) entries in \(report.title(formatter))")
-        .foregroundStyle(.secondary)
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
       List(entries, id: \.id) { entry in
         let draft = entry.currentRevision.draft
         let amount = draft.effects.first { $0.amount.unitCode == report.unitCode }?.amount
-        HStack {
-          VStack(alignment: .leading) {
+        HStack(spacing: LedgerTheme.Space.m) {
+          VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
             Text(formatter.date(draft.occurredAt.localDateTime.date))
+              .font(LedgerTheme.Typeface.bodyEmphasis)
+              .foregroundStyle(LedgerTheme.ink)
             Text(draft.note ?? draft.categoryID.flatMap { names[$0] } ?? draft.kind.rawValue)
-              .font(.caption).foregroundStyle(.secondary)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkTertiary)
+              .lineLimit(1)
           }
-          Spacer()
-          if let amount { Text(formatter.amount(amount)).font(.body.monospacedDigit()) }
+          Spacer(minLength: LedgerTheme.Space.s)
+          if let amount { MoneyText(amount, size: .row, sign: .never, tone: .neutral) }
         }
+        .padding(.vertical, LedgerTheme.Space.xs)
         .accessibilityElement(children: .combine)
       }
-      .frame(minWidth: 420, minHeight: 320)
+      .scrollContentBackground(.hidden)
+      .frame(minWidth: 440, minHeight: 320)
+      .ledgerGroupBox()
       HStack {
         Spacer()
-        Button("Done", action: close).keyboardShortcut(.defaultAction)
+        Button("Done", action: close)
+          .buttonStyle(LedgerPrimaryButtonStyle())
+          .keyboardShortcut(.defaultAction)
       }
     }
-    .padding(20)
+    .padding(LedgerTheme.Space.xl)
+    .background(LedgerTheme.canvas)
   }
 }
 
