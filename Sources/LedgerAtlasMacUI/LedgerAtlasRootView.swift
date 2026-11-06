@@ -113,7 +113,7 @@ public struct LedgerAtlasRootView: View {
     }
     .onReceive(
       NSWorkspace.shared.notificationCenter.publisher(
-        for: NSWorkspace.didChangeAccessibilityDisplayOptionsNotification)
+        for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
     ) { _ in
       // Increase Contrast turned on or off: a forced Light or Dark look must follow it.
       LedgerAppearance.apply(productSettings.appearance)
