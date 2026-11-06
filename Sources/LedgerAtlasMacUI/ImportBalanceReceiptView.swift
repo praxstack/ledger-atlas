@@ -30,6 +30,9 @@ struct ImportBalanceReceiptView: View {
         if receipt.differingCount > 0 {
           LedgerChip("\(receipt.differingCount) differ", systemImage: "exclamationmark.triangle")
         }
+        if receipt.missingFromLedgerCount > 0 {
+          LedgerChip("\(receipt.missingFromLedgerCount) not in this ledger", systemImage: "xmark.circle")
+        }
         if receipt.notStoredCount > 0 {
           LedgerChip("\(receipt.notStoredCount) without a figure", systemImage: "questionmark.circle")
         }
@@ -65,6 +68,11 @@ struct ImportBalanceReceiptView: View {
   }
 
   private var headline: String {
+    if receipt.missingFromLedgerCount > 0 {
+      return receipt.missingFromLedgerCount == 1
+        ? "1 Money Manager account is not in this ledger"
+        : "\(receipt.missingFromLedgerCount) Money Manager accounts are not in this ledger"
+    }
     if receipt.differingCount > 0 {
       return receipt.differingCount == 1
         ? "1 balance differs from Money Manager"
@@ -113,8 +121,16 @@ struct ImportBalanceReceiptView: View {
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        figure(row.ledgerBalance, unit: row.currencyUnit)
-          .frame(minWidth: Self.figureWidth, alignment: .trailing)
+        Group {
+          if let ledger = row.ledgerBalance {
+            figure(ledger, unit: row.currencyUnit)
+          } else {
+            Text("Not in this ledger")
+              .font(LedgerTheme.Typeface.secondary)
+              .foregroundStyle(LedgerTheme.inkTertiary)
+          }
+        }
+        .frame(minWidth: Self.figureWidth, alignment: .trailing)
         Group {
           if let source = row.sourceBalance {
             figure(source, unit: row.currencyUnit)
@@ -164,6 +180,10 @@ struct ImportBalanceReceiptView: View {
       Label("No figure", systemImage: "questionmark.circle")
         .font(LedgerTheme.Typeface.captionEmphasis)
         .foregroundStyle(LedgerTheme.inkTertiary)
+    case .notInLedger:
+      Label("Missing here", systemImage: "xmark.circle.fill")
+        .font(LedgerTheme.Typeface.captionEmphasis)
+        .foregroundStyle(LedgerTheme.negative)
     }
   }
 
@@ -184,6 +204,13 @@ struct ImportBalanceReceiptView: View {
     if case .notStored(let reason) = row.outcome {
       notes.append("Money Manager's figure can't be worked out: \(reason).")
     }
+    if row.outcome == .notInLedger {
+      notes.append("Money Manager lists this account, but the import did not create it here.")
+    }
+    if row.debitCardEntryCount > 0 {
+      let entries = row.debitCardEntryCount == 1 ? "1 entry" : "\(row.debitCardEntryCount) entries"
+      notes.append("Money Manager counts \(entries) made with a linked debit card in this account.")
+    }
     if row.notImportedEntryCount > 0 {
       let entries = row.notImportedEntryCount == 1 ? "1 entry" : "\(row.notImportedEntryCount) entries"
       notes.append(
@@ -195,7 +222,9 @@ struct ImportBalanceReceiptView: View {
   private func spoken(_ row: ImportBalanceReceipt.Row) -> String {
     var parts = [row.name]
     parts += row.sourceMarks
-    parts.append("Ledger Atlas \(spokenAmount(row.ledgerBalance, unit: row.currencyUnit))")
+    parts.append(
+      row.ledgerBalance.map { "Ledger Atlas \(spokenAmount($0, unit: row.currencyUnit))" }
+        ?? "not in this ledger")
     parts.append(
       row.sourceBalance.map { "Money Manager \(spokenAmount($0, unit: row.currencyUnit))" }
         ?? "Money Manager figure not stored in the backup")
@@ -203,6 +232,7 @@ struct ImportBalanceReceiptView: View {
     case .equal: parts.append("matches")
     case .differs: parts.append("differs, \(differenceText(row) ?? "")")
     case .notStored: parts.append("no figure to compare")
+    case .notInLedger: parts.append("missing from this ledger")
     }
     if let note = note(for: row) { parts.append(note) }
     return parts.joined(separator: ", ")

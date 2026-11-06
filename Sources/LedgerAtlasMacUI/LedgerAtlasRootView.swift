@@ -1302,7 +1302,7 @@ public struct LedgerAtlasRootView: View {
         ImportReviewView(
           summary: journey.phase == .idle ? importReviewSummary : journey.summary,
           balanceReceipt: shownBalanceReceipt, saveReceipt: exportBalanceReceipt,
-          continueTitle: justImported ? "Continue to \(productSettings.startScreen.title)" : nil,
+          continueTitle: justImported ? "Continue to \(productSettings.startScreen.sidebarTitle)" : nil,
           continueAfterReceipt: {
             justImported = false
             selection = productSettings.startScreen

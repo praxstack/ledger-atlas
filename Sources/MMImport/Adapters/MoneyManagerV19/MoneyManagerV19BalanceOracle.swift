@@ -9,7 +9,9 @@ import LedgerCore
 /// `ASSETS` has no balance column and `INOUTCOME.AMOUNT_ACCOUNT` is a copy of `ZMONEY` on every
 /// row). The app's figure is the signed sum of the account's rows: income (0), transfer in (4)
 /// and a quiet balance increase (7) add; expense (1), transfer out (3) and a quiet balance
-/// decrease (8) subtract; deleted rows do not count. That sum is taken here from the staged
+/// decrease (8) subtract; deleted rows do not count. A Debit Card account (its group's `TYPE`
+/// is 3) keeps no balance of its own: its rows move the account named in its `cardAssetUid`
+/// (docs/compatibility/money-manager-v19-schema-contract.md). That sum is taken here from the staged
 /// source records in Money Manager's vocabulary, never from the ledger Ledger Atlas writes, so
 /// the receipt that compares the two is an independent check of the import mapping.
 public struct MoneyManagerV19SourceBalances: Codable, Equatable, Sendable {
@@ -37,6 +39,10 @@ public struct MoneyManagerV19SourceBalances: Codable, Equatable, Sendable {
     /// Rows Money Manager counts that the import keeps as preserved source instead of mapping
     /// (an orphan transfer leg, an unknown type). They explain a difference.
     public let notImportedRowCount: Int
+    /// Rows of linked debit cards that Money Manager counts in this account.
+    public let debitCardRowCount: Int
+    /// For a debit card: the name of the account its rows move.
+    public let movesAccountName: String?
     /// Display order from the source, then name.
     public let displayOrder: Int
 
@@ -44,7 +50,7 @@ public struct MoneyManagerV19SourceBalances: Codable, Equatable, Sendable {
       sourceAccountUID: String, ledgerAccountID: String, name: String, currencyUnit: String?,
       figure: Figure, deletedInSource: Bool, hiddenInSource: Bool,
       excludedFromTotalsInSource: Bool, countedRowCount: Int, notImportedRowCount: Int,
-      displayOrder: Int
+      displayOrder: Int, debitCardRowCount: Int = 0, movesAccountName: String? = nil
     ) {
       self.sourceAccountUID = sourceAccountUID
       self.ledgerAccountID = ledgerAccountID
@@ -57,6 +63,8 @@ public struct MoneyManagerV19SourceBalances: Codable, Equatable, Sendable {
       self.countedRowCount = countedRowCount
       self.notImportedRowCount = notImportedRowCount
       self.displayOrder = displayOrder
+      self.debitCardRowCount = debitCardRowCount
+      self.movesAccountName = movesAccountName
     }
   }
 
@@ -76,6 +84,12 @@ enum MoneyManagerV19BalanceOracle {
   static let shownStateAliases = ["ZDATA", "ZZDATA", "IS_SHOW"]
   static let excludedFromTotalsAliases = ["ZDATA2", "ZZDATA2"]
   static let displayOrderAliases = ["ORDERSEQ", "ORDER_SEQ", "ZORDERSEQ"]
+  static let assetGroupTables: Set<String> = ["ASSETGROUP", "ZASSETGROUP"]
+  static let groupUIDAliases = ["groupUid", "GROUP_UID", "ZGROUPUID"]
+  static let groupTypeAliases = ["TYPE", "ZTYPE"]
+  static let cardAssetAliases = ["cardAssetUid", "CARD_ASSET_UID", "ZCARDASSETUID"]
+  /// `ASSETGROUP.TYPE` of the Debit Card group.
+  static let debitCardGroupType = "3"
   static let deletedAccountState = "1"
   static let hiddenAccountState = "3"
   static let excludedFromTotalsFlag = "1"
@@ -107,11 +121,40 @@ enum MoneyManagerV19BalanceOracle {
       isoByCurrencyUID[uid] = iso
     }
 
+    // Debit cards: their rows count in the account that pays them.
+    var groupTypeByUID: [String: String] = [:]
+    for group in input.allRecords where assetGroupTables.contains(group.tableName) {
+      guard let uid = literal(group, MoneyManagerV19Vocabulary.uidAliases),
+        let type = literal(group, groupTypeAliases)
+      else { continue }
+      groupTypeByUID[uid] = type
+    }
+    var assetsByUID: [String: MoneyManagerV19SourceRecord] = [:]
+    for asset in input.assets {
+      if let uid = literal(asset, MoneyManagerV19Vocabulary.uidAliases), !uid.isEmpty {
+        assetsByUID[uid] = assetsByUID[uid] ?? asset
+      }
+    }
+    var debitCards: Set<String> = []
+    var payingAccountByCard: [String: String] = [:]
+    for (uid, asset) in assetsByUID {
+      guard let group = literal(asset, groupUIDAliases),
+        groupTypeByUID[group] == debitCardGroupType
+      else { continue }
+      debitCards.insert(uid)
+      if let paying = literal(asset, cardAssetAliases), !paying.isEmpty, paying != uid,
+        assetsByUID[paying] != nil
+      {
+        payingAccountByCard[uid] = paying
+      }
+    }
+
     struct Running {
       var sum: ExactDecimal
       var unavailable: String?
       var counted = 0
       var notImported = 0
+      var fromDebitCards = 0
       var rowCurrencies: Set<String> = []
     }
     let zero = try ExactDecimal("0")
@@ -125,11 +168,13 @@ enum MoneyManagerV19BalanceOracle {
       {
         continue
       }
-      guard let accountUID = literal(row, MoneyManagerV19Vocabulary.assetAliases),
-        !accountUID.isEmpty
+      guard let rowAccountUID = literal(row, MoneyManagerV19Vocabulary.assetAliases),
+        !rowAccountUID.isEmpty
       else { continue }
+      let accountUID = payingAccountByCard[rowAccountUID] ?? rowAccountUID
       var state = running[accountUID] ?? Running(sum: zero)
       defer { running[accountUID] = state }
+      if accountUID != rowAccountUID { state.fromDebitCards += 1 }
       state.counted += 1
       countedRows += 1
       if !mappedRecordIDs.contains(row.sourceRecordID) { state.notImported += 1 }
@@ -172,7 +217,17 @@ enum MoneyManagerV19BalanceOracle {
         .flatMap { $0.isEmpty ? nil : $0 }
       var currencyUnit = accountCurrencyUID.flatMap { isoByCurrencyUID[$0] }
       var figure: MoneyManagerV19SourceBalances.Account.Figure
-      if let reason = state.unavailable {
+      let paying = payingAccountByCard[uid]
+      let payingName = paying.map { payingUID in
+        assetsByUID[payingUID].flatMap { literal($0, MoneyManagerV19Vocabulary.nameAliases) }
+          .flatMap { $0.isEmpty ? nil : $0 } ?? payingUID
+      }
+      if let payingName {
+        figure = .unavailable(
+          reason: "Money Manager keeps no balance for a debit card; its entries count in \(payingName)")
+      } else if debitCards.contains(uid) {
+        figure = .unavailable(reason: "this debit card names no account that pays it")
+      } else if let reason = state.unavailable {
         figure = .unavailable(reason: reason)
       } else if let accountCurrencyUID,
         state.rowCurrencies.contains(where: { $0 != accountCurrencyUID })
@@ -203,7 +258,8 @@ enum MoneyManagerV19BalanceOracle {
           excludedFromTotalsInSource: literal(asset, excludedFromTotalsAliases)
             == excludedFromTotalsFlag,
           countedRowCount: state.counted, notImportedRowCount: state.notImported,
-          displayOrder: order))
+          displayOrder: order, debitCardRowCount: state.fromDebitCards,
+          movesAccountName: payingName))
     }
     accounts.sort {
       ($0.displayOrder, $0.name, $0.sourceAccountUID) < ($1.displayOrder, $1.name, $1.sourceAccountUID)

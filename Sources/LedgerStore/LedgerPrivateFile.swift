@@ -33,8 +33,13 @@ package enum LedgerPrivateFile {
   /// file is refused, never treated as missing.
   package static func read(_ name: String, in directory: URL) throws -> Data? {
     guard isSafeName(name) else { throw Error.invalidName }
-    let descriptor = open(
-      directory.appendingPathComponent(name).path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    return try read(at: directory.appendingPathComponent(name), maximumSize: maximumSize)
+  }
+
+  /// `read(_:in:)` for a file whose name the caller has already made safe, such as a sidecar
+  /// beside a ledger, with its own size limit.
+  package static func read(at url: URL, maximumSize: Int) throws -> Data? {
+    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
     if descriptor < 0 {
       if errno == ENOENT { return nil }
       throw Error.system(errno)
@@ -63,7 +68,24 @@ package enum LedgerPrivateFile {
   /// either the old file or the new one, never a partial write.
   package static func write(_ data: Data?, to name: String, in directory: URL) throws {
     guard isSafeName(name) else { throw Error.invalidName }
-    let final = directory.appendingPathComponent(name).path
+    if let data {
+      guard data.count <= maximumSize else { throw Error.tooLarge }
+      guard !data.isEmpty else { throw Error.empty }
+      try FileManager.default.createDirectory(
+        at: directory, withIntermediateDirectories: true,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+      try tightenFolder(directory)
+    }
+    try write(data, at: directory.appendingPathComponent(name), maximumSize: maximumSize)
+  }
+
+  /// `write(_:to:in:)` for a file whose name the caller has already made safe, in a folder that
+  /// already exists. The file is created owner-only (0600) from the start, without following a
+  /// symlink, and replaced in one step.
+  package static func write(_ data: Data?, at url: URL, maximumSize: Int) throws {
+    let directory = url.deletingLastPathComponent()
+    let name = url.lastPathComponent
+    let final = url.path
     guard let data else {
       guard unlink(final) == 0 || errno == ENOENT else { throw Error.system(errno) }
       syncFolder(directory)
@@ -71,10 +93,6 @@ package enum LedgerPrivateFile {
     }
     guard data.count <= maximumSize else { throw Error.tooLarge }
     guard !data.isEmpty else { throw Error.empty }
-    try FileManager.default.createDirectory(
-      at: directory, withIntermediateDirectories: true,
-      attributes: [.posixPermissions: NSNumber(value: 0o700)])
-    try tightenFolder(directory)
     let temporary = directory.appendingPathComponent(".\(name).\(UUID().uuidString).tmp").path
     let descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
     guard descriptor >= 0 else { throw Error.system(errno) }

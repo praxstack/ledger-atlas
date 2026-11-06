@@ -106,6 +106,92 @@ struct ImportBalanceReceiptTests {
     }
   }
 
+  @Test("a debit card's entries count in the account that pays it, as Money Manager shows")
+  func debitCardMovesItsPayingAccount() throws {
+    try withImportedFixture(
+      extraSQL: """
+        INSERT INTO ASSETGROUP (uid, IS_DEL, ACC_GROUP_NAME, TYPE, ORDERSEQ)
+          VALUES ('3', 0, 'Debit Card', 3, 3);
+        INSERT INTO ASSETS (uid, NIC_NAME, ZDATA, groupUid, currencyUid, ORDERSEQ, cardAssetUid)
+          VALUES ('acct-debit', 'Bank Debit', '0', '3', 'cur-main', 3, 'acct-b');
+        INSERT INTO INOUTCOME
+          (uid, assetUid, ctgUid, DO_TYPE, ZMONEY, IN_ZMONEY, AMOUNT_ACCOUNT, ZDATE, WDATE,
+           ZCONTENT, ZDATA, CARDDIVIDMONTH, currencyUid, UTIME)
+        VALUES
+          ('tx-debit', 'acct-debit', 'cat-food', '1', '7.00', '7.00', 7.0,
+           '1738547700000', '2025-02-03', 'card', '', '0', 'cur-main', 1738547700000);
+        """
+    ) { imported in
+      let source = try #require(imported.source.accounts.first { $0.name == "Bank" })
+      #expect(source.figure == .amount("135"))
+      #expect(source.debitCardRowCount == 1)
+      let card = try #require(imported.source.accounts.first { $0.name == "Bank Debit" })
+      #expect(card.movesAccountName == "Bank")
+      #expect(
+        card.figure
+          == .unavailable(
+            reason: "Money Manager keeps no balance for a debit card; its entries count in Bank"))
+
+      // The importer still books the card's entry on the card (#207), so the receipt shows
+      // the gap instead of a false match.
+      let bank = try #require(imported.receipt.rows.first { $0.name == "Bank" })
+      #expect(bank.sourceBalance == "135")
+      #expect(bank.debitCardEntryCount == 1)
+      let cardRow = try #require(imported.receipt.rows.first { $0.name == "Bank Debit" })
+      #expect(cardRow.sourceBalance == nil)
+      #expect(cardRow.movesAccountName == "Bank")
+      #expect(imported.receipt.statementLines().contains("  Includes 1 entry made with a linked debit card"))
+    }
+  }
+
+  @Test("an account Money Manager has and the ledger lacks is listed, not skipped")
+  func accountMissingFromTheLedger() throws {
+    try withImportedFixture { imported in
+      let missing = MoneyManagerV19SourceBalances(
+        accounts: [
+          .init(
+            sourceAccountUID: "gone", ledgerAccountID: "not-in-ledger", name: "Gone",
+            currencyUnit: "USD", figure: .amount("3.50"), deletedInSource: false,
+            hiddenInSource: false, excludedFromTotalsInSource: false, countedRowCount: 1,
+            notImportedRowCount: 1, displayOrder: 0)
+        ], throughDay: nil, countedRowCount: 1)
+      let receipt = try ImportBalanceReceipt.build(
+        source: missing, accounts: imported.snapshot.accounts,
+        transactions: imported.snapshot.transactions, importedAt: UTCInstant(epochMilliseconds: 1))
+      let row = try #require(receipt.rows.first)
+      #expect(row.outcome == .notInLedger)
+      #expect(row.ledgerBalance == nil)
+      #expect(row.sourceBalance == "3.5")
+      #expect(receipt.missingFromLedgerCount == 1)
+      #expect(receipt.notStoredCount == 0)
+      #expect(!receipt.allMatch)
+      #expect(receipt.statementLines().contains("  Ledger Atlas: not in this ledger"))
+    }
+  }
+
+  @Test("the sidecar is owner-only from the start and a symlink in its place is refused")
+  func sidecarIsPrivate() throws {
+    try withImportedFixture { imported in
+      let ledger = imported.canonicalURL
+      try imported.receipt.write(besideLedgerAt: ledger)
+      let sidecar = ImportBalanceReceipt.sidecarURL(forLedgerAt: ledger)
+      let mode = try #require(
+        try FileManager.default.attributesOfItem(atPath: sidecar.path)[.posixPermissions] as? NSNumber)
+      #expect(mode.intValue & 0o777 == 0o600)
+
+      ImportBalanceReceipt.removeSidecar(besideLedgerAt: ledger)
+      let elsewhere = ledger.deletingLastPathComponent().appendingPathComponent("elsewhere.json")
+      try imported.receipt.write(besideLedgerAt: ledger.deletingLastPathComponent()
+        .appendingPathComponent("other.sqlite"))
+      try FileManager.default.moveItem(
+        at: ImportBalanceReceipt.sidecarURL(
+          forLedgerAt: ledger.deletingLastPathComponent().appendingPathComponent("other.sqlite")),
+        to: elsewhere)
+      try FileManager.default.createSymbolicLink(at: sidecar, withDestinationURL: elsewhere)
+      #expect(ImportBalanceReceipt.read(besideLedgerAt: ledger) == nil)
+    }
+  }
+
   @Test("the receipt round-trips through its sidecar file and ignores a newer format")
   func sidecarRoundTrip() throws {
     try withImportedFixture { imported in

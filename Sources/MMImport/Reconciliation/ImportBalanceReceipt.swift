@@ -1,5 +1,6 @@
 import Foundation
 import LedgerCore
+import LedgerStore
 
 /// Every account's balance in Ledger Atlas beside the figure Money Manager shows for it, taken
 /// the moment an import commits (#172). The Money Manager figure comes from the backup's rows
@@ -20,14 +21,17 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       case differs(difference: String)
       /// The backup carries no figure for this account; the reason says why.
       case notStored(reason: String)
+      /// Money Manager has this account but the ledger does not.
+      case notInLedger
     }
 
     public var id: String { ledgerAccountID }
     public let ledgerAccountID: String
     public let name: String
     public let currencyUnit: String
-    /// Ledger Atlas's balance as an exact decimal literal.
-    public let ledgerBalance: String
+    /// Ledger Atlas's balance as an exact decimal literal; nil when the ledger has no such
+    /// account.
+    public let ledgerBalance: String?
     /// Money Manager's figure as an exact decimal literal, when the backup yields one.
     public let sourceBalance: String?
     public let outcome: Outcome
@@ -36,12 +40,16 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     public let deletedInSource: Bool
     /// Entries Money Manager counts that stayed preserved source instead of being imported.
     public let notImportedEntryCount: Int
+    /// Entries made with a linked debit card that Money Manager counts in this account.
+    public let debitCardEntryCount: Int
+    /// For a debit card: the account its entries count in, by name.
+    public let movesAccountName: String?
 
     public init(
-      ledgerAccountID: String, name: String, currencyUnit: String, ledgerBalance: String,
+      ledgerAccountID: String, name: String, currencyUnit: String, ledgerBalance: String?,
       sourceBalance: String?, outcome: Outcome, hiddenInSource: Bool = false,
       excludedFromTotalsInSource: Bool = false, deletedInSource: Bool = false,
-      notImportedEntryCount: Int = 0
+      notImportedEntryCount: Int = 0, debitCardEntryCount: Int = 0, movesAccountName: String? = nil
     ) {
       self.ledgerAccountID = ledgerAccountID
       self.name = name
@@ -53,6 +61,8 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       self.excludedFromTotalsInSource = excludedFromTotalsInSource
       self.deletedInSource = deletedInSource
       self.notImportedEntryCount = notImportedEntryCount
+      self.debitCardEntryCount = debitCardEntryCount
+      self.movesAccountName = movesAccountName
     }
 
     public var isEqual: Bool { outcome == .equal }
@@ -68,6 +78,7 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       if case .differs = outcome { return true }
       return false
     }
+    public var isMissingFromLedger: Bool { outcome == .notInLedger }
   }
 
   public let formatVersion: Int
@@ -95,9 +106,12 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
 
   public var equalCount: Int { rows.filter(\.isEqual).count }
   public var differingCount: Int { rows.filter(\.isDifferent).count }
-  public var notStoredCount: Int { rows.count - equalCount - differingCount }
-  /// True when every account that has a figure matches.
-  public var allMatch: Bool { differingCount == 0 }
+  public var missingFromLedgerCount: Int { rows.filter(\.isMissingFromLedger).count }
+  public var notStoredCount: Int {
+    rows.count - equalCount - differingCount - missingFromLedgerCount
+  }
+  /// True when every account that has a figure matches and none is missing from the ledger.
+  public var allMatch: Bool { differingCount == 0 && missingFromLedgerCount == 0 }
 
   /// Builds the receipt from the source figures and the ledger as read right after the commit.
   /// Ledger balances come from `LedgerAccountBalanceSheet`, the same arithmetic every screen
@@ -112,7 +126,25 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     for sourceAccount in source.accounts {
       guard let account = accountsByID[sourceAccount.ledgerAccountID],
         let balance = sheet.balances[account.id]
-      else { continue }
+      else {
+        // Listed, not skipped: an account the phone shows and the ledger lacks is a finding.
+        let sourceLiteral: String? =
+          if case .amount(let literal) = sourceAccount.figure {
+            (try? ExactDecimal(literal))?.description
+          } else { nil }
+        rows.append(
+          Row(
+            ledgerAccountID: sourceAccount.ledgerAccountID, name: sourceAccount.name,
+            currencyUnit: sourceAccount.currencyUnit ?? "", ledgerBalance: nil,
+            sourceBalance: sourceLiteral, outcome: .notInLedger,
+            hiddenInSource: sourceAccount.hiddenInSource,
+            excludedFromTotalsInSource: sourceAccount.excludedFromTotalsInSource,
+            deletedInSource: sourceAccount.deletedInSource,
+            notImportedEntryCount: sourceAccount.notImportedRowCount,
+            debitCardEntryCount: sourceAccount.debitCardRowCount,
+            movesAccountName: sourceAccount.movesAccountName))
+        continue
+      }
       let ledgerLiteral = balance.amount.description
       var sourceLiteral: String?
       let outcome: Row.Outcome
@@ -139,7 +171,9 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
           hiddenInSource: sourceAccount.hiddenInSource,
           excludedFromTotalsInSource: sourceAccount.excludedFromTotalsInSource,
           deletedInSource: sourceAccount.deletedInSource,
-          notImportedEntryCount: sourceAccount.notImportedRowCount))
+          notImportedEntryCount: sourceAccount.notImportedRowCount,
+          debitCardEntryCount: sourceAccount.debitCardRowCount,
+          movesAccountName: sourceAccount.movesAccountName))
     }
     return ImportBalanceReceipt(
       importedAtEpochMilliseconds: importedAt.epochMilliseconds, throughDay: source.throughDay,
@@ -155,13 +189,15 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     if let throughDay { lines.append("Figures as of \(throughDay), the newest entry in the backup") }
     lines.append("Checked when the import committed: \(Self.isoDay(importedAtEpochMilliseconds))")
     lines.append("")
-    lines.append(
-      "\(equalCount) match, \(differingCount) differ, \(notStoredCount) without a Money Manager figure")
+    var counts = "\(equalCount) match, \(differingCount) differ, \(notStoredCount) without a Money Manager figure"
+    if missingFromLedgerCount > 0 { counts += ", \(missingFromLedgerCount) not in this ledger" }
+    lines.append(counts)
     for row in rows {
       lines.append("")
       let marks = row.sourceMarks
       lines.append(marks.isEmpty ? row.name : "\(row.name) (\(marks.joined(separator: ", ")))")
-      lines.append("  Ledger Atlas: \(row.ledgerBalance) \(row.currencyUnit)")
+      lines.append(
+        "  Ledger Atlas: \(row.ledgerBalance.map { "\($0) \(row.currencyUnit)" } ?? "not in this ledger")")
       lines.append(
         "  Money Manager: \(row.sourceBalance.map { "\($0) \(row.currencyUnit)" } ?? "not stored in the backup")")
       switch row.outcome {
@@ -171,6 +207,12 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
         lines.append("  Result: differs by \(difference) \(row.currencyUnit) (Ledger Atlas minus Money Manager)")
       case .notStored(let reason):
         lines.append("  Result: no Money Manager figure, because \(reason)")
+      case .notInLedger:
+        lines.append("  Result: the account is in Money Manager but not in this ledger")
+      }
+      if row.debitCardEntryCount > 0 {
+        lines.append(
+          "  Includes \(row.debitCardEntryCount) \(row.debitCardEntryCount == 1 ? "entry" : "entries") made with a linked debit card")
       }
       if row.notImportedEntryCount > 0 {
         lines.append(
@@ -206,21 +248,26 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     URL(fileURLWithPath: ledgerURL.path + sidecarSuffix)
   }
 
+  /// Larger sidecars are refused when written or read.
+  public static let maximumSidecarBytes = 4 * 1_024 * 1_024
+
+  /// Saved owner-only (0600) from the moment it exists, without following a symlink put where
+  /// the sidecar goes, and replaced in one step.
   public func write(besideLedgerAt ledgerURL: URL) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-    let data = try encoder.encode(self)
-    let url = Self.sidecarURL(forLedgerAt: ledgerURL)
-    try data.write(to: url, options: [.atomic])
-    try FileManager.default.setAttributes(
-      [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: url.path)
+    try LedgerPrivateFile.write(
+      try encoder.encode(self), at: Self.sidecarURL(forLedgerAt: ledgerURL),
+      maximumSize: Self.maximumSidecarBytes)
   }
 
   /// The receipt saved beside `ledgerURL`, or nil when there is none or it cannot be read.
-  /// A receipt from a newer app is ignored rather than guessed at.
+  /// A symlink, a folder or an oversized file is refused before anything is read. A receipt
+  /// from a newer app is ignored rather than guessed at.
   public static func read(besideLedgerAt ledgerURL: URL) -> ImportBalanceReceipt? {
-    let url = sidecarURL(forLedgerAt: ledgerURL)
-    guard let data = try? Data(contentsOf: url), data.count <= 4 * 1_024 * 1_024,
+    guard
+      let data = try? LedgerPrivateFile.read(
+        at: sidecarURL(forLedgerAt: ledgerURL), maximumSize: maximumSidecarBytes),
       let receipt = try? JSONDecoder().decode(ImportBalanceReceipt.self, from: data),
       receipt.formatVersion == currentFormatVersion
     else { return nil }
@@ -228,6 +275,7 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
   }
 
   public static func removeSidecar(besideLedgerAt ledgerURL: URL) {
-    try? FileManager.default.removeItem(at: sidecarURL(forLedgerAt: ledgerURL))
+    try? LedgerPrivateFile.write(
+      nil, at: sidecarURL(forLedgerAt: ledgerURL), maximumSize: maximumSidecarBytes)
   }
 }

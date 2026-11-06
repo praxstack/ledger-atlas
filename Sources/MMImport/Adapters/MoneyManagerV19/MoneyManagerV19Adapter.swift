@@ -726,7 +726,7 @@ public struct MoneyManagerV19AdapterInput: Sendable {
   /// A descriptor obtains this from read-only staging; a committer must re-authenticate it.
   public let stagingDigest: String
   public let assets, categories, currencies, transactions: [MoneyManagerV19SourceRecord]
-  fileprivate let allRecords: [MoneyManagerV19SourceRecord]
+  let allRecords: [MoneyManagerV19SourceRecord]
   fileprivate let allTableNames: [String]
   public init(
     manifest: StagingManifest, stagingDigest: String, assets: [MoneyManagerV19SourceRecord],
