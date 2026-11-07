@@ -20,6 +20,8 @@ import Testing
 @Test func designReviewCaptureSet() async throws {
   let output = try reviewDirectory()
   var index: [[String: String]] = []
+  FullSizeTestWindow.drawsAsActive = true
+  defer { FullSizeTestWindow.drawsAsActive = false }
 
   func record(
     _ root: MountedRoot, _ name: String, note: String, after prepare: () -> Void = {}
@@ -38,6 +40,7 @@ import Testing
       index.append([
         "file": file, "screen": name, "appearance": appearance.rawValue, "note": note,
         "capture_method": method, "window_active": root.window.isKeyWindow ? "true" : "false",
+        "app_active": NSApplication.shared.isActive ? "true" : "false",
       ])
       pair.append(png)
     }

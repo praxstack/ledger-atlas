@@ -88,13 +88,15 @@ struct LedgerBrowseList: View {
           .padding(.horizontal, LedgerTheme.Space.l)
           .padding(.bottom, LedgerTheme.Space.s)
       }
-      summaryLine
+      summaryStrip
         .padding(.horizontal, LedgerTheme.Space.l)
-        .padding(.bottom, LedgerTheme.Space.s)
+        .padding(.bottom, LedgerTheme.Space.m)
+      Divider().overlay(LedgerTheme.hairline)
       content
       pager
     }
     .ledgerCanvas()
+    .navigationSubtitle(subtitle)
     // Measured while the inspector is still hidden, so this is the whole detail width.
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
     .task(id: measuredWidth > 0) {
@@ -116,6 +118,9 @@ struct LedgerBrowseList: View {
         .inspectorColumnWidth(min: 260, ideal: LedgerTheme.Metrics.inspectorWidth, max: 400)
     }
     .toolbar {
+      // The view switcher sits in the toolbar like any Mac app's (Mail, Finder), which keeps
+      // the content for the filters, the totals and the table.
+      ToolbarItem(placement: .principal) { modePicker }
       ToolbarItem {
         // A toolbar item speaks its label's title (an accessibility label is not used there), so
         // the title itself says what pressing it does.
@@ -132,6 +137,10 @@ struct LedgerBrowseList: View {
         .keyboardShortcut("i", modifiers: [.command, .option])
       }
     }
+    .onChange(of: inspectorChoiceRaw) { _, choice in
+      // An inspector that opens on nothing is an empty panel; show the first entry instead.
+      if choice == 1, selectedID == nil { selectedID = page?.entries.first?.id }
+    }
     .onAppear { rebuild() }
     .onChange(of: transactions) { _, _ in rebuild() }
     .onChange(of: hiddenIDs) { _, _ in rebuild() }
@@ -147,22 +156,12 @@ struct LedgerBrowseList: View {
 
   // MARK: Controls
 
-  /// View switcher, search and filter chips: one row where there is room, two where not. The
-  /// chips scroll sideways rather than widen the window.
+  /// Search and filter chips in one row. The chips scroll sideways rather than widen the
+  /// window; the view switcher is in the toolbar.
   private var controls: some View {
-    ViewThatFits(in: .horizontal) {
-      HStack(spacing: LedgerTheme.Space.m) {
-        modePicker
-        searchField.frame(width: 220)
-        filterChips
-      }
-      VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
-        modePicker
-        HStack(spacing: LedgerTheme.Space.m) {
-          searchField.frame(maxWidth: 260)
-          filterChips
-        }
-      }
+    HStack(spacing: LedgerTheme.Space.m) {
+      searchField.frame(minWidth: 180, idealWidth: 240, maxWidth: 260)
+      filterChips
     }
   }
 
@@ -328,22 +327,27 @@ struct LedgerBrowseList: View {
 
   // MARK: Summary
 
-  /// "55 transactions · In ₹6,25,000.00 · Out ₹99,548.70 · Net ₹5,25,451.30", one In / Out /
-  /// Net group per currency.
-  private var summaryLine: some View {
-    HStack(spacing: LedgerTheme.Space.l) {
-      Text(page.map { "\($0.matchCount) transactions" } ?? " ")
-        .font(LedgerTheme.Typeface.caption)
-        .monospacedDigit()
-        .foregroundStyle(LedgerTheme.inkSecondary)
+  /// "55 transactions", or "55 of 312 transactions" while a filter or search narrows them.
+  private var subtitle: String {
+    guard let page else { return "" }
+    let total = browser.entries.count
+    let noun = page.matchCount == 1 ? "transaction" : "transactions"
+    return filter.isActive && total != page.matchCount
+      ? "\(page.matchCount) of \(total) \(noun)" : "\(page.matchCount) \(noun)"
+  }
+
+  /// Money in, spending and net for what is shown, as figures: the first thing the eye
+  /// reads on the screen. One group per currency.
+  private var summaryStrip: some View {
+    HStack(alignment: .top, spacing: LedgerTheme.Space.xxl) {
       ForEach(totals, id: \.unitCode) { total in
         if let figures = Self.summaryFigures(total) {
-          summaryFigure("In", figures.income)
-          summaryFigure("Out", figures.expense)
+          summaryFigure("Money in", figures.income, sign: .always)
+          summaryFigure("Spending", figures.expense)
           summaryFigure("Net", figures.net, sign: .always)
         } else {
           Text(Self.describe([total], formatter: formatter))
-            .font(LedgerTheme.Typeface.caption)
+            .font(LedgerTheme.Typeface.secondary)
             .foregroundStyle(LedgerTheme.inkSecondary)
         }
       }
@@ -352,14 +356,15 @@ struct LedgerBrowseList: View {
     .accessibilityElement(children: .combine)
   }
 
+  /// Money in is green with "+"; spending stays in ink; net carries its sign.
   private func summaryFigure(
     _ label: String, _ amount: CurrencyAmount, sign: LedgerDisplayFormatter.SignStyle = .never
   ) -> some View {
-    HStack(spacing: LedgerTheme.Space.xs) {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
       Text(label)
         .font(LedgerTheme.Typeface.caption)
-        .foregroundStyle(LedgerTheme.inkTertiary)
-      MoneyText(amount, size: .caption, sign: sign, tone: sign == .always ? .automatic : .neutral)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+      MoneyText(amount, size: .figure, sign: sign, tone: sign == .always ? .automatic : .neutral)
     }
   }
 
@@ -387,7 +392,7 @@ struct LedgerBrowseList: View {
           Image(systemName: "chevron.left")
         }
         .accessibilityLabel("Previous month")
-        Text(monthTitle).font(.headline)
+        Text(monthTitle).font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
         Button {
           shiftMonth(by: 1)
         } label: {
@@ -407,20 +412,23 @@ struct LedgerBrowseList: View {
             filter.day = filter.day == day.date ? nil : day.date
           } label: {
             VStack(spacing: 2) {
-              Text("\(day.date.day)").font(.body.monospacedDigit())
-              Text("\(day.count)").font(.caption2).foregroundStyle(.secondary)
+              Text("\(day.date.day)").font(LedgerTheme.Typeface.body.monospacedDigit())
+                .foregroundStyle(LedgerTheme.ink)
+              Text("\(day.count)").font(LedgerTheme.Typeface.caption).monospacedDigit()
+                .foregroundStyle(LedgerTheme.inkTertiary)
             }
             .frame(maxWidth: .infinity, minHeight: 36)
-            // System selection colours and a solid outline, so the chosen day stays clear with
+            // A soft accent fill and a solid accent outline, so the chosen day stays clear with
             // Increase Contrast on.
             .background(
-              filter.day == day.date
-                ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : Color.clear,
-              in: RoundedRectangle(cornerRadius: 6)
+              filter.day == day.date ? LedgerTheme.accentSoft : LedgerTheme.card,
+              in: .rect(cornerRadius: LedgerTheme.Radius.control)
             )
             .overlay(
-              RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(filter.day == day.date ? Color.accentColor : Color.clear, lineWidth: 2))
+              RoundedRectangle(cornerRadius: LedgerTheme.Radius.control)
+                .strokeBorder(
+                  filter.day == day.date ? LedgerTheme.accent : LedgerTheme.hairline,
+                  lineWidth: filter.day == day.date ? 2 : 0.5))
           }
           .buttonStyle(.plain)
           .accessibilityLabel(
@@ -430,15 +438,17 @@ struct LedgerBrowseList: View {
       }
       if calendarDays.isEmpty {
         Text("No transactions this month.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkSecondary)
       }
     }
   }
 
   private var monthTitle: String {
     guard let calendarMonth else { return "" }
-    return String(format: "%04d-%02d", calendarMonth.year, calendarMonth.month)
+    guard let first = try? SourceLocalDate(year: calendarMonth.year, month: calendarMonth.month, day: 1)
+    else { return String(format: "%04d-%02d", calendarMonth.year, calendarMonth.month) }
+    return formatter.monthTitle(first)
   }
 
   private func shiftMonth(by delta: Int) {
@@ -535,7 +545,10 @@ struct LedgerBrowseList: View {
 
   private func sectionHeader(_ section: LedgerBrowseSection) -> some View {
     let title = Self.sectionTitle(section.id, formatter: formatter)
-    let totals = Self.describe(section.totals, formatter: formatter, omittingZero: true)
+    // A one-entry day's total repeats the row's amount, so it is left out.
+    let totals =
+      section.entries.count > 1
+      ? Self.describe(section.totals, formatter: formatter, omittingZero: true) : ""
     return HStack(alignment: .firstTextBaseline) {
       Text(title)
         .font(LedgerTheme.Typeface.captionEmphasis)
@@ -552,6 +565,9 @@ struct LedgerBrowseList: View {
     .accessibilityLabel(totals.isEmpty ? title : "\(title), \(totals)")
   }
 
+  /// One entry in two short lines: what it was for, then where the money moved and how it is
+  /// tagged; the signed amount on the right. The kind, time and markers are spoken, and shown in
+  /// the inspector, so the row stays one glance tall.
   private func row(_ entry: LedgerBrowseEntry) -> some View {
     let category = entry.categoryID.flatMap { categoryNames[$0] }
     let account = entry.accountIDs.compactMap { accountNames[$0] }.joined(separator: " → ")
@@ -560,38 +576,36 @@ struct LedgerBrowseList: View {
     let amountText = formatter.parts(signed.amount, sign: signed.sign).text
     let time = String(format: "%02d:%02d", entry.occurredAt.hour, entry.occurredAt.minute)
     // Say the kind in words when the title is a category, so income and expense never rely on
-    // colour or category names alone.
+    // colour, sign or category names alone.
     let kind = category == nil ? nil : entry.kind.rawValue.capitalized
-    let detail = [kind, account.isEmpty ? nil : account, time].compactMap { $0 }
+    let spokenDetail = [kind, account.isEmpty ? nil : account, time].compactMap { $0 }
       .joined(separator: " · ")
     let markers = entry.indicators.map(Self.indicatorLabel).joined(separator: ", ")
-    let tagLine = entry.tagIDs.compactMap { tagNames[$0] }.sorted {
+    let tagNamesSorted = entry.tagIDs.compactMap { tagNames[$0] }.sorted {
       $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
-    }.map { "#\($0)" }.joined(separator: " ")
+    }
+    let tagLine = tagNamesSorted.map { "#\($0)" }.joined(separator: " ")
+    let shownDetail = ([account.isEmpty ? nil : account, entry.note] + tagNamesSorted.map { "#\($0)" })
+      .compactMap { $0 }.joined(separator: " · ")
     return HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
-      LedgerIconTile(.symbol(Self.kindSymbol(entry.kind)), swatch: LedgerTheme.swatch(for: title))
+      LedgerIconTile(
+        .symbol(LedgerCategorySymbol.name(for: category, kind: entry.kind)),
+        swatch: LedgerTheme.swatch(for: title))
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text(title)
           .font(LedgerTheme.Typeface.body)
           .foregroundStyle(LedgerTheme.ink)
           .strikethrough(entry.lifecycle == .tombstoned)
           .lineLimit(1)
-        Text(detail)
-          .font(LedgerTheme.Typeface.caption)
-          .foregroundStyle(LedgerTheme.inkTertiary)
-          .lineLimit(1)
-        if let conversion = entry.conversion {
-          Text(conversion).font(LedgerTheme.Typeface.caption).monospacedDigit()
-            .foregroundStyle(LedgerTheme.inkTertiary).lineLimit(1)
-        }
-        if let note = entry.note {
-          Text(note).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+        if !shownDetail.isEmpty {
+          Text(shownDetail)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
             .lineLimit(1)
-        }
-        if !tagLine.isEmpty {
-          Text(tagLine).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.accent).lineLimit(1)
+            .truncationMode(.tail)
         }
       }
+      .layoutPriority(1)
       Spacer(minLength: LedgerTheme.Space.s)
       HStack(spacing: LedgerTheme.Space.xs) {
         ForEach(entry.indicators, id: \.self) { indicator in
@@ -602,14 +616,24 @@ struct LedgerBrowseList: View {
         }
       }
       .accessibilityHidden(true)
-      MoneyText(signed.amount, size: .row, sign: signed.sign)
+      VStack(alignment: .trailing, spacing: LedgerTheme.Space.xxs) {
+        MoneyText(signed.amount, size: .row, sign: signed.sign)
+        if let conversion = entry.conversion {
+          Text(conversion)
+            .font(LedgerTheme.Typeface.caption)
+            .monospacedDigit()
+            .foregroundStyle(LedgerTheme.inkTertiary)
+            .lineLimit(1)
+        }
+      }
+      .fixedSize()
     }
-    .frame(minHeight: LedgerTheme.Metrics.tableRow - 8)
+    .frame(minHeight: LedgerTheme.Metrics.tableRow - 4)
     .padding(.vertical, LedgerTheme.Space.xxs)
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
       [
-        title, detail.isEmpty ? nil : detail, amountText, entry.conversion, entry.note,
+        title, spokenDetail.isEmpty ? nil : spokenDetail, amountText, entry.conversion, entry.note,
         tagLine.isEmpty ? nil : "tags \(tagLine)", markers.isEmpty ? nil : markers,
       ].compactMap { $0 }
         .joined(separator: ", "))
@@ -633,15 +657,6 @@ struct LedgerBrowseList: View {
     }
   }
 
-  static func kindSymbol(_ kind: LedgerTransactionKind) -> String {
-    switch kind {
-    case .income: "arrow.down.left"
-    case .expense: "arrow.up.right"
-    case .transfer: "arrow.left.arrow.right"
-    case .adjustment: "slider.horizontal.3"
-    }
-  }
-
   /// "Monday, 2 November 2026" for a day, "November 2026" for a month.
   static func sectionTitle(_ id: String, formatter: LedgerDisplayFormatter) -> String {
     if id == "total" { return "All transactions" }
@@ -659,17 +674,29 @@ struct LedgerBrowseList: View {
     DisclosureGroup {
       ForEach(purchase.lines, id: \.id) { line in
         let category = categoryNames[line.categoryID] ?? "Category"
-        let text =
-          "\(line.description ?? "Split line"), \(category), \(line.amount.amount.rawLiteral) \(line.amount.unitCode)"
-        Text(text).font(.caption).accessibilityLabel(text)
+        let amount = formatter.parts(line.amount).text
+        let text = "\(line.description ?? "Split line"), \(category), \(amount)"
+        HStack {
+          Text(line.description ?? "Split line").font(LedgerTheme.Typeface.body)
+            .foregroundStyle(LedgerTheme.ink)
+          Text(category).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+          Spacer(minLength: LedgerTheme.Space.s)
+          MoneyText(line.amount, size: .row)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
       }
     } label: {
-      Text(
-        "Split purchase · \(purchase.parentAmount.amount.rawLiteral) \(purchase.parentAmount.unitCode) · \(purchase.lines.count) categories"
-      )
+      HStack {
+        Text("Split purchase").font(LedgerTheme.Typeface.body).foregroundStyle(LedgerTheme.ink)
+        Text("\(purchase.lines.count) categories").font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkSecondary)
+        Spacer(minLength: LedgerTheme.Space.s)
+        MoneyText(purchase.parentAmount, size: .row)
+      }
     }
     .accessibilityLabel(
-      "Split purchase, \(purchase.parentAmount.amount.rawLiteral) \(purchase.parentAmount.unitCode), \(purchase.lines.count) categories"
+      "Split purchase, \(formatter.parts(purchase.parentAmount).text), \(purchase.lines.count) categories"
     )
   }
 

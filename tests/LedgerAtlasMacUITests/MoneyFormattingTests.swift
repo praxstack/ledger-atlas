@@ -78,3 +78,22 @@ import Testing
   #expect(formatter.shortMonth(november) == "Nov")
   #expect(formatter.monthTitle(november) == "November 2026")
 }
+
+@Test func accountColoursNeverRepeatAndSkipTheRose() {
+  let names = ["Cash", "Everyday Bank", "Rewards Card", "Emergency Fund", "Index Fund", "Travel Wallet"]
+  let indices = LedgerTheme.accountPaletteIndices(for: names)
+  #expect(Set(indices.values).count == names.count, "two accounts share a colour: \(indices)")
+  #expect(!indices.values.contains(LedgerTheme.roseIndex))
+  // Same accounts in another order: same colours, so the sidebar and Accounts screen agree.
+  #expect(LedgerTheme.accountPaletteIndices(for: names.reversed()) == indices)
+}
+
+@Test func categorySymbolsMatchWholeWords() {
+  #expect(LedgerCategorySymbol.name(for: "Food & Dining", kind: .expense) == "fork.knife")
+  #expect(LedgerCategorySymbol.name(for: "Groceries", kind: .expense) == "cart.fill")
+  #expect(LedgerCategorySymbol.name(for: "Transport", kind: .expense) == "car.fill")
+  #expect(LedgerCategorySymbol.name(for: "Salary", kind: .income) == "banknote.fill")
+  // "card" is not "car"; an unknown name falls back to the kind.
+  #expect(LedgerCategorySymbol.name(for: "Card", kind: .expense) == "arrow.up.right")
+  #expect(LedgerCategorySymbol.name(for: nil, kind: .transfer) == "arrow.left.arrow.right")
+}

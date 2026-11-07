@@ -10,16 +10,20 @@ import SwiftUI
 public enum LedgerTheme {
   // MARK: Colour
 
-  /// Window content background. Numbers live on this solid surface, never on glass.
-  public static let canvas = dynamic(light: 0xFBFBFA, dark: 0x1C1C1E)
-  /// Recessed surfaces: inspector, day headers, drop zones.
-  public static let recessed = dynamic(light: 0xF4F4F2, dark: 0x232325)
-  /// Raised cards on the canvas.
-  public static let card = dynamic(light: 0xFFFFFF, dark: 0x232326, highContrastLight: 0xFFFFFF, highContrastDark: 0x26262A)
+  /// Window content background behind every screen. Numbers live on this solid surface,
+  /// never on glass. Light is a shade off white so white cards stand out from it.
+  public static let canvas = dynamic(
+    light: 0xF5F5F4, dark: 0x1C1C1E, highContrastLight: 0xFBFBFA, highContrastDark: 0x1C1C1E)
+  /// Recessed surfaces: inspector, day headers, drop zones. Below the canvas in both looks
+  /// (darker than it in dark mode too), so they read as set in, never raised.
+  public static let recessed = dynamic(
+    light: 0xF0F0EE, dark: 0x161618, highContrastLight: 0xF4F4F2, highContrastDark: 0x141416)
+  /// Raised cards on the canvas: lighter than the canvas in both looks.
+  public static let card = dynamic(light: 0xFFFFFF, dark: 0x28282B, highContrastLight: 0xFFFFFF, highContrastDark: 0x26262A)
 
   public static let ink = dynamic(light: 0x1D1D1F, dark: 0xF5F5F7, highContrastLight: 0x000000, highContrastDark: 0xFFFFFF)
   public static let inkSecondary = dynamic(light: 0x515154, dark: 0xC7C7CC, highContrastLight: 0x2C2C2E, highContrastDark: 0xE5E5EA)
-  public static let inkTertiary = dynamic(light: 0x6E6E72, dark: 0x8E8E93, highContrastLight: 0x515154, highContrastDark: 0xC7C7CC)
+  public static let inkTertiary = dynamic(light: 0x69696D, dark: 0x8E8E93, highContrastLight: 0x515154, highContrastDark: 0xC7C7CC)
 
   /// Hairline separators. Increase Contrast doubles their strength.
   public static let hairline = dynamic(
@@ -128,8 +132,8 @@ public enum LedgerTheme {
     Swatch(
       color: dynamic(light: light, dark: dark),
       soft: dynamic(
-        light: light, dark: dark, lightAlpha: 0.16, darkAlpha: 0.2,
-        highContrastLightAlpha: 0.28, highContrastDarkAlpha: 0.32))
+        light: light, dark: dark, lightAlpha: 0.16, darkAlpha: 0.26,
+        highContrastLightAlpha: 0.28, highContrastDarkAlpha: 0.38))
   }
 
   public static var categoryPalette: [Color] { palette.map(\.color) }
@@ -140,6 +144,34 @@ public enum LedgerTheme {
   }
 
   public static func paletteColor(for key: String) -> Color { swatch(for: key).color }
+
+  /// Account colours: no two accounts alike while the palette lasts, and never the rose that
+  /// sits next to a red negative balance. Each name starts at its stable slot and takes the next
+  /// free one, in name order, so an account keeps its colour on every screen that lists the
+  /// same accounts (sidebar keys, Accounts tiles).
+  public static func accountSwatches(for names: [String]) -> [String: Swatch] {
+    accountPaletteIndices(for: names).mapValues { palette[$0] }
+  }
+
+  /// The palette index behind each account's colour (see `accountSwatches`).
+  static func accountPaletteIndices(for names: [String]) -> [String: Int] {
+    let slots = palette.indices.filter { $0 != roseIndex }
+    var taken = Set<Int>()
+    var result: [String: Int] = [:]
+    for name in Set(names).sorted() {
+      let start = Int(stableHash(name) % UInt64(slots.count))
+      let offset = (0..<slots.count).first { !taken.contains((start + $0) % slots.count) } ?? 0
+      let slot = (start + offset) % slots.count
+      taken.insert(slot)
+      // More accounts than colours: start sharing again.
+      if taken.count == slots.count { taken.removeAll() }
+      result[name] = slots[slot]
+    }
+    return result
+  }
+
+  /// The palette's rose, kept off account keys because it reads as a warning beside red figures.
+  static let roseIndex = 6
 
   static func stableHash(_ key: String) -> UInt64 {
     // FNV-1a: stable across launches, unlike `Hasher`.

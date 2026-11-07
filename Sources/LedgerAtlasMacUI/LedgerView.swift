@@ -45,6 +45,8 @@ struct LedgerView: View {
   @State private var macAmountLiteral = ""
   @State private var showingTransactionForm = false
   @State private var showingSplitForm = false
+  /// + New was pressed while read-only: the form opens once editing has begun.
+  @State private var opensFormWhenEditing = false
 
   var body: some View {
     Group {
@@ -93,6 +95,24 @@ struct LedgerView: View {
           .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
         }
         .navigationTitle("Transactions")
+        .toolbar {
+          ToolbarItem(placement: .primaryAction) {
+            // The one primary action on the screen. Read-only, it begins editing first.
+            Button {
+              if isEditing {
+                showingTransactionForm = true
+              } else {
+                opensFormWhenEditing = true
+                beginEditing()
+              }
+            } label: {
+              Label(Self.newTransactionTitle, systemImage: "plus")
+                .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.borderedProminent)
+            .help("Add income or an expense")
+          }
+        }
       } else {
         switch state {
         case .noLedger:
@@ -206,10 +226,17 @@ struct LedgerView: View {
       else { return }
       amountLiteral = amount
     }
+    .onChange(of: isEditing) { _, editing in
+      guard editing, opensFormWhenEditing else { return }
+      opensFormWhenEditing = false
+      showingTransactionForm = true
+    }
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
   }
+
+  static let newTransactionTitle = "New Transaction"
 
   /// The actions under the list: new entries, then what to do with the selected one.
   @ViewBuilder private var editBar: some View {

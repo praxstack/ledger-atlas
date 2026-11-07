@@ -945,10 +945,18 @@ final class TreeBox: @unchecked Sendable {
 }
 
 /// CI runners have a small virtual display; keep the requested window size.
-private final class FullSizeTestWindow: NSWindow {
+final class FullSizeTestWindow: NSWindow {
+  /// The CI runner's test process never becomes the frontmost app, so its windows draw with
+  /// the inactive look (grey title, toolbar and selection). The design-review captures set
+  /// this so the window draws as the key, main window a person sees in use.
+  nonisolated(unsafe) static var drawsAsActive = false
+
   override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
     frameRect
   }
+
+  override var isKeyWindow: Bool { Self.drawsAsActive || super.isKeyWindow }
+  override var isMainWindow: Bool { Self.drawsAsActive || super.isMainWindow }
 }
 
 /// Reduce Motion: every animation in the app goes through `MotionPolicy`, which drops it when
