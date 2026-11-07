@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 
 struct TransferSurface: View {
   let rows: [LedgerJourney.SurfaceRow]
+  /// The ledger's transfers, newest first, shown as money rows (from → to, amount).
+  var transfers: [LedgerTransactionSnapshot] = []
   let accounts: [LedgerAccount]
   let intentRequest: LedgerIntentRequest?
   let consumeIntent: () -> Void
@@ -20,12 +22,12 @@ struct TransferSurface: View {
   var body: some View {
     let activeCount = accounts.filter { $0.lifecycle == .active }.count
     VStack(alignment: .leading, spacing: 0) {
-      if rows.isEmpty {
+      if rows.isEmpty && transfers.isEmpty {
         LedgerEmptyState(
           "No transfers yet", systemImage: "arrow.left.arrow.right",
           message: "Transfers, currency conversions, and fees will appear here.")
       } else {
-        LedgerSurfaceRowList(rows: rows)
+        transferList
       }
       LedgerActionBar {
         if isEditing {
@@ -66,6 +68,25 @@ struct TransferSurface: View {
   private func presentIntentIfNeeded() {
     guard intentRequest?.kind == .addTransfer, !showingForm, accounts.count >= 2 else { return }
     showingForm = true
+  }
+
+  /// Transfers as money rows; source records kept from a backup follow as plain rows.
+  private var transferList: some View {
+    let names = Dictionary(accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+    let transferIDs = Set(transfers.map(\.id))
+    return List {
+      ForEach(transfers, id: \.id) { transfer in
+        TransferMoneyRow(transfer: transfer, accountNames: names)
+      }
+      ForEach(rows.filter { !transferIDs.contains($0.id) && $0.title != "Transfer" }) { row in
+        LedgerRow(row.title, detail: row.detail)
+          .accessibilityElement(children: .combine)
+          .accessibilityLabel("\(row.title), \(row.detail)")
+      }
+    }
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .ledgerCanvas()
   }
 }
 
@@ -196,5 +217,49 @@ struct NativeTransferForm: View {
       needsConversion ? destinationAmount : nil,
       feeAmount.isEmpty ? nil : feeAmount, feeAmount.isEmpty ? nil : feeAccountID)
     dismiss()
+  }
+}
+
+/// One transfer: an arrow tile, "From → To" with the date, and the amount sent.
+struct TransferMoneyRow: View {
+  let transfer: LedgerTransactionSnapshot
+  let accountNames: [String: String]
+  @Environment(\.ledgerFormatter) private var formatter
+
+  private var draft: LedgerTransactionDraft { transfer.currentRevision.draft }
+  private var sent: LedgerTransactionEffect? { draft.effects.first { $0.direction == .decrease } }
+  private var received: LedgerTransactionEffect? {
+    draft.effects.first { $0.direction == .increase && $0.accountID != sent?.accountID }
+  }
+
+  private var route: String {
+    let from = sent.flatMap { accountNames[$0.accountID] } ?? "Unknown account"
+    let to = received.flatMap { accountNames[$0.accountID] } ?? "Unknown account"
+    return "\(from) → \(to)"
+  }
+
+  private var detail: String {
+    var parts = [formatter.date(draft.occurredAt.localDay)]
+    if let sent, let received, sent.amount.unitCode != received.amount.unitCode {
+      parts.append("received \(formatter.amount(received.amount))")
+    }
+    if let note = draft.note?.split(whereSeparator: \.isNewline).first, !note.isEmpty {
+      parts.append(String(note))
+    }
+    return parts.joined(separator: " · ")
+  }
+
+  var body: some View {
+    LedgerRow(route, detail: detail) {
+      LedgerIconTile(
+        .symbol("arrow.left.arrow.right"), swatch: LedgerTheme.Swatch(color: LedgerTheme.accent, soft: LedgerTheme.accentSoft))
+    } trailing: {
+      if let sent {
+        MoneyText(sent.amount, size: .row, sign: .never, tone: .neutral)
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(
+      "Transfer, \(route), \(sent.map { formatter.amount($0.amount) } ?? ""), \(detail)")
   }
 }
