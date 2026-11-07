@@ -96,6 +96,23 @@ public struct LedgerAtlasRootView: View {
         importBackup: chooseImportSource)
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+      .toolbar {
+        // Hide amounts (⇧⌘H) sits in the sidebar's part of the toolbar, which has room to
+        // spare; in the screen's part it pushed New into the overflow menu at the default size.
+        if !appLock.isLocked, session.screen == .loaded {
+          ToolbarItem {
+            Button {
+              productSettings.hidesAmounts.toggle()
+            } label: {
+              Label(
+                productSettings.hidesAmounts ? "Show Amounts" : "Hide Amounts",
+                systemImage: productSettings.hidesAmounts ? "eye.slash" : "eye")
+            }
+            .accessibilityLabel(productSettings.hidesAmounts ? "Show amounts" : "Hide amounts")
+            .help(productSettings.hidesAmounts ? "Show amounts (⇧⌘H)" : "Hide amounts (⇧⌘H)")
+          }
+        }
+      }
     } detail: {
       Group {
         if appLock.isLocked {
@@ -154,16 +171,7 @@ public struct LedgerAtlasRootView: View {
       // New and Open Ledger live in the File menu (⇧⌘N, ⌘O); the toolbar keeps the screen's
       // own controls. Locked, there is nothing to act on, so the toolbar is empty.
       if !appLock.isLocked, session.screen == .loaded {
-        ToolbarItemGroup {
-          Button {
-            productSettings.hidesAmounts.toggle()
-          } label: {
-            Label(
-              productSettings.hidesAmounts ? "Show Amounts" : "Hide Amounts",
-              systemImage: productSettings.hidesAmounts ? "eye.slash" : "eye")
-          }
-          .accessibilityLabel(productSettings.hidesAmounts ? "Show amounts" : "Hide amounts")
-          .help(productSettings.hidesAmounts ? "Show amounts (⇧⌘H)" : "Hide amounts (⇧⌘H)")
+        ToolbarItem {
           Button(action: chooseImportSource) {
             Label("Import", systemImage: "square.and.arrow.down")
           }

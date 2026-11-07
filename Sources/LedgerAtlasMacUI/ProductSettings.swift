@@ -73,6 +73,9 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
   /// What Hide amounts covers, as Settings states it.
   public static let hideAmountsScope =
     "Every amount, balance and chart figure on screen shows as the same row of bullets, whatever its size (⇧⌘H). Charts keep their shape. Hide amounts does not apply to exports: PDF statements, spreadsheets, portable packages, the local web portal and Shortcuts results still show amounts. A form you open to enter or change an amount still shows that amount."
+  /// Shown in place of the Insights accessible table while amounts are hidden.
+  public static let hiddenTableNotice =
+    "Amounts are hidden. Turn off Hide amounts (⇧⌘H) to read this table."
   /// Said beside each export while amounts are hidden.
   public static let hideAmountsExportNotice = "Hide amounts does not apply to exports."
 

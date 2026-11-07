@@ -75,10 +75,13 @@ struct InsightsSurface: View {
           periodSections(report)
         }
         Section("Accessible table") {
-          Text(table)
+          // The table is every figure again as text, so while amounts are hidden it says so
+          // instead of showing a wall of masks.
+          let shownTable = formatter.hidesAmounts ? LedgerProductSettings.hiddenTableNotice : table
+          Text(shownTable)
             .font(.body.monospaced())
             .textSelection(.enabled)
-            .accessibilityLabel(table)
+            .accessibilityLabel(shownTable)
             .accessibilityAddTraits(.isStaticText)
         }
         Section("Status") {
