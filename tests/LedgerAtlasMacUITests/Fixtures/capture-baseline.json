@@ -2,12 +2,12 @@
   "01-transactions.daily-dark.populated.root-dark.png" : {
     "lines" : 532,
     "looks" : "f2e26342c34263e2",
-    "text" : "5a1025593eada7c65b154f004e0724ef75501e47198a3c9edf463d6b08032d6d"
+    "text" : "4e86cc065ac32e8225e76fc9a971819e2e6249a9ca5ca10bfae387e74ed292f0"
   },
   "01-transactions.daily-dark.populated.root-light.png" : {
     "lines" : 532,
     "looks" : "ac3d9cb830b0919e",
-    "text" : "5a1025593eada7c65b154f004e0724ef75501e47198a3c9edf463d6b08032d6d"
+    "text" : "4e86cc065ac32e8225e76fc9a971819e2e6249a9ca5ca10bfae387e74ed292f0"
   },
   "02-statistics.overview-monthly.expense-dark.png" : {
     "lines" : 358,
@@ -16,7 +16,7 @@
   },
   "02-statistics.overview-monthly.expense-light.png" : {
     "lines" : 358,
-    "looks" : "929a3a3839b05198",
+    "looks" : "929a3a3839b85198",
     "text" : "1cee306e762029455ad696f04d615e88903381bea08c38f8b140c0b2f5d5df85"
   },
   "03-statistics.overview-annual.expense-dark.png" : {
@@ -71,12 +71,12 @@
   },
   "08-statistics.total_balance-monthly.trend-dark.png" : {
     "lines" : 208,
-    "looks" : "e261d040d04060ea",
+    "looks" : "c261d040d04060ea",
     "text" : "8f76e72f62bc65bf1d48131d5fddc17a44fb9aad5e7bcf82516719c02b6f1598"
   },
   "08-statistics.total_balance-monthly.trend-light.png" : {
     "lines" : 208,
-    "looks" : "b21b22a020a05192",
+    "looks" : "b21f22a020a05192",
     "text" : "8f76e72f62bc65bf1d48131d5fddc17a44fb9aad5e7bcf82516719c02b6f1598"
   },
   "09-accounts.overview-upper.cards.totals-dark.png" : {
@@ -156,7 +156,7 @@
   },
   "16-settings.accounts-index-light.png" : {
     "lines" : 324,
-    "looks" : "b03cb8b13898999a",
+    "looks" : "923cb8b13898999a",
     "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "17-settings.account_groups-edit.reorder.protected-dark.png" : {
@@ -166,7 +166,7 @@
   },
   "17-settings.account_groups-edit.reorder.protected-light.png" : {
     "lines" : 326,
-    "looks" : "b03cb8b13098999a",
+    "looks" : "923cb8b13098999a",
     "text" : "6b0d572fc20a6d12bb383868e1d3a9e04d61590d3aec52ca56d005483305b37f"
   },
   "18-settings.account_list-upper.hidden_variant-dark.png" : {
@@ -176,17 +176,17 @@
   },
   "18-settings.account_list-upper.hidden_variant-light.png" : {
     "lines" : 324,
-    "looks" : "b03cb8b13898999a",
+    "looks" : "923cb8b13898999a",
     "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "19-settings.account_list-tail-dark.png" : {
     "lines" : 325,
-    "looks" : "e0626245c76767e2",
+    "looks" : "e0626244c76767e2",
     "text" : "db391d751d1576f29acfd2e4a1aa101af3535fac822fd442d039428dfb5475b7"
   },
   "19-settings.account_list-tail-light.png" : {
     "lines" : 325,
-    "looks" : "b03cb8b13899989a",
+    "looks" : "923cb8b13899989a",
     "text" : "db391d751d1576f29acfd2e4a1aa101af3535fac822fd442d039428dfb5475b7"
   },
   "20-accounts.add-group_picker.open-dark.png" : {
@@ -291,12 +291,12 @@
   },
   "key-lock-dark.png" : {
     "lines" : 87,
-    "looks" : "e0813078387824a2",
+    "looks" : "e0813078387826a2",
     "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
   },
   "key-lock-light.png" : {
     "lines" : 87,
-    "looks" : "b061d8d4c4c45182",
+    "looks" : "b061d8d4c4c45982",
     "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
   },
   "key-upcoming-empty-dark.png" : {

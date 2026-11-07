@@ -292,6 +292,9 @@ struct LedgerBrowseList: View {
         }
       }
     }
+    // On macOS 26 a scroll view right under the toolbar draws the toolbar's edge effect over
+    // itself, which washed this row out to white in light mode.
+    .hidingScrollEdgeEffect()
   }
 
   private var accountTitle: String {
@@ -368,32 +371,20 @@ struct LedgerBrowseList: View {
   /// Money in, spending and net for what is shown, as figures: the first thing the eye
   /// reads on the screen. One group per currency.
   private var summaryStrip: some View {
-    HStack(alignment: .top, spacing: LedgerTheme.Space.xxl) {
+    LedgerSummaryStrip {
       ForEach(totals, id: \.unitCode) { total in
         if let figures = Self.summaryFigures(total) {
-          summaryFigure("Money in", figures.income, sign: .always)
-          summaryFigure("Spending", figures.expense)
-          summaryFigure("Net", figures.net, sign: .always)
+          // Money in is green with "+"; spending stays in ink; net carries its sign and is
+          // the one figure drawn large, so the eye lands on it.
+          LedgerSummaryFigure("Money in", MoneyText(figures.income, size: .row, sign: .always))
+          LedgerSummaryFigure("Spending", MoneyText(figures.expense, size: .row, sign: .never, tone: .neutral))
+          LedgerSummaryFigure("Net", MoneyText(figures.net, size: .figure, sign: .always))
         } else {
           Text(Self.describe([total], formatter: formatter))
             .font(LedgerTheme.Typeface.secondary)
             .foregroundStyle(LedgerTheme.inkSecondary)
         }
       }
-      Spacer(minLength: 0)
-    }
-    .accessibilityElement(children: .combine)
-  }
-
-  /// Money in is green with "+"; spending stays in ink; net carries its sign.
-  private func summaryFigure(
-    _ label: String, _ amount: CurrencyAmount, sign: LedgerDisplayFormatter.SignStyle = .never
-  ) -> some View {
-    VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
-      Text(label)
-        .font(LedgerTheme.Typeface.caption)
-        .foregroundStyle(LedgerTheme.inkSecondary)
-      MoneyText(amount, size: .figure, sign: sign, tone: sign == .always ? .automatic : .neutral)
     }
   }
 
@@ -966,5 +957,31 @@ package enum LedgerBrowseContent: Equatable {
       return mode == .note && !filterActive ? .noNotes : .noMatches
     }
     return .entries
+  }
+}
+
+extension View {
+  /// Hides the macOS 26 scroll edge effect on the given edges; earlier systems draw none.
+  /// Its opaque band is painted in the system window colour, not the canvas, so in light
+  /// mode it showed as a white strip under the toolbar.
+  @ViewBuilder
+  func hidingScrollEdgeEffect(_ edges: Edge.Set = .all) -> some View {
+    if #available(macOS 26.0, *) {
+      scrollEdgeEffectHidden(true, for: edges)
+    } else {
+      self
+    }
+  }
+
+  /// Uses the soft macOS 26 scroll edge effect on the given edges: content fades under the
+  /// toolbar (so its items stay readable when scrolled) without the opaque band the hard
+  /// style paints in the system window colour.
+  @ViewBuilder
+  func softScrollEdgeEffect(_ edges: Edge.Set) -> some View {
+    if #available(macOS 26.0, *) {
+      scrollEdgeEffectStyle(.soft, for: edges)
+    } else {
+      self
+    }
   }
 }

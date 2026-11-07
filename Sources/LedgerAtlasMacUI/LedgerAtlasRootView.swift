@@ -17,6 +17,9 @@ public struct LedgerAtlasRootView: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
+  /// Which columns show. The sidebar's own toggle and ⌃⌘S change it; tests start with the
+  /// detail alone to capture the table and inspector at a small display's width.
+  @State private var columnVisibility: NavigationSplitViewVisibility
   @State private var session: LedgerSession
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
@@ -75,9 +78,11 @@ public struct LedgerAtlasRootView: View {
     intentConsumer: @escaping () -> LedgerIntentRequest? = { nil },
     scopeStarter: @escaping (URL) -> Bool = { LedgerLocations.startAccess($0) },
     scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) },
+    initialColumnVisibility: NavigationSplitViewVisibility = .automatic,
     today: (() -> SourceLocalDate)? = nil
   ) {
     _selection = State(initialValue: initialSelection)
+    _columnVisibility = State(initialValue: initialColumnVisibility)
     _session = State(
       initialValue: LedgerSession(testingScopeStarter: scopeStarter, testingScopeStopper: scopeStopper))
     _appLock = State(initialValue: appLock)
@@ -92,7 +97,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   public var body: some View {
-    NavigationSplitView {
+    NavigationSplitView(columnVisibility: $columnVisibility) {
       LedgerSidebar(
         selection: $selection, focusedAccountID: $focusedAccountID,
         accounts: appLock.isLocked ? [] : sidebarAccounts,
@@ -100,7 +105,7 @@ public struct LedgerAtlasRootView: View {
         importDisabled: journey.backgroundWork != nil,
         importBackup: chooseImportSource)
       .navigationTitle("Ledger Atlas")
-      .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+      .navigationSplitViewColumnWidth(min: 240, ideal: 250, max: 300)
       .toolbar {
         // Hide amounts (⇧⌘H) sits in the sidebar's part of the toolbar, which has room to
         // spare; in the screen's part it pushed New into the overflow menu at the default size.
@@ -138,8 +143,17 @@ public struct LedgerAtlasRootView: View {
       // Every screen sits on the same canvas: lists and forms drop their own white or grey
       // scroll background, so the base never changes shade from one screen to the next.
       .scrollContentBackground(.hidden)
-      .ledgerCanvas()
+      // No opaque white band where a screen's scroll view meets the toolbar (macOS 26), but
+      // scrolled content still fades under the toolbar so its items stay readable.
+      .softScrollEdgeEffect(.top)
+      // Fill the whole column, including the strip under the toolbar and, on macOS 26, the part
+      // behind the floating sidebar; otherwise the system window colour shows there in light.
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(LedgerTheme.canvas, ignoresSafeAreaEdges: .all)
     }
+    // The window's own background is the canvas too: on macOS 26 the toolbar's scroll edge
+    // effect is painted in the window colour, which left a white band above most screens.
+    .containerBackground(LedgerTheme.canvas, for: .window)
     // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
     .onChange(of: productSettings.appearance, initial: true) { _, appearance in
       LedgerAppearance.apply(appearance)
@@ -1503,7 +1517,14 @@ public struct LedgerAtlasRootView: View {
         importDisabled: journey.backgroundWork != nil,
         importBackup: chooseImportSource, createLedger: createLedger, openLedger: openLedger,
         trySampleData: openSampleLedger)
-    } else if selection == .importReview || selection == .onboarding {
+    } else if selection == .onboarding {
+      LedgerGetStartedView(
+        hasLedger: session.screen == .loaded,
+        historyImported: session.screen == .loaded && journey.hasImportedHistory,
+        importDisabled: journey.backgroundWork != nil,
+        importBackup: chooseImportSource,
+        show: { selection = $0 })
+    } else if selection == .importReview {
       ImportReviewSurface(
         summary: journey.phase == .idle ? importReviewSummary : journey.summary,
         failure: journey.lastFailure,
