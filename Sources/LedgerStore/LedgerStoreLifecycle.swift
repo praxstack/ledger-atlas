@@ -363,12 +363,15 @@ public enum LedgerStoreLifecycle {
     let recoveryLeaf = recoveryURL.lastPathComponent
     // The recovery image, the scratch migration and the replacement: three copies at most. An
     // upgrade resumed after its recovery image was published reuses that image (it is
-    // validated below), so it needs room for the other two. Scratch copies a killed upgrade
-    // left behind go first, so their space counts.
+    // validated below). The scratch copy counts here only when the temporary folder is on the
+    // ledger's volume; otherwise its own volume is checked when it is made. Scratch copies a
+    // killed upgrade left behind go first, so their space counts.
     removeAbandonedMigrations()
     try requireMigrationSpace(
       source.descriptor,
-      copies: entryExists(recoveryLeaf, in: destination.parentDescriptor) ? 2 : 3)
+      copies: migrationCopiesOnLedgerVolume(
+        recoveryExists: entryExists(recoveryLeaf, in: destination.parentDescriptor),
+        scratchSharesVolume: sharesVolume(source.descriptor, with: scratchRoot())))
     var temporaryRecovery: TemporaryFile?
     var recoveryPublished = false
     var didPublishRecovery = false
@@ -1717,6 +1720,24 @@ public enum LedgerStoreLifecycle {
 
   /// Refuses an upgrade the disk hasn't room for, before anything is written. `copies` is how
   /// many files the size of the ledger the step writes.
+  /// Ledger-sized copies an upgrade writes to the ledger's own volume: the replacement, the
+  /// recovery image unless it already exists, and the scratch migration when the temporary
+  /// folder shares the volume.
+  package static func migrationCopiesOnLedgerVolume(
+    recoveryExists: Bool, scratchSharesVolume: Bool
+  ) -> UInt64 {
+    1 + (recoveryExists ? 0 : 1) + (scratchSharesVolume ? 1 : 0)
+  }
+
+  /// Whether the folder at `path` is on the volume of the file open at `descriptor`. When
+  /// either can't be checked, the answer is yes, so the space check counts more, never less.
+  private static func sharesVolume(_ descriptor: Int32, with path: String) -> Bool {
+    var file = stat()
+    var folder = stat()
+    guard fstat(descriptor, &file) == 0, stat(path, &folder) == 0 else { return true }
+    return file.st_dev == folder.st_dev
+  }
+
   private static func requireMigrationSpace(_ descriptor: Int32, copies: UInt64) throws {
     try requireMigrationSpace(of: descriptor, copies: copies, onVolumeOf: descriptor)
   }

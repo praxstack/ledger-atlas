@@ -2258,6 +2258,20 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
     try LedgerStoreLifecycle.requireMigrationSpace(
       ledgerBytes: UInt64.max / 2, copies: 3, availableBytes: UInt64.max)
   }
+  // The ledger's volume holds the replacement, the recovery image unless it exists, and the
+  // scratch migration only when the temporary folder is on the same volume.
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: false, scratchSharesVolume: true) == 3)
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: true, scratchSharesVolume: true) == 2)
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: false, scratchSharesVolume: false) == 2)
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: true, scratchSharesVolume: false) == 1)
 }
 
 @Test func scratchMigrationsAKilledUpgradeLeftBehindAreSwept() throws {
