@@ -71,6 +71,10 @@ struct ReceiptSurface: View {
           LedgerEmptyState(
             "Choose a receipt", systemImage: "doc.text.viewfinder",
             message: "Pick one from the list to link it to a transaction or record an expense from it.")
+        } else {
+          // Keeps the row as wide as the window, so the screen's width never depends on the
+          // wrapped intro text above it.
+          Spacer(minLength: 0)
         }
       }
       .padding(.horizontal, LedgerTheme.Space.xxl)
@@ -81,6 +85,7 @@ struct ReceiptSurface: View {
         Spacer(minLength: LedgerTheme.Space.l)
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .ledgerCanvas()
     .navigationTitle("Receipts")
     .task(id: journey.snapshotGeneration) { reload() }
