@@ -832,6 +832,7 @@ public final class LedgerJourney {
   /// carries receipts, is a known limit with a 1:1 backup as the answer, not a failed integrity check.
   private func backupExportRow() -> SurfaceRow {
     do {
+      try refuseWhenReceiptsArePresent()
       let exported = try exportPackage()
       return SurfaceRow(
         id: "manifest", title: "Integrity",

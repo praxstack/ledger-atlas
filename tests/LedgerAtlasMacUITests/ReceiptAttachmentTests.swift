@@ -168,6 +168,10 @@ private func withDirectory(
       try journey.exportPortablePackage(to: package)
     }
     #expect(!FileManager.default.fileExists(atPath: package.path))
+    // Backup & Restore shows this as a portable-package limit, not a failed integrity check.
+    let exportRow = try #require(journey.rows(for: .backupRestore).last)
+    #expect(exportRow.id == "manifest-limit")
+    #expect(exportRow.detail == "Has receipts · use Save 1:1 backup")
     #expect(
       LedgerJourney.packageExportFailureMessage(
         for: ReceiptAttachmentError.receiptsCannotTravelInPackages
