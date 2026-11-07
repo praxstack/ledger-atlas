@@ -121,7 +121,9 @@ struct LedgerView: View {
               Label(Self.newTransactionTitle, systemImage: "plus")
                 .labelStyle(.titleAndIcon)
             }
-            .buttonStyle(.borderedProminent)
+            // The app's own primary style, so it is the teal accent like every other primary
+            // action, not the system accent colour.
+            .buttonStyle(LedgerPrimaryButtonStyle())
             .help("New transaction: add income or an expense")
           }
         }
@@ -176,8 +178,8 @@ struct LedgerView: View {
               VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
                 Text(transaction.detail(hidingAmounts: formatter.hidesAmounts))
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
+                  .font(LedgerTheme.Typeface.caption)
+                  .foregroundStyle(LedgerTheme.inkSecondary)
               }
             }
           }
@@ -365,9 +367,9 @@ struct LedgerView: View {
     -> some View
   {
     VStack(spacing: 12) {
-      Image(systemName: icon).font(.largeTitle).foregroundStyle(.secondary)
+      Image(systemName: icon).font(.largeTitle).foregroundStyle(LedgerTheme.inkTertiary)
       Text(title).font(.title2.bold())
-      Text(description).foregroundStyle(.secondary)
+      Text(description).foregroundStyle(LedgerTheme.inkSecondary)
       if let guidance { LedgerLifecycleGuidanceView(guidance: guidance, failure: failure) }
       HStack {
         Button(buttonTitle, action: open)

@@ -45,9 +45,7 @@ struct LedgerTransactionInspector: View {
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
         Text(entry.kind.rawValue.capitalized)
           .font(LedgerTheme.Typeface.captionEmphasis)
-          .textCase(.uppercase)
-          .kerning(0.6)
-          .foregroundStyle(LedgerTheme.inkTertiary)
+          .foregroundStyle(LedgerTheme.inkSecondary)
         MoneyText(signed.amount, size: .large, sign: signed.sign)
         Text(category ?? entry.kind.rawValue.capitalized)
           .font(LedgerTheme.Typeface.cardTitle)
