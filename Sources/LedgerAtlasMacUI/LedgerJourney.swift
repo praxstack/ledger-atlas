@@ -524,8 +524,10 @@ public final class LedgerJourney {
 
   nonisolated package static let entryAmountNotANumberMessage =
     "Not saved. Write the amount as a number, like 1250 or 1250.50, without commas."
+  // A failure can come after the write (reading the ledger back), so the words promise only
+  // what is true either way: Save again is the same submission and never enters it twice.
   nonisolated package static let entryNotSavedMessage =
-    "Not saved: Ledger Atlas could not write this entry. Everything you typed is still here; try Save again."
+    "Ledger Atlas couldn't confirm this entry was saved. Everything you typed is still here; Save again finishes it without entering it twice."
 
   /// The entry form's Save (#169): nil when the entry was written, otherwise the words the form
   /// shows. The form stays open after a save, so it, not the window behind it, says when
@@ -541,6 +543,8 @@ public final class LedgerJourney {
       _ = try createNativeTransaction(
         amountLiteral: amountLiteral, kind: kind, accountID: accountID, categoryID: categoryID,
         note: note, createdAt: createdAt, submissionID: submissionID, tags: tags)
+      // A retry that saves clears the failure an earlier attempt left behind the form.
+      lastFailure = nil
       return nil
     } catch {
       failClosed(message: "Transaction could not be saved.")

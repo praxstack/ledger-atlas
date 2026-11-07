@@ -80,10 +80,11 @@ struct NativeTransactionForm: View {
 
   var body: some View {
     Form {
-      if accounts.isEmpty {
+      if activeAccounts.isEmpty {
         ContentUnavailableView(
-          "No accounts", systemImage: "rectangle.stack",
-          description: Text("Create an account before entering a transaction."))
+          "No open accounts", systemImage: "rectangle.stack",
+          description: Text(
+            "Create an account, or reopen a closed one, before entering a transaction."))
       } else {
         TextField("Amount", text: $entry.amount)
           .focused($amountFocused)
@@ -172,6 +173,8 @@ struct NativeTransactionForm: View {
         !availableCategories.contains(where: { $0.id == categoryID })
       {
         entry.categoryID = nil
+        // The person's pick no longer applies, so a suggestion may fill the empty field.
+        entry.categoryChosen = false
       }
     }
     // Looked up a moment after typing stops, off the main thread: on a 100,000-entry ledger
