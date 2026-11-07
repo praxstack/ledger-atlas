@@ -78,8 +78,11 @@ struct LedgerSidebar: View {
       section(.money)
       if !accounts.isEmpty {
         Section("Accounts") {
+          let swatches = LedgerTheme.accountSwatches(for: accounts.map(\.name))
           ForEach(accounts) { account in
-            LedgerSidebarAccountRow(account: account)
+            LedgerSidebarAccountRow(
+              account: account,
+              key: swatches[account.name]?.color ?? LedgerTheme.paletteColor(for: account.name))
               .tag(SidebarItem.account(account.id))
           }
         }
@@ -112,11 +115,13 @@ struct LedgerSidebar: View {
 /// An account row: name on the left, balance on the right in tabular figures.
 struct LedgerSidebarAccountRow: View {
   let account: LedgerSidebarAccount
+  /// The account's own colour, the same one its Accounts tile uses.
+  let key: Color
   @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
     HStack(spacing: LedgerTheme.Space.s) {
-      LedgerColorKey(LedgerTheme.paletteColor(for: account.groupName ?? account.name))
+      LedgerColorKey(key)
       Text(account.name).lineLimit(1).truncationMode(.tail)
       Spacer(minLength: LedgerTheme.Space.xs)
       if let balance = account.balance {

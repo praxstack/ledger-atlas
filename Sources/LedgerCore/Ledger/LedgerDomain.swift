@@ -78,6 +78,12 @@ public struct LedgerOrigin: Equatable, Hashable, Sendable {
   public static func macNative() throws -> LedgerOrigin {
     try LedgerOrigin(id: String(repeating: "a", count: 64), label: macNativeLabel)
   }
+
+  /// True for an origin that came from an import: it has a provenance id, or the imported id or
+  /// label. Only a package with its import graph may carry such rows.
+  public var carriesImportProvenance: Bool {
+    provenanceID != nil || id == String(repeating: "e", count: 64) || label == Self.importedLabel
+  }
 }
 
 public struct LedgerSourceLiteral: Equatable, Hashable, Sendable {
