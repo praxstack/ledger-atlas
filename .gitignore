@@ -41,6 +41,10 @@ next-env.d.ts
 # cloned skill source repos (installed copies live in .agents/skills)
 /vendor/
 
+# installed agent skills: never committed (third-party licences, #185).
+# Recreate with ./scripts/install-skills.sh, which reads skills-lock.json.
+/.agents/
+
 # Swift/Python build output and local evidence
 /.build/
 /.swiftpm/

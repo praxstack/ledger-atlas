@@ -1,1 +1,0 @@
-/workspace/vendor/skills-repos/gstack/ETHOS.md
