@@ -162,6 +162,53 @@ func missingReceiptKeyIsReportedAndRecoveryKeyRestoresIt() throws {
   }
 }
 
+@Test("a damaged ledger without its key is still reported as damaged")
+func damagedLedgerWithoutKeyIsNotReportedAsKeyMissing() throws {
+  let fixture = try V19Fixture(
+    artifactSHA256: CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8)))
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: fixture) { url, _ in
+    let file = try #require(try LedgerReceiptTrust.recoveryKeyFile(for: url))
+    let account = try LedgerReceiptTrust.recoveryKey(from: file, for: url).account
+    // A tag link to a tag that doesn't exist: only the foreign-key check sees it.
+    try withSQLite(url) {
+      try execute(
+        $0,
+        """
+        PRAGMA foreign_keys=OFF;
+        INSERT INTO ledger_revision_tag
+          SELECT revision_id, 'missing-tag' FROM ledger_transaction_revision LIMIT 1;
+        """)
+    }
+    try LedgerReceiptTrust.removeKeyForTesting(account: account)
+    defer { try? LedgerReceiptTrust.removeKeyForTesting(account: account) }
+    #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+      _ = try LedgerStore.openReadOnly(at: url)
+    }
+  }
+}
+
+@Test("a recovery key never replaces a different key already on this Mac")
+func recoveryKeyNeverReplacesAKeyOnThisMac() throws {
+  let fixture = try V19Fixture(
+    artifactSHA256: CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8)))
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: fixture) { url, _ in
+    let file = try #require(try LedgerReceiptTrust.recoveryKeyFile(for: url))
+    let saved = try LedgerReceiptTrust.recoveryKey(from: file, for: url)
+    defer { try? LedgerReceiptTrust.removeKeyForTesting(account: saved.account) }
+    var wrong = saved.key
+    wrong[0] ^= 0x01
+    let other = Data(
+      ([LedgerReceiptTrust.recoveryKeyHeader, saved.account, CanonicalReceiptDigest.hex(wrong), ""]
+        .joined(separator: "\n")).utf8)
+    #expect(throws: LedgerReceiptTrustError.conflictingKeys) {
+      try LedgerStore.installRecoveryKey(other, for: url)
+    }
+    // The same key again changes nothing.
+    try LedgerStore.installRecoveryKey(file, for: url)
+    #expect(try LedgerReceiptTrust.key(for: url, create: false) == saved.key)
+  }
+}
+
 @Test("a recovery key file is refused for a different ledger")
 func recoveryKeyFileIsRefusedForAnotherLedger() throws {
   let first = try V19Fixture(

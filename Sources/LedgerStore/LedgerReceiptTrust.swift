@@ -174,6 +174,11 @@ package enum LedgerReceiptTrust {
     return Data(text.utf8)
   }
 
+  /// True when the ledger at `url` holds imported history, so it needs a receipt key.
+  package static func hasImportedHistory(at url: URL) -> Bool {
+    persistedReceiptIdentity(at: url) != nil
+  }
+
   /// Reads a recovery key file made for the ledger at `url`. Throws `invalidKey` when the file
   /// is malformed or was made for a different ledger.
   package static func recoveryKey(from file: Data, for url: URL) throws -> (

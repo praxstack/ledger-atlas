@@ -102,6 +102,11 @@ lost, the ledger itself is fine, but Ledger Atlas can't check it without the key
   on this Mac, choose **Choose Recovery Key…** and pick that file. The key is checked against
   the ledger before it is added, and never replaces a different key.
 - A ledger you made in Ledger Atlas without importing needs no key.
+- No recovery key saved? If the keys were kept as files (the default) and the old Mac is in a
+  Time Machine backup, restoring that Mac's `…/Application Support/Ledger Atlas/Keys` folder
+  brings them back. Restore it only where that folder is missing or empty: never over a `Keys`
+  folder holding other keys. Keys kept in the Keychain stay on the old Mac and can't be
+  restored this way, so save a recovery key there.
 
 ## Updating
 

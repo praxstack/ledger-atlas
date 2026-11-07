@@ -473,6 +473,7 @@ public struct LedgerAtlasRootView: View {
       defer { try? handle.close() }
       return try handle.read(upToCount: 2_048) ?? Data()
     } catch {
+      lifecycleMessage = nil
       journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
       return nil
     }
@@ -485,6 +486,8 @@ public struct LedgerAtlasRootView: View {
       lifecycleMessage = Self.recoveryKeyInstalledMessage
       return true
     case .failure(let error):
+      // The missing-key explanation would otherwise stay on screen over this error.
+      lifecycleMessage = nil
       journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
       return false
     }
@@ -496,7 +499,12 @@ public struct LedgerAtlasRootView: View {
     let file: Data
     do {
       guard let made = try LedgerReceiptTrust.recoveryKeyFile(for: ledger) else {
-        lifecycleMessage = Self.recoveryKeyNotNeededMessage
+        if LedgerReceiptTrust.hasImportedHistory(at: ledger) {
+          lifecycleMessage = nil
+          journey.recordFailure(Self.recoveryKeyUnavailableMessage)
+        } else {
+          lifecycleMessage = Self.recoveryKeyNotNeededMessage
+        }
         return
       }
       file = made
@@ -653,6 +661,8 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: given == nil ? 0 : 19_800))
       log("import check: review \(journey.phase) after \(seconds()) \(journey.lastFailure ?? "")")
       await approveImport()
+      // Publication picks another name if the requested one was taken meanwhile.
+      if let published = journey.ledgerURL { imported = published }
       log(
         "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions after \(seconds()) \(journey.lastFailure ?? "")"
       )
@@ -1113,6 +1123,8 @@ public struct LedgerAtlasRootView: View {
     "Recovery key added to this Mac. The ledger opens normally from now on."
   package static let recoveryKeySavedMessage =
     "Recovery key saved. Keep it separate from your backups, somewhere private (a password manager is ideal). Anyone with both a backup and its key could change the imported history without it showing."
+  package static let recoveryKeyUnavailableMessage =
+    "This ledger's receipt key isn't on this Mac any more, so there's no recovery key to save. Reopen the ledger and choose the recovery key saved earlier."
   package static let recoveryKeyNotNeededMessage =
     "This ledger has no imported history, so it needs no recovery key. Its backups open on any Mac."
   package static let recoveryKeySavePanelMessage =

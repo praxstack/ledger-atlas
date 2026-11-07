@@ -59,6 +59,9 @@ import Testing
   let hidden = LedgerLocations.importInProgressURL(in: directory)
   try Data("ledger".utf8).write(to: hidden)
   try Data("binding".utf8).write(to: URL(fileURLWithPath: hidden.path + "-journal.ledger-atlas-binding"))
+  for suffix in ["-wal", "-shm"] {
+    try Data("companion".utf8).write(to: URL(fileURLWithPath: hidden.path + suffix))
+  }
 
   let published = try LedgerLocations.publishImport(
     hidden, as: directory.appendingPathComponent("Home.sqlite"))

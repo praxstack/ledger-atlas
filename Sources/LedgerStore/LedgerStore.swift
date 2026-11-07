@@ -351,6 +351,11 @@ public final class LedgerStore {
   /// different key already on this Mac is never replaced.
   package static func installRecoveryKey(_ file: Data, for url: URL) throws {
     let candidate = try LedgerReceiptTrust.recoveryKey(from: file, for: url)
+    // A key already on this Mac, wherever it is kept, is never replaced or shadowed.
+    if let existing = try LedgerReceiptTrust.key(for: url, create: false) {
+      guard existing == candidate.key else { throw LedgerReceiptTrustError.conflictingKeys }
+      return
+    }
     _ = try openReadOnly(at: url, trustKey: candidate.key)
     try LedgerReceiptTrust.installRecoveryKey(candidate.key, account: candidate.account)
   }
@@ -415,6 +420,7 @@ public final class LedgerStore {
   /// ledger has a receipt and passes everything but the receipt signatures.
   private static func failedOnlyForMissingKey(_ database: OpaquePointer) -> Bool {
     (scalarInt("SELECT count(*) FROM main.import_receipt", on: database) ?? 0) > 0
+      && (try? validateCanonicalSchema(on: database)) != nil
       && CanonicalLedgerHealth.passesAllButReceiptSignatures(database)
   }
 
