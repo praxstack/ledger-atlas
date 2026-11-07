@@ -103,6 +103,10 @@ public final class LedgerStore {
     /// A package with import history did not rebuild the ledger it was exported from. Nothing
     /// was written.
     case importGraphMismatch
+    /// The ledger holds imported history, and its receipt key is not on this Mac (a new Mac,
+    /// a wiped container, a lost Keys folder). Nothing is damaged; the key has to come back
+    /// first (#182).
+    case receiptKeyMissing
 
     fileprivate var preservesMutationError: Bool {
       switch self {
@@ -339,6 +343,22 @@ public final class LedgerStore {
   static let busyTimeoutMilliseconds: Int32 = 5_000
 
   public static func openReadOnly(at url: URL) throws -> LedgerStore {
+    try openReadOnly(at: url, trustKey: nil)
+  }
+
+  /// Installs the receipt key from a recovery key file made on another Mac, after checking
+  /// that the file was made for the ledger at `url` and that its key opens it (#182). A
+  /// different key already on this Mac is never replaced.
+  package static func installRecoveryKey(_ file: Data, for url: URL) throws {
+    let candidate = try LedgerReceiptTrust.recoveryKey(from: file, for: url)
+    _ = try openReadOnly(at: url, trustKey: candidate.key)
+    try LedgerReceiptTrust.installRecoveryKey(candidate.key, account: candidate.account)
+  }
+
+  /// `suppliedKey` checks the ledger with a key that is not on this Mac yet.
+  private static func openReadOnly(at url: URL, trustKey suppliedKey: Data?) throws
+    -> LedgerStore
+  {
     try validateNoSQLiteCompanions(at: url)
     // Prefer a read-write description even though SQLite opens this connection read-only. With a
     // read-only one, a save on another connection in this process intermittently failed to take
@@ -371,20 +391,31 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     sqlite3_busy_timeout(database, Self.busyTimeoutMilliseconds)
+    var trustKey: Data?
+    var keyLookedUp = false
     do {
       // HAS_MOVED is not meaningful for a standard VFS opened through a file descriptor.
       // The descriptor was authenticated before opening and the path is revalidated below.
       try validateCanonicalSchema(on: database)
-      try CanonicalLedgerHealth.validate(
-        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
-        remembering: .shared)
+      trustKey = try suppliedKey ?? LedgerReceiptTrust.key(for: url, create: false)
+      keyLookedUp = true
+      try CanonicalLedgerHealth.validate(database, trustKey: trustKey, remembering: .shared)
       try validatePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(database: database, identity: identity, url: url)
     } catch {
+      let keyMissing = keyLookedUp && trustKey == nil && failedOnlyForMissingKey(database)
       sqlite3_close(database)
-      throw Error.incompatibleCanonicalStore
+      throw keyMissing ? Error.receiptKeyMissing : Error.incompatibleCanonicalStore
     }
+  }
+
+  /// A ledger with an import receipt can't be fully checked without its receipt key. A failed
+  /// check with no key on this Mac is reported as the missing key, not as damage, when the
+  /// ledger has a receipt and passes everything but the receipt signatures.
+  private static func failedOnlyForMissingKey(_ database: OpaquePointer) -> Bool {
+    (scalarInt("SELECT count(*) FROM main.import_receipt", on: database) ?? 0) > 0
+      && CanonicalLedgerHealth.passesAllButReceiptSignatures(database)
   }
 
   public static func openForMutation(at url: URL) throws -> LedgerStore {
@@ -470,6 +501,8 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     sqlite3_busy_timeout(database, busyTimeoutMilliseconds)
+    var trustKey: Data?
+    var keyLookedUp = false
     do {
       try mutationTestHook?(.afterPinnedOpen)
       try execute("PRAGMA foreign_keys=ON", on: database)
@@ -477,7 +510,8 @@ public final class LedgerStore {
         throw Error.incompatibleCanonicalStore
       }
       try validateCanonicalJournalMode(on: database)
-      let trustKey = try LedgerReceiptTrust.key(for: url, create: false)
+      trustKey = try LedgerReceiptTrust.key(for: url, create: false)
+      keyLookedUp = true
       // A file with the same inode, size, modification and change time as when it was digested
       // still has the digested bytes: any write moves its change time (the caller only passes a
       // digest for a file whose change time is old enough for that to hold), and only a change
@@ -546,8 +580,9 @@ public final class LedgerStore {
       store.rememberCoreSnapshot(checked.snapshot, readFrom: stateBeforeCheck)
       return store
     } catch {
+      let keyMissing = keyLookedUp && trustKey == nil && failedOnlyForMissingKey(database)
       _ = csqlite_close_pinned(database, registration)
-      throw Error.incompatibleCanonicalStore
+      throw keyMissing ? Error.receiptKeyMissing : Error.incompatibleCanonicalStore
     }
   }
 

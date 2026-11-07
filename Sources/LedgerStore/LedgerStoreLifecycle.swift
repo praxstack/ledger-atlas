@@ -53,6 +53,9 @@ public enum LedgerStoreLifecycle {
     case publicationFailed
     case publicationCompleted(phase: PublicationPhase, recoveryImageExists: Bool)
     case interrupted
+    /// The ledger holds imported history and its receipt key isn't on this Mac. Nothing is
+    /// damaged; installing the key (or the Keys folder) lets it open (#182).
+    case receiptKeyMissing
   }
 
   package enum TestPhase: Equatable, Sendable {
@@ -2117,7 +2120,9 @@ public enum LedgerStoreLifecycle {
         verifiedFiles: verifiedFiles, testing: nil)
       guard store.matchesPinnedInode(expected) else { throw Error.pathChanged }
       return store
-    } catch let error as Error { throw error } catch { throw Error.invalidStore }
+    } catch let error as Error { throw error } catch LedgerStore.Error.receiptKeyMissing {
+      throw Error.receiptKeyMissing
+    } catch { throw Error.invalidStore }
   }
 
   private static func invoke(_ hook: TestHook?, _ phase: TestPhase) throws {

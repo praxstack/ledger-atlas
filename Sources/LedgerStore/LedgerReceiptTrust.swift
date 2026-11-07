@@ -156,11 +156,87 @@ package enum LedgerReceiptTrust {
     }
   }
 
+  // MARK: Recovery key (#182)
+
+  /// The first line of a recovery key file.
+  package static let recoveryKeyHeader = "ledger-atlas-recovery-key-v1"
+
+  /// The receipt key of the ledger at `url` as a small text file the person keeps with their
+  /// backups, so a backup can be opened on another Mac. Plaintext, like the v1 backup itself.
+  /// Nil when the ledger has no imported history (it needs no key) or this Mac has no key.
+  package static func recoveryKeyFile(for url: URL) throws -> Data? {
+    guard let identity = persistedReceiptIdentity(at: url),
+      let key = try self.key(for: url, create: false), key.count == 32
+    else { return nil }
+    let account = account(for: identity, namespace: currentNamespace)
+    let text = [recoveryKeyHeader, account, CanonicalReceiptDigest.hex(key), ""]
+      .joined(separator: "\n")
+    return Data(text.utf8)
+  }
+
+  /// Reads a recovery key file made for the ledger at `url`. Throws `invalidKey` when the file
+  /// is malformed or was made for a different ledger.
+  package static func recoveryKey(from file: Data, for url: URL) throws -> (
+    account: String, key: Data
+  ) {
+    guard file.count <= 1_024, let text = String(data: file, encoding: .utf8) else {
+      throw LedgerReceiptTrustError.invalidKey
+    }
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    guard lines.count >= 3, lines[0] == recoveryKeyHeader,
+      lines.dropFirst(3).allSatisfy(\.isEmpty),
+      let identity = persistedReceiptIdentity(at: url),
+      lines[1] == account(for: identity, namespace: currentNamespace),
+      let key = hexBytes(lines[2]), key.count == 32
+    else { throw LedgerReceiptTrustError.invalidKey }
+    return (lines[1], key)
+  }
+
+  /// Stores a recovery key where new keys go (iCloud Keychain, a private file or this Mac's
+  /// Keychain). The caller checks first that the key opens the ledger. A different key already
+  /// on this Mac for the same ledger is never replaced.
+  package static func installRecoveryKey(_ key: Data, account: String) throws {
+    guard key.count == 32 else { throw LedgerReceiptTrustError.invalidKey }
+    guard try storeNew(key, account: account) == key else {
+      throw LedgerReceiptTrustError.conflictingKeys
+    }
+  }
+
+  private static func hexBytes(_ text: String) -> Data? {
+    let digits = Array(text.utf8)
+    guard digits.count % 2 == 0 else { return nil }
+    var bytes = Data(capacity: digits.count / 2)
+    var index = 0
+    while index < digits.count {
+      guard let high = hexValue(digits[index]), let low = hexValue(digits[index + 1]) else {
+        return nil
+      }
+      bytes.append(high << 4 | low)
+      index += 2
+    }
+    return bytes
+  }
+
+  private static func hexValue(_ digit: UInt8) -> UInt8? {
+    switch digit {
+    case UInt8(ascii: "0")...UInt8(ascii: "9"): digit - UInt8(ascii: "0")
+    case UInt8(ascii: "a")...UInt8(ascii: "f"): digit - UInt8(ascii: "a") + 10
+    default: nil
+    }
+  }
+
   private static func account(for identity: String, namespace: String) -> String {
     CanonicalReceiptDigest.sha256(Data("ledger-atlas/receipt-key/\(namespace)\n\(identity)".utf8))
   }
 
   #if DEBUG
+    /// Tests only, never in release builds: removes a ledger's key from this Mac, the way a
+    /// new Mac or a wiped container has none.
+    package static func removeKeyForTesting(account: String) throws {
+      try? LedgerReceiptKeyFile.remove(account: account, in: keyDirectory())
+      try? deleteLocal(account)
+    }
+
     /// Tests only, never in release builds: stores a known key for a receipt identity, so a
     /// committed package fixture signed with that key can be restored. Returns false when a
     /// different key already exists for the identity; nothing is replaced.
