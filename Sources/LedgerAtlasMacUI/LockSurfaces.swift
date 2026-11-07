@@ -33,7 +33,8 @@ struct LockedSurface: View {
       }
       SecureField("Passcode", text: $passcode)
         .textFieldStyle(.roundedBorder)
-        .textContentType(.password)
+        // No password content type: it opened the Passwords AutoFill bubble over Unlock, and
+        // this passcode is never stored in a password manager.
         .controlSize(.large)
         .accessibilityLabel("Ledger Atlas passcode")
       if lock.storageUnavailable {
@@ -63,7 +64,9 @@ struct LockedSurface: View {
       }
     }
     .ledgerCard(padding: LedgerTheme.Space.xxxl)
-    .frame(maxWidth: 400)
+    // A fixed width: the wrapped message below the title must never be measured narrow, or the
+    // window's minimum height grows past the screen.
+    .frame(width: 400)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .ledgerCanvas()
     .accessibilityElement(children: .contain)
