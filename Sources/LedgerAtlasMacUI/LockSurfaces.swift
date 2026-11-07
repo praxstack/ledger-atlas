@@ -223,7 +223,7 @@ struct SettingsSurface: View {
         Toggle("Hide amounts", isOn: $draft.hidesAmounts)
           .accessibilityHint("Shows every amount on screen as bullets. Shift Command H turns it on or off.")
         Text(LedgerProductSettings.hideAmountsScope)
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
         Picker("Start screen", selection: $draft.startScreen) {
           ForEach(LedgerProductSettings.startScreenChoices) { Text($0.sidebarTitle).tag($0) }
         }

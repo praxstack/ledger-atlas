@@ -10,7 +10,7 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
   try CurrencyAmount(unitCode: "INR", amount: ExactDecimal(literal))
 }
 
-@Test func hiddenFiguresKeepTheirShapeButLoseEveryDigitAndTheSign() throws {
+@Test func hiddenFiguresShowOneFixedMaskWhateverTheirSizeOrSign() throws {
   let shown = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"))
   let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"), hidesAmounts: true)
   let amount = try rupees("-483676.30")
@@ -19,10 +19,14 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
   let parts = hidden.parts(amount, sign: .always)
   #expect(!parts.text.contains(where: \.isNumber))
   #expect(parts.sign == .none)
-  // One bullet per digit and the same separators, so the figure keeps its width.
-  #expect(parts.whole.count == visible.whole.count)
-  #expect(parts.fraction.count == visible.fraction.count)
+  // A fixed mask: lakhs and single rupees look the same, so the width says nothing.
+  #expect(parts.whole == LedgerDisplayFormatter.hiddenAmountMask)
+  #expect(parts.fraction.isEmpty)
   #expect(parts.leading == visible.leading)
+  #expect(parts == hidden.parts(try rupees("5"), sign: .always))
+  #expect(hidden.amount(amount) == hidden.amount(try rupees("5")))
+  #expect(hidden.plain(amount) == hidden.plain(try rupees("5")))
+  #expect(hidden.figure("Balance ₹12 of ₹3,000") == "Balance ₹••••• of ₹•••••")
 
   #expect(!hidden.amount(amount).contains(where: \.isNumber))
   #expect(!hidden.plain(amount).contains(where: \.isNumber))

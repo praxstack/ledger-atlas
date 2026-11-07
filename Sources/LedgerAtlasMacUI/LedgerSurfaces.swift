@@ -125,7 +125,7 @@ struct BackupSurface: View {
         .accessibilityLabel(VendorExport.notice)
       if formatter.hidesAmounts {
         Text(LedgerProductSettings.hideAmountsExportNotice)
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       if exportXLSX != nil || importXLSX != nil || reset != nil {
         HStack {

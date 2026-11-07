@@ -9,9 +9,9 @@ import LedgerCore
 /// rules, never from formatted output.
 public struct LedgerDisplayFormatter: Sendable {
   public let locale: Locale
-  /// Hide amounts (#173): every figure this formatter produces has its digits replaced by
-  /// bullets, one per digit, so layouts keep their width and nothing shifts when it is turned
-  /// on. Exports never use a hiding formatter.
+  /// Hide amounts (#173): every number in a figure this formatter produces becomes the same
+  /// fixed mask, whatever its size, and its sign goes too, so a hidden figure says nothing about
+  /// how big it is or which way it went. Exports never use a hiding formatter.
   public let hidesAmounts: Bool
 
   public init(locale: Locale, hidesAmounts: Bool = false) {
@@ -26,7 +26,11 @@ public struct LedgerDisplayFormatter: Sendable {
   /// What VoiceOver says in place of a hidden figure.
   public static let hiddenAmountLabel = "Amount hidden"
 
-  /// `text` with every digit replaced by a bullet when amounts are hidden.
+  /// What every hidden number shows. Fixed length, so its width reveals nothing.
+  public static let hiddenAmountMask = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}"
+
+  /// `text` with every number (and its sign) replaced by the fixed mask when amounts are
+  /// hidden.
   public func figure(_ text: String) -> String {
     hidesAmounts ? Self.redacted(text) : text
   }
@@ -41,8 +45,19 @@ public struct LedgerDisplayFormatter: Sendable {
     plain(value.amount, unitCode: value.unitCode)
   }
 
+  /// A sign, an optional currency symbol, then digits with their grouping and decimal
+  /// separators. Everything but the symbol becomes the mask, so "−₹4,83,676.30" and "₹5" read
+  /// the same.
+  private static let numberRun = try! NSRegularExpression(
+    pattern: "[+\\-\u{2212}]?(\\p{Sc}[\u{00A0}\u{202F} ]?)?[+\\-\u{2212}]?\\p{N}(?:[\\p{N}.,'\u{2019}\u{00A0}\u{202F}]*\\p{N})?"
+  )
+
   static func redacted(_ text: String) -> String {
-    String(text.map { $0.isNumber ? "\u{2022}" : $0 })
+    let range = NSRange(text.startIndex..., in: text)
+    let masked = numberRun.stringByReplacingMatches(
+      in: text, range: range, withTemplate: "$1" + hiddenAmountMask)
+    // Any numeral the pattern missed still goes.
+    return String(masked.map { $0.isNumber ? "\u{2022}" : $0 })
   }
 
   /// Decimal holds 38 significant digits; longer canonical values are shown verbatim.
@@ -72,10 +87,11 @@ public struct LedgerDisplayFormatter: Sendable {
   public func parts(_ value: CurrencyAmount, sign style: SignStyle = .negativeOnly) -> MoneyParts {
     let shown = unhiddenParts(value, sign: style)
     guard hidesAmounts else { return shown }
-    // The direction is part of the figure too, so a hidden amount shows no sign.
+    // The direction and size are part of the figure too, so a hidden amount shows no sign and
+    // the same fixed mask for every value.
     return MoneyParts(
-      sign: .none, leading: shown.leading, whole: Self.redacted(shown.whole),
-      fraction: Self.redacted(shown.fraction), trailing: shown.trailing)
+      sign: .none, leading: shown.leading, whole: Self.hiddenAmountMask, fraction: "",
+      trailing: shown.trailing)
   }
 
   private func unhiddenParts(_ value: CurrencyAmount, sign style: SignStyle) -> MoneyParts {
@@ -160,7 +176,7 @@ public struct LedgerDisplayFormatter: Sendable {
   public func compactAxis(_ value: Double, unitCode: String) -> String {
     let symbol = currencySymbol(for: unitCode)
     // A hidden axis says nothing about scale: every label is the same.
-    if hidesAmounts { return symbol + "\u{2022}\u{2022}\u{2022}" }
+    if hidesAmounts { return symbol + Self.hiddenAmountMask }
     let sign = value < 0 ? "\u{2212}" : ""
     let magnitude = abs(value)
     let steps: [(Double, String)] =

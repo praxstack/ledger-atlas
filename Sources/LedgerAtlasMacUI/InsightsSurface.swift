@@ -99,7 +99,7 @@ struct InsightsSurface: View {
             .accessibilityLabel("Export PDF statement")
           if formatter.hidesAmounts {
             Text(LedgerProductSettings.hideAmountsExportNotice)
-              .font(.caption).foregroundStyle(.secondary)
+              .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
           }
         }
       }
@@ -236,7 +236,7 @@ struct InsightsSurface: View {
       .disabled(exportPeriodPDF == nil)
       if formatter.hidesAmounts {
         Text(LedgerProductSettings.hideAmountsExportNotice)
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Text("Snapshot \(s.snapshotDigest.prefix(16)). The screen and the PDF show the same snapshot.")
         .font(.caption)
