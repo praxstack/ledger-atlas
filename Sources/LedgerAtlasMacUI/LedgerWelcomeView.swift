@@ -34,10 +34,7 @@ struct LedgerWelcomeView: View {
 
   private var header: some View {
     VStack(spacing: LedgerTheme.Space.m) {
-      Image(nsImage: NSApplication.shared.applicationIconImage)
-        .resizable()
-        .frame(width: 72, height: 72)
-        .accessibilityHidden(true)
+      LedgerAtlasMark(size: 72)
       Text("Bring over your Money Manager history")
         .font(LedgerTheme.Typeface.display)
         .foregroundStyle(LedgerTheme.ink)
