@@ -569,7 +569,8 @@ func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
 @MainActor
 final class MountedRoot {
   let window: NSWindow
-  private let directory: URL
+  /// The test's own folder: the ledger, its SQLite files and the widget store.
+  let directory: URL
   private let suite: String
   let identifier = "a11y-window-\(UUID().uuidString)"
   /// Set when an Accessibility read ran out of time; its reader thread may still be running.
@@ -587,7 +588,8 @@ final class MountedRoot {
   init(
     showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
     size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
-    readsInProcess: Bool = false, appearance: LedgerProductSettings.Appearance = .system
+    readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil,
+    appearance: LedgerProductSettings.Appearance = .system
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
@@ -598,7 +600,10 @@ final class MountedRoot {
     defer { if !mounted { try? FileManager.default.removeItem(at: directory) } }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let ledger = directory.appendingPathComponent("Demo Household.sqlite")
-    if withLedger { try LedgerDemoTour.makeDemoLedger(at: ledger) }
+    if withLedger {
+      try LedgerDemoTour.makeDemoLedger(at: ledger)
+      try prepareLedger?(ledger)
+    }
     suite = "LedgerAtlasMacUITests.a11y.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     let bookmarks = SecurityScopedBookmarkStore(
@@ -644,7 +649,10 @@ final class MountedRoot {
     for _ in 0..<30 {
       try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
-      let elements = accessibilityElements()
+      // Waiting reads in-process whatever the test reads with: a whole-window system read every
+      // 200 ms made AppKit lay out from the reader thread and stop the runner's main run loop,
+      // until a run ended early (runs 42196159643 and #177's).
+      let elements = inProcessElements()
       if readTimedOut { break }
       // Keep waiting while the saved ledger is still opening.
       // The empty-ledger prompt's title is exactly "Open a ledger".
@@ -696,7 +704,11 @@ final class MountedRoot {
   nonisolated(unsafe) private static var loopDepth = 0
   /// How many times the test runner's run of the main loop was stopped and run again.
   nonisolated(unsafe) static var runLoopRestarts = 0
-  static let maxRunLoopRestarts = 20
+  /// The cap is for the whole test process, not one test: each restart nests one more run of
+  /// the loop on the main thread's stack (a few kilobytes of frames), so 100 is far from
+  /// the stack's limit and leaves room as the suite grows; 20 was reached on 7 Nov 2026 by the
+  /// capture set, the lock tests and the privacy scan together.
+  static let maxRunLoopRestarts = 100
 
   /// The test process lives inside the test runner's own run of the main run loop, and that
   /// run should never end: when the tests finish, the runner calls exit() itself. Something in
@@ -748,17 +760,19 @@ final class MountedRoot {
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
   /// there, so pump it until the background read finishes.
   func accessibilityElements() -> [SpokenElement] {
-    if readsInProcess {
-      // SwiftUI only builds its accessibility elements once an Accessibility client has asked
-      // for them. Run alone, nothing else in the process has, and the in-process tree is
-      // just the window title; so ask once through the system API first.
-      if !Self.systemReadDone {
-        Self.systemReadDone = true
-        _ = systemAccessibilityElements()
-      }
-      return inProcessAccessibilityTree(of: window)
+    readsInProcess ? inProcessElements() : systemAccessibilityElements()
+  }
+
+  /// The window's tree read in-process on the main thread.
+  private func inProcessElements() -> [SpokenElement] {
+    // SwiftUI only builds its accessibility elements once an Accessibility client has asked
+    // for them. Run alone, nothing else in the process has, and the in-process tree is
+    // just the window title; so ask once through the system API first.
+    if !Self.systemReadDone {
+      Self.systemReadDone = true
+      _ = systemAccessibilityElements()
     }
-    return systemAccessibilityElements()
+    return inProcessAccessibilityTree(of: window)
   }
 
   nonisolated(unsafe) private static var systemReadDone = false
@@ -909,6 +923,18 @@ func accessibilityFocus(of pid: pid_t) -> [String] {
   var spoken = name(element) ?? ""
   if spoken.isEmpty, let labelElement = axElement(attribute(element, kAXTitleUIElementAttribute)) {
     spoken = name(labelElement) ?? (attribute(labelElement, kAXValueAttribute) as? String) ?? ""
+  }
+  // A focused wrapper (a SwiftUI button's group, say) is read by what is inside it, as
+  // VoiceOver does: the first named descendant, breadth first.
+  if spoken.isEmpty {
+    var queue = (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+    var looked = 0
+    while !queue.isEmpty, looked < 40, spoken.isEmpty {
+      let child = queue.removeFirst()
+      looked += 1
+      spoken = name(child) ?? ""
+      queue += (attribute(child, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+    }
   }
   guard let box = frame(element) else { return [spoken] }
   return [spoken] + [box.minX, box.minY, box.width, box.height].map { String(Double($0)) }
