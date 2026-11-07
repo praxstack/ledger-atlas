@@ -2260,6 +2260,43 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
   }
 }
 
+@Test func scratchMigrationsAKilledUpgradeLeftBehindAreSwept() throws {
+  try withLifecycleDirectory { root in
+    let fileManager = FileManager.default
+    func scratch(_ name: String, lock: Bool) throws -> URL {
+      let folder = root.appendingPathComponent(name, isDirectory: true)
+      try fileManager.createDirectory(at: folder, withIntermediateDirectories: false)
+      try Data("ledger".utf8).write(to: folder.appendingPathComponent("migration.sqlite"))
+      if lock { try Data().write(to: folder.appendingPathComponent("lock")) }
+      return folder
+    }
+    // Left behind by a killed upgrade: its lock file is there but nobody holds it.
+    let abandoned = try scratch("ledger-atlas-migration-killed", lock: true)
+    // An upgrade running now holds its lock.
+    let live = try scratch("ledger-atlas-migration-running", lock: true)
+    let held = open(live.appendingPathComponent("lock").path, O_RDWR | O_CLOEXEC)
+    #expect(held >= 0)
+    defer { close(held) }
+    #expect(flock(held, LOCK_EX | LOCK_NB) == 0)
+    // Just made by mkdtemp, before its upgrade took the lock: left alone for now.
+    let starting = try scratch("ledger-atlas-migration-starting", lock: false)
+    // Made long ago and never locked: an upgrade killed before it took the lock.
+    let stale = try scratch("ledger-atlas-migration-stale", lock: false)
+    try fileManager.setAttributes(
+      [.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: stale.path)
+    // Not ours.
+    let other = try scratch("something-else", lock: true)
+
+    LedgerStoreLifecycle.removeAbandonedMigrations(in: root.path, grace: 600)
+
+    #expect(!fileManager.fileExists(atPath: abandoned.path))
+    #expect(!fileManager.fileExists(atPath: stale.path))
+    #expect(fileManager.fileExists(atPath: live.appendingPathComponent("migration.sqlite").path))
+    #expect(fileManager.fileExists(atPath: starting.appendingPathComponent("migration.sqlite").path))
+    #expect(fileManager.fileExists(atPath: other.appendingPathComponent("migration.sqlite").path))
+  }
+}
+
 @Test func lifecycleRejectsSemanticallyInvalidExactV10ImportGraphsWithoutMutation() throws {
   try withLifecycleDirectory { directory in
     let valid = directory.appendingPathComponent("valid.sqlite")

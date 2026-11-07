@@ -1712,12 +1712,20 @@ public enum LedgerStoreLifecycle {
   /// Refuses an upgrade the disk hasn't room for, before anything is written. `copies` is how
   /// many files the size of the ledger the step writes.
   private static func requireMigrationSpace(_ descriptor: Int32, copies: UInt64) throws {
-    let value = try identity(of: descriptor)
+    try requireMigrationSpace(of: descriptor, copies: copies, onVolumeOf: descriptor)
+  }
+
+  /// The same check for `copies` files the size of the ledger open at `ledger`, written to the
+  /// volume holding the file open at `volumeFile`.
+  private static func requireMigrationSpace(
+    of ledger: Int32, copies: UInt64, onVolumeOf volumeFile: Int32
+  ) throws {
+    let value = try identity(of: ledger)
     guard value.st_size >= 0 else { throw Error.invalidStore }
     // fstatfs, not fstatvfs: macOS's statvfs counts blocks in 32 bits and misreports a
     // large disk.
     var volume = statfs()
-    guard fstatfs(descriptor, &volume) == 0 else { throw Error.insufficientSpace }
+    guard fstatfs(volumeFile, &volume) == 0 else { throw Error.insufficientSpace }
     try requireMigrationSpace(
       ledgerBytes: UInt64(value.st_size), copies: copies,
       availableBytes: UInt64(volume.f_bavail) &* UInt64(volume.f_bsize))
@@ -1739,16 +1747,19 @@ public enum LedgerStoreLifecycle {
     let descriptor: Int32
     private let directory: String
     private let path: String
+    private let lock: Int32
 
-    fileprivate init(descriptor: Int32, directory: String, path: String) {
+    fileprivate init(descriptor: Int32, directory: String, path: String, lock: Int32) {
       self.descriptor = descriptor
       self.directory = directory
       self.path = path
+      self.lock = lock
     }
 
     deinit {
       Darwin.close(descriptor)
       MigratedImage.remove(directory: directory, path: path)
+      Darwin.close(lock)
     }
 
     /// Methods, so the file stays open for as long as they read it.
@@ -1759,14 +1770,46 @@ public enum LedgerStoreLifecycle {
 
     fileprivate static func remove(directory: String, path: String) {
       for suffix in ["", "-journal", "-wal", "-shm"] { unlink(path + suffix) }
+      unlink(directory + "/" + scratchLockName)
       rmdir(directory)
+    }
+  }
+
+  private static let scratchPrefix = "ledger-atlas-migration-"
+  private static let scratchName = "migration.sqlite"
+  /// Held (flock) for as long as its upgrade runs, so a sweep can tell a live scratch
+  /// migration from one a killed upgrade left behind.
+  private static let scratchLockName = "lock"
+
+  /// Removes scratch migrations that an upgrade killed part-way left in `root`. Each is a full
+  /// plaintext copy of a ledger and takes the room the next upgrade needs. A live upgrade holds
+  /// its lock and is skipped; a folder without a lock yet is skipped until `grace` has passed,
+  /// since its upgrade may be about to take the lock.
+  package static func removeAbandonedMigrations(
+    in root: String = FileManager.default.temporaryDirectory.path, grace: TimeInterval = 600
+  ) {
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
+    for name in names where name.hasPrefix(scratchPrefix) {
+      let directory = root + "/" + name
+      var info = stat()
+      guard lstat(directory, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+        info.st_uid == geteuid()
+      else { continue }
+      let lock = Darwin.open(directory + "/" + scratchLockName, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+      if lock >= 0 {
+        defer { Darwin.close(lock) }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { continue }
+      } else {
+        let age = Date().timeIntervalSince1970 - TimeInterval(info.st_mtimespec.tv_sec)
+        guard age >= grace else { continue }
+      }
+      MigratedImage.remove(directory: directory, path: directory + "/" + scratchName)
     }
   }
 
   /// Builds the migrated ledger from the legacy ledger open at `descriptor`. The same input
   /// always gives the same bytes, which the upgrade's restart checks rely on.
   private static func migratedImage(from descriptor: Int32, at _: URL) throws -> MigratedImage {
-    try requireMigrationSpace(descriptor, copies: 1)
     let source = try openReadOnlyDatabase(descriptor)
     defer { sqlite3_close(source) }
     try validateDatabase(source, as: .legacy)
@@ -1776,15 +1819,28 @@ public enum LedgerStoreLifecycle {
     try requireMigrationSupported(source, from: release)
 
     // A private directory (mkdtemp makes it owner-only) in the app's own temporary folder.
-    var template = Array(
-      (FileManager.default.temporaryDirectory.path + "/ledger-atlas-migration-XXXXXX").utf8CString)
+    // That folder is in the app's container, but the space check below looks at the volume it
+    // is actually on rather than assuming it shares the ledger's.
+    let root = FileManager.default.temporaryDirectory.path
+    removeAbandonedMigrations(in: root)
+    var template = Array((root + "/" + scratchPrefix + "XXXXXX").utf8CString)
     guard let made = template.withUnsafeMutableBufferPointer({ mkdtemp($0.baseAddress!) }) else {
-      throw Error.insufficientSpace
+      throw errno == ENOSPC ? Error.insufficientSpace : Error.invalidStore
     }
     let directory = String(cString: made)
-    let scratch = directory + "/migration.sqlite"
+    let scratch = directory + "/" + scratchName
+    let lock = Darwin.open(
+      directory + "/" + scratchLockName, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+      mode_t(S_IRUSR | S_IWUSR))
     var built = false
-    defer { if !built { MigratedImage.remove(directory: directory, path: scratch) } }
+    defer {
+      if !built {
+        MigratedImage.remove(directory: directory, path: scratch)
+        if lock >= 0 { Darwin.close(lock) }
+      }
+    }
+    guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Error.invalidStore }
+    try requireMigrationSpace(of: descriptor, copies: 1, onVolumeOf: lock)
 
     var destination: OpaquePointer?
     guard
@@ -1810,7 +1866,10 @@ public enum LedgerStoreLifecycle {
       let finish = sqlite3_backup_finish(backup)
       guard step == SQLITE_DONE, finish == SQLITE_OK,
         execute(destination, "PRAGMA foreign_keys=ON"), execute(destination, "BEGIN IMMEDIATE")
-      else { throw sqlite3_errcode(destination) == SQLITE_FULL ? Error.insufficientSpace : Error.invalidStore }
+      else {
+        throw step == SQLITE_FULL || sqlite3_errcode(destination) == SQLITE_FULL
+          ? Error.insufficientSpace : Error.invalidStore
+      }
       // One transaction for every step, so the checks below see the finished migration only.
       do {
         for upgrade in path {
@@ -1843,7 +1902,7 @@ public enum LedgerStoreLifecycle {
       throw Error.invalidStore
     }
     built = true
-    return MigratedImage(descriptor: image, directory: directory, path: scratch)
+    return MigratedImage(descriptor: image, directory: directory, path: scratch, lock: lock)
   }
 
   #if DEBUG
