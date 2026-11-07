@@ -37,7 +37,7 @@ Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Inc
 | `inkTertiary` | `#69696D` | `#8E8E93` | Labels, captions, axis text |
 | `hairline` | black 8% | white 9% | Separators (22% / 26% with Increase Contrast) |
 | `inkQuiet`, `positiveQuiet`, `negativeQuiet` | their colour, faded only as far as 4.5:1 allows | same | The currency symbol and paise of a figure |
-| `fieldFill` | black 4.5% | white 7% | Fields, chips, segmented items |
+| `fieldFill` | black 6% | white 10% | Fields, chips, segmented items |
 | `accent` | `#09747D` | `#4FC3CE` | Selection, focus, primary action |
 | `accentSoft` | accent 11% | accent 16% | Selected rows, provenance note |
 | `positive` | `#1B774A` | `#4CC985` | Money in |
@@ -67,6 +67,7 @@ SF Pro only (system font); no bundled faces. Every style is a **system text styl
 - Spacing: 2, 4, 8, 12, 16, 20, 24, 32.
 - Radius: control 7, row 8, group 10, card 14, panel (sidebar, sheets) 16. Corners are concentric with the window.
 - Rows: table 40, compact 28, sidebar 27. Icon tile 28. Inspector width 320. Sidebar 240–300.
+- Screens: one column of cards (`LedgerCardColumn`, 24 pt gutter, up to 760 pt); paragraphs up to 560 pt (about 80 characters).
 
 ## 4. Components
 
@@ -83,6 +84,8 @@ All in `Sources/LedgerAtlasMacUI/Design/`.
 - **LedgerIconTile**: 28 pt tile with an SF Symbol or payee initials on a 16% tint.
 - **LedgerProgressTrack**: budgets and shares; over 100% turns red and marks the limit.
 - **Screen chrome** (`LedgerScreenChrome.swift`): **LedgerCardColumn** (the scrolling column of cards most screens are), **LedgerEmptyState** (icon tile, title, one sentence, the actions that get you out), **LedgerSessionEmptyState** (no ledger / loading / unavailable, with the **Open Ledger…** button), **LedgerActionBar** (recessed bar under a list: one primary, the rest secondary, status or failure beside them), **LedgerRow** and **LedgerRowDivider**, **LedgerKeyValue** (label left, value right, in a group box), **LedgerBadge** (small capsule: Hidden, Paused, Closed), **LedgerFigure** (caption over a MoneyText), **LedgerStatusLine** (failure in red with a warning symbol, otherwise a quiet sentence), **LedgerSurfaceRowList** (title-and-detail rows for the data-backed screens).
+- **LedgerSummaryStrip** of **LedgerSummaryFigure**s: the figures line at the top of a screen (caption over figure, baseline-aligned, the key figure last and largest). `.ledgerReadableWidth()` caps a paragraph at about 80 characters.
+- **Guards** (`LedgerDesignGuardTests`): no system colours, no raw `rawLiteral` amounts on screen, no `.caption`/`.footnote` fonts. Files that still have them are listed with a count that may only go down.
 
 ## 5. Layout
 

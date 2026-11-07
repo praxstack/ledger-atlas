@@ -57,7 +57,12 @@ public final class LedgerJourney {
   private let workspace = ImportWorkspace()
   private var application: LedgerApplication?
   private var mutableStore: LedgerStore?
-  private var openedStore: LedgerStore?
+  private var openedStore: LedgerStore? {
+    didSet { hasImportedHistory = openedStore?.latestImportID() != nil }
+  }
+  /// The open ledger was made by importing a backup (it has an import receipt). False for an
+  /// empty or hand-made ledger, so Get Started doesn't mark the import step done for those.
+  package private(set) var hasImportedHistory = false
 
   public init() {}
 
