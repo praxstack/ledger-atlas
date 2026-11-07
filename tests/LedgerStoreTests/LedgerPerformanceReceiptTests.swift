@@ -89,6 +89,13 @@ struct LedgerPerformanceReceiptTests {
       try application.search(.init(noteContains: "lunch 77"))
     }
     #expect(!found.isEmpty)
+    // #169: the entry form looks up a memo on every pause in typing.
+    let suggested = receipt.time("suggest an account and category from a memo", ceiling: 1) {
+      LedgerEntrySuggestion.suggestion(
+        forMemo: "Lunch 77", kind: .expense, accounts: snapshot.accounts,
+        categories: snapshot.categories, transactions: snapshot.transactions)
+    }
+    #expect(suggested != nil)
     let report = try receipt.time("build the INR report", ceiling: 8) {
       try application.report(unitCode: "INR")
     }

@@ -151,6 +151,7 @@ struct LedgerView: View {
     .sheet(isPresented: $showingTransactionForm) {
       NativeTransactionForm(
         accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
+        entries: transactions,
         onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
           createTransaction(submissionID, amount, kind, accountID, categoryID, note, links)
           if intentRequest != nil { consumeIntent() }
