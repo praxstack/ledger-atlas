@@ -170,6 +170,45 @@ private struct MergeFixture {
   #expect(try open.checksum() == before)
 }
 
+@Test func eraseTransactionsOnlyWorksOnAnImportedLedger() throws {
+  // Imported setup rows carry the import origin. The reset ledger has no import history, so
+  // it must keep those rows as its own instead of refusing them (#183).
+  let imported = try LedgerOrigin.imported()
+  let cash = try LedgerAccount(
+    id: StableLedgerID.account(origin: imported, localKey: key("a")), name: "Cash",
+    currencyUnit: "USD", origin: imported, displayOrder: 3, hidden: true,
+    includeInTotals: false)
+  let food = try LedgerCategory(
+    id: StableLedgerID.category(origin: imported, localKey: key("b")), name: "Food",
+    kind: .expense, origin: imported, displayOrder: 2)
+  let trip = try LedgerTag(
+    id: StableLedgerID.tag(origin: imported, localKey: key("d")), name: "Trip",
+    origin: imported)
+  let open = LedgerApplication(store: try makeMergeStore())
+  try open.createAccount(cash)
+  try open.createCategory(food)
+  try open.createTag(trip)
+  let before = try open.checksum()
+
+  let contents = try LedgerApplication.resetPackage(
+    from: try open.snapshot(), scope: .contentsOnly)
+  let kept = LedgerApplication(store: try makeMergeStore())
+  try kept.importPackage(manifest: contents.manifest, payload: contents.payload)
+  let snapshot = try kept.snapshot()
+  let native = try LedgerOrigin.macNative()
+  #expect(snapshot.accounts.map(\.id) == [cash.id])
+  #expect(snapshot.accounts.map(\.origin) == [native])
+  #expect(snapshot.accounts.first?.name == "Cash")
+  #expect(snapshot.accounts.first?.hidden == true)
+  #expect(snapshot.accounts.first?.includeInTotals == false)
+  #expect(snapshot.categories.map(\.id) == [food.id])
+  #expect(snapshot.categories.map(\.origin) == [native])
+  #expect(snapshot.tags.map(\.id) == [trip.id])
+  #expect(snapshot.tags.map(\.origin) == [native])
+  #expect(snapshot.transactions.isEmpty)
+  #expect(try open.checksum() == before)
+}
+
 @Test func twoPackageRestoreCyclesKeepTheChecksum() throws {
   let fixture = try MergeFixture()
   let (open, _) = try fixture.seeded()
