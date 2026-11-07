@@ -1806,10 +1806,7 @@ private func hasUnsupportedPortableProvenance(_ snapshot: LedgerStore.LedgerRead
     + snapshot.budgets.map(\.origin) + snapshot.installmentPlans.map(\.origin)
     + snapshot.tags.map(\.origin) + snapshot.transactionTemplates.map(\.origin)
     + snapshot.memos.map(\.origin)
-  let importedOriginID = String(repeating: "e", count: 64)
-  return origins.contains {
-    $0.provenanceID != nil || $0.id == importedOriginID || $0.label == LedgerOrigin.importedLabel
-  }
+  return origins.contains(where: \.carriesImportProvenance)
     || snapshot.revisionHistory.contains { revision in
       revision.draft.sourceLiterals.contains {
         $0.provenanceID != nil || $0.field.hasPrefix("import.")
@@ -1865,16 +1862,25 @@ extension LedgerApplication {
     from snapshot: LedgerStore.LedgerReadSnapshot, scope: LedgerResetScope
   ) throws -> (manifest: LedgerExportManifest, payload: Data) {
     let keepsSetup = scope == .contentsOnly
+    // The new ledger has no import history, so setup rows that came from an import are kept
+    // as rows made on this Mac. Ids don't depend on the origin, so nothing else changes.
+    let native = try LedgerOrigin.macNative()
+    func kept(_ origin: LedgerOrigin) -> LedgerOrigin {
+      origin.carriesImportProvenance ? native : origin
+    }
     return try sealedPackage(
       LedgerCanonicalPackage(
         formatVersion: LedgerPortablePackageFormat.version,
         formatFingerprint: LedgerPortablePackageFormat.fingerprint,
-        accounts: keepsSetup ? snapshot.accounts : [],
+        accounts: keepsSetup ? try snapshot.accounts.map { try $0.reorigined(kept($0.origin)) } : [],
         accountGroups: keepsSetup ? snapshot.accountGroups : [],
-        categories: keepsSetup ? snapshot.categories : [], revisions: [], links: [],
+        categories: keepsSetup
+          ? try snapshot.categories.map { try $0.reorigined(kept($0.origin)) } : [],
+        revisions: [], links: [],
         recurrenceRules: [], budgets: [], installmentPlans: [],
-        tags: keepsSetup ? snapshot.tags : [],
-        transactionTemplates: keepsSetup ? snapshot.transactionTemplates : []))
+        tags: keepsSetup ? try snapshot.tags.map { try $0.reorigined(kept($0.origin)) } : [],
+        transactionTemplates: keepsSetup
+          ? try snapshot.transactionTemplates.map { try $0.reorigined(kept($0.origin)) } : []))
   }
 
   /// Adds what `incoming` has and `current` lacks. Transaction history is joined revision by
@@ -1969,5 +1975,44 @@ extension LedgerApplication {
         createdAtMilliseconds: 0),
       payload
     )
+  }
+}
+
+extension LedgerAccount {
+  fileprivate func reorigined(_ origin: LedgerOrigin) throws -> LedgerAccount {
+    origin == self.origin
+      ? self
+      : try LedgerAccount(
+        id: id, name: name, currencyUnit: currencyUnit, origin: origin, lifecycle: lifecycle,
+        groupID: groupID, displayOrder: displayOrder, hidden: hidden,
+        includeInTotals: includeInTotals, variant: variant)
+  }
+}
+
+extension LedgerCategory {
+  fileprivate func reorigined(_ origin: LedgerOrigin) throws -> LedgerCategory {
+    origin == self.origin
+      ? self
+      : try LedgerCategory(
+        id: id, name: name, kind: kind, origin: origin, lifecycle: lifecycle,
+        parentID: parentID, displayOrder: displayOrder, hidden: hidden)
+  }
+}
+
+extension LedgerTag {
+  fileprivate func reorigined(_ origin: LedgerOrigin) throws -> LedgerTag {
+    origin == self.origin
+      ? self : try LedgerTag(id: id, name: name, origin: origin, lifecycle: lifecycle)
+  }
+}
+
+extension LedgerTransactionTemplate {
+  fileprivate func reorigined(_ origin: LedgerOrigin) throws -> LedgerTransactionTemplate {
+    origin == self.origin
+      ? self
+      : try LedgerTransactionTemplate(
+        id: id, name: name, kind: kind, categoryID: categoryID, amount: amount, note: note,
+        accountID: accountID, counterAccountID: counterAccountID, tags: tags, origin: origin,
+        lifecycle: lifecycle)
   }
 }
