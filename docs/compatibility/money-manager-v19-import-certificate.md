@@ -46,7 +46,7 @@ into a fresh ledger B.
 | `profile_observed_v19` | the backup classifies as a supported v19 profile |
 | `committed` | the first import committed, and its event count matches the ledger |
 | `no_blocking_subjects` | the reconciliation report has no blocking subject |
-| `no_unresolved_semantics` | no unknown type, unproven transfer direction or deleted flag remains |
+| `no_unresolved_semantics` | no transaction row was left out of the ledger: no unknown or unsupported type, unproven transfer direction, deleted flag, missing required field or unresolved category |
 | `every_subject_dispositioned` | mapped + preserved + excluded = tables + records + fields + 1 artifact |
 | `canonical_integrity` | `PRAGMA integrity_check` and `foreign_key_check` are clean |
 | `no_duplicate_mapping` | no source record maps to two events |

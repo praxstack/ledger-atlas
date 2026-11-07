@@ -98,7 +98,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
     case .onboarding:
       "Start a local Ledger Atlas workspace."
     case .importReview:
-      "Review a Mac or iOS Money Manager backup before commit."
+      "Review a Money Manager backup before commit."
     case .accounts:
       "Show canonical accounts."
     case .ledger:
