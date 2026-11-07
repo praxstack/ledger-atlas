@@ -10,6 +10,9 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
   try CurrencyAmount(unitCode: "INR", amount: ExactDecimal(literal))
 }
 
+/// Swift Testing's #expect can't take `contains(where:)` with a key path: it reads as throwing.
+private func hasDigit(_ text: String) -> Bool { text.contains(where: \.isNumber) }
+
 @Test func hiddenFiguresShowOneFixedMaskWhateverTheirSizeOrSign() throws {
   let shown = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"))
   let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"), hidesAmounts: true)
@@ -17,7 +20,7 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
 
   let visible = shown.parts(amount, sign: .always)
   let parts = hidden.parts(amount, sign: .always)
-  #expect(!parts.text.contains(where: \.isNumber))
+  #expect(!hasDigit(parts.text))
   #expect(parts.sign == .none)
   // A fixed mask: lakhs and single rupees look the same, so the width says nothing.
   #expect(parts.whole == LedgerDisplayFormatter.hiddenAmountMask)
@@ -29,10 +32,10 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
   #expect(hidden.plain(amount) == hidden.plain(small))
   #expect(hidden.figure("Balance ₹12 of ₹3,000") == "Balance ₹••••• of ₹•••••")
 
-  #expect(!hidden.amount(amount).contains(where: \.isNumber))
-  #expect(!hidden.plain(amount).contains(where: \.isNumber))
+  #expect(!hasDigit(hidden.amount(amount)))
+  #expect(!hasDigit(hidden.plain(amount)))
   #expect(hidden.plain(amount).hasSuffix(" INR"))
-  #expect(!hidden.compactAxis(450_000, unitCode: "INR").contains(where: \.isNumber))
+  #expect(!hasDigit(hidden.compactAxis(450_000, unitCode: "INR")))
   #expect(hidden.compactAxis(450_000, unitCode: "INR") == hidden.compactAxis(1, unitCode: "INR"))
   #expect(hidden.currencySymbol(for: "INR") == "₹")
   // Text that is not a figure passes through only when amounts are shown.
