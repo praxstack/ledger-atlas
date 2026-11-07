@@ -1212,6 +1212,18 @@ private enum FlowTestError: Error { case sqlite, injected }
   #expect(!LedgerAtlasRootView.backupSavedMessage(sha256: "ab").contains("recovery key"))
 }
 
+@MainActor
+@Test func anUpgradeWithoutRoomSaysSo() {
+  let message = LedgerAtlasRootView.lifecycleFailureMessage(
+    .open, LedgerStoreLifecycle.Error.insufficientSpace)
+  #expect(message.hasPrefix("There isn't enough free space on this Mac to upgrade this ledger."))
+  #expect(message.hasSuffix("Nothing was changed."))
+  #expect(
+    !LedgerAtlasRootView.shouldRemoveRefusedCopy(
+      .init(
+        kind: .failed, recoveryImageExists: false, message: nil, failure: .insufficientSpace)))
+}
+
 /// Owner-only, as Open Ledger's copy into app storage is (`LedgerLocations.importCopy`); the
 /// store refuses a group- or world-readable file as an unsafe path before reading it.
 private func writeFlowMoneyManagerBackup(to url: URL) throws {

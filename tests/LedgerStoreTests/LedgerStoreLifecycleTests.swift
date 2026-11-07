@@ -2203,36 +2203,60 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
   }
 }
 
-@Test func lifecycleRejectsSparseOversizedV10BeforeMigrationAllocation() throws {
+/// The upgrade used to run in memory and refused a ledger over 512 MiB, so a large imported
+/// ledger could never move to a new schema (#180). It now runs on disk. A v10 ledger with a
+/// sparse 512 MiB tail upgrades, and the migrated ledger holds only the pages SQLite uses.
+@Test func lifecycleUpgradesALedgerOverTheOldInMemoryCap() throws {
   try withLifecycleDirectory { directory in
     let url = directory.appendingPathComponent("ledger.sqlite")
     _ = try writeV10Ledger(to: url)
-    let originalBytes = try Data(contentsOf: url)
+    let originalSize = try #require(
+      try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
     let descriptor = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
     #expect(descriptor >= 0)
     #expect(ftruncate(descriptor, off_t(512 * 1024 * 1024 + 4 * 1024)) == 0)
     #expect(fsync(descriptor) == 0)
     Darwin.close(descriptor)
 
-    #expect(throws: LedgerStoreLifecycle.Error.unsupportedStore) {
-      try LedgerStoreLifecycle.inspect(at: url)
-    }
-    #expect(throws: LedgerStoreLifecycle.Error.unsupportedStore) {
-      try LedgerStoreLifecycle.open(at: url)
-    }
-    var value = stat()
-    #expect(lstat(url.path, &value) == 0)
-    #expect(value.st_size == off_t(512 * 1024 * 1024 + 4 * 1024))
-    let prefix = originalBytes
-    let readDescriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-    #expect(readDescriptor >= 0)
-    var readBuffer = [UInt8](repeating: 0, count: prefix.count)
-    let count = readBuffer.withUnsafeMutableBytes {
-      pread(readDescriptor, $0.baseAddress, $0.count, 0)
-    }
-    Darwin.close(readDescriptor)
-    #expect(count == prefix.count)
-    #expect(Data(readBuffer) == prefix)
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .upgradeRequired)
+    #if DEBUG
+      #expect(try LedgerStoreLifecycle.migrationMatchesInMemoryForTesting(at: url))
+    #endif
+    let result = try LedgerStoreLifecycle.open(at: url)
+    #expect(result.disposition == .upgraded)
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
+    let upgradedSize = try #require(
+      try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+    #expect(upgradedSize < originalSize * 4)
+  }
+}
+
+// The in-memory migration it compares with exists only in debug builds.
+#if DEBUG
+/// An upgrade started by a build that migrated in memory must finish under this one, which
+/// checks the replacement against its own migration byte for byte.
+@Test func onDiskMigrationGivesTheInMemoryBytes() throws {
+  try withLifecycleDirectory { directory in
+    let plain = directory.appendingPathComponent("plain.sqlite")
+    _ = try writeV10Ledger(to: plain)
+    #expect(try LedgerStoreLifecycle.migrationMatchesInMemoryForTesting(at: plain))
+  }
+}
+#endif
+
+@Test func anUpgradeTheDiskHasNoRoomForIsRefusedFirst() throws {
+  let gib: UInt64 = 1024 * 1024 * 1024
+  #expect(throws: Never.self) {
+    try LedgerStoreLifecycle.requireMigrationSpace(
+      ledgerBytes: gib, copies: 3, availableBytes: 4 * gib)
+  }
+  #expect(throws: LedgerStoreLifecycle.Error.insufficientSpace) {
+    try LedgerStoreLifecycle.requireMigrationSpace(
+      ledgerBytes: gib, copies: 3, availableBytes: 3 * gib)
+  }
+  #expect(throws: LedgerStoreLifecycle.Error.insufficientSpace) {
+    try LedgerStoreLifecycle.requireMigrationSpace(
+      ledgerBytes: UInt64.max / 2, copies: 3, availableBytes: UInt64.max)
   }
 }
 

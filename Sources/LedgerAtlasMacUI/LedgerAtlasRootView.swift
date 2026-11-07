@@ -1173,6 +1173,8 @@ public struct LedgerAtlasRootView: View {
       return "Temporary files left beside this ledger by an earlier session were not recognised, so it was not opened. \(retry)"
     case .receiptKeyMissing:
       return receiptKeyMissingExplanation
+    case .insufficientSpace:
+      return "There isn't enough free space on this Mac to upgrade this ledger. For a short while the upgrade needs about three times the ledger's size. Free some space, then open it again. Nothing was changed."
     default:
       return operation == .create
         ? "Ledger could not be created. \(retry)" : "Ledger could not be opened. \(retry)"
