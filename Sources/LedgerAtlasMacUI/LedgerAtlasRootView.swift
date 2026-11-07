@@ -121,6 +121,9 @@ public struct LedgerAtlasRootView: View {
       // Every screen sits on the same canvas: lists and forms drop their own white or grey
       // scroll background, so the base never changes shade from one screen to the next.
       .scrollContentBackground(.hidden)
+      // No white edge band where a screen's scroll view meets the toolbar (macOS 26); the
+      // toolbar items are glass and stay readable over the canvas.
+      .hidingScrollEdgeEffect(.top)
       // Fill the whole column, including the strip under the toolbar and, on macOS 26, the part
       // behind the floating sidebar; otherwise the system window colour shows there in light.
       .frame(maxWidth: .infinity, maxHeight: .infinity)

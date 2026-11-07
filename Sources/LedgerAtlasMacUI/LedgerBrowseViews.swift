@@ -863,11 +863,13 @@ package enum LedgerBrowseContent: Equatable {
 }
 
 extension View {
-  /// Hides the macOS 26 scroll edge effect; earlier systems draw none.
+  /// Hides the macOS 26 scroll edge effect on the given edges; earlier systems draw none.
+  /// Its opaque band is painted in the system window colour, not the canvas, so in light
+  /// mode it showed as a white strip under the toolbar.
   @ViewBuilder
-  fileprivate func hidingScrollEdgeEffect() -> some View {
+  func hidingScrollEdgeEffect(_ edges: Edge.Set = .all) -> some View {
     if #available(macOS 26.0, *) {
-      scrollEdgeEffectHidden(true, for: .all)
+      scrollEdgeEffectHidden(true, for: edges)
     } else {
       self
     }
