@@ -135,7 +135,9 @@ struct ImportBalanceReceiptTests {
       // The importer still books the card's entry on the card (#207), so the receipt shows
       // the gap instead of a false match.
       let bank = try #require(imported.receipt.rows.first { $0.name == "Bank" })
+      #expect(bank.ledgerBalance == "142")
       #expect(bank.sourceBalance == "135")
+      #expect(bank.outcome == .differs(difference: "7"))
       #expect(bank.debitCardEntryCount == 1)
       let cardRow = try #require(imported.receipt.rows.first { $0.name == "Bank Debit" })
       #expect(cardRow.sourceBalance == nil)
@@ -166,6 +168,112 @@ struct ImportBalanceReceiptTests {
       #expect(receipt.notStoredCount == 0)
       #expect(!receipt.allMatch)
       #expect(receipt.statementLines().contains("  Ledger Atlas: not in this ledger"))
+      #expect(row.sourceUnavailableReason == nil)
+    }
+  }
+
+  @Test("a missing account without a Money Manager figure keeps the reason")
+  func missingAccountKeepsTheReason() throws {
+    try withImportedFixture { imported in
+      let missing = MoneyManagerV19SourceBalances(
+        accounts: [
+          .init(
+            sourceAccountUID: "gone", ledgerAccountID: "not-in-ledger", name: "Gone",
+            currencyUnit: "USD", figure: .unavailable(reason: "entries in more than one currency"),
+            deletedInSource: false, hiddenInSource: false, excludedFromTotalsInSource: false,
+            countedRowCount: 2, notImportedRowCount: 2, displayOrder: 0)
+        ], throughDay: nil, countedRowCount: 2)
+      let receipt = try ImportBalanceReceipt.build(
+        source: missing, accounts: imported.snapshot.accounts,
+        transactions: imported.snapshot.transactions, importedAt: UTCInstant(epochMilliseconds: 1))
+      let row = try #require(receipt.rows.first)
+      #expect(row.outcome == .notInLedger)
+      #expect(row.sourceUnavailableReason == "entries in more than one currency")
+      #expect(
+        receipt.statementLines().contains(
+          "  No Money Manager figure either, because entries in more than one currency"))
+    }
+  }
+
+  @Test("a figure in another currency is a difference, never a match, and keeps its amount")
+  func currencyMismatchIsADifference() throws {
+    try withImportedFixture { imported in
+      let bank = try #require(imported.source.accounts.first { $0.name == "Bank" })
+      let euros = MoneyManagerV19SourceBalances(
+        accounts: [
+          .init(
+            sourceAccountUID: bank.sourceAccountUID, ledgerAccountID: bank.ledgerAccountID,
+            name: bank.name, currencyUnit: "EUR", figure: .amount("142.00"),
+            deletedInSource: false, hiddenInSource: false, excludedFromTotalsInSource: false,
+            countedRowCount: bank.countedRowCount, notImportedRowCount: 0, displayOrder: 0)
+        ], throughDay: nil, countedRowCount: 4)
+      let receipt = try ImportBalanceReceipt.build(
+        source: euros, accounts: imported.snapshot.accounts,
+        transactions: imported.snapshot.transactions, importedAt: UTCInstant(epochMilliseconds: 1))
+      let row = try #require(receipt.rows.first)
+      #expect(row.outcome == .differentCurrency)
+      #expect(row.sourceBalance == "142")
+      #expect(row.sourceUnit == "EUR")
+      #expect(row.currencyUnit == "USD")
+      #expect(receipt.differingCount == 1)
+      #expect(!receipt.allMatch)
+      let lines = receipt.statementLines()
+      #expect(lines.contains("  Money Manager: 142 EUR"))
+      #expect(
+        lines.contains("  Result: differs, Money Manager keeps this account in EUR, this ledger in USD"))
+    }
+  }
+
+  @Test("a saved receipt is shown only for the ledger it describes")
+  func receiptIsBoundToItsLedger() throws {
+    try withImportedFixture { imported in
+      let ledger = imported.canonicalURL
+      try imported.receipt.write(besideLedgerAt: ledger)
+      #expect(
+        ImportBalanceReceipt.read(besideLedgerAt: ledger, accounts: imported.snapshot.accounts)
+          == imported.receipt)
+      // A replacement ledger without these accounts does not inherit the receipt.
+      let other = try LedgerAccount(
+        id: StableLedgerID.account(
+          origin: LedgerOrigin(id: String(repeating: "7", count: 64), label: "other"),
+          localKey: String(repeating: "a", count: 64)),
+        name: "Other", currencyUnit: "USD",
+        origin: LedgerOrigin(id: String(repeating: "7", count: 64), label: "other"))
+      #expect(ImportBalanceReceipt.read(besideLedgerAt: ledger, accounts: [other]) == nil)
+      #expect(!imported.receipt.describes(accounts: []))
+    }
+  }
+
+  @Test("the as-of day is a padded calendar day, so a short month cannot sort after November")
+  func asOfDayIsNormalized() {
+    #expect(MoneyManagerV19BalanceOracle.civilDay("2025-2-03") == "2025-02-03")
+    #expect(MoneyManagerV19BalanceOracle.civilDay("2025-11-01") == "2025-11-01")
+    #expect(MoneyManagerV19BalanceOracle.civilDay("2025-02-30") == nil)
+    #expect(MoneyManagerV19BalanceOracle.civilDay("yesterday") == nil)
+    #expect(
+      MoneyManagerV19BalanceOracle.civilDay("2025-11-01")! > MoneyManagerV19BalanceOracle.civilDay("2025-2-03")!)
+  }
+
+  @Test("an account whose entries add up past what can be held exactly has no figure; the import still prepares")
+  func overflowLeavesTheFigureUnavailable() throws {
+    let huge = String(repeating: "9", count: 120)
+    try withImportedFixture(
+      extraSQL: """
+        INSERT INTO ASSETS (uid, NIC_NAME, ZDATA, groupUid, currencyUid, ORDERSEQ)
+          VALUES ('acct-big', 'Big', '0', '1', 'cur-main', 3);
+        INSERT INTO INOUTCOME
+          (uid, assetUid, ctgUid, DO_TYPE, ZMONEY, IN_ZMONEY, AMOUNT_ACCOUNT, ZDATE, WDATE,
+           ZCONTENT, ZDATA, CARDDIVIDMONTH, currencyUid, UTIME)
+        VALUES
+          ('tx-big-1', 'acct-big', 'cat-salary', '0', '\(huge)', '\(huge)', 0.0,
+           '1738547700000', '2025-02-03', 'big', '', '0', 'cur-main', 1738547700000),
+          ('tx-big-2', 'acct-big', 'cat-salary', '0', '0.\(String(repeating: "1", count: 60))',
+           '0.1', 0.0, '1738547700000', '2025-02-03', 'big', '', '0', 'cur-main', 1738547700000);
+        """,
+      allowUnbuiltReceipt: true
+    ) { imported in
+      let big = try #require(imported.source.accounts.first { $0.name == "Big" })
+      #expect(big.figure == .unavailable(reason: "the entries add up to more than can be held exactly"))
     }
   }
 
@@ -188,6 +296,11 @@ struct ImportBalanceReceiptTests {
           forLedgerAt: ledger.deletingLastPathComponent().appendingPathComponent("other.sqlite")),
         to: elsewhere)
       try FileManager.default.createSymbolicLink(at: sidecar, withDestinationURL: elsewhere)
+      #expect(ImportBalanceReceipt.read(besideLedgerAt: ledger) == nil)
+
+      // A FIFO with no writer is refused at once instead of hanging the open.
+      try FileManager.default.removeItem(at: sidecar)
+      #expect(mkfifo(sidecar.path, 0o600) == 0)
       #expect(ImportBalanceReceipt.read(besideLedgerAt: ledger) == nil)
     }
   }
@@ -265,7 +378,8 @@ private struct ImportedFixture {
 }
 
 private func withImportedFixture(
-  extraSQL: String? = nil, _ body: (ImportedFixture) throws -> Void
+  extraSQL: String? = nil, allowUnbuiltReceipt: Bool = false,
+  _ body: (ImportedFixture) throws -> Void
 ) throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -285,10 +399,17 @@ private func withImportedFixture(
   #expect(result.status == .committed)
   let balances = workspace.sourceBalances(handle)
   let snapshot = try LedgerStore.openReadOnly(at: canonical).readSnapshot()
-  let receipt = try ImportBalanceReceipt.build(
-    source: balances, accounts: snapshot.accounts, transactions: snapshot.transactions,
-    importedAt: UTCInstant(epochMilliseconds: 1_762_000_000_000))
-  #expect(receipt.importedAtEpochMilliseconds == 1_762_000_000_000)
+  let built = Result {
+    try ImportBalanceReceipt.build(
+      source: balances, accounts: snapshot.accounts, transactions: snapshot.transactions,
+      importedAt: UTCInstant(epochMilliseconds: 1_762_000_000_000))
+  }
+  let receipt =
+    allowUnbuiltReceipt
+    ? ((try? built.get())
+      ?? ImportBalanceReceipt(importedAtEpochMilliseconds: 0, throughDay: nil, rows: []))
+    : try built.get()
+  #expect(allowUnbuiltReceipt || receipt.importedAtEpochMilliseconds == 1_762_000_000_000)
   try body(
     ImportedFixture(
       canonicalURL: canonical, commitResult: result, source: balances, snapshot: snapshot,

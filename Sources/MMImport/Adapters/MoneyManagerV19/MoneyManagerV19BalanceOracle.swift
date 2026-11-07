@@ -178,8 +178,9 @@ enum MoneyManagerV19BalanceOracle {
       state.counted += 1
       countedRows += 1
       if !mappedRecordIDs.contains(row.sourceRecordID) { state.notImported += 1 }
-      if let day = literal(row, MoneyManagerV19Vocabulary.wdateAliases), isCivilDay(day),
-        throughDay.map({ day > $0 }) ?? true
+      // Compared as a padded YYYY-MM-DD, so "2025-2-03" cannot sort after "2025-11-01".
+      if let literal = literal(row, MoneyManagerV19Vocabulary.wdateAliases),
+        let day = civilDay(literal), throughDay.map({ day > $0 }) ?? true
       {
         throughDay = day
       }
@@ -199,7 +200,13 @@ enum MoneyManagerV19BalanceOracle {
         state.unavailable = "an entry's amount is not an exact decimal"
         continue
       }
-      state.sum = sign > 0 ? try state.sum.adding(amount) : try state.sum.subtracting(amount)
+      do {
+        state.sum = sign > 0 ? try state.sum.adding(amount) : try state.sum.subtracting(amount)
+      } catch {
+        // A figure too large to hold exactly leaves this account without one; it must never
+        // stop the import itself from being prepared.
+        state.unavailable = "the entries add up to more than can be held exactly"
+      }
     }
 
     var accounts: [MoneyManagerV19SourceBalances.Account] = []
@@ -241,7 +248,11 @@ enum MoneyManagerV19BalanceOracle {
       if currencyUnit == nil, let only = state.rowCurrencies.first, state.rowCurrencies.count == 1 {
         currencyUnit = isoByCurrencyUID[only]
       }
-      if currencyUnit == nil, accountCurrencyUID == nil, isoByCurrencyUID.count == 1 {
+      // The backup's only currency stands in only when nothing names another: a row whose
+      // currency is unknown must not be labelled with it.
+      if currencyUnit == nil, accountCurrencyUID == nil, state.rowCurrencies.isEmpty,
+        isoByCurrencyUID.count == 1
+      {
         currencyUnit = isoByCurrencyUID.values.first
       }
       if currencyUnit == nil, case .amount = figure {
@@ -276,11 +287,12 @@ enum MoneyManagerV19BalanceOracle {
     return nil
   }
 
-  private static func isCivilDay(_ literal: String) -> Bool {
+  /// A real calendar day as a padded `YYYY-MM-DD`, or nil.
+  static func civilDay(_ literal: String) -> String? {
     let parts = literal.split(separator: "-", omittingEmptySubsequences: false)
     guard parts.count == 3, let year = Int(parts[0]), let month = Int(parts[1]),
-      let day = Int(parts[2])
-    else { return false }
-    return (try? SourceLocalDate(year: year, month: month, day: day)) != nil
+      let day = Int(parts[2]), (try? SourceLocalDate(year: year, month: month, day: day)) != nil
+    else { return nil }
+    return String(format: "%04d-%02d-%02d", year, month, day)
   }
 }

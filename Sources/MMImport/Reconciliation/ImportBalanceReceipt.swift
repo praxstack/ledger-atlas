@@ -23,6 +23,9 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       case notStored(reason: String)
       /// Money Manager has this account but the ledger does not.
       case notInLedger
+      /// Money Manager keeps the account in another currency (`sourceCurrencyUnit`), so the
+      /// two figures cannot be compared. Counted as a difference, never as a match.
+      case differentCurrency
     }
 
     public var id: String { ledgerAccountID }
@@ -44,12 +47,18 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     public let debitCardEntryCount: Int
     /// For a debit card: the account its entries count in, by name.
     public let movesAccountName: String?
+    /// Why Money Manager's figure can't be worked out, whatever the outcome. Kept apart from
+    /// the outcome so an account missing from the ledger still says why it has no figure.
+    public let sourceUnavailableReason: String?
+    /// The currency of `sourceBalance` when it is not `currencyUnit`.
+    public let sourceCurrencyUnit: String?
 
     public init(
       ledgerAccountID: String, name: String, currencyUnit: String, ledgerBalance: String?,
       sourceBalance: String?, outcome: Outcome, hiddenInSource: Bool = false,
       excludedFromTotalsInSource: Bool = false, deletedInSource: Bool = false,
-      notImportedEntryCount: Int = 0, debitCardEntryCount: Int = 0, movesAccountName: String? = nil
+      notImportedEntryCount: Int = 0, debitCardEntryCount: Int = 0, movesAccountName: String? = nil,
+      sourceUnavailableReason: String? = nil, sourceCurrencyUnit: String? = nil
     ) {
       self.ledgerAccountID = ledgerAccountID
       self.name = name
@@ -63,6 +72,12 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       self.notImportedEntryCount = notImportedEntryCount
       self.debitCardEntryCount = debitCardEntryCount
       self.movesAccountName = movesAccountName
+      if case .notStored(let reason) = outcome {
+        self.sourceUnavailableReason = sourceUnavailableReason ?? reason
+      } else {
+        self.sourceUnavailableReason = sourceUnavailableReason
+      }
+      self.sourceCurrencyUnit = sourceCurrencyUnit
     }
 
     public var isEqual: Bool { outcome == .equal }
@@ -75,9 +90,13 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       return marks
     }
     public var isDifferent: Bool {
-      if case .differs = outcome { return true }
-      return false
+      switch outcome {
+      case .differs, .differentCurrency: true
+      default: false
+      }
     }
+    /// The unit `sourceBalance` is in.
+    public var sourceUnit: String { sourceCurrencyUnit ?? currencyUnit }
     public var isMissingFromLedger: Bool { outcome == .notInLedger }
   }
 
@@ -128,10 +147,15 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
         let balance = sheet.balances[account.id]
       else {
         // Listed, not skipped: an account the phone shows and the ledger lacks is a finding.
-        let sourceLiteral: String? =
-          if case .amount(let literal) = sourceAccount.figure {
-            (try? ExactDecimal(literal))?.description
-          } else { nil }
+        var sourceLiteral: String?
+        var reason: String?
+        switch sourceAccount.figure {
+        case .amount(let literal):
+          sourceLiteral = (try? ExactDecimal(literal))?.description
+          if sourceLiteral == nil { reason = "the figure is not an exact decimal" }
+        case .unavailable(let why):
+          reason = why
+        }
         rows.append(
           Row(
             ledgerAccountID: sourceAccount.ledgerAccountID, name: sourceAccount.name,
@@ -142,19 +166,23 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
             deletedInSource: sourceAccount.deletedInSource,
             notImportedEntryCount: sourceAccount.notImportedRowCount,
             debitCardEntryCount: sourceAccount.debitCardRowCount,
-            movesAccountName: sourceAccount.movesAccountName))
+            movesAccountName: sourceAccount.movesAccountName, sourceUnavailableReason: reason))
         continue
       }
       let ledgerLiteral = balance.amount.description
       var sourceLiteral: String?
+      var sourceCurrencyUnit: String?
       let outcome: Row.Outcome
       switch sourceAccount.figure {
       case .unavailable(let reason):
         outcome = .notStored(reason: reason)
       case .amount(let literal):
-        if let unit = sourceAccount.currencyUnit, unit != account.currencyUnit {
-          outcome = .notStored(
-            reason: "Money Manager keeps this account in \(unit), the ledger in \(account.currencyUnit)")
+        if let unit = sourceAccount.currencyUnit, unit != account.currencyUnit,
+          let figure = try? ExactDecimal(literal)
+        {
+          sourceLiteral = figure.description
+          sourceCurrencyUnit = unit
+          outcome = .differentCurrency
         } else if let figure = try? ExactDecimal(literal) {
           sourceLiteral = figure.description
           let difference = try balance.amount.subtracting(figure)
@@ -173,7 +201,8 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
           deletedInSource: sourceAccount.deletedInSource,
           notImportedEntryCount: sourceAccount.notImportedRowCount,
           debitCardEntryCount: sourceAccount.debitCardRowCount,
-          movesAccountName: sourceAccount.movesAccountName))
+          movesAccountName: sourceAccount.movesAccountName,
+          sourceCurrencyUnit: sourceCurrencyUnit))
     }
     return ImportBalanceReceipt(
       importedAtEpochMilliseconds: importedAt.epochMilliseconds, throughDay: source.throughDay,
@@ -199,7 +228,7 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       lines.append(
         "  Ledger Atlas: \(row.ledgerBalance.map { "\($0) \(row.currencyUnit)" } ?? "not in this ledger")")
       lines.append(
-        "  Money Manager: \(row.sourceBalance.map { "\($0) \(row.currencyUnit)" } ?? "not stored in the backup")")
+        "  Money Manager: \(row.sourceBalance.map { "\($0) \(row.sourceUnit)" } ?? "not stored in the backup")")
       switch row.outcome {
       case .equal:
         lines.append("  Result: matches")
@@ -209,6 +238,12 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
         lines.append("  Result: no Money Manager figure, because \(reason)")
       case .notInLedger:
         lines.append("  Result: the account is in Money Manager but not in this ledger")
+        if let reason = row.sourceUnavailableReason {
+          lines.append("  No Money Manager figure either, because \(reason)")
+        }
+      case .differentCurrency:
+        lines.append(
+          "  Result: differs, Money Manager keeps this account in \(row.sourceUnit), this ledger in \(row.currencyUnit)")
       }
       if row.debitCardEntryCount > 0 {
         lines.append(
@@ -272,6 +307,24 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
       receipt.formatVersion == currentFormatVersion
     else { return nil }
     return receipt
+  }
+
+  /// `read(besideLedgerAt:)`, kept only when it describes the ledger that is open: every
+  /// account the receipt found in the ledger must still be there. A sidecar left beside a
+  /// ledger that was replaced by another backup names accounts the new ledger lacks, so it is
+  /// not shown as that ledger's receipt.
+  public static func read(
+    besideLedgerAt ledgerURL: URL, accounts: [LedgerAccount]
+  ) -> ImportBalanceReceipt? {
+    guard let receipt = read(besideLedgerAt: ledgerURL) else { return nil }
+    return receipt.describes(accounts: accounts) ? receipt : nil
+  }
+
+  /// True when every account this receipt found in the ledger is among `accounts`.
+  public func describes(accounts: [LedgerAccount]) -> Bool {
+    let ids = Set(accounts.map(\.id))
+    let found = rows.filter { $0.ledgerBalance != nil }
+    return found.allSatisfy { ids.contains($0.ledgerAccountID) }
   }
 
   public static func removeSidecar(besideLedgerAt ledgerURL: URL) {

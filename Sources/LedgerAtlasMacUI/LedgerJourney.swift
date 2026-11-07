@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import LedgerCore
 import LedgerStore
-internal import MMImport
+package import MMImport
 import Observation
 
 @MainActor
@@ -179,6 +179,12 @@ public final class LedgerJourney {
       failClosed(message: "Import could not be approved.")
       throw LedgerApplication.Error.invalidCommand
     }
+    // The import commits to the ledger it was prepared for; opening another one here would
+    // compare the source with the wrong ledger and save the receipt beside it.
+    if let canonicalURL, canonicalURL.standardizedFileURL != canonicalDatabaseURL.standardizedFileURL {
+      failClosed(message: "Import could not be approved.")
+      throw LedgerApplication.Error.invalidCommand
+    }
     let approval = workspace.approve(prepared)
     _ = try workspace.commit(prepared, approval: approval)
     application = nil
@@ -202,6 +208,9 @@ public final class LedgerJourney {
     for snapshot: LedgerStore.LedgerReadSnapshot, sourceBalances: MoneyManagerV19SourceBalances,
     ledgerURL: URL
   ) -> ImportBalanceReceipt? {
+    // Whatever was beside this file before describes another import; it must not reopen as
+    // this one's receipt if the new one cannot be built or saved.
+    ImportBalanceReceipt.removeSidecar(besideLedgerAt: ledgerURL)
     guard
       let receipt = try? ImportBalanceReceipt.build(
         source: sourceBalances, accounts: snapshot.accounts, transactions: snapshot.transactions,
@@ -209,6 +218,14 @@ public final class LedgerJourney {
     else { return nil }
     try? receipt.write(besideLedgerAt: ledgerURL)
     return receipt
+  }
+
+  /// The receipt saved beside `url`, kept only when it describes `snapshot`'s ledger.
+  private static func savedReceipt(
+    at url: URL, for snapshot: LedgerStore.LedgerReadSnapshot?
+  ) -> ImportBalanceReceipt? {
+    guard let snapshot else { return nil }
+    return ImportBalanceReceipt.read(besideLedgerAt: url, accounts: snapshot.accounts)
   }
 
   /// `approveAndOpen` with the commit and the first read off the main thread. On a real
@@ -267,7 +284,7 @@ public final class LedgerJourney {
     do {
       let store = try LedgerStore.openReadOnly(at: url)
       snapshot = try store.readSnapshot()
-      balanceReceipt = ImportBalanceReceipt.read(besideLedgerAt: url)
+      balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
       openedStore = store
       ledgerURL = url
       canonicalURL = url
@@ -300,7 +317,7 @@ public final class LedgerJourney {
     disconnectLedger()
     lastFailure = nil
     self.snapshot = snapshot
-    balanceReceipt = ImportBalanceReceipt.read(besideLedgerAt: url)
+    balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
     openedStore = store
     ledgerURL = url
     canonicalURL = url
@@ -313,7 +330,7 @@ public final class LedgerJourney {
     openedStore = nil
     application = LedgerApplication(store: store)
     snapshot = try store.readSnapshot()
-    if ledgerURL != url { balanceReceipt = ImportBalanceReceipt.read(besideLedgerAt: url) }
+    if ledgerURL != url { balanceReceipt = Self.savedReceipt(at: url, for: snapshot) }
     canonicalURL = url
     ledgerURL = url
     phase = .imported
@@ -1355,6 +1372,7 @@ public final class LedgerJourney {
     if let application, ledgerURL == url {
       try application.importPackage(manifest: manifest, payload: payload)
       snapshot = try application.snapshot()
+      balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
       phase = .imported
       return
     }
@@ -1364,6 +1382,7 @@ public final class LedgerJourney {
     mutableStore = store
     self.application = application
     snapshot = try application.snapshot()
+    balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
     canonicalURL = url
     ledgerURL = url
     phase = .imported

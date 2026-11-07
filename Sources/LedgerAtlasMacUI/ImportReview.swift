@@ -816,12 +816,19 @@ struct ImportReviewView: View {
         }
         .accessibilityElement(children: .combine)
 
+        // With a receipt the import has already committed, so the preparation status ("ready
+        // for approval", or "Blocked" for a ledger reopened later) no longer applies.
         GroupBox {
-          Label(summary.decision.message, systemImage: summary.decision.systemImageName)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+          Label(
+            balanceReceipt == nil
+              ? summary.decision.message
+              : "This ledger was written from the backup. The receipt above compares every account with Money Manager.",
+            systemImage: balanceReceipt == nil ? summary.decision.systemImageName : "checkmark.seal"
+          )
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, 4)
         } label: {
-          Text(summary.decision.title)
+          Text(balanceReceipt == nil ? summary.decision.title : "Imported")
             .font(.title2.bold())
         }
         .accessibilityElement(children: .combine)

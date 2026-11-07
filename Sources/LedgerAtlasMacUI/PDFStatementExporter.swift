@@ -89,8 +89,14 @@ public enum LedgerPDFStatementExporter {
     let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
     let lineHeight = font.ascender - font.descender + 4
     let linesPerPage = max(1, Int((pageSize.height - 72) / lineHeight))
-    for pageLines in stride(from: 0, to: max(lines.count, 1), by: linesPerPage).map({ index in
-      Array(lines[index..<min(index + linesPerPage, lines.count)])
+    // Pages are cut by line count, so no line may wrap when drawn: a wrapped line would push
+    // the page past its rectangle and the overflow would be clipped. Each line is broken to
+    // the columns the monospaced font fits across the page, one column spare.
+    let advance = max(1, ("M" as NSString).size(withAttributes: attributes).width)
+    let columns = max(20, Int((pageSize.width - 72) / advance) - 1)
+    let drawn = wrapped(lines, columns: columns)
+    for pageLines in stride(from: 0, to: max(drawn.count, 1), by: linesPerPage).map({ index in
+      Array(drawn[index..<min(index + linesPerPage, drawn.count)])
     }) {
       context.beginPDFPage(nil)
       let graphics = NSGraphicsContext(cgContext: context, flipped: true)
@@ -111,5 +117,37 @@ public enum LedgerPDFStatementExporter {
     } catch {
       throw Error.writeFailed
     }
+  }
+
+  /// `lines` broken so none is longer than `columns` characters. A line breaks at its last
+  /// space that fits, or mid-word when a word alone is too long; the continuation keeps the
+  /// line's leading indent plus two spaces so it reads as the same entry.
+  package static func wrapped(_ lines: [String], columns: Int) -> [String] {
+    let columns = max(columns, 8)
+    var result: [String] = []
+    for line in lines {
+      guard line.count > columns else {
+        result.append(line)
+        continue
+      }
+      let indent = String(line.prefix { $0 == " " }.prefix(columns / 2))
+      let continuation = indent + "  "
+      var remaining = Substring(line)
+      var prefix = ""
+      while prefix.count + remaining.count > columns {
+        let room = columns - prefix.count
+        let head = remaining.prefix(room + 1)
+        var cut = head.lastIndex(of: " ").flatMap { $0 > remaining.startIndex ? $0 : nil }
+        if let space = cut, remaining[remaining.startIndex..<space].allSatisfy({ $0 == " " }) {
+          cut = nil
+        }
+        let end = cut ?? remaining.index(remaining.startIndex, offsetBy: room)
+        result.append(prefix + String(remaining[remaining.startIndex..<end]))
+        remaining = remaining[end...].drop { $0 == " " }
+        prefix = continuation
+      }
+      if !remaining.isEmpty { result.append(prefix + String(remaining)) }
+    }
+    return result
   }
 }

@@ -133,7 +133,7 @@ struct ImportBalanceReceiptView: View {
         .frame(minWidth: Self.figureWidth, alignment: .trailing)
         Group {
           if let source = row.sourceBalance {
-            figure(source, unit: row.currencyUnit)
+            figure(source, unit: row.sourceUnit)
           } else {
             Text("Not stored in the backup")
               .font(LedgerTheme.Typeface.secondary)
@@ -184,6 +184,10 @@ struct ImportBalanceReceiptView: View {
       Label("Missing here", systemImage: "xmark.circle.fill")
         .font(LedgerTheme.Typeface.captionEmphasis)
         .foregroundStyle(LedgerTheme.negative)
+    case .differentCurrency:
+      Label("Different currency", systemImage: "exclamationmark.triangle.fill")
+        .font(LedgerTheme.Typeface.captionEmphasis)
+        .foregroundStyle(LedgerTheme.negative)
     }
   }
 
@@ -201,11 +205,15 @@ struct ImportBalanceReceiptView: View {
 
   private func note(for row: ImportBalanceReceipt.Row) -> String? {
     var notes: [String] = []
-    if case .notStored(let reason) = row.outcome {
-      notes.append("Money Manager's figure can't be worked out: \(reason).")
-    }
     if row.outcome == .notInLedger {
       notes.append("Money Manager lists this account, but the import did not create it here.")
+    }
+    if let reason = row.sourceUnavailableReason {
+      notes.append("Money Manager's figure can't be worked out: \(reason).")
+    }
+    if row.outcome == .differentCurrency {
+      notes.append(
+        "Money Manager keeps this account in \(row.sourceUnit) and this ledger in \(row.currencyUnit), so the figures can't be compared.")
     }
     if row.debitCardEntryCount > 0 {
       let entries = row.debitCardEntryCount == 1 ? "1 entry" : "\(row.debitCardEntryCount) entries"
@@ -226,13 +234,14 @@ struct ImportBalanceReceiptView: View {
       row.ledgerBalance.map { "Ledger Atlas \(spokenAmount($0, unit: row.currencyUnit))" }
         ?? "not in this ledger")
     parts.append(
-      row.sourceBalance.map { "Money Manager \(spokenAmount($0, unit: row.currencyUnit))" }
+      row.sourceBalance.map { "Money Manager \(spokenAmount($0, unit: row.sourceUnit))" }
         ?? "Money Manager figure not stored in the backup")
     switch row.outcome {
     case .equal: parts.append("matches")
     case .differs: parts.append("differs, \(differenceText(row) ?? "")")
     case .notStored: parts.append("no figure to compare")
     case .notInLedger: parts.append("missing from this ledger")
+    case .differentCurrency: parts.append("differs, in a different currency")
     }
     if let note = note(for: row) { parts.append(note) }
     return parts.joined(separator: ", ")

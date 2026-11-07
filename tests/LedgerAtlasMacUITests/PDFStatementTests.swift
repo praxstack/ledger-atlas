@@ -164,3 +164,21 @@ private func snapshot(
     try LedgerPDFStatementExporter.export(report, to: directory)
   }
 }
+
+/// #206 review: pages are cut by line count, so a line that wrapped when drawn ran off the
+/// page and was clipped. Lines are now broken to the page's columns before paging.
+@Test func pdfLinesAreBrokenToThePageWidthSoNothingIsClipped() {
+  let long =
+    "  Result: no Money Manager figure, because Money Manager keeps no balance for a debit card; its entries count in A Very Long Account Name"
+  let lines = LedgerPDFStatementExporter.wrapped(
+    [long, "short", String(repeating: "x", count: 90)], columns: 40)
+  #expect(lines.allSatisfy { $0.count <= 40 })
+  #expect(lines.contains("short"))
+  #expect(lines.first == "  Result: no Money Manager figure,")
+  #expect(lines[1].hasPrefix("    because"))
+  // Nothing is lost: the words come back in order.
+  let rejoined = lines.prefix { $0 != "short" }.map { $0.trimmingCharacters(in: .whitespaces) }
+    .joined(separator: " ")
+  #expect(rejoined == long.trimmingCharacters(in: .whitespaces))
+  #expect(lines.suffix(3).joined().filter { $0 == "x" }.count == 90)
+}

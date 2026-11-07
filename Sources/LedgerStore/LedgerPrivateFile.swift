@@ -39,7 +39,9 @@ package enum LedgerPrivateFile {
   /// `read(_:in:)` for a file whose name the caller has already made safe, such as a sidecar
   /// beside a ledger, with its own size limit.
   package static func read(at url: URL, maximumSize: Int) throws -> Data? {
-    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    // O_NONBLOCK: a FIFO put where the file goes must not hang the open; the type check
+    // below then refuses it. A regular file reads the same either way.
+    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
     if descriptor < 0 {
       if errno == ENOENT { return nil }
       throw Error.system(errno)
