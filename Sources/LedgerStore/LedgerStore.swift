@@ -1343,7 +1343,6 @@ public final class LedgerStore {
       + package.budgets.map(\.origin) + package.installmentPlans.map(\.origin)
       + package.tags.map(\.origin) + package.transactionTemplates.map(\.origin)
       + package.memos.map(\.origin)
-    let importedOriginID = String(repeating: "e", count: 64)
     let revisionIDs = Set(package.revisions.map(\.id))
     guard package.preservedSource.isEmpty,
       Set(package.tags.map(\.id)).count == package.tags.count,
@@ -1361,11 +1360,7 @@ public final class LedgerStore {
       Set(package.recurrenceRules.map(\.id)).count == package.recurrenceRules.count,
       Set(package.budgets.map(\.id)).count == package.budgets.count,
       Set(package.installmentPlans.map(\.id)).count == package.installmentPlans.count,
-      allowingImportProvenance
-        || !origins.contains(where: {
-          $0.provenanceID != nil || $0.id == importedOriginID
-            || $0.label == LedgerOrigin.importedLabel
-        }),
+      allowingImportProvenance || !origins.contains(where: \.carriesImportProvenance),
       allowingImportProvenance
         || !package.revisions.contains(where: { revision in
           revision.draft.sourceLiterals.contains {

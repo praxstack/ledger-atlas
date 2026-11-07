@@ -1122,6 +1122,9 @@ public struct LedgerAtlasRootView: View {
     journey.closeLedger()
     var completedLifecycle: LedgerLifecycleCompletion?
     do {
+      // Opening can upgrade or swap the ledger file, so Quit waits for it (#178).
+      let work = LedgerQuitGuard.shared.begin("Opening a ledger")
+      defer { work.end() }
       let lifecycleTask = Task.detached {
         let result = try await lifecycle(operation, url)
         return LedgerLifecyclePreparation(result, snapshotReader: snapshotReader)
