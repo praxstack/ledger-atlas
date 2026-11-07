@@ -7,11 +7,12 @@ import Foundation
 /// no grouping and a plain minus for money leaving the row's account. The file is UTF-8 with a
 /// byte-order mark and CRLF line ends, and fields are quoted per RFC 4180, so Numbers and Excel
 /// open it as written. A text cell that a spreadsheet would read as a formula (it starts with
-/// `=`, `+`, `-` or `@`, or with a tab or carriage return) gets a leading single quote.
+/// `=`, `+`, `-` or `@`, their full-width forms, or a tab or carriage return) gets a leading
+/// single quote. Dates and times are the ledger's local time, as recorded.
 public enum LedgerCSVExport {
   public static let header = [
     "date", "account", "kind", "category", "amount", "currency", "memo", "tags",
-    "transfer_counterpart", "status", "id",
+    "transfer_counterpart", "counterpart_amount", "counterpart_currency", "status", "id",
   ]
 
   /// Names used to spell out ids. A missing name falls back to the id itself.
@@ -58,10 +59,10 @@ public enum LedgerCSVExport {
       // A transfer's row belongs to the account the money leaves; every other kind has one
       // effect.
       let main = draft.effects.first { $0.direction == .decrease } ?? draft.effects[0]
-      let counterpart =
-        draft.kind == .transfer
-        ? draft.effects.first { $0.accountID != main.accountID }.map { account($0.accountID) } ?? ""
-        : ""
+      // What arrived on the other side of a transfer, which differs from what left for a
+      // cross-currency transfer.
+      let other =
+        draft.kind == .transfer ? draft.effects.first { $0.accountID != main.accountID } : nil
       let tags = (revisionTags[revision.id]?.tagIDs ?? []).map { names.tags[$0] ?? $0 }
       return [
         date(draft.occurredAt),
@@ -72,7 +73,9 @@ public enum LedgerCSVExport {
         main.amount.unitCode,
         draft.note ?? "",
         tags.joined(separator: "; "),
-        counterpart,
+        other.map { account($0.accountID) } ?? "",
+        other.map { amount($0.amount.amount, leaving: false) } ?? "",
+        other?.amount.unitCode ?? "",
         revision.lifecycle == .active ? "active" : "closed",
         transaction.id,
       ]
@@ -87,25 +90,27 @@ public enum LedgerCSVExport {
     data(rows: rows(transactions, names: names, revisionTags: revisionTags))
   }
 
-  /// Quotes and joins rows. Every column but `amount` is text, so only those cells are guarded
-  /// against formulas; an amount is written by `amount(_:leaving:)` and is always a number.
+  /// Quotes and joins rows. The two amount columns are written by `amount(_:leaving:)` and are
+  /// always numbers; every other column is text and is guarded against formulas.
   public static func data(rows: [[String]]) -> Data {
-    let amountColumn = header.firstIndex(of: "amount")!
-    var text = line(header, amountColumn: nil)
-    for row in rows { text += line(row, amountColumn: amountColumn) }
+    let amountColumns = Set(
+      ["amount", "counterpart_amount"].compactMap { header.firstIndex(of: $0) })
+    var text = line(header, amountColumns: [])
+    for row in rows { text += line(row, amountColumns: amountColumns) }
     return Data([0xEF, 0xBB, 0xBF]) + Data(text.utf8)
   }
 
-  static func line(_ cells: [String], amountColumn: Int?) -> String {
+  static func line(_ cells: [String], amountColumns: Set<Int>) -> String {
     cells.enumerated().map { index, cell in
-      field(index == amountColumn ? cell : neutralized(cell))
+      field(amountColumns.contains(index) ? cell : neutralized(cell))
     }.joined(separator: ",") + "\r\n"
   }
 
   /// A spreadsheet runs a cell that starts with one of these as a formula.
   static func neutralized(_ cell: String) -> String {
     guard let first = cell.unicodeScalars.first,
-      ["=", "+", "-", "@", "\t", "\r"].contains(first)
+      ["=", "+", "-", "@", "\u{FF1D}", "\u{FF0B}", "\u{FF0D}", "\u{FF20}", "\t", "\r"]
+        .contains(first)
     else { return cell }
     return "'" + cell
   }

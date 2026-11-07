@@ -140,7 +140,7 @@ struct LedgerCSVExportTests {
     let filter = LedgerBrowseFilter(tagID: Self.trip)
     let shown = browser.matches(mode: .daily, filter: filter).map { byID[browser.entries[$0].id]! }
     let rows = LedgerCSVExport.rows(shown, names: Self.names, revisionTags: tags)
-    let ids = rows.map { $0[10] }
+    let ids = rows.map { $0[12] }
     let tagCells = rows.map { $0[7] }
     let expectedIDs = [try Self.id(1), try Self.id(3)]
     #expect(ids == expectedIDs)
@@ -149,15 +149,16 @@ struct LedgerCSVExportTests {
 
   @Test("cells a spreadsheet would run as formulas get a leading quote; amounts stay numbers")
   func formulaCellsAreNeutralized() {
-    for start in ["=1+1", "+1", "-1", "@A1", "\tx", "\rx"] {
+    for start in ["=1+1", "+1", "-1", "@A1", "\tx", "\rx", "\u{FF1D}1", "\u{FF20}A1"] {
       #expect(LedgerCSVExport.neutralized(start) == "'" + start)
     }
     #expect(LedgerCSVExport.neutralized("Coffee") == "Coffee")
     #expect(LedgerCSVExport.neutralized("") == "")
     let row = LedgerCSVExport.line(
-      ["2026-03-01", "-Cash", "expense", "", "-12.50", "INR", "=1", "", "", "active", "x"],
-      amountColumn: 4)
-    #expect(row == "2026-03-01,'-Cash,expense,,-12.50,INR,'=1,,,active,x\r\n")
+      ["2026-03-01", "-Cash", "transfer", "", "-12.50", "USD", "=1", "", "Bank", "1000", "INR",
+       "active", "x"],
+      amountColumns: [4, 9])
+    #expect(row == "2026-03-01,'-Cash,transfer,,-12.50,USD,'=1,,Bank,1000,INR,active,x\r\n")
   }
 
   @Test("amounts keep their exact digits with no grouping and a plain minus")
