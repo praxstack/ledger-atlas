@@ -34,7 +34,11 @@ import Testing
   do {
     defer { _ = console.finish() }
     for destination in LedgerDemoTour.destinations {
-      let mounted = try await MountedRoot(showing: destination, prepareLedger: markers.add)
+      // In-process Accessibility reads, as the capture set uses: reading this process's own
+      // windows through the system API on every screen made AppKit stop the main run loop
+      // over and over (20 times, the keep-alive's cap) and lay out from the reader thread.
+      let mounted = try await MountedRoot(
+        showing: destination, readsInProcess: true, prepareLedger: markers.add)
       ledgerFolders.append(mounted.directory.standardizedFileURL)
       let text = mounted.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
         .joined(separator: "\n")
