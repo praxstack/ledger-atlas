@@ -690,7 +690,7 @@ No extension may inherit certification from another profile or platform.
 | Import mapping | Stable anchors, deterministic effect ordinals, transfers, fees, FX, splits, installments, recurrence, budgets, unknowns, tombstones |
 | Reconciliation | Counts, cardinality histogram, duplicates, orphans, balances, reports, XLSX multisets, direct-vs-ZIP equality |
 | Round trip | Import, edit, backup, restore twice, reopen, checksum and balance equality |
-| Accessibility | VoiceOver rows, focus order, keyboard completion, 200 percent text, non-color semantics, reduced motion |
+| Accessibility | VoiceOver rows, focus order, keyboard completion, the largest text the Mac offers, non-color semantics, reduced motion |
 | Privacy | No real content in fixtures, logs, receipts, captures, prompts, or tracked artifacts |
 
 ## 16. Implementation Order
