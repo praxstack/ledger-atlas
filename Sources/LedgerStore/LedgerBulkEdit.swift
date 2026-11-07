@@ -28,6 +28,8 @@ public enum LedgerBulkEditRefusal: Error, Equatable, Sendable {
   case nothingToChange
   /// Reverting: these entries were changed again after the bulk change, so it is left as is.
   case changedSince(count: Int)
+  /// These entries already carry the most tags an entry can have.
+  case tooManyTags(count: Int)
 }
 
 /// What a bulk change will do, worked out before anything is written: the confirm sheet shows
@@ -64,12 +66,16 @@ public struct LedgerBulkEditPlan: Sendable {
     let byID = Dictionary(
       snapshot.transactions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let group = linkedGroup(of: selected, in: byID)
-    let entries = group.compactMap { byID[$0] }
+    var entries = group.compactMap { byID[$0] }
     let closed = entries.filter { $0.currentRevision.lifecycle != .active }.count
     guard closed == 0 else { throw LedgerBulkEditRefusal.closedEntries(count: closed) }
 
     switch change {
     case .category(let categoryID):
+      // A transfer has no category, so one only linked in (the transfer a selected fee belongs
+      // to) is left out; a selected transfer is refused below.
+      let picked = Set(selected)
+      entries.removeAll { $0.currentRevision.draft.kind == .transfer && !picked.contains($0.id) }
       if let categoryID {
         guard
           let category = snapshot.categories.first(where: { $0.id == categoryID }),
@@ -98,6 +104,14 @@ public struct LedgerBulkEditPlan: Sendable {
       }
     case .removeTag:
       break
+    }
+
+    if case .addTag(let tagID) = change {
+      let full = entries.filter { entry in
+        let tags = snapshot.tags(forRevision: entry.currentRevision.id).tagIDs
+        return !tags.contains(tagID) && tags.count >= LedgerTagLinks.maximumCount
+      }.count
+      guard full == 0 else { throw LedgerBulkEditRefusal.tooManyTags(count: full) }
     }
 
     var targets: [Target] = []
@@ -130,7 +144,7 @@ public struct LedgerBulkEditPlan: Sendable {
     guard onClosed == 0 else { throw LedgerBulkEditRefusal.closedAccount(count: onClosed) }
     return LedgerBulkEditPlan(
       change: change, selectedCount: selected.count,
-      linkedCount: group.count - selected.filter { byID[$0] != nil }.count,
+      linkedCount: entries.count - selected.filter { byID[$0] != nil }.count,
       unchangedCount: unchanged, targets: targets)
   }
 

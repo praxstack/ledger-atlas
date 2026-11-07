@@ -524,6 +524,11 @@ public final class LedgerJourney {
       return count == 1
         ? "1 entry was edited after the bulk change, so it can't be reverted in one step. Nothing was changed."
         : "\(count) entries were edited after the bulk change, so it can't be reverted in one step. Nothing was changed."
+    case LedgerBulkEditRefusal.tooManyTags(let count):
+      let most = LedgerTagLinks.maximumCount
+      return count == 1
+        ? "1 entry already has \(most) tags, the most an entry can have. Nothing was changed."
+        : "\(count) entries already have \(most) tags, the most an entry can have. Nothing was changed."
     case LedgerStore.Error.revisionConflict:
       return "Some of these entries changed while you were choosing. Nothing was changed; try again."
     default:

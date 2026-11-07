@@ -38,6 +38,7 @@ private func inr(_ literal: String) throws -> CurrencyAmount {
 }
 
 private struct BulkFixture {
+  let store: LedgerStore
   let app: LedgerApplication
   let origin: LedgerOrigin
   let cash: LedgerAccount
@@ -51,7 +52,8 @@ private struct BulkFixture {
   var expenses: [String] = []
 
   init(expenses count: Int = 0) throws {
-    app = LedgerApplication(store: try makeBulkStore())
+    store = try makeBulkStore()
+    app = LedgerApplication(store: store)
     origin = try LedgerOrigin(id: String(repeating: "9", count: 64), label: "local")
     cash = try LedgerAccount(
       id: StableLedgerID.account(origin: origin, localKey: hex(1)), name: "Cash",
@@ -205,9 +207,20 @@ private struct BulkFixture {
     createdAt: UTCInstant(epochMilliseconds: 1))
   let feeID = try #require(fee).transactionID
 
-  // A category can't go on a transfer, so recategorising its fee is refused as a whole.
-  #expect(throws: LedgerBulkEditRefusal.transfersHaveNoCategory(count: 1)) {
+  // A transfer has no category: recategorising its fee (an adjustment, so a neutral
+  // category) changes the fee alone, and selecting the transfer itself is refused.
+  let charges = try LedgerCategory(
+    id: StableLedgerID.category(origin: fixture.origin, localKey: hex(51)), name: "Bank charges",
+    kind: .neutral, origin: fixture.origin)
+  try app.createCategory(charges)
+  #expect(throws: LedgerBulkEditRefusal.categoryDoesNotFit(count: 1)) {
     try fixture.plan(.category(fixture.home.id), [feeID])
+  }
+  let feeOnly = try fixture.plan(.category(charges.id), [feeID])
+  #expect(feeOnly.selectedCount == 1 && feeOnly.linkedCount == 0 && feeOnly.changeCount == 1)
+  #expect(feeOnly.targets.map(\.current.transactionID) == [feeID])
+  #expect(throws: LedgerBulkEditRefusal.transfersHaveNoCategory(count: 1)) {
+    try fixture.plan(.category(charges.id), [transfer.transactionID])
   }
   // A tag on the fee tags the transfer too.
   let plan = try fixture.plan(.addTag(fixture.shared.id), [feeID])
@@ -278,4 +291,46 @@ private struct BulkFixture {
   #expect(partial.entries.count == 1)
   let rest = try fixture.plan(.category(fixture.home.id), fixture.expenses)
   #expect(rest.changeCount == 2 && rest.unchangedCount == 1)
+}
+
+@Test func aBatchNamingOneEntryTwiceIsRefusedWithNothingWritten() throws {
+  let fixture = try BulkFixture(expenses: 1)
+  let current = try fixture.current(fixture.expenses[0])
+  let request = LedgerStore.CorrectTransactionRequest(
+    transactionID: current.transactionID, expectedCurrentRevisionID: current.id,
+    draft: try LedgerBulkEditPlan.correctedDraft(current.draft, categoryID: fixture.home.id),
+    createdAt: UTCInstant(epochMilliseconds: 2))
+  let checksum = try fixture.app.checksum()
+  #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+    try fixture.store.correctLinkedTransactions([request, request])
+  }
+  #expect(try fixture.app.checksum() == checksum)
+}
+
+@Test func anEntryWithTheMostTagsIsRefusedAnotherWithAPlainReason() throws {
+  let fixture = try BulkFixture(expenses: 2)
+  let app = fixture.app
+  // Fill the first entry up to the limit, the shared tag included.
+  for index in 1..<LedgerTagLinks.maximumCount {
+    let tag = try LedgerTag(
+      id: StableLedgerID.tag(origin: fixture.origin, localKey: hex(5_000 + index)),
+      name: "t\(index)", origin: fixture.origin)
+    try app.createTag(tag)
+    _ = try app.applyBulkEdit(
+      fixture.plan(.addTag(tag.id), [fixture.expenses[0]]),
+      createdAt: UTCInstant(epochMilliseconds: Int64(index + 1)))
+  }
+  _ = try app.applyBulkEdit(
+    fixture.plan(.addTag(fixture.shared.id), [fixture.expenses[0]]),
+    createdAt: UTCInstant(epochMilliseconds: 100))
+  let extra = try LedgerTag(
+    id: StableLedgerID.tag(origin: fixture.origin, localKey: hex(6_000)), name: "extra",
+    origin: fixture.origin)
+  try app.createTag(extra)
+  #expect(throws: LedgerBulkEditRefusal.tooManyTags(count: 1)) {
+    try fixture.plan(.addTag(extra.id), fixture.expenses)
+  }
+  // A tag the full entry already has is no problem: it stays as it is.
+  let shared = try fixture.plan(.addTag(fixture.shared.id), fixture.expenses)
+  #expect(shared.changeCount == 1 && shared.unchangedCount == 1)
 }
