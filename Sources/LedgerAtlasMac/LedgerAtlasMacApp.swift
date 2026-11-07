@@ -36,6 +36,7 @@ struct LedgerAtlasMacApp: App {
       }
       LedgerHideAmountsCommands()
       LedgerViewExportCommands()
+      BulkEditCommands()
     }
   }
 }

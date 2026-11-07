@@ -11,7 +11,8 @@ struct LedgerBrowseList: View {
   let accounts: [LedgerAccount]
   let categories: [LedgerCategory]
   let splitPurchases: [LedgerSplitPurchase]
-  @Binding var selectedID: String?
+  /// The selected entries. One shows in the inspector; more than one shows the bulk bar (#168).
+  @Binding var selectedIDs: Set<String>
   let copy: (String) -> Void
   let tombstone: (String) -> Void
   var tags: [LedgerTag] = []
@@ -21,6 +22,8 @@ struct LedgerBrowseList: View {
   var saveAsTemplate: ((String) -> Void)?
   var editSplit: ((LedgerSplitPurchase) -> Void)?
   var closeSplit: ((LedgerSplitPurchase) -> Void)?
+  /// A bulk change on the given entries (#168). Nil while the ledger is read-only.
+  var bulkEdit: ((LedgerBulkChange, [String]) -> Void)?
 
   @Environment(\.ledgerFormatter) private var formatter
   /// The inspector as the person last left it, kept across visits and launches: -1 until they
@@ -37,6 +40,8 @@ struct LedgerBrowseList: View {
   @State private var pageIndex = 0
   @State private var page: LedgerBrowsePage?
   @State private var totals: [LedgerBrowseTotal] = []
+  /// How many entries the view matches across all pages, for "Select All N".
+  @State private var matchCount = 0
   @State private var calendarMonth: (year: Int, month: Int)?
   @State private var calendarDays: [LedgerBrowseDay] = []
   /// True until the first index of this ledger is built; large ledgers build off the main thread.
@@ -68,6 +73,9 @@ struct LedgerBrowseList: View {
     Dictionary(tags.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
   }
 
+  /// The one selected entry; nil when none or several are selected.
+  private var selectedID: String? { selectedIDs.count == 1 ? selectedIDs.first : nil }
+
   private var selectedEntry: LedgerBrowseEntry? {
     guard let selectedID else { return nil }
     return page?.entries.first { $0.id == selectedID }
@@ -91,6 +99,7 @@ struct LedgerBrowseList: View {
       summaryStrip
         .padding(.horizontal, LedgerTheme.Space.l)
         .padding(.bottom, LedgerTheme.Space.m)
+      bulkBar
       Divider().overlay(LedgerTheme.hairline)
       content
       pager
@@ -127,8 +136,8 @@ struct LedgerBrowseList: View {
         Button {
           showsInspector.wrappedValue.toggle()
           // Opening the inspector on nothing shows an empty panel; show the first entry.
-          if showsInspector.wrappedValue, selectedID == nil {
-            selectedID = page?.entries.first?.id
+          if showsInspector.wrappedValue, selectedIDs.isEmpty, let first = page?.entries.first?.id {
+            selectedIDs = [first]
           }
         } label: {
           Label(
@@ -517,7 +526,7 @@ struct LedgerBrowseList: View {
 
   private var entryList: some View {
     ScrollViewReader { proxy in
-      List(selection: $selectedID) {
+      List(selection: $selectedIDs) {
         ForEach(page?.sections ?? []) { section in
           Section {
             ForEach(section.entries) { entry in
@@ -741,6 +750,79 @@ struct LedgerBrowseList: View {
     }
   }
 
+  // MARK: Bulk edit (#168)
+
+  /// Shown while more than one entry is selected: how many, a way to select every entry this
+  /// view matches (all pages), and the bulk actions. They need editing, like every change.
+  @ViewBuilder private var bulkBar: some View {
+    if selectedIDs.count > 1 {
+      HStack(spacing: LedgerTheme.Space.m) {
+        Text("\(selectedIDs.count) selected")
+          .font(LedgerTheme.Typeface.captionEmphasis)
+          .foregroundStyle(LedgerTheme.ink)
+        if selectedIDs.count < matchCount {
+          Button("Select All \(matchCount)") { selectAllMatching() }
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Select all \(matchCount) entries this view shows")
+            .help("Select every entry this view shows, on every page")
+        }
+        Spacer(minLength: LedgerTheme.Space.s)
+        if let bulkEdit {
+          let ids = Array(selectedIDs)
+          Menu("Set Category") {
+            Button("No Category") { bulkEdit(.category(nil), ids) }
+            Divider()
+            ForEach(bulkCategories, id: \.id) { category in
+              Button(CategoryPresentation.label(category, in: categories)) {
+                bulkEdit(.category(category.id), ids)
+              }
+            }
+          }
+          .fixedSize()
+          .accessibilityLabel("Set the category of the selected entries")
+          Menu("Add Tag") {
+            ForEach(tags.filter { $0.lifecycle == .active }, id: \.id) { tag in
+              Button(tag.name) { bulkEdit(.addTag(tag.id), ids) }
+            }
+          }
+          .fixedSize()
+          .disabled(!tags.contains { $0.lifecycle == .active })
+          .accessibilityLabel("Add a tag to the selected entries")
+          Menu("Remove Tag") {
+            ForEach(tags, id: \.id) { tag in
+              Button(tag.name) { bulkEdit(.removeTag(tag.id), ids) }
+            }
+          }
+          .fixedSize()
+          .disabled(tags.isEmpty)
+          .accessibilityLabel("Remove a tag from the selected entries")
+        } else {
+          Text("Begin editing to change them.")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
+        }
+        Button("Clear Selection") { selectedIDs = [] }
+          .buttonStyle(LedgerSecondaryButtonStyle())
+      }
+      .padding(.horizontal, LedgerTheme.Space.l)
+      .padding(.vertical, LedgerTheme.Space.s)
+      .background(LedgerTheme.recessed)
+      .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("Bulk actions for \(selectedIDs.count) selected entries")
+    }
+  }
+
+  private var bulkCategories: [LedgerCategory] {
+    categories.filter { $0.lifecycle == .active && !$0.hidden }
+      .sorted { CategoryPresentation.label($0, in: categories) < CategoryPresentation.label($1, in: categories) }
+  }
+
+  /// Every entry this view matches, on every page (⌘A selects the rows on this page).
+  private func selectAllMatching() {
+    selectedIDs = Set(browser.matches(mode: mode, filter: filter).map { browser.entries[$0].id })
+  }
+
   // MARK: State
 
   /// New snapshot (after an edit, copy or close): re-sort and keep the selection on screen.
@@ -783,6 +865,14 @@ struct LedgerBrowseList: View {
   }
 
   private func refresh(keepingSelection: Bool) {
+    let matches = browser.matches(mode: mode, filter: filter)
+    matchCount = matches.count
+    // Several selected: keep only what this view still shows, so the bulk bar never counts
+    // entries a filter has hidden.
+    if selectedIDs.count > 1 {
+      let shown = Set(matches.map { browser.entries[$0].id })
+      selectedIDs.formIntersection(shown)
+    }
     if keepingSelection, let selectedID,
       let index = browser.pageIndex(of: selectedID, mode: mode, filter: filter)
     {
