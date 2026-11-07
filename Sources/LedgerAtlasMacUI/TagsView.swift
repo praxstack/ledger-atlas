@@ -77,10 +77,10 @@ enum AnnotationPresentation {
 
   static func templateSummary(
     _ template: LedgerTransactionTemplate, accounts: [LedgerAccount],
-    categories: [LedgerCategory]
+    categories: [LedgerCategory], formatter: LedgerDisplayFormatter
   ) -> String {
     let name: (String?) -> String? = { id in accounts.first { $0.id == id }?.name }
-    let amount = "\(template.amount.amount.rawLiteral) \(template.amount.unitCode)"
+    let amount = formatter.amount(template.amount)
     let from = name(template.accountID) ?? "Unknown account"
     if template.kind == .transfer {
       let to = name(template.counterAccountID) ?? "Unknown account"
@@ -110,6 +110,7 @@ enum AnnotationPresentation {
 }
 
 struct TagsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let tags: [LedgerTag]
   let templates: [LedgerTransactionTemplate]
@@ -241,7 +242,8 @@ struct TagsView: View {
       }
       Button("Cancel", role: .cancel) { pendingUse = nil }
     } message: { use in
-      Text(AnnotationPresentation.templateSummary(use.template, accounts: accounts, categories: categories))
+      Text(AnnotationPresentation.templateSummary(
+        use.template, accounts: accounts, categories: categories, formatter: formatter))
     }
   }
 
@@ -293,7 +295,8 @@ struct TagsView: View {
         message: isEditing ? "Save a transaction you repeat, then record it in one step." : "Begin editing to create templates.")
     } else {
       List(active, id: \.id) { template in
-        let summary = AnnotationPresentation.templateSummary(template, accounts: accounts, categories: categories)
+        let summary = AnnotationPresentation.templateSummary(
+          template, accounts: accounts, categories: categories, formatter: formatter)
         let tagNames = AnnotationPresentation.tagNames(template.tags, in: tags)
         HStack(spacing: LedgerTheme.Space.m) {
           LedgerIconTile(.symbol("doc.on.doc"), swatch: LedgerTheme.swatch(for: template.name))
