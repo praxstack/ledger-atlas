@@ -126,6 +126,10 @@ struct LedgerBrowseList: View {
         // the title itself says what pressing it does.
         Button {
           showsInspector.wrappedValue.toggle()
+          // Opening the inspector on nothing shows an empty panel; show the first entry.
+          if showsInspector.wrappedValue, selectedID == nil {
+            selectedID = page?.entries.first?.id
+          }
         } label: {
           Label(
             showsInspector.wrappedValue ? Self.hideInspectorTitle : Self.showInspectorTitle,
@@ -136,10 +140,6 @@ struct LedgerBrowseList: View {
         .help("Show or hide transaction details (⌥⌘I)")
         .keyboardShortcut("i", modifiers: [.command, .option])
       }
-    }
-    .onChange(of: inspectorChoiceRaw) { _, choice in
-      // An inspector that opens on nothing is an empty panel; show the first entry instead.
-      if choice == 1, selectedID == nil { selectedID = page?.entries.first?.id }
     }
     .onAppear { rebuild() }
     .onChange(of: transactions) { _, _ in rebuild() }

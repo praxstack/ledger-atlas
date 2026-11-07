@@ -63,8 +63,18 @@ import Testing
       #expect(selected, "no entry row to select on the Transactions screen")
       let hide = LedgerBrowseList.hideInspectorTitle
       captureLog("ledger window before inspector \(root.window.frame)")
-      if !root.accessibilityElements().contains(where: { $0.spokenName == hide }) {
-        #expect(root.click(named: LedgerBrowseList.showInspectorTitle), "no Show Inspector button")
+      if !root.accessibilityElements().contains(where: { $0.spokenName == hide }),
+        !root.click(named: LedgerBrowseList.showInspectorTitle)
+      {
+        // The toolbar button can sit in the overflow menu at this width; ⌥⌘I is the same toggle.
+        if let event = NSEvent.keyEvent(
+          with: .keyDown, location: .zero, modifierFlags: [.command, .option],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: root.window.windowNumber,
+          context: nil, characters: "i", charactersIgnoringModifiers: "i", isARepeat: false,
+          keyCode: 34)
+        {
+          captureLog("toolbar toggle not found; ⌥⌘I handled: \(root.window.performKeyEquivalent(with: event))")
+        }
       }
       try await root.settle()
       // Sidebar, table and a 320 pt inspector need about 1,250 pt; the runner's display is

@@ -116,7 +116,7 @@ struct LedgerView: View {
                 .labelStyle(.titleAndIcon)
             }
             .buttonStyle(.borderedProminent)
-            .help("Add income or an expense")
+            .help("New transaction: add income or an expense")
           }
         }
       } else {
@@ -243,7 +243,8 @@ struct LedgerView: View {
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
   }
 
-  static let newTransactionTitle = "New Transaction"
+  /// Short, so the toolbar keeps the view switcher and the inspector toggle at 1,000 pt.
+  static let newTransactionTitle = "New"
 
   /// The actions under the list: new entries, then what to do with the selected one.
   @ViewBuilder private var editBar: some View {
