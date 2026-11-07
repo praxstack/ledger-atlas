@@ -653,7 +653,6 @@ public struct LedgerAtlasRootView: View {
       journey.closeLedger()
       let canonical = LedgerLocations.availableURL(
         named: "Money Manager import", in: try LedgerLocations.ledgersDirectory())
-      imported = canonical
       await journey.selectSourceInBackground(
         backup, stagingDatabaseURL: folder.appendingPathComponent("stage.sqlite"),
         canonicalDatabaseURL: canonical,
@@ -661,8 +660,9 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: given == nil ? 0 : 19_800))
       log("import check: review \(journey.phase) after \(seconds()) \(journey.lastFailure ?? "")")
       await approveImport()
-      // Publication picks another name if the requested one was taken meanwhile.
-      if let published = journey.ledgerURL { imported = published }
+      // Clean up only what this check published: publication picks another name if the
+      // requested one was taken meanwhile, and a failed import publishes nothing.
+      imported = journey.ledgerURL
       log(
         "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions after \(seconds()) \(journey.lastFailure ?? "")"
       )
