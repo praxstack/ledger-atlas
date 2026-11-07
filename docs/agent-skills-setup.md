@@ -210,12 +210,9 @@ Matt Pocock skills read from `docs/agents/issue-tracker.md`, `triage-labels.md`,
 
 **Ledger Atlas (this repo)**
 ```bash
-npm ci
-npm run dev          # http://localhost:3000
-npm test
-npm run typecheck
-npm run lint
-npm run build
+./scripts/bootstrap.sh
+./scripts/verify.sh --fast   # ruff, pytest, swift build + test (Swift needs macOS)
+swift run mmctl
 ```
 
 ## Install / update skills
@@ -352,4 +349,4 @@ CLAUDE.md                # Agent skills entry point
 - `agent-browser` CLI: install with `npm install -g agent-browser --prefix ~/.npm-global` then `agent-browser install`.
 - gstack's browse binary is installed globally; browser QA skills need Playwright/Chrome.
 - Review skill security assessments at [skills.sh](https://skills.sh) before enabling in sensitive repos.
-- ESLint ignores `.agents/**` and `vendor/**` — `npm run lint` only checks app source.
+- `.agents/` and `vendor/` are gitignored, so scanners and linters only see first-party code.
