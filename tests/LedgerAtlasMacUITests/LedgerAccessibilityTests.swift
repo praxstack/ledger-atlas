@@ -643,7 +643,10 @@ final class MountedRoot {
     for _ in 0..<30 {
       try await Task.sleep(for: .milliseconds(200))
       window.contentView?.layoutSubtreeIfNeeded()
-      let elements = accessibilityElements()
+      // Waiting reads in-process whatever the test reads with: a whole-window system read every
+      // 200 ms made AppKit lay out from the reader thread and stop the runner's main run loop,
+      // until a run ended early (runs 42196159643 and #177's).
+      let elements = inProcessElements()
       if readTimedOut { break }
       // Keep waiting while the saved ledger is still opening.
       // The empty-ledger prompt's title is exactly "Open a ledger".
@@ -745,17 +748,19 @@ final class MountedRoot {
   /// The test runner doesn't run the main run loop, and the app answers Accessibility requests
   /// there, so pump it until the background read finishes.
   func accessibilityElements() -> [SpokenElement] {
-    if readsInProcess {
-      // SwiftUI only builds its accessibility elements once an Accessibility client has asked
-      // for them. Run alone, nothing else in the process has, and the in-process tree is
-      // just the window title; so ask once through the system API first.
-      if !Self.systemReadDone {
-        Self.systemReadDone = true
-        _ = systemAccessibilityElements()
-      }
-      return inProcessAccessibilityTree(of: window)
+    readsInProcess ? inProcessElements() : systemAccessibilityElements()
+  }
+
+  /// The window's tree read in-process on the main thread.
+  private func inProcessElements() -> [SpokenElement] {
+    // SwiftUI only builds its accessibility elements once an Accessibility client has asked
+    // for them. Run alone, nothing else in the process has, and the in-process tree is
+    // just the window title; so ask once through the system API first.
+    if !Self.systemReadDone {
+      Self.systemReadDone = true
+      _ = systemAccessibilityElements()
     }
-    return systemAccessibilityElements()
+    return inProcessAccessibilityTree(of: window)
   }
 
   nonisolated(unsafe) private static var systemReadDone = false
