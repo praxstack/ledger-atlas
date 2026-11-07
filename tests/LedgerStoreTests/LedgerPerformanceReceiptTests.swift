@@ -107,6 +107,21 @@ struct LedgerPerformanceReceiptTests {
         idempotencyKey: corpus.key("one-more"), draft: try corpus.expense(n: 0, note: "one more"),
         createdAt: corpus.createdAt)
     }
+    // Recategorise 200 expenses in one bulk change (#168), then revert it in one step.
+    let foodExpenses = try application.snapshot().transactions.filter {
+      $0.currentRevision.draft.kind == .expense && $0.currentRevision.draft.categoryID == corpus.food.id
+    }.prefix(200).map(\.id)
+    #expect(foodExpenses.count == 200)
+    let bulk = try receipt.time("plan a 200-entry bulk change", ceiling: 3) {
+      try LedgerBulkEditPlan.make(
+        .category(corpus.rent.id), transactionIDs: Array(foodExpenses), in: application.snapshot())
+    }
+    let bulkReceipt = try receipt.time("write a 200-entry bulk change", ceiling: 35) {
+      try application.applyBulkEdit(bulk, createdAt: corpus.createdAt)
+    }
+    try receipt.time("revert a 200-entry bulk change", ceiling: 35) {
+      try application.revertBulkEdit(bulkReceipt, createdAt: corpus.createdAt)
+    }
     let backupURL = directory.appendingPathComponent("backup.sqlite")
     try receipt.time("save a 1:1 backup", ceiling: 60) {
       _ = try opened.store.backupCanonicalDatabase(to: backupURL)
@@ -129,8 +144,8 @@ private struct Corpus {
   private(set) var content = LedgerXLSXExchange.Content()
   private let wallet: LedgerAccount
   private let bank: LedgerAccount
-  private let food: LedgerCategory
-  private let rent: LedgerCategory
+  let food: LedgerCategory
+  let rent: LedgerCategory
   private let salary: LedgerCategory
   private let timeZone: SourceTimeZone
 

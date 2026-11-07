@@ -259,6 +259,36 @@
     "looks" : "929ca2b232be5a8a",
     "text" : "b1d490d37a5b028db848ab5036c8a432519f483ca39542d48adfde320ed8888b"
   },
+  "key-bulk-confirm-dark.png" : {
+    "lines" : 7,
+    "looks" : "802cd3c0889e9e84",
+    "text" : "16bca73a8e572feea43419a5c6b2e3f554a6be07f13f37f739cd425961aa4d92"
+  },
+  "key-bulk-confirm-light.png" : {
+    "lines" : 7,
+    "looks" : "80802c2f77618180",
+    "text" : "16bca73a8e572feea43419a5c6b2e3f554a6be07f13f37f739cd425961aa4d92"
+  },
+  "key-bulk-done-dark.png" : {
+    "lines" : 175,
+    "looks" : "a68088898828888a",
+    "text" : "3f088f7a0f906306d3f87392d5e27606b5ec011b4ff009df33d3b020e5ea2c05"
+  },
+  "key-bulk-done-light.png" : {
+    "lines" : 175,
+    "looks" : "9c79614041414180",
+    "text" : "3f088f7a0f906306d3f87392d5e27606b5ec011b4ff009df33d3b020e5ea2c05"
+  },
+  "key-bulk-selection-dark.png" : {
+    "lines" : 178,
+    "looks" : "a680b88989890888",
+    "text" : "07e38b8451039213227165967c7b8feb615225afa9efc5c49c283407d711b00d"
+  },
+  "key-bulk-selection-light.png" : {
+    "lines" : 178,
+    "looks" : "9c794346444441c2",
+    "text" : "07e38b8451039213227165967c7b8feb615225afa9efc5c49c283407d711b00d"
+  },
   "key-empty-dark.png" : {
     "lines" : 97,
     "looks" : "ea98785935387892",
@@ -306,12 +336,12 @@
   },
   "key-upcoming-empty-light.png" : {
     "lines" : 20,
-    "looks" : "806733782c000080",
+    "looks" : "8433386c00000080",
     "text" : "bad759880717a01d302717482e16eb672847a772517c90e0cb931c568dc83fdf"
   },
   "key-upcoming-reminder-dark.png" : {
     "lines" : 24,
-    "looks" : "a289c8889a020082",
+    "looks" : "aac8c89a40000182",
     "text" : "41888a61609ce72ce449f7ec306ac171e0fc28bcdad617f26025c204de63cf46"
   },
   "key-upcoming-reminder-light.png" : {

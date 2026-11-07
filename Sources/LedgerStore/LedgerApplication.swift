@@ -139,6 +139,51 @@ public struct LedgerApplication: LedgerClient {
     ).revision
   }
 
+  /// Writes a bulk change (#168) planned with `LedgerBulkEditPlan.make`: one new revision per
+  /// entry, all in one database transaction, so a failure anywhere leaves the ledger unchanged.
+  /// An entry changed after the plan was made fails the whole change too.
+  public func applyBulkEdit(_ plan: LedgerBulkEditPlan, createdAt: UTCInstant) throws
+    -> LedgerBulkEditReceipt
+  {
+    let requests = plan.targets.map { target in
+      LedgerStore.CorrectTransactionRequest(
+        transactionID: target.current.transactionID,
+        expectedCurrentRevisionID: target.current.id, draft: target.draft, createdAt: createdAt,
+        tags: target.tags)
+    }
+    let results = try store.correctLinkedTransactions(requests)
+    return LedgerBulkEditReceipt(
+      change: plan.change,
+      entries: zip(plan.targets, results).map { target, result in
+        .init(
+          transactionID: target.current.transactionID, before: target.current,
+          beforeTags: target.currentTags, afterRevisionID: result.revision.id)
+      })
+  }
+
+  /// Reverts a bulk change as one step: every entry it touched gets a new revision with the
+  /// category and tags it had before, all or none. Refused when any of them was changed again
+  /// since, so a later edit is never undone by accident.
+  public func revertBulkEdit(_ receipt: LedgerBulkEditReceipt, createdAt: UTCInstant) throws {
+    let current = Dictionary(
+      try snapshot().transactions.map { ($0.id, $0.currentRevision) },
+      uniquingKeysWith: { first, _ in first })
+    let moved = receipt.entries.filter { entry in
+      guard let revision = current[entry.transactionID] else { return true }
+      return revision.id != entry.afterRevisionID || revision.lifecycle != .active
+    }.count
+    guard moved == 0 else { throw LedgerBulkEditRefusal.changedSince(count: moved) }
+    guard !receipt.entries.isEmpty else { return }
+    let requests = try receipt.entries.map { entry in
+      LedgerStore.CorrectTransactionRequest(
+        transactionID: entry.transactionID, expectedCurrentRevisionID: entry.afterRevisionID,
+        draft: try LedgerBulkEditPlan.correctedDraft(
+          entry.before.draft, categoryID: entry.before.draft.categoryID),
+        createdAt: createdAt, tags: entry.beforeTags)
+    }
+    _ = try store.correctLinkedTransactions(requests)
+  }
+
   public func tombstoneTransaction(
     transactionID: String, expectedCurrentRevisionID: String, createdAt: UTCInstant
   ) throws -> LedgerTransactionRevision {
