@@ -26,7 +26,7 @@ private enum PlanningSupport {
   /// The first date on or after `day` the rule still produces, nil once it has ended.
   static func nextDate(of rule: LedgerRecurrenceRule, onOrAfter day: SourceLocalDate) -> SourceLocalDate? {
     let skipped = Set(rule.skippedDates)
-    for index in 0..<LedgerSchedule.maximumOccurrences {
+    for index in firstIndex(of: rule, near: day)..<LedgerSchedule.maximumOccurrences {
       guard let date = try? LedgerSchedule.occurrence(
         index, from: rule.start, frequency: rule.frequency, interval: rule.interval,
         dayOfMonth: rule.dayOfMonth)
@@ -35,6 +35,29 @@ private enum PlanningSupport {
       if date >= day, !skipped.contains(date) { return date }
     }
     return nil
+  }
+
+  /// An occurrence index just before `day`, so `nextDate` skips the rule's history instead of
+  /// walking it from the start.
+  private static func firstIndex(of rule: LedgerRecurrenceRule, near day: SourceLocalDate) -> Int {
+    let start = rule.start
+    let steps: Int
+    switch rule.frequency {
+    case .monthly:
+      steps = ((day.year - start.year) * 12 + day.month - start.month) / rule.interval
+    case .yearly:
+      steps = (day.year - start.year) / rule.interval
+    case .daily, .weekly:
+      var calendar = Calendar(identifier: .gregorian)
+      calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? calendar.timeZone
+      guard
+        let from = calendar.date(from: DateComponents(year: start.year, month: start.month, day: start.day)),
+        let to = calendar.date(from: DateComponents(year: day.year, month: day.month, day: day.day)),
+        let days = calendar.dateComponents([.day], from: from, to: to).day
+      else { return 0 }
+      steps = (rule.frequency == .weekly ? days / 7 : days) / rule.interval
+    }
+    return min(max(0, steps - 1), LedgerSchedule.maximumOccurrences - 1)
   }
 
   static func generatedID(_ prefix: String) -> String {
@@ -55,9 +78,12 @@ struct RecurrenceView: View {
   let onUpdate: (LedgerRecurrenceRule, LedgerEditScope) -> Void
   let onGenerate: (LedgerRecurrenceRule, SourceLocalDate) -> Void
   let open: () -> Void
+  /// The ledger's time zone from settings, for which day is "today".
+  var timeZone: TimeZone = .current
   @State private var showingForm = false
 
   var body: some View {
+    let today = LedgerPeriodRule.today(in: timeZone)
     VStack(alignment: .leading, spacing: 0) {
       if rules.isEmpty {
         PlanningEmptyView(
@@ -69,9 +95,9 @@ struct RecurrenceView: View {
           RecurrenceRow(
             rule: rule, accountName: accounts.first(where: { $0.id == rule.accountID })?.name,
             categoryName: categories.first(where: { $0.id == rule.categoryID })?.name,
-            isEditing: isEditing,
+            today: today, isEditing: isEditing,
             toggle: { onUpdate($0, .thisAndFuture) },
-            generate: { onGenerate(rule, PlanningSupport.today()) })
+            generate: { onGenerate(rule, today) })
         }
         .scrollContentBackground(.hidden)
       }
@@ -99,6 +125,7 @@ private struct RecurrenceRow: View {
   let rule: LedgerRecurrenceRule
   let accountName: String?
   let categoryName: String?
+  let today: SourceLocalDate
   let isEditing: Bool
   let toggle: (LedgerRecurrenceRule) -> Void
   let generate: () -> Void
@@ -115,6 +142,7 @@ private struct RecurrenceRow: View {
   }
 
   var body: some View {
+    let schedule = self.schedule
     HStack(spacing: LedgerTheme.Space.m) {
       // The category's own symbol and colour, as on Transactions and Categories.
       LedgerIconTile(
@@ -171,7 +199,6 @@ private struct RecurrenceRow: View {
 
   /// "next Nov 3, 2026" while the rule runs; when it ended or is closed, when it started.
   private var schedule: String {
-    let today = PlanningSupport.today()
     if rule.lifecycle == .active, !rule.paused,
       let next = PlanningSupport.nextDate(of: rule, onOrAfter: today)
     {

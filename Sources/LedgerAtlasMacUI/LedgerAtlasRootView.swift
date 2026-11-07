@@ -1615,7 +1615,7 @@ public struct LedgerAtlasRootView: View {
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
           } catch { journey.recordFailure("Recurrence occurrences could not be generated.") }
         },
-        open: openLedger)
+        open: openLedger, timeZone: productSettings.timeZone)
       .id(selection)
     } else if selection == .installments {
       InstallmentsView(

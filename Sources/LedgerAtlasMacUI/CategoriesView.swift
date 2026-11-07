@@ -148,7 +148,9 @@ struct CategoryMonthFigures: Sendable {
 
   let unitCode: String
   let month: SourceLocalDate
-  let totals: [String: ExactDecimal]
+  /// Per kind, so a category ID can never mix income with spending.
+  let expenseTotals: [String: ExactDecimal]
+  let incomeTotals: [String: ExactDecimal]
   let expense: Double
   let income: Double
 
@@ -158,17 +160,17 @@ struct CategoryMonthFigures: Sendable {
       snapshot: snapshot, kind: .month, containing: day, unitCode: nil, rule: rule)
     unitCode = report.unitCode
     month = report.period.start
-    var totals: [String: ExactDecimal] = [:]
-    for row in report.statistics.expenseCategories + report.statistics.incomeCategories {
-      totals[row.id] = row.totalAmount
-    }
-    self.totals = totals
+    expenseTotals = Dictionary(
+      report.statistics.expenseCategories.map { ($0.id, $0.totalAmount) }, uniquingKeysWith: { first, _ in first })
+    incomeTotals = Dictionary(
+      report.statistics.incomeCategories.map { ($0.id, $0.totalAmount) }, uniquingKeysWith: { first, _ in first })
     expense = Double(report.statistics.expense.description) ?? 0
     income = Double(report.statistics.income.description) ?? 0
   }
 
   /// Nil for a category with no money this month, or one that is neither income nor expense.
   func line(for category: LedgerCategory) -> Line? {
+    let totals = category.kind == .income ? incomeTotals : expenseTotals
     guard category.kind != .neutral, let total = totals[category.id], total.isPositive || total.isNegative,
       let amount = try? CurrencyAmount(unitCode: unitCode, amount: total)
     else { return nil }
