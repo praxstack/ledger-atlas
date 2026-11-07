@@ -1,1 +1,0 @@
-../../../../../.agents/plugins/gstack/.cursor/skills/gstack/SKILL.md

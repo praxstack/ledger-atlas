@@ -591,8 +591,9 @@ public final class LedgerJourney {
     let foundationTimeZone = TimeZone.current
     let localDate = try localDate(for: instant, in: foundationTimeZone)
     let nativeTimeZone = try SourceTimeZone(ianaIdentifier: foundationTimeZone.identifier)
-    return try SourceTemporal(
-      resolving: SourceLocalDateTime(date: localDate), in: nativeTimeZone, precision: .day)
+    // Day precision: a zone whose clocks change at midnight (Havana, Beirut, Santiago,
+    // Asunción) has no or two midnights on that day; `startOf` picks the first instant either way.
+    return try SourceTemporal(startOf: localDate, in: nativeTimeZone)
   }
 
   /// Shown before any plaintext copy of the ledger leaves the app (LA-004).
@@ -661,7 +662,7 @@ public final class LedgerJourney {
   package static func packageExportSuccessMessage(includesImportHistory: Bool) -> String {
     guard includesImportHistory else { return "Portable package exported." }
     return
-      "Portable package exported with its imported Money Manager history. It restores only on a Mac that has this ledger's receipt key (iCloud Keychain carries it) and on this version of Ledger Atlas. Keep the original Money Manager backup (.mmbak) and an XLSX export as fallbacks."
+      "Portable package exported with its imported Money Manager history. It restores only on a Mac that has this ledger's receipt key (kept in this app's private storage, or in the Keychain when that setting is on) and on this version of Ledger Atlas. Keep the original Money Manager backup (.mmbak) and an XLSX export as fallbacks."
   }
 
   // MARK: XLSX exchange (LA-040)
@@ -819,7 +820,7 @@ public final class LedgerJourney {
     switch error as? LedgerApplication.Error {
     case .packageReceiptKeyMissing:
       return
-        "This package holds imported Money Manager history signed with a key this Mac doesn't have. Turn on iCloud Keychain on both Macs and try again, or restore the SQLite backup instead. Nothing was changed."
+        "This package holds imported Money Manager history signed with a key this Mac doesn't have. Restore the SQLite backup instead, or open the package on the Mac that made it. Nothing was changed."
     case .packageSchemaMismatch:
       return
         "This package's imported history was written by a different version of Ledger Atlas. Update Ledger Atlas on both Macs, or restore the SQLite backup instead. Nothing was changed."
@@ -1465,6 +1466,7 @@ public final class LedgerJourney {
         $0.currentRevision.draft.origin.label == LedgerOrigin.macNativeLabel
       }.count
       let unresolved = review?.unresolvedSemanticCount ?? 0
+      let certificationBlocked = review?.losslessCertificationBlocked ?? false
       var analysis = [
         SurfaceRow(id: "origin-imported", title: "Imported", detail: "\(importedCount)"),
         SurfaceRow(id: "origin-mac-native", title: "Mac-native", detail: "\(nativeCount)"),
@@ -1477,7 +1479,8 @@ public final class LedgerJourney {
           detail: "\(snapshot.transactions.count)"),
         SurfaceRow(
           id: "unresolved-types", title: "Unresolved source types",
-          detail: "\(unresolved) (lossless certification blocked)"),
+          detail: certificationBlocked
+            ? "\(unresolved) (lossless certification blocked)" : "\(unresolved)"),
       ]
       if let income = report?.rows.first(where: { $0.id == "income" }),
         let expense = report?.rows.first(where: { $0.id == "expense" }),

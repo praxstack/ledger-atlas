@@ -1,18 +1,5 @@
 {
   "name": "Ledger Atlas",
   "snapshot": "snapshot-20260829-6d607db6-16e1-44ee-be1a-2ad2bcaa6c1b",
-  "install": ".cursor/scripts/install.sh",
-  "terminals": [
-    {
-      "name": "dev-server",
-      "command": "npm run dev",
-      "description": "Next.js development server on port 3000"
-    }
-  ],
-  "ports": [
-    {
-      "name": "web",
-      "port": 3000
-    }
-  ]
+  "install": ".cursor/scripts/install.sh"
 }
