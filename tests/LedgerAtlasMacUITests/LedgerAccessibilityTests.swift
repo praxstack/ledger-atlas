@@ -590,6 +590,9 @@ func inProcessAccessibilityTree(of window: NSWindow) -> [SpokenElement] {
 /// The root view in a window with the synthetic demo ledger open on one screen.
 @MainActor
 final class MountedRoot {
+  /// The calendar day Upcoming is made for in tests: the demo rent rule (the 3rd of each month
+  /// from 3 Nov 2026) is then overdue on 3 Nov and due on 3 Dec.
+  nonisolated static let fixedToday = try! SourceLocalDate(year: 2026, month: 11, day: 20)
   let window: NSWindow
   /// The test's own folder: the ledger, its SQLite files and the widget store.
   let directory: URL
@@ -647,7 +650,9 @@ final class MountedRoot {
       // one every screen reports "Widget status could not be published".
       widgetProjectionPublisher: RedactedWidgetProjectionPublisher(
         store: .init(containerURL: directory)),
-      scopeStarter: { _ in true }, scopeStopper: { _ in }, initialColumnVisibility: columns)
+      scopeStarter: { _ in true }, scopeStopper: { _ in },
+      // Upcoming (#171) is made for a fixed day, so what the screens say doesn't change daily.
+      initialColumnVisibility: columns, today: { MountedRoot.fixedToday })
     // `appWindow` builds the window the way the app's WindowGroup does (full-size content
     // under a hosting controller), so the detail column starts beside the sidebar instead of
     // under it. Captures need that; the Accessibility checks don't.

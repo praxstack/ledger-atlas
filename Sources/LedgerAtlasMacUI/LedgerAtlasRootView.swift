@@ -52,6 +52,8 @@ public struct LedgerAtlasRootView: View {
   /// ledger outside app storage.
   private let scopeStarter: (URL) -> Bool
   private let scopeStopper: (URL) -> Void
+  /// The calendar day Upcoming is made for. Tests fix it so captures read the same every day.
+  private let todayOverride: (() -> SourceLocalDate)?
 
   public init(
     initialSelection: AppDestination = .defaultSelection,
@@ -75,7 +77,8 @@ public struct LedgerAtlasRootView: View {
     intentConsumer: @escaping () -> LedgerIntentRequest? = { nil },
     scopeStarter: @escaping (URL) -> Bool = { LedgerLocations.startAccess($0) },
     scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) },
-    initialColumnVisibility: NavigationSplitViewVisibility = .automatic
+    initialColumnVisibility: NavigationSplitViewVisibility = .automatic,
+    today: (() -> SourceLocalDate)? = nil
   ) {
     _selection = State(initialValue: initialSelection)
     _columnVisibility = State(initialValue: initialColumnVisibility)
@@ -89,6 +92,7 @@ public struct LedgerAtlasRootView: View {
     self.intentConsumer = intentConsumer
     self.scopeStarter = scopeStarter
     self.scopeStopper = scopeStopper
+    self.todayOverride = today
   }
 
   public var body: some View {
@@ -224,6 +228,9 @@ public struct LedgerAtlasRootView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: LedgerReminderResponder.didOpenReminder)) { _ in
+      openReminderIfReady()
     }
     .onChange(of: journey.ledgerURL) { _, ledger in
       portal.ledgerDidChange(to: ledger)
@@ -576,6 +583,7 @@ public struct LedgerAtlasRootView: View {
       // is taken here, once the ledger is back. Its screen wins over the start screen.
       if let pendingIntent { route(pendingIntent) }
       consumePendingIntentIfUnlocked()
+      openReminderIfReady()
     }
   }
 
@@ -1635,7 +1643,8 @@ public struct LedgerAtlasRootView: View {
               LedgerJourney.editFailureMessage(
                 for: error, otherwise: "Split purchase could not be closed."))
           }
-        }
+        },
+        upcoming: pendingIntent?.showsUpcoming == true ? upcoming() : nil
       )
       .id(selection)
     } else if selection == .receipts {
@@ -1812,7 +1821,7 @@ public struct LedgerAtlasRootView: View {
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
           } catch { journey.recordFailure("Recurrence occurrences could not be generated.") }
         },
-        open: openLedger, timeZone: productSettings.timeZone)
+        open: openLedger, timeZone: productSettings.timeZone, upcoming: upcoming())
       .id(selection)
     } else if selection == .installments {
       InstallmentsView(
@@ -1936,6 +1945,26 @@ public struct LedgerAtlasRootView: View {
       let request = intentConsumer()
     else { return }
     route(request)
+  }
+
+  /// The daily reminder was opened: the entry form opens with Upcoming beside it (#171). It
+  /// waits while the app is locked or the ledger is still opening, and gives way to a request
+  /// already being shown.
+  private func openReminderIfReady() {
+    guard LedgerReminderResponder.isWaiting, !appLock.isLocked, journey.snapshot != nil,
+      pendingIntent == nil
+    else { return }
+    guard LedgerReminderResponder.take() else { return }
+    route(LedgerIntentRequest(kind: .addExpense, showsUpcoming: true))
+  }
+
+  /// What is due soon in the open ledger (#171), for the person's calendar day.
+  private func upcoming() -> LedgerUpcoming? {
+    guard let snapshot = journey.snapshot else { return nil }
+    return LedgerUpcoming(
+      rules: snapshot.recurrenceRules, installmentPlans: snapshot.installmentPlans,
+      transactions: snapshot.transactions,
+      today: todayOverride?() ?? LedgerPeriodRule.today(in: productSettings.timeZone))
   }
 
   private func route(_ request: LedgerIntentRequest) {

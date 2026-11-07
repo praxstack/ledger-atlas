@@ -157,8 +157,8 @@ import Testing
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
   try snapshots.verify(writingTo: output)
-  // 25 records and 5 key states, each in light and dark.
-  let expectedFiles: Int = 60
+  // 25 records and 7 key states, each in light and dark.
+  let expectedFiles: Int = 64
   #expect(index.count == expectedFiles)
   print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
   #expect(
@@ -166,8 +166,9 @@ import Testing
     "the main run loop was stopped too often; restarts are capped")
 }
 
-/// The empty state, the lock screen, a refused passcode and the balance receipt, in light and dark. (Loaded and the
-/// edit sheet are records 1 and 14 above.)
+/// The empty state, the lock screen, a refused passcode, the balance receipt, the entry
+/// suggestion and the reminder's entry form with Upcoming (due and nothing due), in light and
+/// dark. (Loaded and the edit sheet are records 1 and 14 above.)
 @MainActor
 private func captureKeyStates(
   into output: URL, snapshots: CaptureSnapshots
@@ -288,6 +289,54 @@ private func captureKeyStates(
       capture, "entry-suggestion", appearance,
       "A memo used before fills account and category, labelled as a suggestion; nothing is saved yet.",
       text: formText)
+  }
+
+  // #171: the daily reminder opens the entry form with Upcoming beside it. The demo rent rule's
+  // 3 Nov date was never entered, so it is overdue; 3 Dec is due. Then a day with nothing due:
+  // the form still opens and Upcoming says so in words.
+  let dueSoon = LedgerUpcoming(
+    rules: ledger.recurrenceRules, installmentPlans: ledger.installmentPlans,
+    transactions: ledger.transactions, today: MountedRoot.fixedToday)
+  let nothingDue = LedgerUpcoming(
+    rules: [], installmentPlans: [], transactions: [], today: MountedRoot.fixedToday)
+  let upcomingStates: [(name: String, upcoming: LedgerUpcoming, expects: [String], note: String)] = [
+    (
+      "upcoming-reminder", dueSoon, ["Upcoming", "Overdue", "Rent", "Total"],
+      "The daily reminder opens the entry form with Upcoming beside it; an unentered date is overdue, in red and in words."
+    ),
+    (
+      "upcoming-empty", nothingDue, ["Upcoming", UpcomingPanel.emptyText],
+      "Nothing due: the reminder still opens the entry form, and Upcoming says so."
+    ),
+  ]
+  for state in upcomingStates {
+    captureLog(state.name)
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 780, height: 520), styleMask: [.titled],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentViewController = NSHostingController(
+      rootView: EntryFormWithUpcoming(
+        form: NativeTransactionForm(
+          accounts: ledger.accounts, categories: ledger.categories,
+          intent: LedgerIntentRequest(kind: .addExpense, showsUpcoming: true),
+          entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in .saved }),
+        upcoming: state.upcoming, accounts: ledger.accounts, categories: ledger.categories))
+    window.makeKeyAndOrderFront(nil)
+    defer { window.close() }
+    var text: [String] = []
+    for _ in 0..<40 {
+      try await Task.sleep(for: .milliseconds(200))
+      text = inProcessAccessibilityTree(of: window).map { "\($0.spokenName) \($0.value)" }
+      if text.contains(where: { $0.contains("Upcoming") }) { break }
+    }
+    for appearance in CaptureAppearance.allCases {
+      window.appearance = NSAppearance(named: appearance.name)
+      pump(0.6)
+      let capture = try #require(windowPNG(window))
+      expectUsable(capture.png, text: text, expecting: state.expects, for: state.name)
+      try save(capture, state.name, appearance, state.note, text: text)
+    }
   }
   return index
 }

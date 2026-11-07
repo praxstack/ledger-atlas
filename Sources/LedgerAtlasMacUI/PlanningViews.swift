@@ -80,26 +80,20 @@ struct RecurrenceView: View {
   let open: () -> Void
   /// The ledger's time zone from settings, for which day is "today".
   var timeZone: TimeZone = .current
+  /// What is due soon (#171), shown beside the rules while a ledger is open.
+  var upcoming: LedgerUpcoming? = nil
   @State private var showingForm = false
 
   var body: some View {
     let today = LedgerPeriodRule.today(in: timeZone)
     VStack(alignment: .leading, spacing: 0) {
-      if rules.isEmpty {
-        PlanningEmptyView(
-          title: "Nothing recurring yet", systemImage: "repeat",
-          message: "Rent, salary and subscriptions can be added on their dates automatically.",
-          state: state, isEditing: isEditing, failure: lastFailure, open: open)
-      } else {
-        List(rules, id: \.id) { rule in
-          RecurrenceRow(
-            rule: rule, accountName: accounts.first(where: { $0.id == rule.accountID })?.name,
-            categoryName: categories.first(where: { $0.id == rule.categoryID })?.name,
-            today: today, isEditing: isEditing,
-            toggle: { onUpdate($0, .thisAndFuture) },
-            generate: { onGenerate(rule, today) })
+      HStack(alignment: .top, spacing: 0) {
+        rulesList(today: today).frame(maxWidth: .infinity, maxHeight: .infinity)
+        if let upcoming {
+          Divider()
+          UpcomingPanel(upcoming: upcoming, accounts: accounts, categories: categories)
+            .frame(width: 320)
         }
-        .scrollContentBackground(.hidden)
       }
       LedgerActionBar {
         if isEditing {
@@ -116,6 +110,25 @@ struct RecurrenceView: View {
     .navigationTitle("Recurring")
     .sheet(isPresented: $showingForm) {
       RecurrenceForm(accounts: accounts, categories: categories, onSave: onCreate)
+    }
+  }
+
+  @ViewBuilder private func rulesList(today: SourceLocalDate) -> some View {
+    if rules.isEmpty {
+      PlanningEmptyView(
+        title: "Nothing recurring yet", systemImage: "repeat",
+        message: "Rent, salary and subscriptions can be added on their dates automatically.",
+        state: state, isEditing: isEditing, failure: lastFailure, open: open)
+    } else {
+      List(rules, id: \.id) { rule in
+        RecurrenceRow(
+          rule: rule, accountName: accounts.first(where: { $0.id == rule.accountID })?.name,
+          categoryName: categories.first(where: { $0.id == rule.categoryID })?.name,
+          today: today, isEditing: isEditing,
+          toggle: { onUpdate($0, .thisAndFuture) },
+          generate: { onGenerate(rule, today) })
+      }
+      .scrollContentBackground(.hidden)
     }
   }
 }

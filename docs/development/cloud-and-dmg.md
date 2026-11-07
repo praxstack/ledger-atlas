@@ -50,6 +50,11 @@ Swift feedback comes from the `CI` workflow on the pull request.
   search), then **File › Export › CSV of This View…**. Open the file in Numbers or Excel: it has
   the same rows in the same order as the screen, amounts are plain numbers (no grouping,
   minus for money out), and a memo that starts with `=` shows as text.
+- **Upcoming (#171).** Open **Recurrence**: beside the rules, Upcoming lists the next 30
+  days by day, with any rule date before today that has no entry under "Overdue" in red and a
+  total at the bottom. Turn on the daily reminder in Settings, wait for it (or set the hour to
+  the next one) and click it: the entry form opens with Upcoming beside it, also on a day with
+  nothing due.
 
 For a tagged release: `git tag v0.2.0 && git push origin v0.2.0` publishes a GitHub
 Release (marked pre-release) with the DMG and its SHA-256.
