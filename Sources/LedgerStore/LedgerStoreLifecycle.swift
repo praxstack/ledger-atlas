@@ -1798,10 +1798,13 @@ public enum LedgerStoreLifecycle {
 
   /// Removes scratch migrations that an upgrade killed part-way left in `root`. Each is a full
   /// plaintext copy of a ledger and takes the room the next upgrade needs. A live upgrade holds
-  /// its lock and is skipped; a folder without a lock yet is skipped until `grace` has passed,
-  /// since its upgrade may be about to take the lock.
-  package static func removeAbandonedMigrations(in given: String? = nil, grace: TimeInterval = 600)
-  {
+  /// its lock and is skipped. An upgrade creates its lock file and then takes the lock, so a lock
+  /// file nobody holds is left alone until it is `lockGrace` old, and a folder with no lock file
+  /// until it is `grace` old. The sweep keeps the lock until the folder is gone, so an upgrade
+  /// can't take it over midway.
+  package static func removeAbandonedMigrations(
+    in given: String? = nil, grace: TimeInterval = 600, lockGrace: TimeInterval = 60
+  ) {
     let root = given ?? scratchRoot()
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
     for name in names where name.hasPrefix(scratchPrefix) {
@@ -1810,13 +1813,17 @@ public enum LedgerStoreLifecycle {
       guard lstat(directory, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
         info.st_uid == geteuid()
       else { continue }
+      let now = Date().timeIntervalSince1970
       let lock = Darwin.open(directory + "/" + scratchLockName, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+      // Closed at the end of this pass, after the folder is removed.
+      defer { if lock >= 0 { Darwin.close(lock) } }
       if lock >= 0 {
-        defer { Darwin.close(lock) }
-        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { continue }
+        var lockInfo = stat()
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0, fstat(lock, &lockInfo) == 0,
+          now - TimeInterval(lockInfo.st_mtimespec.tv_sec) >= lockGrace
+        else { continue }
       } else {
-        let age = Date().timeIntervalSince1970 - TimeInterval(info.st_mtimespec.tv_sec)
-        guard age >= grace else { continue }
+        guard now - TimeInterval(info.st_mtimespec.tv_sec) >= grace else { continue }
       }
       MigratedImage.remove(directory: directory, path: directory + "/" + scratchName)
     }

@@ -2272,6 +2272,11 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
     }
     // Left behind by a killed upgrade: its lock file is there but nobody holds it.
     let abandoned = try scratch("ledger-atlas-migration-killed", lock: true)
+    try fileManager.setAttributes(
+      [.modificationDate: Date(timeIntervalSinceNow: -3600)],
+      ofItemAtPath: abandoned.appendingPathComponent("lock").path)
+    // Its upgrade just made the lock file and hasn't taken the lock yet: left alone.
+    let locking = try scratch("ledger-atlas-migration-locking", lock: true)
     // An upgrade running now holds its lock.
     let live = try scratch("ledger-atlas-migration-running", lock: true)
     let held = open(live.appendingPathComponent("lock").path, O_RDWR | O_CLOEXEC)
@@ -2287,12 +2292,13 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
     // Not ours.
     let other = try scratch("something-else", lock: true)
 
-    LedgerStoreLifecycle.removeAbandonedMigrations(in: root.path, grace: 600)
+    LedgerStoreLifecycle.removeAbandonedMigrations(in: root.path, grace: 600, lockGrace: 60)
 
     #expect(!fileManager.fileExists(atPath: abandoned.path))
     #expect(!fileManager.fileExists(atPath: stale.path))
     #expect(fileManager.fileExists(atPath: live.appendingPathComponent("migration.sqlite").path))
     #expect(fileManager.fileExists(atPath: starting.appendingPathComponent("migration.sqlite").path))
+    #expect(fileManager.fileExists(atPath: locking.appendingPathComponent("migration.sqlite").path))
     #expect(fileManager.fileExists(atPath: other.appendingPathComponent("migration.sqlite").path))
   }
 }
