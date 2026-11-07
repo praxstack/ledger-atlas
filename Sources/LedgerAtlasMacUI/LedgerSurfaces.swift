@@ -72,6 +72,7 @@ struct DataBackedSurface: View {
 }
 
 struct BackupSurface: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let rows: [LedgerJourney.SurfaceRow]
   let emptyMessage: String
   let lastFailure: String?
@@ -156,6 +157,10 @@ struct BackupSurface: View {
           .foregroundStyle(LedgerTheme.inkTertiary)
           .fixedSize(horizontal: false, vertical: true)
           .accessibilityLabel(VendorExport.notice)
+        if formatter.hidesAmounts {
+          Text(LedgerProductSettings.hideAmountsExportNotice)
+            .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+        }
       }
       .ledgerCard()
 
