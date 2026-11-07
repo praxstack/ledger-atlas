@@ -342,34 +342,20 @@ struct LedgerBrowseList: View {
   /// Money in, spending and net for what is shown, as figures: the first thing the eye
   /// reads on the screen. One group per currency.
   private var summaryStrip: some View {
-    HStack(alignment: .lastTextBaseline, spacing: LedgerTheme.Space.xxl) {
+    LedgerPageSummary {
       ForEach(totals, id: \.unitCode) { total in
         if let figures = Self.summaryFigures(total) {
-          summaryFigure("Money in", figures.income, size: .row, sign: .always)
-          summaryFigure("Spending", figures.expense, size: .row)
-          summaryFigure("Net", figures.net, size: .figure, sign: .always)
+          // Money in is green with "+"; spending stays in ink; net carries its sign and is
+          // the one figure drawn large, so the eye lands on it.
+          LedgerPageFigure("Money in", MoneyText(figures.income, size: .row, sign: .always))
+          LedgerPageFigure("Spending", MoneyText(figures.expense, size: .row, sign: .never, tone: .neutral))
+          LedgerPageFigure("Net", MoneyText(figures.net, size: .figure, sign: .always))
         } else {
           Text(Self.describe([total], formatter: formatter))
             .font(LedgerTheme.Typeface.secondary)
             .foregroundStyle(LedgerTheme.inkSecondary)
         }
       }
-      Spacer(minLength: 0)
-    }
-    .accessibilityElement(children: .combine)
-  }
-
-  /// Money in is green with "+"; spending stays in ink; net carries its sign. Net is the
-  /// figure the eye should land on, so only it is drawn large.
-  private func summaryFigure(
-    _ label: String, _ amount: CurrencyAmount, size: MoneyText.Size,
-    sign: LedgerDisplayFormatter.SignStyle = .never
-  ) -> some View {
-    VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
-      Text(label)
-        .font(LedgerTheme.Typeface.caption)
-        .foregroundStyle(LedgerTheme.inkSecondary)
-      MoneyText(amount, size: size, sign: sign, tone: sign == .always ? .automatic : .neutral)
     }
   }
 

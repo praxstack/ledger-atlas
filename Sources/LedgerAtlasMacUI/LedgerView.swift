@@ -172,8 +172,8 @@ struct LedgerView: View {
               VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
                 Text(transaction.detail)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
+                  .font(LedgerTheme.Typeface.caption)
+                  .foregroundStyle(LedgerTheme.inkSecondary)
               }
             }
           }
@@ -355,9 +355,9 @@ struct LedgerView: View {
     -> some View
   {
     VStack(spacing: 12) {
-      Image(systemName: icon).font(.largeTitle).foregroundStyle(.secondary)
+      Image(systemName: icon).font(.largeTitle).foregroundStyle(LedgerTheme.inkTertiary)
       Text(title).font(.title2.bold())
-      Text(description).foregroundStyle(.secondary)
+      Text(description).foregroundStyle(LedgerTheme.inkSecondary)
       if let guidance { LedgerLifecycleGuidanceView(guidance: guidance, failure: failure) }
       HStack {
         Button(buttonTitle, action: open)

@@ -188,7 +188,8 @@ struct SplitPurchaseForm: View {
         }
         TextField("Purchase note (optional)", text: $note)
         if let mismatch = sumMismatch {
-          Text(mismatch).font(.caption).foregroundStyle(.orange).accessibilityLabel(mismatch)
+          Text(mismatch).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.warning)
+            .accessibilityLabel(mismatch)
         }
         HStack {
           Button("Cancel", role: .cancel) { dismiss() }

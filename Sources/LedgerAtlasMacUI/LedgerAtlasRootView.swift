@@ -1349,7 +1349,8 @@ public struct LedgerAtlasRootView: View {
           })
         if let lastFailure = journey.lastFailure {
           Text(lastFailure)
-            .foregroundStyle(.red)
+            .font(LedgerTheme.Typeface.secondary)
+            .foregroundStyle(LedgerTheme.negative)
             .accessibilityLabel(lastFailure)
         }
         Picker("Backup source time zone", selection: $sourceTimeZoneIdentifier) {

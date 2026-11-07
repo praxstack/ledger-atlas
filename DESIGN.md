@@ -67,6 +67,7 @@ SF Pro only (system font); no bundled faces. Every style is a **system text styl
 - Spacing: 2, 4, 8, 12, 16, 20, 24, 32.
 - Radius: control 7, row 8, group 10, card 14, panel (sidebar, sheets) 16. Corners are concentric with the window.
 - Rows: table 40, compact 28, sidebar 27. Icon tile 28. Inspector width 320. Sidebar 240–300.
+- Pages: gutter 24, card column up to 820 then centred, paragraphs up to 560 (about 80 characters).
 
 ## 4. Components
 
@@ -82,6 +83,8 @@ All in `Sources/LedgerAtlasMacUI/Design/`.
 - **LedgerColorKey**: 8 pt rounded square for categories and accounts.
 - **LedgerIconTile**: 28 pt tile with an SF Symbol or payee initials on a 16% tint.
 - **LedgerProgressTrack**: budgets and shares; over 100% turns red and marks the limit.
+- **LedgerPage**: the page every screen outside the Transactions table sits on: canvas, 24 pt gutter, card column, no repeated large title (the toolbar has it). Inside it: **LedgerPageSummary** of **LedgerPageFigure**s (caption over figure, baseline-aligned, the key figure last and largest), **LedgerPageSection** (card header plus one card), **LedgerPageDivider** (1 px hairline inset to the text) and `.ledgerReadableWidth()` for paragraphs.
+- **Guards** (`LedgerDesignGuardTests`): no system colours, no raw `rawLiteral` amounts on screen, no `.caption`/`.footnote` fonts. Files that still have them are listed with a count that may only go down.
 
 ## 5. Layout
 

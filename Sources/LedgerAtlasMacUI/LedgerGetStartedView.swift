@@ -43,27 +43,20 @@ struct LedgerGetStartedView: View {
   ]
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxl) {
-        header
-        VStack(spacing: 0) {
-          importStep
-          ForEach(Self.laterSteps) { step in
-            Divider().overlay(LedgerTheme.hairline)
-            row(step)
-          }
+    LedgerPage {
+      header
+      VStack(spacing: 0) {
+        importStep
+        ForEach(Self.laterSteps) { step in
+          LedgerPageDivider()
+          row(step)
         }
-        .ledgerCard(padding: 0)
-        Label("Everything stays on this Mac. Nothing is uploaded.", systemImage: "lock")
-          .font(LedgerTheme.Typeface.caption)
-          .foregroundStyle(LedgerTheme.inkSecondary)
       }
-      .frame(maxWidth: 620, alignment: .leading)
-      .padding(.horizontal, LedgerTheme.Space.xxl)
-      .padding(.vertical, LedgerTheme.Space.xxl)
-      .frame(maxWidth: .infinity)
+      .ledgerCard(padding: 0)
+      Label("Everything stays on this Mac. Nothing is uploaded.", systemImage: "lock")
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.inkSecondary)
     }
-    .ledgerCanvas()
     .navigationTitle("Get Started")
   }
 
@@ -81,6 +74,7 @@ struct LedgerGetStartedView: View {
       .font(LedgerTheme.Typeface.body)
       .foregroundStyle(LedgerTheme.inkSecondary)
       .fixedSize(horizontal: false, vertical: true)
+      .ledgerReadableWidth()
     }
   }
 

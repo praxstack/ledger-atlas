@@ -220,6 +220,12 @@ public enum LedgerTheme {
     public static let sidebarRow: CGFloat = 27
     public static let iconTile: CGFloat = 28
     public static let inspectorWidth: CGFloat = 320
+    /// The one left and right margin of every page (LedgerPage).
+    public static let pageGutter: CGFloat = 24
+    /// The widest a page's column of cards grows before it centres.
+    public static let pageMaxWidth: CGFloat = 820
+    /// The widest a paragraph of explanation runs (about 80 characters).
+    public static let readableWidth: CGFloat = 560
   }
 
   // MARK: Type
