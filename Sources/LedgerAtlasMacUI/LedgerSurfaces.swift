@@ -213,7 +213,6 @@ struct BackupSurface: View {
     switch rowID {
     case "manifest": ("checkmark.seal.fill", LedgerTheme.positive)
     case "manifest-limit": ("info.circle.fill", LedgerTheme.inkSecondary)
-    case "manifest-failed": ("exclamationmark.triangle.fill", LedgerTheme.negative)
     default: nil
     }
   }
@@ -248,7 +247,7 @@ struct BackupSurface: View {
             ForEach(rows) { row in
               HStack(spacing: LedgerTheme.Space.s) {
                 if let status = Self.exportStatusSymbol(for: row.id) {
-                  // Healthy, limited or failed at a glance, and never by colour alone: the words say it too.
+                  // Ready or limited at a glance, and never by colour alone: the words say it too.
                   Image(systemName: status.symbol)
                     .foregroundStyle(status.tint)
                     .accessibilityHidden(true)

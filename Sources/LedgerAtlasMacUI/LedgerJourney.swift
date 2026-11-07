@@ -828,24 +828,25 @@ public final class LedgerJourney {
     return object?["importGraph"].map { !($0 is NSNull) } ?? false
   }
 
-  /// The Backup screen's export row. A ledger that is simply too big for a portable package, or that
-  /// carries receipts, is a known limit with a 1:1 backup as the answer, not a failed integrity check.
+  /// The Backup screen's portable-package row. An export that can't be made here (too large, has
+  /// receipts, or otherwise not representable) is a known limit with a 1:1 backup as the answer, so it
+  /// is never shown as a failed integrity check.
   private func backupExportRow() -> SurfaceRow {
+    let detail: String
     do {
       try refuseWhenReceiptsArePresent()
       let exported = try exportPackage()
       return SurfaceRow(
-        id: "manifest", title: "Integrity",
-        detail: "Exports cleanly · schema \(exported.manifest.schemaVersion)")
+        id: "manifest", title: "Portable package",
+        detail: "Ready · schema \(exported.manifest.schemaVersion)")
     } catch ReceiptAttachmentError.receiptsCannotTravelInPackages {
-      return SurfaceRow(
-        id: "manifest-limit", title: "Portable package", detail: "Has receipts · use Save 1:1 backup")
+      detail = "Has receipts · use Save 1:1 backup"
     } catch LedgerApplication.Error.packageTooLarge {
-      return SurfaceRow(
-        id: "manifest-limit", title: "Portable package", detail: "Too large · use Save 1:1 backup")
+      detail = "Too large · use Save 1:1 backup"
     } catch {
-      return SurfaceRow(id: "manifest-failed", title: "Integrity", detail: "Unavailable")
+      detail = "Not available · use Save 1:1 backup"
     }
+    return SurfaceRow(id: "manifest-limit", title: "Portable package", detail: detail)
   }
 
   package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
