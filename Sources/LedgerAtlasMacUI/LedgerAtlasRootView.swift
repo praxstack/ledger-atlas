@@ -436,29 +436,34 @@ public struct LedgerAtlasRootView: View {
       lifecycleRetryOperation = outcome.retryOperation
       if [.created, .opened, .upgraded].contains(outcome.kind) {
         selection = productSettings.startScreen
-      } else if outcome.failure == .receiptKeyMissing, let url, installRecoveryKey(for: url) {
+      } else if outcome.failure == .receiptKeyMissing, let url, let key = chooseRecoveryKey() {
+        // Checking the key replays the ledger's import graph, so it runs off the main actor.
+        let installed = await Task.detached(priority: .userInitiated) {
+          Result { try LedgerStore.installRecoveryKey(key, for: url) }
+        }.value
+        guard lifecycleGeneration == generation, recoveryKeyInstalled(installed) else { return }
         performLedgerSelection(.open, url: url, removingCopyIfRefused: removingCopyIfRefused)
       }
     }
   }
 
   /// A ledger with imported history needs its receipt key, which stays on the Mac that made it.
-  /// Asks for the recovery key file saved there, checks that it opens `ledger`, and stores it.
-  /// True when the key was installed (#182).
-  private func installRecoveryKey(for ledger: URL) -> Bool {
+  /// Asks for the recovery key file saved there and returns its contents, or nil when the person
+  /// cancels or the file can't be read (#182). The caller checks it against the ledger.
+  private func chooseRecoveryKey() -> Data? {
     let alert = NSAlert()
     alert.messageText = "This ledger's receipt key isn't on this Mac"
     alert.informativeText = Self.receiptKeyMissingExplanation
     alert.addButton(withTitle: "Choose Recovery Key…")
     alert.addButton(withTitle: "Cancel")
-    guard alert.runModal() == .alertFirstButtonReturn else { return false }
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
     let panel = NSOpenPanel()
     panel.title = "Choose the ledger's recovery key"
     panel.prompt = "Use Key"
     panel.allowedContentTypes = Self.recoveryKeyTypes
     panel.allowsMultipleSelection = false
     panel.canChooseDirectories = false
-    guard panel.runModal() == .OK, let file = panel.url else { return false }
+    guard panel.runModal() == .OK, let file = panel.url else { return nil }
     let scoped = file.startAccessingSecurityScopedResource()
     defer { if scoped { file.stopAccessingSecurityScopedResource() } }
     do {
@@ -466,11 +471,20 @@ public struct LedgerAtlasRootView: View {
       // large file without loading it.
       let handle = try FileHandle(forReadingFrom: file)
       defer { try? handle.close() }
-      let data = try handle.read(upToCount: 2_048) ?? Data()
-      try LedgerStore.installRecoveryKey(data, for: ledger)
+      return try handle.read(upToCount: 2_048) ?? Data()
+    } catch {
+      journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
+      return nil
+    }
+  }
+
+  /// Reports the result of checking and storing a recovery key. True when it was stored.
+  private func recoveryKeyInstalled(_ result: Result<Void, any Error>) -> Bool {
+    switch result {
+    case .success:
       lifecycleMessage = Self.recoveryKeyInstalledMessage
       return true
-    } catch {
+    case .failure(let error):
       journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
       return false
     }
@@ -798,7 +812,11 @@ public struct LedgerAtlasRootView: View {
     do {
       preview = try LedgerStore.openReadOnly(at: source).readSnapshot()
     } catch LedgerStore.Error.receiptKeyMissing {
-      guard installRecoveryKey(for: source) else { return }
+      // Restore validates the backup on the main actor (the preview above), so the key check
+      // does too; the open path checks keys off it.
+      guard let key = chooseRecoveryKey(),
+        recoveryKeyInstalled(Result { try LedgerStore.installRecoveryKey(key, for: source) })
+      else { return }
       preview = try? LedgerStore.openReadOnly(at: source).readSnapshot()
     } catch {}
     guard let preview else {
