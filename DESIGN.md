@@ -82,6 +82,7 @@ All in `Sources/LedgerAtlasMacUI/Design/`.
 - **LedgerColorKey**: 8 pt rounded square for categories and accounts.
 - **LedgerIconTile**: 28 pt tile with an SF Symbol or payee initials on a 16% tint.
 - **LedgerProgressTrack**: budgets and shares; over 100% turns red and marks the limit.
+- **Screen chrome** (`LedgerScreenChrome.swift`): **LedgerCardColumn** (the scrolling column of cards most screens are), **LedgerEmptyState** (icon tile, title, one sentence, the actions that get you out), **LedgerSessionEmptyState** (no ledger / loading / unavailable, with the **Open Ledger…** button), **LedgerActionBar** (recessed bar under a list: one primary, the rest secondary, status or failure beside them), **LedgerRow** and **LedgerRowDivider**, **LedgerKeyValue** (label left, value right, in a group box), **LedgerBadge** (small capsule: Hidden, Paused, Closed), **LedgerFigure** (caption over a MoneyText), **LedgerStatusLine** (failure in red with a warning symbol, otherwise a quiet sentence), **LedgerSurfaceRowList** (title-and-detail rows for the data-backed screens).
 
 ## 5. Layout
 

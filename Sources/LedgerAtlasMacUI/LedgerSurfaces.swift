@@ -15,30 +15,38 @@ struct SearchSurface: View {
   @State private var draft = ""
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      TextField("Search accounts, memos, tags, status", text: $draft)
-        .textFieldStyle(.roundedBorder)
-        .onChange(of: draft) { _, value in onQuery(value) }
-        .onAppear { draft = query }
-        .accessibilityLabel("Search ledger")
-        .accessibilityHint("Filters canonical transactions by memo, tag, kind, or status.")
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: LedgerTheme.Space.s) {
+        Image(systemName: "magnifyingglass")
+          .foregroundStyle(LedgerTheme.inkTertiary)
+          .accessibilityHidden(true)
+        TextField("Search accounts, memos, tags, status", text: $draft)
+          .textFieldStyle(.plain)
+          .font(LedgerTheme.Typeface.body)
+          .onChange(of: draft) { _, value in onQuery(value) }
+          .onAppear { draft = query }
+          .accessibilityLabel("Search ledger")
+          .accessibilityHint("Filters canonical transactions by memo, tag, kind, or status.")
+      }
+      .padding(.horizontal, LedgerTheme.Space.m)
+      .frame(height: 32)
+      .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.row))
+      .padding(LedgerTheme.Space.l)
       if rows.isEmpty {
-        Text(query.isEmpty ? emptyMessage : "No matching transactions.")
-          .foregroundStyle(.secondary)
-          .accessibilityLabel(query.isEmpty ? emptyMessage : "No matching transactions")
-        Button("Open…", action: open)
-      } else {
-        List(rows) { row in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(row.title)
-            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+        LedgerEmptyState(
+          query.isEmpty ? "Search the ledger" : "No matching transactions", systemImage: "magnifyingglass",
+          message: query.isEmpty ? emptyMessage : "Nothing matches “\(query)”. Try a memo, a tag, a kind or a status."
+        ) {
+          if query.isEmpty {
+            Button("Open…", action: open).buttonStyle(LedgerSecondaryButtonStyle())
           }
-          .accessibilityElement(children: .combine)
-          .accessibilityLabel("\(row.title), \(row.detail)")
         }
+        .accessibilityLabel(query.isEmpty ? emptyMessage : "No matching transactions")
+      } else {
+        LedgerSurfaceRowList(rows: rows)
       }
     }
-    .padding(query.isEmpty && rows.isEmpty ? 32 : 16)
+    .ledgerCanvas()
     .navigationTitle("Search")
   }
 }
@@ -51,23 +59,14 @@ struct DataBackedSurface: View {
 
   var body: some View {
     if rows.isEmpty {
-      VStack(alignment: .leading, spacing: 12) {
-        Text(destination.title).font(.largeTitle.bold())
-        Text(emptyMessage).foregroundStyle(.secondary)
-        Button("Open…", action: open)
+      LedgerEmptyState(destination.title, systemImage: "tray", message: emptyMessage) {
+        Button("Open…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .padding(32)
-    } else {
-      List(rows) { row in
-        VStack(alignment: .leading, spacing: 4) {
-          Text(row.title)
-          Text(row.detail).font(.caption).foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.title), \(row.detail)")
-      }
+      .ledgerCanvas()
       .navigationTitle(destination.title)
+    } else {
+      LedgerSurfaceRowList(rows: rows)
+        .navigationTitle(destination.title)
     }
   }
 }
@@ -89,55 +88,89 @@ struct BackupSurface: View {
   var importXLSX: (() -> Void)? = nil
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      if rows.isEmpty {
-        Text("Backup").font(.largeTitle.bold())
-        Text(emptyMessage).foregroundStyle(.secondary)
-      } else {
-        List(rows) { row in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(row.title)
-            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+    LedgerCardColumn {
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+        LedgerCardHeader("This ledger")
+        if rows.isEmpty {
+          Text(emptyMessage)
+            .font(LedgerTheme.Typeface.secondary)
+            .foregroundStyle(LedgerTheme.inkSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+              LedgerKeyValue(row.title, row.detail)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(row.title), \(row.detail)")
+              if row.id != rows.last?.id { LedgerRowDivider() }
+            }
           }
-          .accessibilityElement(children: .combine)
-          .accessibilityLabel("\(row.title), \(row.detail)")
+          .padding(.horizontal, LedgerTheme.Space.m)
+          .ledgerGroupBox()
+        }
+        if lastFailure != nil || status != nil {
+          LedgerStatusLine(failure: lastFailure, status: status).textSelection(.enabled)
         }
       }
-      if let lastFailure {
-        Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
-      } else if let status {
-        Text(status).foregroundStyle(.secondary).textSelection(.enabled)
-          .accessibilityLabel(status)
+      .ledgerCard()
+
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+        LedgerCardHeader("Backups") { Text("Exact copies of this ledger") }
+        Text("A 1:1 backup is the ledger file as it is, receipts included. Restoring one replaces the open ledger with that copy.")
+          .font(LedgerTheme.Typeface.secondary)
+          .foregroundStyle(LedgerTheme.inkSecondary)
+          .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: LedgerTheme.Space.s) {
+          Button("Save 1:1 backup…", action: saveBackup)
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            .accessibilityLabel("Save 1:1 backup")
+          Button("Restore backup…", action: restoreBackup)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Restore backup")
+          Button("Open ledger…", action: open)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+        }
       }
-      HStack {
-        Button("Open ledger…", action: open)
-        Button("Save 1:1 backup…", action: saveBackup)
-          .accessibilityLabel("Save 1:1 backup")
-        Button("Restore backup…", action: restoreBackup)
-          .accessibilityLabel("Restore backup")
-        Button("Export portable package…", action: exportPackage)
-          .accessibilityLabel("Export portable package")
-        Button("Import portable package…", action: restorePackage)
-          .accessibilityLabel("Import portable package")
+      .ledgerCard()
+
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+        LedgerCardHeader("Portable packages") { Text("For moving between Macs") }
+        HStack(spacing: LedgerTheme.Space.s) {
+          Button("Export portable package…", action: exportPackage)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Export portable package")
+          Button("Import portable package…", action: restorePackage)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Import portable package")
+        }
+        Text(VendorExport.notice)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkTertiary)
+          .fixedSize(horizontal: false, vertical: true)
+          .accessibilityLabel(VendorExport.notice)
       }
-      Text(VendorExport.notice).font(.caption).foregroundStyle(.secondary)
-        .accessibilityLabel(VendorExport.notice)
+      .ledgerCard()
+
       if exportXLSX != nil || importXLSX != nil || reset != nil {
-        HStack {
-          if let exportXLSX {
-            Button("Export spreadsheet…", action: exportXLSX)
-          }
-          if let importXLSX {
-            Button("Import spreadsheet…", action: importXLSX)
-          }
-          if let reset {
-            Button("Reset ledger…", role: .destructive, action: reset)
-              .accessibilityLabel("Reset ledger")
+        VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+          LedgerCardHeader("Spreadsheets and reset")
+          HStack(spacing: LedgerTheme.Space.s) {
+            if let exportXLSX {
+              Button("Export spreadsheet…", action: exportXLSX).buttonStyle(LedgerSecondaryButtonStyle())
+            }
+            if let importXLSX {
+              Button("Import spreadsheet…", action: importXLSX).buttonStyle(LedgerSecondaryButtonStyle())
+            }
+            if let reset {
+              Button("Reset ledger…", role: .destructive, action: reset)
+                .buttonStyle(LedgerSecondaryButtonStyle())
+                .accessibilityLabel("Reset ledger")
+            }
           }
         }
+        .ledgerCard()
       }
     }
-    .padding(16)
     .navigationTitle("Backup")
   }
 }
