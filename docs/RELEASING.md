@@ -12,8 +12,8 @@ Either way, these run on that commit:
 - **CI** (`.github/workflows/ci.yml`): Swift build and tests, Python and web checks.
 - **Mac app (DMG)** (`.github/workflows/mac-app.yml`): builds and signs the DMG, opens it on a
   CI Mac, walks every screen, and imports a 7,500-entry made-up backup and reopens the result.
-  It then **waits for CI on the same commit to pass** (`scripts/ci/wait-for-green-ci.sh`) and
-  only then publishes the GitHub Release with the DMG, its `.sha256`, and the notes from
+  It then **waits for the whole CI run on the same commit to pass**
+  (`scripts/ci/wait-for-green-ci.sh`), and only then publishes the GitHub Release with the DMG, its `.sha256`, and the notes from
   `docs/releases/<tag>.md`.
 
 The DMG is signed ad hoc (there is no paid Apple Developer account), so it is not notarized.
