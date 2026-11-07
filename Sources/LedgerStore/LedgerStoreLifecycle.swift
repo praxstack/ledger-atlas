@@ -6,10 +6,8 @@ import LedgerCore
 
 /// The only path-based boundary for creating, opening, and upgrading canonical ledgers.
 public enum LedgerStoreLifecycle {
-  // In-memory legacy migration uses sqlite3 backup plus sqlite3_serialize.  Keep this
-  // preflight bounded so a sparse/hostile legacy file cannot force an unbounded allocation;
-  // larger ledgers need a future streaming migration path.
-  private static let maximumMigratedImageBytes: UInt64 = 512 * 1024 * 1024
+  /// Room an upgrade leaves free on the disk beyond the files it writes.
+  private static let migrationSpaceMargin: UInt64 = 64 * 1024 * 1024
 
   public enum Inspection: Equatable, Sendable { case current, upgradeRequired }
   public enum Disposition: Equatable, Sendable { case created, opened, upgraded }
@@ -56,6 +54,8 @@ public enum LedgerStoreLifecycle {
     /// The ledger holds imported history and its receipt key isn't on this Mac. Nothing is
     /// damaged; installing the key (or the Keys folder) lets it open (#182).
     case receiptKeyMissing
+    /// The disk hasn't room for the files an upgrade writes. Nothing was changed (#180).
+    case insufficientSpace
   }
 
   package enum TestPhase: Equatable, Sendable {
@@ -357,11 +357,21 @@ public enum LedgerStoreLifecycle {
   private static func upgrade(
     _ source: PinnedFile, at url: URL, lease: LifecycleLease, hook: TestHook?
   ) throws -> Result {
-    try requireMigrationSizeBound(source.descriptor)
     let destination = try Destination(url)
     defer { Darwin.close(destination.parentDescriptor) }
     let recoveryURL = recoveryImageURL(for: url)
     let recoveryLeaf = recoveryURL.lastPathComponent
+    // The recovery image, the scratch migration and the replacement: three copies at most. An
+    // upgrade resumed after its recovery image was published reuses that image (it is
+    // validated below). The scratch copy counts here only when the temporary folder is on the
+    // ledger's volume; otherwise its own volume is checked when it is made. Scratch copies a
+    // killed upgrade left behind go first, so their space counts.
+    removeAbandonedMigrations()
+    try requireMigrationSpace(
+      source.descriptor,
+      copies: migrationCopiesOnLedgerVolume(
+        recoveryExists: entryExists(recoveryLeaf, in: destination.parentDescriptor),
+        scratchSharesVolume: sharesVolume(source.descriptor, with: scratchRoot())))
     var temporaryRecovery: TemporaryFile?
     var recoveryPublished = false
     var didPublishRecovery = false
@@ -517,7 +527,7 @@ public enum LedgerStoreLifecycle {
         leaf: recoveryLeaf, parentDescriptor: destination.parentDescriptor,
         expectedDigest: recovery.contentDigest, expectedIdentity: recovery.identity)
     ) {
-      try write(try migratedImage(from: source.descriptor, at: url), to: replacement)
+      try migratedImage(from: source.descriptor, at: url).copy(to: replacement)
       try invoke(hook, .afterReplacementMigrated)
     }
     try reportingPublication(
@@ -657,7 +667,7 @@ public enum LedgerStoreLifecycle {
         recovery, source: source, leaf: recoveryLeaf,
         parentDescriptor: destination.parentDescriptor)
       let expected = try migratedImage(from: source.descriptor, at: url)
-      guard digest(expected) == replacement.lastAuthoredState.digest else {
+      guard try expected.digest() == replacement.lastAuthoredState.digest else {
         throw Error.pathChanged
       }
       try requirePath(url, matches: source.identity)
@@ -1055,7 +1065,9 @@ public enum LedgerStoreLifecycle {
     defer { Darwin.close(displaced.descriptor) }
     try requirePinnedFileStillSafe(current, parentDescriptor: destination.parentDescriptor)
     let expected = try migratedImage(from: recovery.descriptor, at: url)
-    guard digest(expected) == current.contentDigest else { throw Error.pathChanged }
+    guard try expected.digest() == current.contentDigest else {
+      throw Error.pathChanged
+    }
     try reconcilePublishedUpgradeCompanions(
       current: current, displaced: displaced, at: url, destination: destination, lease: lease)
     try requirePublishedRecoveryStillSafe(
@@ -1221,7 +1233,9 @@ public enum LedgerStoreLifecycle {
       replacement, leaf: record.replacementLeaf,
       parentDescriptor: destination.parentDescriptor)
     let expected = try migratedImage(from: source.descriptor, at: url)
-    guard digest(expected) == replacement.contentDigest else { throw Error.pathChanged }
+    guard try expected.digest() == replacement.contentDigest else {
+      throw Error.pathChanged
+    }
     try requirePath(url, matches: source.identity)
     try requirePinnedFileStillSafe(
       recovery, leaf: recoveryURL.lastPathComponent,
@@ -1604,10 +1618,8 @@ public enum LedgerStoreLifecycle {
         version: versionNumber, fingerprint: fingerprint),
       CanonicalLedgerSchema.lifecycleUpgradePath(from: release) != nil
     {
-      // Validate only the cheap legacy metadata before accepting the file for an in-memory
-      // migration.  The migration path uses sqlite3_backup/serialize and is bounded below;
-      // current-schema inspection remains uncapped.
-      try requireMigrationSizeBound(source.descriptor)
+      // Validate only the cheap legacy metadata here. The migration itself runs on disk and
+      // checks for room when it starts (#180).
       try validateDatabase(database, as: .legacy)
       return .upgradeRequired
     }
@@ -1706,16 +1718,141 @@ public enum LedgerStoreLifecycle {
     return try serialized(database)
   }
 
-  private static func requireMigrationSizeBound(_ descriptor: Int32) throws {
-    let value = try identity(of: descriptor)
+  /// Refuses an upgrade the disk hasn't room for, before anything is written. `copies` is how
+  /// many files the size of the ledger the step writes.
+  /// Ledger-sized copies an upgrade writes to the ledger's own volume: the replacement, the
+  /// recovery image unless it already exists, and the scratch migration when the temporary
+  /// folder shares the volume.
+  package static func migrationCopiesOnLedgerVolume(
+    recoveryExists: Bool, scratchSharesVolume: Bool
+  ) -> UInt64 {
+    1 + (recoveryExists ? 0 : 1) + (scratchSharesVolume ? 1 : 0)
+  }
+
+  /// Whether the folder at `path` is on the volume of the file open at `descriptor`. When
+  /// either can't be checked, the answer is yes, so the space check counts more, never less.
+  private static func sharesVolume(_ descriptor: Int32, with path: String) -> Bool {
+    var file = stat()
+    var folder = stat()
+    guard fstat(descriptor, &file) == 0, stat(path, &folder) == 0 else { return true }
+    return file.st_dev == folder.st_dev
+  }
+
+  private static func requireMigrationSpace(_ descriptor: Int32, copies: UInt64) throws {
+    try requireMigrationSpace(of: descriptor, copies: copies, onVolumeOf: descriptor)
+  }
+
+  /// The same check for `copies` files the size of the ledger open at `ledger`, written to the
+  /// volume holding the file open at `volumeFile`.
+  private static func requireMigrationSpace(
+    of ledger: Int32, copies: UInt64, onVolumeOf volumeFile: Int32
+  ) throws {
+    let value = try identity(of: ledger)
     guard value.st_size >= 0 else { throw Error.invalidStore }
-    guard UInt64(value.st_size) <= maximumMigratedImageBytes else {
-      throw Error.unsupportedStore
+    // fstatfs, not fstatvfs: macOS's statvfs counts blocks in 32 bits and misreports a
+    // large disk.
+    var volume = statfs()
+    guard fstatfs(volumeFile, &volume) == 0 else { throw Error.insufficientSpace }
+    try requireMigrationSpace(
+      ledgerBytes: UInt64(value.st_size), copies: copies,
+      availableBytes: UInt64(volume.f_bavail) &* UInt64(volume.f_bsize))
+  }
+
+  package static func requireMigrationSpace(
+    ledgerBytes: UInt64, copies: UInt64, availableBytes: UInt64
+  ) throws {
+    let (needed, overflow) = ledgerBytes.multipliedReportingOverflow(by: copies)
+    guard !overflow, needed <= availableBytes,
+      availableBytes - needed >= migrationSpaceMargin
+    else { throw Error.insufficientSpace }
+  }
+
+  /// A migrated ledger in a private scratch file. Until #180 the migration ran in memory and was
+  /// capped at 512 MiB, so a large imported ledger could never be upgraded. The scratch file is
+  /// removed when this is released.
+  private final class MigratedImage {
+    let descriptor: Int32
+    private let directory: String
+    private let path: String
+    private let lock: Int32
+
+    fileprivate init(descriptor: Int32, directory: String, path: String, lock: Int32) {
+      self.descriptor = descriptor
+      self.directory = directory
+      self.path = path
+      self.lock = lock
+    }
+
+    deinit {
+      Darwin.close(descriptor)
+      MigratedImage.remove(directory: directory, path: path)
+      Darwin.close(lock)
+    }
+
+    /// Methods, so the file stays open for as long as they read it.
+    func digest() throws -> String { try LedgerStoreLifecycle.digest(descriptor) }
+    func copy(to temporary: TemporaryFile) throws {
+      try LedgerStoreLifecycle.copy(descriptor, to: temporary)
+    }
+
+    fileprivate static func remove(directory: String, path: String) {
+      for suffix in ["", "-journal", "-wal", "-shm"] { unlink(path + suffix) }
+      unlink(directory + "/" + scratchLockName)
+      rmdir(directory)
     }
   }
 
-  private static func migratedImage(from descriptor: Int32, at _: URL) throws -> Data {
-    try requireMigrationSizeBound(descriptor)
+  /// The app's temporary folder with its symlinks resolved. On macOS it lives under /var, a
+  /// symlink to /private/var, and SQLite's no-follow open refuses any path through a symlink.
+  private static func scratchRoot() -> String {
+    let path = FileManager.default.temporaryDirectory.path
+    guard let resolved = realpath(path, nil) else { return path }
+    defer { free(resolved) }
+    return String(cString: resolved)
+  }
+
+  private static let scratchPrefix = "ledger-atlas-migration-"
+  private static let scratchName = "migration.sqlite"
+  /// Held (flock) for as long as its upgrade runs, so a sweep can tell a live scratch
+  /// migration from one a killed upgrade left behind.
+  private static let scratchLockName = "lock"
+
+  /// Removes scratch migrations that an upgrade killed part-way left in `root`. Each is a full
+  /// plaintext copy of a ledger and takes the room the next upgrade needs. A live upgrade holds
+  /// its lock and is skipped. An upgrade creates its lock file and then takes the lock, so a lock
+  /// file nobody holds is left alone until it is `lockGrace` old, and a folder with no lock file
+  /// until it is `grace` old. The sweep keeps the lock until the folder is gone, so an upgrade
+  /// can't take it over midway.
+  package static func removeAbandonedMigrations(
+    in given: String? = nil, grace: TimeInterval = 600, lockGrace: TimeInterval = 60
+  ) {
+    let root = given ?? scratchRoot()
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
+    for name in names where name.hasPrefix(scratchPrefix) {
+      let directory = root + "/" + name
+      var info = stat()
+      guard lstat(directory, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+        info.st_uid == geteuid()
+      else { continue }
+      let now = Date().timeIntervalSince1970
+      let lock = Darwin.open(directory + "/" + scratchLockName, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+      // Closed at the end of this pass, after the folder is removed.
+      defer { if lock >= 0 { Darwin.close(lock) } }
+      if lock >= 0 {
+        var lockInfo = stat()
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0, fstat(lock, &lockInfo) == 0,
+          now - TimeInterval(lockInfo.st_mtimespec.tv_sec) >= lockGrace
+        else { continue }
+      } else {
+        guard now - TimeInterval(info.st_mtimespec.tv_sec) >= grace else { continue }
+      }
+      MigratedImage.remove(directory: directory, path: directory + "/" + scratchName)
+    }
+  }
+
+  /// Builds the migrated ledger from the legacy ledger open at `descriptor`. The same input
+  /// always gives the same bytes, which the upgrade's restart checks rely on.
+  private static func migratedImage(from descriptor: Int32, at _: URL) throws -> MigratedImage {
     let source = try openReadOnlyDatabase(descriptor)
     defer { sqlite3_close(source) }
     try validateDatabase(source, as: .legacy)
@@ -1723,21 +1860,132 @@ public enum LedgerStoreLifecycle {
       let path = CanonicalLedgerSchema.lifecycleUpgradePath(from: release)
     else { throw Error.unsupportedStore }
     try requireMigrationSupported(source, from: release)
+
+    // A private directory (mkdtemp makes it owner-only) in the app's own temporary folder.
+    // That folder is in the app's container, but the space check below looks at the volume it
+    // is actually on rather than assuming it shares the ledger's.
+    let root = scratchRoot()
+    removeAbandonedMigrations(in: root)
+    var template = Array((root + "/" + scratchPrefix + "XXXXXX").utf8CString)
+    // The path is read inside the closure: mkdtemp's result points into `template`'s buffer.
+    let made: String? = template.withUnsafeMutableBufferPointer { buffer in
+      mkdtemp(buffer.baseAddress!).map { String(cString: $0) }
+    }
+    guard let directory = made else {
+      throw errno == ENOSPC ? Error.insufficientSpace : Error.invalidStore
+    }
+    let scratch = directory + "/" + scratchName
+    let lock = Darwin.open(
+      directory + "/" + scratchLockName, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+      mode_t(S_IRUSR | S_IWUSR))
+    var built = false
+    defer {
+      if !built {
+        MigratedImage.remove(directory: directory, path: scratch)
+        if lock >= 0 { Darwin.close(lock) }
+      }
+    }
+    guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Error.invalidStore }
+    try requireMigrationSpace(of: descriptor, copies: 1, onVolumeOf: lock)
+
     var destination: OpaquePointer?
-    guard sqlite3_open(":memory:", &destination) == SQLITE_OK, let destination else {
+    guard
+      sqlite3_open_v2(
+        scratch, &destination, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOFOLLOW,
+        nil) == SQLITE_OK,
+      let destination
+    else {
+      sqlite3_close(destination)
       throw Error.invalidStore
     }
-    defer { sqlite3_close(destination) }
-    guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
-      throw Error.invalidStore
-    }
-    let step = sqlite3_backup_step(backup, -1)
-    let finish = sqlite3_backup_finish(backup)
-    guard step == SQLITE_DONE, finish == SQLITE_OK,
-      execute(destination, "PRAGMA foreign_keys=ON"), execute(destination, "BEGIN IMMEDIATE")
-    else { throw Error.invalidStore }
-    // All steps share one transaction, so a failure at any step leaves nothing half-upgraded.
     do {
+      defer { sqlite3_close(destination) }
+      // A scratch copy nothing else reads: no journal and no fsync. A failure throws the whole
+      // file away, and the result is checked before it is used.
+      guard execute(destination, "PRAGMA journal_mode=OFF"),
+        execute(destination, "PRAGMA synchronous=OFF")
+      else { throw Error.invalidStore }
+      guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
+        throw Error.invalidStore
+      }
+      let step = sqlite3_backup_step(backup, -1)
+      let finish = sqlite3_backup_finish(backup)
+      guard step == SQLITE_DONE, finish == SQLITE_OK,
+        execute(destination, "PRAGMA foreign_keys=ON"), execute(destination, "BEGIN IMMEDIATE")
+      else {
+        throw step == SQLITE_FULL || sqlite3_errcode(destination) == SQLITE_FULL
+          ? Error.insufficientSpace : Error.invalidStore
+      }
+      // One transaction for every step, so the checks below see the finished migration only.
+      do {
+        for upgrade in path {
+          for statement in upgrade.statements {
+            guard execute(destination, statement) else { throw Error.invalidStore }
+          }
+          guard
+            execute(
+              destination,
+              "UPDATE ledger_meta SET value='\(upgrade.to.version)' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(upgrade.to.fingerprint)' WHERE key='schema_fingerprint'"
+            ),
+            schemaObjects(destination) == upgrade.to.objects
+          else { throw Error.invalidStore }
+        }
+        guard execute(destination, "COMMIT") else { throw Error.invalidStore }
+      } catch {
+        let full = sqlite3_errcode(destination) == SQLITE_FULL
+        _ = execute(destination, "ROLLBACK")
+        throw full ? Error.insufficientSpace : error
+      }
+      try validateDatabase(destination, as: .current)
+    }
+
+    let image = Darwin.open(scratch, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+    guard image >= 0 else { throw Error.invalidStore }
+    guard fchmod(image, mode_t(S_IRUSR | S_IWUSR)) == 0,
+      matchInMemoryHeader(image, source: descriptor)
+    else {
+      Darwin.close(image)
+      throw Error.invalidStore
+    }
+    built = true
+    return MigratedImage(descriptor: image, directory: directory, path: scratch, lock: lock)
+  }
+
+  #if DEBUG
+    /// Tests only: true when the on-disk migration of the legacy ledger at `url` gives exactly
+    /// the bytes the in-memory migration of builds before #180 gave.
+    package static func migrationMatchesInMemoryForTesting(at url: URL) throws -> Bool {
+      let descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+      guard descriptor >= 0 else { throw Error.invalidStore }
+      defer { Darwin.close(descriptor) }
+      let image = try migratedImage(from: descriptor, at: url)
+      let size = try identity(of: image.descriptor).st_size
+      var onDisk = [UInt8](repeating: 0, count: Int(size))
+      guard pread(image.descriptor, &onDisk, onDisk.count, 0) == onDisk.count else {
+        throw Error.invalidStore
+      }
+      return Data(onDisk) == (try inMemoryMigratedImage(from: descriptor))
+    }
+
+    private static func inMemoryMigratedImage(from descriptor: Int32) throws -> Data {
+      let source = try openReadOnlyDatabase(descriptor)
+      defer { sqlite3_close(source) }
+      guard let release = legacyRelease(of: source),
+        let path = CanonicalLedgerSchema.lifecycleUpgradePath(from: release)
+      else { throw Error.unsupportedStore }
+      var destination: OpaquePointer?
+      guard sqlite3_open(":memory:", &destination) == SQLITE_OK, let destination else {
+        throw Error.invalidStore
+      }
+      defer { sqlite3_close(destination) }
+      guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
+        throw Error.invalidStore
+      }
+      let step = sqlite3_backup_step(backup, -1)
+      let finish = sqlite3_backup_finish(backup)
+      guard step == SQLITE_DONE, finish == SQLITE_OK,
+        execute(destination, "PRAGMA foreign_keys=ON"), execute(destination, "BEGIN IMMEDIATE")
+      else { throw Error.invalidStore }
       for upgrade in path {
         for statement in upgrade.statements {
           guard execute(destination, statement) else { throw Error.invalidStore }
@@ -1746,17 +1994,28 @@ public enum LedgerStoreLifecycle {
           execute(
             destination,
             "UPDATE ledger_meta SET value='\(upgrade.to.version)' WHERE key='schema_version'; UPDATE ledger_meta SET value='\(upgrade.to.fingerprint)' WHERE key='schema_fingerprint'"
-          ),
-          schemaObjects(destination) == upgrade.to.objects
+          )
         else { throw Error.invalidStore }
       }
       guard execute(destination, "COMMIT") else { throw Error.invalidStore }
-    } catch {
-      _ = execute(destination, "ROLLBACK")
-      throw error
+      return try serialized(destination)
     }
-    try validateDatabase(destination, as: .current)
-    return try serialized(destination)
+  #endif
+
+  /// SQLite counts commits in the header of a file database (the change counter at offset 24,
+  /// copied to offset 92 with the library version at 96) but not in an in-memory one. Builds
+  /// before #180 migrated in memory, so the scratch file takes the source's values back. The
+  /// bytes then match what those builds wrote, and an upgrade one of them started still
+  /// finishes.
+  private static func matchInMemoryHeader(_ image: Int32, source: Int32) -> Bool {
+    var original = [UInt8](repeating: 0, count: 100)
+    var migrated = [UInt8](repeating: 0, count: 100)
+    guard pread(source, &original, 100, 0) == 100, pread(image, &migrated, 100, 0) == 100
+    else { return false }
+    for range in [24..<28, 92..<100] {
+      migrated.replaceSubrange(range, with: original[range])
+    }
+    return pwrite(image, migrated, 100, 0) == 100 && fsync(image) == 0
   }
 
   private static func requireLegacyMigrationSupported(_ descriptor: Int32) throws {
@@ -2024,13 +2283,36 @@ public enum LedgerStoreLifecycle {
     }
 
     func beginWrite(of data: Data) {
+      releaseCopySource()
       expectedContent = .data(data)
       authoredLength = 0
     }
 
+    /// Keeps its own descriptor for the source, so a copy cut short can still be checked against
+    /// it and neutralized after the caller has closed the source (a scratch migration, #180).
     func beginCopy(from source: Int32) throws {
-      expectedContent = .descriptor(source, identity: try LedgerStoreLifecycle.identity(of: source))
+      releaseCopySource()
+      let owned = dup(source)
+      guard owned >= 0 else { throw Error.publicationFailed }
+      do {
+        expectedContent = .descriptor(owned, identity: try LedgerStoreLifecycle.identity(of: owned))
+      } catch {
+        Darwin.close(owned)
+        throw error
+      }
       authoredLength = 0
+    }
+
+    /// The copy finished and its state is recorded: the file is exactly `lastAuthoredState`, so
+    /// the source is no longer needed to recognise it, and its space can be freed.
+    func finishCopy() {
+      releaseCopySource()
+      expectedContent = .complete
+    }
+
+    private func releaseCopySource() {
+      if case .descriptor(let owned, _) = expectedContent { Darwin.close(owned) }
+      expectedContent = nil
     }
 
     func recordAuthoredBytes(_ count: Int) {
@@ -2056,6 +2338,7 @@ public enum LedgerStoreLifecycle {
           try? unlinkIfStillBoundAndEmpty()
         }
       }
+      releaseCopySource()
       Darwin.close(descriptor)
     }
 
@@ -2099,6 +2382,10 @@ public enum LedgerStoreLifecycle {
           try LedgerStoreLifecycle.prefixMatches(
             descriptor, source: source, length: authoredLength)
         else { throw Error.pathChanged }
+      case .complete:
+        guard try LedgerStoreLifecycle.digest(descriptor) == lastAuthoredState.digest else {
+          throw Error.pathChanged
+        }
       }
       guard ftruncate(descriptor, 0) == 0, fsync(descriptor) == 0,
         fsync(parentDescriptor) == 0
@@ -2108,7 +2395,10 @@ public enum LedgerStoreLifecycle {
 
   private enum ExpectedTemporaryContent {
     case data(Data)
+    /// A descriptor the temporary file owns and closes.
     case descriptor(Int32, identity: stat)
+    /// A finished copy: the whole file is its last authored state.
+    case complete
   }
 
   private static func openPublished(
@@ -2425,7 +2715,7 @@ public enum LedgerStoreLifecycle {
     while offset < value.st_size {
       let count = pread(descriptor, &buffer, min(buffer.count, Int(value.st_size - offset)), offset)
       guard count > 0 else { throw Error.pathChanged }
-      hasher.update(data: Data(buffer[0..<count]))
+      buffer.withUnsafeBytes { hasher.update(bufferPointer: .init(rebasing: $0[..<count])) }
       offset += off_t(count)
     }
     let retained = try identity(of: descriptor)
@@ -2505,6 +2795,7 @@ public enum LedgerStoreLifecycle {
       throw Error.publicationFailed
     }
     try temporary.recordAuthoredState()
+    temporary.finishCopy()
   }
 
   private static func filesEqual(_ lhs: Int32, _ rhs: Int32) -> Bool {
@@ -2519,7 +2810,7 @@ public enum LedgerStoreLifecycle {
       let leftCount = pread(lhs, &leftBuffer, amount, offset)
       let rightCount = pread(rhs, &rightBuffer, amount, offset)
       guard leftCount == amount, rightCount == amount,
-        leftBuffer.prefix(amount).elementsEqual(rightBuffer.prefix(amount))
+        memcmp(leftBuffer, rightBuffer, amount) == 0
       else { return false }
       offset += off_t(amount)
     }
@@ -2536,7 +2827,7 @@ public enum LedgerStoreLifecycle {
       let count = pread(descriptor, &buffer, amount, off_t(offset))
       guard count == amount else { return false }
       let matches = expected.withUnsafeBytes { bytes in
-        buffer[..<amount].elementsEqual(bytes[offset..<offset + amount])
+        memcmp(buffer, bytes.baseAddress!.advanced(by: offset), amount) == 0
       }
       guard matches else { return false }
       offset += amount
@@ -2555,7 +2846,7 @@ public enum LedgerStoreLifecycle {
       let leftCount = pread(descriptor, &leftBuffer, amount, off_t(offset))
       let rightCount = pread(source, &rightBuffer, amount, off_t(offset))
       guard leftCount == amount, rightCount == amount,
-        leftBuffer[..<amount].elementsEqual(rightBuffer[..<amount])
+        memcmp(leftBuffer, rightBuffer, amount) == 0
       else { return false }
       offset += amount
     }
