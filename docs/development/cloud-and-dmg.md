@@ -8,7 +8,7 @@ Swift build, the tests, and the DMG.
   edit (cloud session / any machine)
         │  git push / pull request
         ▼
-  CI ─────────────── checks  (Linux)  npm lint/typecheck/test/build, ruff, pytest
+  CI ─────────────── checks  (Linux)  ruff, pytest, JSON parse
    │                 swift   (macOS)  swift build, swift test, mmctl
    ▼
   Mac app (DMG) ──── xcodebuild Release → sign → DMG → launch smoke test
@@ -25,14 +25,13 @@ Swift build, the tests, and the DMG.
 
 | Workflow | Trigger | Runner | What it proves |
 |---|---|---|---|
-| `CI` / Web + Python checks | every PR, push to main | ubuntu | web demo and orchestration tooling are green |
+| `CI` / Python checks | every PR, push to main | ubuntu | orchestration tooling and JSON files are green |
 | `CI` / Swift build + test | PRs touching Swift/Xcode/scripts, push to main | macos-26 | `swift build`, `swift test`, `mmctl` |
 | `Mac app (DMG)` | push to main, `v*` tags, manual, PRs labelled `build-dmg` | macos-26 | the Xcode app builds, signs, packages, and launches |
 
 The cloud container itself is Linux, so it cannot build the Swift targets (they link
-AppKit, Security, WidgetKit, and friends). It can run the web and Python checks
-locally: `npm ci && npm run lint && npm run typecheck && npm test` and
-`uv sync --frozen && .venv/bin/ruff check scripts .codex/hooks tests/orchestration && .venv/bin/pytest tests/orchestration`.
+AppKit, Security, WidgetKit, and friends). It can run the Python checks
+locally: `uv sync --frozen && .venv/bin/ruff check scripts .codex/hooks tests/orchestration && .venv/bin/pytest tests/orchestration`.
 Swift feedback comes from the `CI` workflow on the pull request.
 
 ## Getting a DMG onto your Mac

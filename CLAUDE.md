@@ -1,6 +1,6 @@
 # Ledger Atlas
 
-Next.js application for ledger/accounting workflows. See `README.md` for development setup.
+Local-first personal-finance app for macOS (Swift, SwiftUI) that imports Money Manager backups losslessly. See `README.md` for development setup and `docs/INSTALL.md` for the app.
 
 ## Agent skills
 
