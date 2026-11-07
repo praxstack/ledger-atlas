@@ -151,9 +151,9 @@ struct BackupSurface: View {
       }
       .ledgerCard()
 
-      if exportXLSX != nil || importXLSX != nil || reset != nil {
+      if exportXLSX != nil || importXLSX != nil {
         VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
-          LedgerCardHeader("Spreadsheets and reset")
+          LedgerCardHeader("Spreadsheets") { Text("Excel workbooks") }
           HStack(spacing: LedgerTheme.Space.s) {
             if let exportXLSX {
               Button("Export spreadsheet…", action: exportXLSX).buttonStyle(LedgerSecondaryButtonStyle())
@@ -161,12 +161,21 @@ struct BackupSurface: View {
             if let importXLSX {
               Button("Import spreadsheet…", action: importXLSX).buttonStyle(LedgerSecondaryButtonStyle())
             }
-            if let reset {
-              Button("Reset ledger…", role: .destructive, action: reset)
-                .buttonStyle(LedgerSecondaryButtonStyle())
-                .accessibilityLabel("Reset ledger")
-            }
           }
+        }
+        .ledgerCard()
+      }
+
+      if let reset {
+        VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+          LedgerCardHeader("Reset")
+          Text("Resetting removes this ledger's contents. Save a 1:1 backup first if you may want them back.")
+            .font(LedgerTheme.Typeface.secondary)
+            .foregroundStyle(LedgerTheme.inkSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+          Button("Reset ledger…", role: .destructive, action: reset)
+            .buttonStyle(LedgerDestructiveButtonStyle())
+            .accessibilityLabel("Reset ledger")
         }
         .ledgerCard()
       }

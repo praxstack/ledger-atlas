@@ -125,7 +125,7 @@ struct CategoryBreadcrumbs: View {
         .accessibilityAddTraits(.isHeader)
     } else {
       Button(title) { select(id) }
-        .buttonStyle(.link)
+        .buttonStyle(LedgerLinkButtonStyle())
         .accessibilityLabel(title)
         .font(LedgerTheme.Typeface.secondary)
     }

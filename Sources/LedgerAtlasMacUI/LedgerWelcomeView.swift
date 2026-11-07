@@ -137,7 +137,7 @@ struct LedgerWelcomeView: View {
         .accessibilityLabel("Try sample data")
         .accessibilityHint("Opens a made-up household ledger to explore. Your data is not touched.")
     }
-    .buttonStyle(.link)
+    .buttonStyle(LedgerLinkButtonStyle())
     .font(LedgerTheme.Typeface.secondary)
   }
 }

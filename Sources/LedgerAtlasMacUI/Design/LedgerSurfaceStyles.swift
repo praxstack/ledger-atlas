@@ -139,6 +139,37 @@ public struct LedgerSecondaryButtonStyle: ButtonStyle {
   }
 }
 
+/// A destructive action (Reset): a quiet button with its label in the negative colour.
+/// `role: .destructive` alone doesn't colour a bordered button on macOS.
+public struct LedgerDestructiveButtonStyle: ButtonStyle {
+  public init() {}
+
+  public func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.system(.callout, weight: .medium))
+      .foregroundStyle(LedgerTheme.negative)
+      .padding(.horizontal, 11)
+      .frame(height: 26)
+      .background(
+        configuration.isPressed ? LedgerTheme.fieldFillPressed : LedgerTheme.fieldFill,
+        in: .rect(cornerRadius: LedgerTheme.Radius.control)
+      )
+      .contentShape(.rect)
+  }
+}
+
+/// An inline text link in the accent colour. The system `.link` style is always system blue,
+/// a second accent next to the teal.
+public struct LedgerLinkButtonStyle: ButtonStyle {
+  public init() {}
+
+  public func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .foregroundStyle(configuration.isPressed ? LedgerTheme.accentPressed : LedgerTheme.accent)
+      .contentShape(.rect)
+  }
+}
+
 /// A filter chip ("October 2026", "All accounts").
 public struct LedgerChip: View {
   let title: String

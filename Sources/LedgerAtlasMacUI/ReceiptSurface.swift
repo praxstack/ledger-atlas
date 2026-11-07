@@ -193,7 +193,7 @@ struct ReceiptSurface: View {
       if !matches.isEmpty {
         ForEach(matches, id: \.id) { row in
           Button("\(row.title) · \(row.detail)") { linkTarget = row.id }
-            .buttonStyle(.link)
+            .buttonStyle(LedgerLinkButtonStyle())
             .accessibilityLabel("Link to \(row.title), \(row.detail)")
         }
       }
