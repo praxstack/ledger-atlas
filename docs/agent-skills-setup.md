@@ -1,6 +1,6 @@
 # Agent Skills — Super-Pro Developer Workflow
 
-This repository ships a curated, project-local skill library under `.agents/skills/` so Cloud Agents and local Cursor sessions share the same workflows.
+This repository installs a curated, project-local skill library under `.agents/skills/` so Cloud Agents and local Cursor sessions share the same workflows. The library is not committed (many packs carry their own licences, #185): `./scripts/install-skills.sh` recreates it from `skills-lock.json`, and the Cursor environment runs it after checkout.
 
 ## 2026 architecture
 
@@ -323,7 +323,7 @@ For project-local browser verification harnesses, run `/create-verification-skil
 ## Directory layout
 
 ```
-.agents/skills/          # Project skills (committed — works in Cloud Agents)
+.agents/skills/          # Project skills (installed, gitignored; recreated by install-skills.sh)
   find-skills/
   agent-browser/
   poteto-mode/

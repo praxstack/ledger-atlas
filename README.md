@@ -33,11 +33,11 @@ builds an installable DMG on GitHub's macOS runners. See
 
 ## Agent skills
 
-This repo ships 818+ project-local agent skills under `.agents/skills/` plus Spec Kit workflows in `.cursor/skills/`. See [docs/agent-skills-setup.md](docs/agent-skills-setup.md) for the full layered pipeline, core 10 commands, and install/update instructions.
+Agent skills are installed locally under `.agents/skills/` by `./scripts/install-skills.sh` (sources pinned in `skills-lock.json`) and are not committed, because many carry their own third-party licences (#185). Spec Kit workflows live in `.cursor/skills/`. See [docs/agent-skills-setup.md](docs/agent-skills-setup.md) for the pipeline and install/update instructions.
 
 ## Cloud Agent environment
 
-Repository-managed environment configuration lives in `.cursor/environment.json`. The install script at `.cursor/scripts/install.sh` sets up the Python tooling after checkout.
+Repository-managed environment configuration lives in `.cursor/environment.json`. The install script at `.cursor/scripts/install.sh` sets up the Python tooling and installs the agent skills after checkout.
 
 Native development also follows `AGENTS.md`, `CONTEXT.md`, `SPEC.md`, and
 `docs/orchestration/RUNBOOK.md`. Real financial evidence stays in the separate
