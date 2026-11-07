@@ -11,6 +11,14 @@ package enum CanonicalLedgerHealth {
     (try? validate(database, trustKey: trustKey)) != nil
   }
 
+  /// True when the ledger passes every check except the receipt signatures, which need the
+  /// receipt key. Each receipt must still carry exactly one anchor in the expected algorithm.
+  /// Only for telling a ledger whose key is missing from a damaged one (#182): it never makes a
+  /// ledger openable.
+  package static func passesAllButReceiptSignatures(_ database: OpaquePointer) -> Bool {
+    (try? validateReading(database, signaturesUnverifiable: true)) != nil
+  }
+
   /// Tables that only an import writes. Besides these, the import-graph replay reads only
   /// `ledger_meta` and the v19 marker literals (`import.v19*`) on transaction revisions.
   /// `importGraphStamp` hashes exactly these inputs: a replay that reads anything more must
@@ -257,7 +265,7 @@ package enum CanonicalLedgerHealth {
   static func validateReading(
     _ database: OpaquePointer, trustKey: Data? = nil, verifyingReceiptImages: Bool = true,
     importGraphVerifiedAt: ImportGraphMark? = nil, remembering: VerifiedImportGraphs? = nil,
-    fileAlreadyVerified: Bool = false
+    fileAlreadyVerified: Bool = false, signaturesUnverifiable: Bool = false
   ) throws -> (mark: ImportGraphMark, snapshot: LedgerStore.LedgerReadSnapshot) {
     // Run the whole check in one read transaction with a larger page cache. Otherwise SQLite
     // re-takes its file lock for each of the many small queries below, and a ~900 MB imported
@@ -286,7 +294,8 @@ package enum CanonicalLedgerHealth {
       if let stamp, let remembering, remembering.contains(stamp) {
         // This exact import graph passed the replay before, under this key and build.
       } else {
-        try validateImportGraph(database, trustKey: trustKey)
+        try validateImportGraph(
+          database, trustKey: trustKey, signaturesUnverifiable: signaturesUnverifiable)
         if let stamp { remembering?.insert(stamp) }
       }
     }
@@ -585,7 +594,9 @@ package enum CanonicalLedgerHealth {
     static let defaults = CategoryTree(parentID: nil, displayOrder: 0, hidden: false)
   }
 
-  private static func validateImportGraph(_ database: OpaquePointer, trustKey: Data?) throws {
+  private static func validateImportGraph(
+    _ database: OpaquePointer, trustKey: Data?, signaturesUnverifiable: Bool
+  ) throws {
     for row in try rows(
       database,
       "SELECT event_id, account_id, event_kind, amount_literal, currency_unit, instant_milliseconds, local_year, local_month, local_day, local_hour, local_minute, local_second, local_millisecond, timezone_kind, timezone_value, temporal_precision, resolved_offset_seconds, source_record_id, provenance_id FROM main.economic_event",
@@ -645,12 +656,15 @@ package enum CanonicalLedgerHealth {
     for query in invalidQueries where try !rows(database, query, { _ in () }).isEmpty {
       throw HealthError.invalid
     }
-    try validateReceiptDigests(database, trustKey: trustKey)
+    try validateReceiptDigests(
+      database, trustKey: trustKey, signaturesUnverifiable: signaturesUnverifiable)
   }
 
   /// Recomputes persisted receipt anchors from the canonical graph. MMImport may validate a
   /// requested receipt additionally, but this is the authority for every stored receipt.
-  private static func validateReceiptDigests(_ database: OpaquePointer, trustKey: Data?) throws {
+  private static func validateReceiptDigests(
+    _ database: OpaquePointer, trustKey: Data?, signaturesUnverifiable: Bool
+  ) throws {
     let schemaVersion = try require(
       rows(database, "SELECT value FROM ledger_meta WHERE key='schema_version'", { $0.text(0) })
         .first)
@@ -703,7 +717,8 @@ package enum CanonicalLedgerHealth {
           requireCurrentMarkers: schemaVersion == String(CanonicalLedgerSchema.version))
         if schemaVersion == String(CanonicalLedgerSchema.version) {
           try validateReceiptTrustAnchor(
-            database, receipt: receiptID, integrityHash: receipt.text(5), trustKey: trustKey)
+            database, receipt: receiptID, integrityHash: receipt.text(5), trustKey: trustKey,
+            signaturesUnverifiable: signaturesUnverifiable)
         }
       } else {
         guard
@@ -718,14 +733,18 @@ package enum CanonicalLedgerHealth {
   }
 
   private static func validateReceiptTrustAnchor(
-    _ database: OpaquePointer, receipt: String, integrityHash: String, trustKey: Data?
+    _ database: OpaquePointer, receipt: String, integrityHash: String, trustKey: Data?,
+    signaturesUnverifiable: Bool
   ) throws {
-    guard let trustKey else { throw HealthError.invalid }
     let anchors = try rows(
       database,
       "SELECT algorithm, signature FROM ledger_receipt_trust_anchor WHERE idempotency_key='\(receipt)'",
       { $0 })
-    guard anchors.count == 1, anchors[0].text(0) == LedgerReceiptTrust.algorithm,
+    guard anchors.count == 1, anchors[0].text(0) == LedgerReceiptTrust.algorithm else {
+      throw HealthError.invalid
+    }
+    if signaturesUnverifiable { return }
+    guard let trustKey,
       LedgerReceiptTrust.verifies(
         key: trustKey, signature: anchors[0].text(1), receiptID: receipt,
         integrityHash: integrityHash)

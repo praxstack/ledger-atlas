@@ -17,6 +17,9 @@ public struct LedgerAtlasRootView: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
+  /// Which columns show. The sidebar's own toggle and ⌃⌘S change it; tests start with the
+  /// detail alone to capture the table and inspector at a small display's width.
+  @State private var columnVisibility: NavigationSplitViewVisibility
   @State private var session: LedgerSession
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
@@ -49,6 +52,8 @@ public struct LedgerAtlasRootView: View {
   /// ledger outside app storage.
   private let scopeStarter: (URL) -> Bool
   private let scopeStopper: (URL) -> Void
+  /// The calendar day Upcoming is made for. Tests fix it so captures read the same every day.
+  private let todayOverride: (() -> SourceLocalDate)?
 
   public init(
     initialSelection: AppDestination = .defaultSelection,
@@ -71,9 +76,12 @@ public struct LedgerAtlasRootView: View {
     widgetProjectionPublisher: RedactedWidgetProjectionPublisher? = nil,
     intentConsumer: @escaping () -> LedgerIntentRequest? = { nil },
     scopeStarter: @escaping (URL) -> Bool = { LedgerLocations.startAccess($0) },
-    scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) }
+    scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) },
+    initialColumnVisibility: NavigationSplitViewVisibility = .automatic,
+    today: (() -> SourceLocalDate)? = nil
   ) {
     _selection = State(initialValue: initialSelection)
+    _columnVisibility = State(initialValue: initialColumnVisibility)
     _session = State(
       initialValue: LedgerSession(testingScopeStarter: scopeStarter, testingScopeStopper: scopeStopper))
     _appLock = State(initialValue: appLock)
@@ -84,10 +92,11 @@ public struct LedgerAtlasRootView: View {
     self.intentConsumer = intentConsumer
     self.scopeStarter = scopeStarter
     self.scopeStopper = scopeStopper
+    self.todayOverride = today
   }
 
   public var body: some View {
-    NavigationSplitView {
+    NavigationSplitView(columnVisibility: $columnVisibility) {
       LedgerSidebar(
         selection: $selection, focusedAccountID: $focusedAccountID,
         accounts: appLock.isLocked ? [] : sidebarAccounts,
@@ -95,7 +104,7 @@ public struct LedgerAtlasRootView: View {
         importDisabled: journey.backgroundWork != nil,
         importBackup: chooseImportSource)
       .navigationTitle("Ledger Atlas")
-      .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+      .navigationSplitViewColumnWidth(min: 240, ideal: 250, max: 300)
       .toolbar {
         // Hide amounts (⇧⌘H) sits in the sidebar's part of the toolbar, which has room to
         // spare; in the screen's part it pushed New into the overflow menu at the default size.
@@ -133,8 +142,17 @@ public struct LedgerAtlasRootView: View {
       // Every screen sits on the same canvas: lists and forms drop their own white or grey
       // scroll background, so the base never changes shade from one screen to the next.
       .scrollContentBackground(.hidden)
-      .ledgerCanvas()
+      // No opaque white band where a screen's scroll view meets the toolbar (macOS 26), but
+      // scrolled content still fades under the toolbar so its items stay readable.
+      .softScrollEdgeEffect(.top)
+      // Fill the whole column, including the strip under the toolbar and, on macOS 26, the part
+      // behind the floating sidebar; otherwise the system window colour shows there in light.
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(LedgerTheme.canvas, ignoresSafeAreaEdges: .all)
     }
+    // The window's own background is the canvas too: on macOS 26 the toolbar's scroll edge
+    // effect is painted in the window colour, which left a white band above most screens.
+    .containerBackground(LedgerTheme.canvas, for: .window)
     // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
     .onChange(of: productSettings.appearance, initial: true) { _, appearance in
       LedgerAppearance.apply(appearance)
@@ -210,6 +228,9 @@ public struct LedgerAtlasRootView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: LedgerReminderResponder.didOpenReminder)) { _ in
+      openReminderIfReady()
     }
     .onChange(of: journey.ledgerURL) { _, ledger in
       portal.ledgerDidChange(to: ledger)
@@ -436,7 +457,99 @@ public struct LedgerAtlasRootView: View {
       lifecycleRetryOperation = outcome.retryOperation
       if [.created, .opened, .upgraded].contains(outcome.kind) {
         selection = productSettings.startScreen
+      } else if outcome.failure == .receiptKeyMissing, let url, let key = chooseRecoveryKey() {
+        // Checking the key replays the ledger's import graph, so it runs off the main actor.
+        let installed = await Task.detached(priority: .userInitiated) {
+          Result { try LedgerStore.installRecoveryKey(key, for: url) }
+        }.value
+        guard lifecycleGeneration == generation, recoveryKeyInstalled(installed) else { return }
+        performLedgerSelection(.open, url: url, removingCopyIfRefused: removingCopyIfRefused)
       }
+    }
+  }
+
+  /// A ledger with imported history needs its receipt key, which stays on the Mac that made it.
+  /// Asks for the recovery key file saved there and returns its contents, or nil when the person
+  /// cancels or the file can't be read (#182). The caller checks it against the ledger.
+  private func chooseRecoveryKey() -> Data? {
+    let alert = NSAlert()
+    alert.messageText = "This ledger's receipt key isn't on this Mac"
+    alert.informativeText = Self.receiptKeyMissingExplanation
+    alert.addButton(withTitle: "Choose Recovery Key…")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    let panel = NSOpenPanel()
+    panel.title = "Choose the ledger's recovery key"
+    panel.prompt = "Use Key"
+    panel.allowedContentTypes = Self.recoveryKeyTypes
+    panel.allowsMultipleSelection = false
+    panel.canChooseDirectories = false
+    guard panel.runModal() == .OK, let file = panel.url else { return nil }
+    let scoped = file.startAccessingSecurityScopedResource()
+    defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+    do {
+      // A recovery key file is under 200 bytes; reading a little more is enough to refuse a
+      // large file without loading it.
+      let handle = try FileHandle(forReadingFrom: file)
+      defer { try? handle.close() }
+      return try handle.read(upToCount: 2_048) ?? Data()
+    } catch {
+      lifecycleMessage = nil
+      journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
+      return nil
+    }
+  }
+
+  /// Reports the result of checking and storing a recovery key. True when it was stored.
+  private func recoveryKeyInstalled(_ result: Result<Void, any Error>) -> Bool {
+    switch result {
+    case .success:
+      lifecycleMessage = Self.recoveryKeyInstalledMessage
+      return true
+    case .failure(let error):
+      // The missing-key explanation would otherwise stay on screen over this error.
+      lifecycleMessage = nil
+      journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
+      return false
+    }
+  }
+
+  /// Saves the open ledger's recovery key, to keep with its backups.
+  private func saveRecoveryKey() {
+    guard let ledger = journey.ledgerURL else { return }
+    let file: Data
+    do {
+      guard let made = try LedgerReceiptTrust.recoveryKeyFile(for: ledger) else {
+        if LedgerReceiptTrust.hasImportedHistory(at: ledger) {
+          lifecycleMessage = nil
+          journey.recordFailure(Self.recoveryKeyUnavailableMessage)
+        } else {
+          lifecycleMessage = Self.recoveryKeyNotNeededMessage
+        }
+        return
+      }
+      file = made
+    } catch {
+      journey.recordFailure("The recovery key could not be read from this Mac.")
+      return
+    }
+    let panel = NSSavePanel()
+    panel.title = "Save recovery key"
+    panel.message = Self.recoveryKeySavePanelMessage
+    panel.allowedContentTypes = Self.recoveryKeyTypes
+    panel.nameFieldStringValue =
+      "\(ledger.deletingPathExtension().lastPathComponent) recovery key.ledgerkey"
+    guard panel.runModal() == .OK, let destination = panel.url else { return }
+    do {
+      // Owner-only (0600) from the start, never following a link or replacing a file. The
+      // sandbox lets the app write the picked file but nothing beside it.
+      try LedgerPortablePackageFile.publish(file, to: destination)
+      lifecycleMessage = Self.recoveryKeySavedMessage
+    } catch LedgerPortablePackageFile.Error.destinationExists {
+      journey.recordFailure(
+        "A file with that name is already there, and it wasn't replaced. Choose another name.")
+    } catch {
+      journey.recordFailure("The recovery key could not be saved there. Choose another place.")
     }
   }
 
@@ -470,6 +583,7 @@ public struct LedgerAtlasRootView: View {
       // is taken here, once the ledger is back. Its screen wins over the start screen.
       if let pendingIntent { route(pendingIntent) }
       consumePendingIntentIfUnlocked()
+      openReminderIfReady()
     }
   }
 
@@ -569,6 +683,8 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: given == nil ? 0 : 19_800))
       log("import check: review \(journey.phase) after \(seconds()) \(journey.lastFailure ?? "")")
       await approveImport()
+      // Publication picks another name if the requested one was taken meanwhile.
+      if let published = journey.ledgerURL { imported = published }
       log(
         "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions after \(seconds()) \(journey.lastFailure ?? "")"
       )
@@ -724,7 +840,18 @@ public struct LedgerAtlasRootView: View {
       return
     }
     defer { source.stopAccessingSecurityScopedResource() }
-    guard let preview = try? LedgerStore.openReadOnly(at: source).readSnapshot() else {
+    var preview: LedgerStore.LedgerReadSnapshot?
+    do {
+      preview = try LedgerStore.openReadOnly(at: source).readSnapshot()
+    } catch LedgerStore.Error.receiptKeyMissing {
+      // Restore validates the backup on the main actor (the preview above), so the key check
+      // does too; the open path checks keys off it.
+      guard let key = chooseRecoveryKey(),
+        recoveryKeyInstalled(Result { try LedgerStore.installRecoveryKey(key, for: source) })
+      else { return }
+      preview = try? LedgerStore.openReadOnly(at: source).readSnapshot()
+    } catch {}
+    guard let preview else {
       journey.recordFailure("The selected backup could not be validated.")
       return
     }
@@ -995,8 +1122,47 @@ public struct LedgerAtlasRootView: View {
     return alert.runModal() == .alertFirstButtonReturn
   }
 
-  package static func backupSavedMessage(sha256: String) -> String {
+  package static func backupSavedMessage(sha256: String, needsRecoveryKey: Bool = false)
+    -> String
+  {
     "Backup saved. SHA-256: \(sha256)"
+      + (needsRecoveryKey
+        ? " To open it on another Mac you'll also need its recovery key: choose Save recovery key… once and keep the key separate from your backups (a password manager is ideal)."
+        : "")
+  }
+
+  /// A recovery key file. `.ledgerkey` is plain text, so it opens anywhere.
+  package static let recoveryKeyTypes: [UTType] = {
+    if let key = UTType(filenameExtension: "ledgerkey", conformingTo: .plainText) {
+      return [key, .plainText]
+    }
+    return [.plainText]
+  }()
+
+  package static let receiptKeyMissingExplanation =
+    "Nothing is damaged. This ledger holds imported Money Manager history, which Ledger Atlas checks with a receipt key kept on the Mac that imported it. To open it here, choose the recovery key saved on that Mac (Backup > Save recovery key…)."
+  package static let recoveryKeyInstalledMessage =
+    "Recovery key added to this Mac. The ledger opens normally from now on."
+  package static let recoveryKeySavedMessage =
+    "Recovery key saved. Keep it separate from your backups, somewhere private (a password manager is ideal). Anyone with both a backup and its key could change the imported history without it showing."
+  package static let recoveryKeyUnavailableMessage =
+    "This ledger's receipt key isn't on this Mac any more, so there's no recovery key to save. Reopen the ledger and choose the recovery key saved earlier."
+  package static let recoveryKeyNotNeededMessage =
+    "This ledger has no imported history, so it needs no recovery key. Its backups open on any Mac."
+  package static let recoveryKeySavePanelMessage =
+    "You need this file to open your backups on another Mac. Keep it apart from them, ideally in a password manager."
+
+  package static func recoveryKeyFailureMessage(for error: any Swift.Error) -> String {
+    switch error as? LedgerReceiptTrustError {
+    case .invalidKey:
+      return "This file isn't the recovery key for this ledger. Nothing was changed. Choose the key saved for this ledger."
+    case .conflictingKeys:
+      return "This Mac already has a different receipt key for this ledger, so nothing was changed."
+    case .some:
+      return "The recovery key could not be stored on this Mac. Nothing was changed."
+    case nil:
+      return "This recovery key doesn't open this ledger, so it wasn't added. Nothing was changed."
+    }
   }
 
   package static func backupFailureMessage(for error: any Swift.Error) -> String {
@@ -1027,6 +1193,8 @@ public struct LedgerAtlasRootView: View {
       return "A ledger with that name already exists. Choose Create Ledger and pick another name."
     case .companionPresent:
       return "Temporary files left beside this ledger by an earlier session were not recognised, so it was not opened. \(retry)"
+    case .receiptKeyMissing:
+      return receiptKeyMissingExplanation
     default:
       return operation == .create
         ? "Ledger could not be created. \(retry)" : "Ledger could not be opened. \(retry)"
@@ -1049,11 +1217,17 @@ public struct LedgerAtlasRootView: View {
       case .upgraded: .upgraded
       }
     let recoveryExists = completion.recoveryImageURL != nil
+    let messages = [
+      completion.rolledBackInterruptedSave ? interruptedSaveRolledBackMessage : nil,
+      recoveryExists ? "Ledger upgraded. A validated recovery image is available." : nil,
+    ].compactMap { $0 }
     return .init(
       kind: kind, recoveryImageExists: recoveryExists,
-      message: recoveryExists
-        ? "Ledger upgraded. A validated recovery image is available." : nil)
+      message: messages.isEmpty ? nil : messages.joined(separator: " "))
   }
+
+  package static let interruptedSaveRolledBackMessage =
+    "A save was interrupted last time, so the ledger was put back to its last complete save."
 
   private static func publicationFailureMessage(
     operation: LedgerLifecycleOperation, phase: LedgerStoreLifecycle.PublicationPhase,
@@ -1342,7 +1516,14 @@ public struct LedgerAtlasRootView: View {
         importDisabled: journey.backgroundWork != nil,
         importBackup: chooseImportSource, createLedger: createLedger, openLedger: openLedger,
         trySampleData: openSampleLedger)
-    } else if selection == .importReview || selection == .onboarding {
+    } else if selection == .onboarding {
+      LedgerGetStartedView(
+        hasLedger: session.screen == .loaded,
+        historyImported: session.screen == .loaded && journey.hasImportedHistory,
+        importDisabled: journey.backgroundWork != nil,
+        importBackup: chooseImportSource,
+        show: { selection = $0 })
+    } else if selection == .importReview {
       ImportReviewSurface(
         summary: journey.phase == .idle ? importReviewSummary : journey.summary,
         failure: journey.lastFailure,
@@ -1462,7 +1643,8 @@ public struct LedgerAtlasRootView: View {
               LedgerJourney.editFailureMessage(
                 for: error, otherwise: "Split purchase could not be closed."))
           }
-        }
+        },
+        upcoming: pendingIntent?.showsUpcoming == true ? upcoming() : nil
       )
       .id(selection)
     } else if selection == .receipts {
@@ -1489,7 +1671,11 @@ public struct LedgerAtlasRootView: View {
           guard panel.runModal() == .OK, let url = panel.url else { return }
           do {
             let digest = try journey.backupCanonicalLedger(to: url)
-            lifecycleMessage = Self.backupSavedMessage(sha256: digest)
+            // A backup with imported history opens on another Mac only with its recovery key.
+            let needsKey = journey.ledgerURL.map {
+              (try? LedgerReceiptTrust.recoveryKeyFile(for: $0)) != nil
+            } ?? false
+            lifecycleMessage = Self.backupSavedMessage(sha256: digest, needsRecoveryKey: needsKey)
           } catch {
             lifecycleMessage = nil
             journey.recordFailure(Self.backupFailureMessage(for: error))
@@ -1499,6 +1685,7 @@ public struct LedgerAtlasRootView: View {
         exportPackage: exportPortablePackage,
         restorePackage: restorePortablePackage,
         reset: journey.snapshot.map { _ in resetLedger },
+        saveRecoveryKey: journey.snapshot.map { _ in saveRecoveryKey },
         exportXLSX: journey.snapshot.map { _ in exportXLSXWorkbook },
         importXLSX: journey.snapshot.map { _ in importXLSXWorkbook }
       )
@@ -1634,7 +1821,7 @@ public struct LedgerAtlasRootView: View {
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
           } catch { journey.recordFailure("Recurrence occurrences could not be generated.") }
         },
-        open: openLedger, timeZone: productSettings.timeZone)
+        open: openLedger, timeZone: productSettings.timeZone, upcoming: upcoming())
       .id(selection)
     } else if selection == .installments {
       InstallmentsView(
@@ -1758,6 +1945,26 @@ public struct LedgerAtlasRootView: View {
       let request = intentConsumer()
     else { return }
     route(request)
+  }
+
+  /// The daily reminder was opened: the entry form opens with Upcoming beside it (#171). It
+  /// waits while the app is locked or the ledger is still opening, and gives way to a request
+  /// already being shown.
+  private func openReminderIfReady() {
+    guard LedgerReminderResponder.isWaiting, !appLock.isLocked, journey.snapshot != nil,
+      pendingIntent == nil
+    else { return }
+    guard LedgerReminderResponder.take() else { return }
+    route(LedgerIntentRequest(kind: .addExpense, showsUpcoming: true))
+  }
+
+  /// What is due soon in the open ledger (#171), for the person's calendar day.
+  private func upcoming() -> LedgerUpcoming? {
+    guard let snapshot = journey.snapshot else { return nil }
+    return LedgerUpcoming(
+      rules: snapshot.recurrenceRules, installmentPlans: snapshot.installmentPlans,
+      transactions: snapshot.transactions,
+      today: todayOverride?() ?? LedgerPeriodRule.today(in: productSettings.timeZone))
   }
 
   private func route(_ request: LedgerIntentRequest) {

@@ -40,13 +40,16 @@ struct LedgerView: View {
   var saveAsTemplate: ((String, String) -> Void)?
   var editSplit: ((LedgerSplitDraft) -> Void)?
   var closeSplit: ((String) -> Void)?
+  /// What is due soon (#171); the entry form shows it beside itself when the request asks.
+  var upcoming: LedgerUpcoming? = nil
   @State private var editingSplit: LedgerSplitPurchase?
   @State private var selectedID: String?
   @State private var taggingID: String?
   @State private var templatingID: String?
   @State private var amountLiteral = ""
   @State private var macAmountLiteral = ""
-  @State private var showingTransactionForm = false
+  @State private var entryForm: EntryFormRequest?
+  /// Upcoming as it was when the reminder opened the form; kept while the form stays open.
   @State private var showingSplitForm = false
   /// + New was pressed while read-only: the form opens once editing has begun.
   @State private var opensFormWhenEditing = false
@@ -103,7 +106,7 @@ struct LedgerView: View {
             // The one primary action on the screen. Read-only, it begins editing first.
             Button {
               if isEditing {
-                showingTransactionForm = true
+                entryForm = EntryFormRequest()
               } else {
                 opensFormWhenEditing = true
                 beginEditing()
@@ -118,7 +121,9 @@ struct LedgerView: View {
               Label(Self.newTransactionTitle, systemImage: "plus")
                 .labelStyle(.titleAndIcon)
             }
-            .buttonStyle(.borderedProminent)
+            // The app's own primary style, so it is the teal accent like every other primary
+            // action, not the system accent colour.
+            .buttonStyle(LedgerPrimaryButtonStyle())
             .help("New transaction: add income or an expense")
           }
         }
@@ -153,7 +158,7 @@ struct LedgerView: View {
                 lifecycleMessage ?? "This native ledger has no transactions yet."))
             if isEditing {
               HStack {
-                Button("New transaction") { showingTransactionForm = true }
+                Button("New transaction") { entryForm = EntryFormRequest() }
                   .accessibilityLabel("New income or expense")
                 Button("New split purchase") { showingSplitForm = true }
                   .accessibilityLabel("New split purchase")
@@ -173,8 +178,8 @@ struct LedgerView: View {
               VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
                 Text(transaction.detail(hidingAmounts: formatter.hidesAmounts))
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
+                  .font(LedgerTheme.Typeface.caption)
+                  .foregroundStyle(LedgerTheme.inkSecondary)
               }
             }
           }
@@ -182,16 +187,18 @@ struct LedgerView: View {
         }
       }
     }
-    .sheet(isPresented: $showingTransactionForm) {
-      NativeTransactionForm(
-        accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
-        entries: transactions,
-        onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
-          let result = createTransaction(
-            submissionID, amount, kind, accountID, categoryID, note, links)
-          if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
-          return result
-        })
+    .sheet(item: $entryForm) { request in
+      EntryFormWithUpcoming(
+        form: NativeTransactionForm(
+          accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
+          entries: transactions,
+          onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
+            let result = createTransaction(
+              submissionID, amount, kind, accountID, categoryID, note, links)
+            if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
+            return result
+          }),
+        upcoming: request.upcoming, accounts: accounts, categories: categories)
     }
     .sheet(isPresented: $showingSplitForm) {
       SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
@@ -242,7 +249,7 @@ struct LedgerView: View {
     .onChange(of: isEditing) { _, editing in
       guard editing, opensFormWhenEditing else { return }
       opensFormWhenEditing = false
-      showingTransactionForm = true
+      entryForm = EntryFormRequest()
     }
     .onDisappear { opensFormWhenEditing = false }
     .onAppear { presentIntentIfNeeded() }
@@ -284,7 +291,7 @@ struct LedgerView: View {
 
   @ViewBuilder private var createButtons: some View {
     Button {
-      showingTransactionForm = true
+      entryForm = EntryFormRequest()
     } label: {
       Label("New Transaction", systemImage: "plus")
     }
@@ -348,9 +355,9 @@ struct LedgerView: View {
   /// Opens the form for a Shortcuts request once the ledger's accounts have loaded, so the
   /// form never opens empty on a cold launch.
   private func presentIntentIfNeeded() {
-    guard let intentRequest, !showingTransactionForm, !accounts.isEmpty else { return }
+    guard let intentRequest, entryForm == nil, !accounts.isEmpty else { return }
     guard intentRequest.kind == .addExpense || intentRequest.kind == .addIncome else { return }
-    showingTransactionForm = true
+    entryForm = EntryFormRequest(upcoming: intentRequest.showsUpcoming ? upcoming : nil)
   }
 
   private func openPrompt(
@@ -360,9 +367,9 @@ struct LedgerView: View {
     -> some View
   {
     VStack(spacing: 12) {
-      Image(systemName: icon).font(.largeTitle).foregroundStyle(.secondary)
+      Image(systemName: icon).font(.largeTitle).foregroundStyle(LedgerTheme.inkTertiary)
       Text(title).font(.title2.bold())
-      Text(description).foregroundStyle(.secondary)
+      Text(description).foregroundStyle(LedgerTheme.inkSecondary)
       if let guidance { LedgerLifecycleGuidanceView(guidance: guidance, failure: failure) }
       HStack {
         Button(buttonTitle, action: open)
@@ -373,5 +380,32 @@ struct LedgerView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(32)
+  }
+}
+
+/// One showing of the entry form. Upcoming travels with it, so the sheet never shows a value
+/// from before it opened.
+struct EntryFormRequest: Identifiable {
+  let id = UUID()
+  var upcoming: LedgerUpcoming? = nil
+}
+
+/// The entry form, with Upcoming beside it when the daily reminder opened it (#171).
+struct EntryFormWithUpcoming: View {
+  let form: NativeTransactionForm
+  let upcoming: LedgerUpcoming?
+  let accounts: [LedgerAccount]
+  let categories: [LedgerCategory]
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 0) {
+      form
+      if let upcoming {
+        Divider()
+        UpcomingPanel(upcoming: upcoming, accounts: accounts, categories: categories)
+          .frame(width: 300)
+          .frame(minHeight: 380, maxHeight: 560)
+      }
+    }
   }
 }

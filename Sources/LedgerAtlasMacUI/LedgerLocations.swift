@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 internal import MMImport
 
@@ -51,6 +52,55 @@ package enum LedgerLocations {
       number += 1
     }
     return candidate
+  }
+
+  /// An import writes its ledger under a hidden name and moves it to its own name only once it
+  /// is complete. An import cut off by a crash or a kill leaves only the hidden file, which Open
+  /// Ledger doesn't list and the next import removes (#178).
+  package static let importInProgressPrefix = ".importing-"
+
+  package static func importInProgressURL(in directory: URL) -> URL {
+    directory.appendingPathComponent(
+      "\(importInProgressPrefix)\(UUID().uuidString).sqlite", isDirectory: false)
+  }
+
+  /// Removes what earlier imports that never finished left in `directory`.
+  package static func removeUnfinishedImports(in directory: URL) {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    for name in names where name.hasPrefix(importInProgressPrefix) {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+  }
+
+  /// Moves a complete import from its hidden name to `destination`, or to the next free name
+  /// beside it if something took that name meanwhile. Never replaces a file.
+  package static func publishImport(_ inProgress: URL, as destination: URL) throws -> URL {
+    // The importer's journal is deleted when its transaction commits; one still there means
+    // the ledger isn't complete.
+    guard !FileManager.default.fileExists(atPath: inProgress.path + "-journal") else {
+      throw CocoaError(.fileWriteUnknown)
+    }
+    let directory = destination.deletingLastPathComponent()
+    var candidate = destination
+    for _ in 0..<100 {
+      if renamex_np(inProgress.path, candidate.path, UInt32(RENAME_EXCL)) == 0 {
+        // What SQLite or the store kept beside the hidden name is for that name only. The
+        // journal itself was checked absent above.
+        for suffix in ["-journal.ledger-atlas-binding", "-wal", "-shm"] {
+          unlink(inProgress.path + suffix)
+        }
+        let parent = Darwin.open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        if parent >= 0 {
+          _ = fsync(parent)
+          Darwin.close(parent)
+        }
+        return candidate
+      }
+      guard errno == EEXIST else { throw CocoaError(.fileWriteUnknown) }
+      candidate = availableURL(
+        named: destination.deletingPathExtension().lastPathComponent, in: directory)
+    }
+    throw CocoaError(.fileWriteFileExists)
   }
 
   /// Starts access to a ledger URL. Files in app storage need no security scope.

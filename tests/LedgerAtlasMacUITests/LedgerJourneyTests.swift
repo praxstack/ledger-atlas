@@ -1347,6 +1347,11 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   let source = directory.appendingPathComponent("synthetic.sqlite")
   try writeSyntheticV19(to: source)
 
+  // What an import cut off by a crash leaves: a hidden, half-written ledger and its journal.
+  let leftover = directory.appendingPathComponent(".importing-synthetic.sqlite")
+  try Data("half-written".utf8).write(to: leftover)
+  try Data("hot journal".utf8).write(to: URL(fileURLWithPath: leftover.path + "-journal"))
+
   let journey = LedgerJourney()
   let utc = try SourceTimeZone(fixedOffsetSeconds: 0)
   let session = LedgerSession()
@@ -1367,6 +1372,11 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   #expect(journey.ledgerURL == directory.appendingPathComponent("canonical.sqlite"))
   #expect(!journey.rows(for: .ledger).isEmpty)
   #expect(session.screen != .loading)
+  // The import was written under a hidden name and moved to its own name once complete; the
+  // earlier leftover is gone (#178).
+  let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+  #expect(!names.contains { $0.hasPrefix(LedgerLocations.importInProgressPrefix) })
+  #expect(!FileManager.default.fileExists(atPath: directory.path + "/canonical.sqlite-journal"))
 
   // Approving again without a new preparation fails visibly instead of importing twice.
   await journey.approveInBackground(into: session)
