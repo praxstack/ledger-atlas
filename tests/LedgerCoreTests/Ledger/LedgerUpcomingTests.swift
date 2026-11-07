@@ -145,6 +145,21 @@ struct LedgerUpcomingTests {
     #expect(total.expense == expense)
   }
 
+  @Test("a date already entered drops out whether it is past, today or ahead")
+  func enteredTodayAndAhead() throws {
+    let today = try Self.date(2026, 3, 10)
+    let daily = try Self.rule("b", .daily, start: Self.date(2026, 3, 9))
+    // Generated through 12 Mar: yesterday, today and two days ahead are entered.
+    let transactions = try [9, 10, 11, 12].map { day in
+      try Self.entry(day, on: Self.date(2026, 3, day), literals: [("recurrence.ruleID", daily.id)])
+    }
+    let upcoming = LedgerUpcoming(
+      rules: [daily], installmentPlans: [], transactions: transactions, today: today, days: 5)
+    let dates = upcoming.items.map { Self.text($0.date) }
+    #expect(dates == ["2026-03-13", "2026-03-14"])
+    #expect(upcoming.overdueCount == 0)
+  }
+
   @Test("overdue dates older than the look-back are counted, not listed")
   func lookBack() throws {
     let daily = try Self.rule("a", .daily, start: Self.date(2026, 1, 1))

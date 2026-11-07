@@ -90,8 +90,10 @@ public struct LedgerUpcoming: Equatable, Sendable {
       guard let dates = try? LedgerSchedule.dates(for: rule, through: end) else { continue }
       let done = entered[rule.id] ?? []
       for date in dates {
+        // A date already entered (by "Generate through today" or a later one) is done, whether
+        // it is past, today or ahead.
+        if done.contains(date) { continue }
         let overdue = date < today
-        if overdue, done.contains(date) { continue }
         if overdue, date < lookBackStart {
           olderOverdue += 1
           continue

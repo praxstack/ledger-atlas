@@ -63,7 +63,8 @@ struct UpcomingPanel: View {
     let source: String =
       switch item.source {
       case .recurrence: "Recurring"
-      case .installment: "Installment"
+      // Installment payments are entries already in the ledger and its balances.
+      case .installment: "Installment, already recorded"
       }
     return HStack(alignment: .firstTextBaseline, spacing: LedgerTheme.Space.s) {
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
