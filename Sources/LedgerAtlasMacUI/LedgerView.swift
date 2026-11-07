@@ -45,16 +45,19 @@ struct LedgerView: View {
   @State private var macAmountLiteral = ""
   @State private var showingTransactionForm = false
   @State private var showingSplitForm = false
+  /// + New was pressed while read-only: the form opens once editing has begun.
+  @State private var opensFormWhenEditing = false
 
   var body: some View {
     Group {
       if !transactions.isEmpty {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
           if let splitNotice {
             Text(splitNotice)
-              .font(.caption)
-              .foregroundStyle(.orange)
-              .padding(.horizontal, 16)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+              .padding(.horizontal, LedgerTheme.Space.l)
+              .padding(.top, LedgerTheme.Space.s)
               .accessibilityLabel(splitNotice)
           }
           LedgerBrowseList(
@@ -70,15 +73,19 @@ struct LedgerView: View {
               ? { (purchase: LedgerSplitPurchase) in closeSplit?(purchase.id) } : nil)
         if let lifecycleMessage {
           Text(lifecycleMessage)
-            .foregroundStyle(.secondary)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
             .accessibilityLabel(lifecycleMessage)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, LedgerTheme.Space.l)
+            .padding(.vertical, LedgerTheme.Space.xs)
         }
         if let lastFailure {
-          Text(lastFailure)
-            .foregroundStyle(.red)
+          Label(lastFailure, systemImage: "exclamationmark.triangle")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.negative)
             .accessibilityLabel(lastFailure)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, LedgerTheme.Space.l)
+            .padding(.vertical, LedgerTheme.Space.xs)
         }
         editBar
           .padding(.horizontal, LedgerTheme.Space.l)
@@ -88,6 +95,30 @@ struct LedgerView: View {
           .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
         }
         .navigationTitle("Transactions")
+        .toolbar {
+          ToolbarItem(placement: .primaryAction) {
+            // The one primary action on the screen. Read-only, it begins editing first.
+            Button {
+              if isEditing {
+                showingTransactionForm = true
+              } else {
+                opensFormWhenEditing = true
+                beginEditing()
+                // If editing can't begin (ledger busy or locked), forget the request, so a
+                // later Begin editing never pops the form up unasked.
+                Task {
+                  try? await Task.sleep(for: .seconds(3))
+                  opensFormWhenEditing = false
+                }
+              }
+            } label: {
+              Label(Self.newTransactionTitle, systemImage: "plus")
+                .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.borderedProminent)
+            .help("New transaction: add income or an expense")
+          }
+        }
       } else {
         switch state {
         case .noLedger:
@@ -201,10 +232,19 @@ struct LedgerView: View {
       else { return }
       amountLiteral = amount
     }
+    .onChange(of: isEditing) { _, editing in
+      guard editing, opensFormWhenEditing else { return }
+      opensFormWhenEditing = false
+      showingTransactionForm = true
+    }
+    .onDisappear { opensFormWhenEditing = false }
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
   }
+
+  /// Short, so the toolbar keeps the view switcher and the inspector toggle at 1,000 pt.
+  static let newTransactionTitle = "New"
 
   /// The actions under the list: new entries, then what to do with the selected one.
   @ViewBuilder private var editBar: some View {

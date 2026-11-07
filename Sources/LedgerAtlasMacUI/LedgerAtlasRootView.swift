@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import LedgerCore
 import LedgerStore
+internal import MMImport
 import SwiftUI
 import os
 import UniformTypeIdentifiers
@@ -27,6 +28,8 @@ public struct LedgerAtlasRootView: View {
   }
   @State private var pendingIntent: LedgerIntentRequest?
   @State private var isChoosingImportSource = false
+  /// True from an approved import until the person moves on from its balance receipt.
+  @State private var justImported = false
   @State private var lifecycleMessage: String?
   @State private var lifecycleRetryOperation: LedgerLifecycleOperation?
   @State private var lifecycleGeneration = 0
@@ -94,20 +97,38 @@ public struct LedgerAtlasRootView: View {
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
     } detail: {
-      if appLock.isLocked {
-        LockedSurface(
-          lock: appLock,
-          unlock: { appLock.unlock(with: $0) },
-          biometricUnlock: { await appLock.unlockWithBiometrics() })
-      } else {
-        destinationPreview
-          .animation(
-            MotionPolicy.navigationAnimation(reduceMotion: effectiveReduceMotion),
-            value: selection
-          )
+      Group {
+        if appLock.isLocked {
+          LockedSurface(
+            lock: appLock,
+            unlock: { appLock.unlock(with: $0) },
+            biometricUnlock: { await appLock.unlockWithBiometrics() })
+            .navigationTitle("Ledger Atlas")
+            .navigationSubtitle("Locked")
+        } else {
+          destinationPreview
+            .animation(
+              MotionPolicy.navigationAnimation(reduceMotion: effectiveReduceMotion),
+              value: selection
+            )
+        }
       }
+      // Every screen sits on the same canvas: lists and forms drop their own white or grey
+      // scroll background, so the base never changes shade from one screen to the next.
+      .scrollContentBackground(.hidden)
+      .ledgerCanvas()
     }
-    .preferredColorScheme(productSettings.colorScheme)
+    // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
+    .onChange(of: productSettings.appearance, initial: true) { _, appearance in
+      LedgerAppearance.apply(appearance)
+    }
+    .onReceive(
+      NSWorkspace.shared.notificationCenter.publisher(
+        for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
+    ) { _ in
+      // Increase Contrast turned on or off: a forced Light or Dark look must follow it.
+      LedgerAppearance.apply(productSettings.appearance)
+    }
     .environment(\.ledgerFormatter, LedgerDisplayFormatter(settings: productSettings))
     .environment(\.ledgerAmountColors, productSettings.amountColors)
     .tint(LedgerTheme.accent)
@@ -128,24 +149,18 @@ public struct LedgerAtlasRootView: View {
       }
     }
     .toolbar {
-      ToolbarItemGroup {
-        Button(action: chooseImportSource) {
-          Label("Import", systemImage: "square.and.arrow.down")
+      // New and Open Ledger live in the File menu (⇧⌘N, ⌘O); the toolbar keeps the screen's
+      // own controls. Locked, there is nothing to act on, so the toolbar is empty.
+      if !appLock.isLocked, session.screen == .loaded {
+        ToolbarItem {
+          Button(action: chooseImportSource) {
+            Label("Import", systemImage: "square.and.arrow.down")
+          }
+          .accessibilityLabel(Self.importBackupActionTitle)
+          .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
+          .help("Import a Money Manager backup (⇧⌘I)")
+          .disabled(journey.backgroundWork != nil)
         }
-        .accessibilityLabel(Self.importBackupActionTitle)
-        .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
-        .help("Import a Money Manager backup (⇧⌘I)")
-        .disabled(appLock.isLocked || journey.backgroundWork != nil)
-        Button("Create Ledger…", action: createLedger)
-          .accessibilityLabel(Self.createLedgerActionLabel)
-          .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
-          .keyboardShortcut("n", modifiers: [.command, .shift])
-          .disabled(appLock.isLocked)
-        Button("Open Ledger…", action: openLedger)
-          .accessibilityLabel(Self.openLedgerActionLabel)
-          .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
-          .keyboardShortcut("o", modifiers: .command)
-          .disabled(appLock.isLocked)
       }
     }
     .fileImporter(
@@ -166,11 +181,22 @@ public struct LedgerAtlasRootView: View {
     .onReceive(NotificationCenter.default.publisher(for: Self.importBackupRequested)) { _ in
       chooseImportSource()
     }
+    .onReceive(NotificationCenter.default.publisher(for: Self.createLedgerRequested)) { _ in
+      guard !appLock.isLocked else { return }
+      createLedger()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: Self.openLedgerRequested)) { _ in
+      guard !appLock.isLocked else { return }
+      openLedger()
+    }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
     }
     .onChange(of: journey.ledgerURL) { _, ledger in
       portal.ledgerDidChange(to: ledger)
+    }
+    .onChange(of: selection) { _, destination in
+      if destination != .importReview { justImported = false }
     }
     .onChange(of: appLock.isLocked) { _, locked in
       portal.lockDidChange(isLocked: locked)
@@ -215,6 +241,9 @@ public struct LedgerAtlasRootView: View {
   package static let importBackupActionTitle = "Import Money Manager Backup…"
   /// Posted by the File menu's import command.
   public static let importBackupRequested = Notification.Name("LedgerAtlas.importBackupRequested")
+  /// File > New Ledger… and File > Open Ledger… (the app's menu commands post these).
+  public static let createLedgerRequested = Notification.Name("LedgerAtlas.createLedgerRequested")
+  public static let openLedgerRequested = Notification.Name("LedgerAtlas.openLedgerRequested")
 
   /// Shows the import screen and its file panel.
   private func chooseImportSource() {
@@ -300,7 +329,7 @@ public struct LedgerAtlasRootView: View {
     }
     let url = LedgerLocations.availableURL(named: "Sample Household", in: directory)
     do {
-      try LedgerDemoTour.makeDemoLedger(at: url)
+      try LedgerDemoTour.makeDemoLedger(at: url, withBalanceReceipt: false)
     } catch {
       journey.recordFailure("The sample ledger could not be made.")
       return
@@ -1237,7 +1266,35 @@ public struct LedgerAtlasRootView: View {
         return
       }
     }
-    selection = productSettings.startScreen
+    // #172: show the balance-match receipt first when the import produced one.
+    if journey.balanceReceipt != nil {
+      justImported = true
+      selection = .importReview
+    } else {
+      selection = productSettings.startScreen
+    }
+  }
+
+  /// The open ledger's receipt, unless a new backup is being reviewed: that review is about
+  /// another file, and the receipt belongs to the ledger already open.
+  private var shownBalanceReceipt: ImportBalanceReceipt? {
+    switch journey.phase {
+    case .reviewing, .blocked: nil
+    default: journey.balanceReceipt
+    }
+  }
+
+  private func exportBalanceReceipt() {
+    guard let receipt = journey.balanceReceipt else { return }
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [UTType.pdf]
+    panel.nameFieldStringValue = "ledger-atlas-balance-receipt.pdf"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try LedgerPDFStatementExporter.export(lines: receipt.statementLines(), to: url)
+    } catch {
+      journey.recordFailure("The balance receipt could not be saved.")
+    }
   }
 
   @ViewBuilder
@@ -1268,7 +1325,14 @@ public struct LedgerAtlasRootView: View {
         trySampleData: openSampleLedger)
     } else if selection == .importReview || selection == .onboarding {
       VStack(alignment: .leading, spacing: 16) {
-        ImportReviewView(summary: journey.phase == .idle ? importReviewSummary : journey.summary)
+        ImportReviewView(
+          summary: journey.phase == .idle ? importReviewSummary : journey.summary,
+          balanceReceipt: shownBalanceReceipt, saveReceipt: exportBalanceReceipt,
+          continueTitle: justImported ? "Continue to \(productSettings.startScreen.sidebarTitle)" : nil,
+          continueAfterReceipt: {
+            justImported = false
+            selection = productSettings.startScreen
+          })
         if let lastFailure = journey.lastFailure {
           Text(lastFailure)
             .foregroundStyle(.red)

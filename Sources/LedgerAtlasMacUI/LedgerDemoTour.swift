@@ -4,6 +4,7 @@ import CryptoKit
 import Foundation
 import LedgerCore
 import LedgerStore
+internal import MMImport
 
 /// A guided capture of the real app for release notes and CI, run only when the
 /// `LEDGER_ATLAS_DEMO_TOUR` environment variable is set. It writes a synthetic demo ledger to app
@@ -103,7 +104,10 @@ package enum LedgerDemoTour {
   /// Writes a small, made-up household ledger: seven accounts in three groups (one hidden, one
   /// an investment), a category tree with a subcategory, about three months of income and
   /// spending, transfers (one in another currency), a monthly rent rule and a groceries budget.
-  package static func makeDemoLedger(at url: URL) throws {
+  /// `withBalanceReceipt` also saves a made-up balance-match receipt beside the ledger, so the
+  /// tour and its captures show the Import Review receipt (#172). The sample ledger a person
+  /// opens from the welcome screen goes without one: it was never imported from Money Manager.
+  package static func makeDemoLedger(at url: URL, withBalanceReceipt: Bool = true) throws {
     let store = try LedgerStoreLifecycle.create(at: url).store
     let app = LedgerApplication(store: store)
     let origin = try LedgerOrigin(id: key("demo-origin"), label: "local")
@@ -234,5 +238,50 @@ package enum LedgerDemoTour {
         origin: origin, name: "Groceries", categoryID: groceries.id,
         amount: try inr("6000.00"), period: .monthly, rollover: true,
         start: try SourceLocalDate(year: 2026, month: 8, day: 1)))
+    if withBalanceReceipt {
+      try writeDemoBalanceReceipt(for: store.readSnapshot(), besideLedgerAt: url)
+    }
+  }
+
+  /// A made-up receipt over the demo ledger's own balances: most accounts match, one differs
+  /// by a rupee (explained by a preserved entry), the hidden one has no Money Manager figure and
+  /// one is left out of Money Manager's totals.
+  package static func writeDemoBalanceReceipt(
+    for snapshot: LedgerStore.LedgerReadSnapshot, besideLedgerAt url: URL
+  ) throws {
+    let sheet = try LedgerAccountBalanceSheet(
+      accounts: snapshot.accounts, transactions: snapshot.transactions)
+    let accounts = snapshot.accounts.sorted { ($0.displayOrder, $0.name) < ($1.displayOrder, $1.name) }
+    let one = try ExactDecimal("1")
+    var rows: [ImportBalanceReceipt.Row] = []
+    var differs = false
+    for account in accounts {
+      guard let balance = sheet.balances[account.id] else { continue }
+      let ledger = balance.amount.description
+      if account.hidden {
+        rows.append(
+          .init(
+            ledgerAccountID: account.id, name: account.name, currencyUnit: account.currencyUnit,
+            ledgerBalance: ledger, sourceBalance: nil,
+            outcome: .notStored(reason: "an entry's amount is not an exact decimal"),
+            hiddenInSource: true))
+      } else if !differs, account.currencyUnit == "INR", balance.amount.isPositive {
+        differs = true
+        rows.append(
+          .init(
+            ledgerAccountID: account.id, name: account.name, currencyUnit: account.currencyUnit,
+            ledgerBalance: ledger, sourceBalance: try balance.amount.subtracting(one).description,
+            outcome: .differs(difference: one.description), notImportedEntryCount: 1))
+      } else {
+        rows.append(
+          .init(
+            ledgerAccountID: account.id, name: account.name, currencyUnit: account.currencyUnit,
+            ledgerBalance: ledger, sourceBalance: ledger, outcome: .equal,
+            excludedFromTotalsInSource: !account.includeInTotals))
+      }
+    }
+    try ImportBalanceReceipt(
+      importedAtEpochMilliseconds: 1_792_000_000_000, throughDay: "2026-10-23", rows: rows
+    ).write(besideLedgerAt: url)
   }
 }
