@@ -55,7 +55,8 @@ struct ReceiptSurface: View {
         )
         .font(LedgerTheme.Typeface.secondary)
         .foregroundStyle(LedgerTheme.inkSecondary)
-        .fixedSize(horizontal: false, vertical: true)
+        // No fixedSize here: this screen doesn't scroll, and a fixed-height paragraph asked for
+        // its size at a narrow width made the window taller than the screen.
         if !journey.isEditing {
           LedgerStatusLine(status: "Open a ledger for editing to add or link receipts.")
         }
