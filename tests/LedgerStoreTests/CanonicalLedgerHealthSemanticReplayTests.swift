@@ -1897,13 +1897,19 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
         }
       }
     }
-    // Save at least 150 times, and keep saving until 5 more reads have completed while saves
-    // run: fast saves can otherwise all finish before either reader gets one full read (seen
-    // after #152). Reads that finished before the first save don't count.
+    // A load is refused while a save's journal is on disk, so back-to-back saves can starve
+    // the readers on a busy machine (seen after #152 and on #176, #212). Every 10 saves, wait
+    // for one more load to finish, so loads and saves always interleave. Reads that finished
+    // before the first save don't count.
     let readsBeforeSaves = reads.value
     var index = 0
-    while index < 150 || (reads.value < readsBeforeSaves + 5 && index < 5_000) {
+    while index < 150 {
       defer { index += 1 }
+      if index % 10 == 9 {
+        let target = reads.value + 1
+        let deadline = Date().addingTimeInterval(10)
+        while reads.value < target, Date() < deadline { usleep(1_000) }
+      }
       let renamed = try LedgerAccount(
         id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
         origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
@@ -1920,7 +1926,7 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
     readers.wait()
     #expect(failures.all.isEmpty, "\(failures.all.prefix(5))")
     #expect(
-      readsDuringSaves >= 5,
+      readsDuringSaves >= 15,
       "only \(readsDuringSaves) read-only loads finished during \(index) saves, so too little overlapped")
     #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save \(index - 1)")
   }
