@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 import LedgerCore
 import SwiftUI
@@ -145,6 +146,17 @@ private func activate(_ window: NSWindow) {
   if !NSApplication.shared.isActive {
     NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
     NSApplication.shared.activate(ignoringOtherApps: true)
+    pump(0.2)
+  }
+  if !NSApplication.shared.isActive {
+    // Since macOS 14 activation is cooperative: the runner's frontmost app never yields, so
+    // the request above is ignored. The test process is trusted for Accessibility (the
+    // VoiceOver tests read the window through it), and Accessibility can make an app
+    // frontmost directly.
+    let app = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+    let result = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    captureLog("AX frontmost: \(result.rawValue), active after: \(NSApplication.shared.isActive)")
+    pump(0.3)
   }
   window.makeKeyAndOrderFront(nil)
   window.makeMain()
