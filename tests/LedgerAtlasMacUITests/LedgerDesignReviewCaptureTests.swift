@@ -64,6 +64,14 @@ import Testing
         #expect(root.click(named: LedgerBrowseList.showInspectorTitle), "no Show Inspector button")
       }
       try await root.settle()
+      // Sidebar, table and a 320 pt inspector need about 1,250 pt; the runner's display is
+      // 1,024 pt wide. Collapse the sidebar, as a person on a small screen would, so the shot
+      // shows the table and the inspector whole instead of a clipped window.
+      NSApplication.shared.sendAction(
+        #selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: root.window)
+      try await root.settle()
+      // Select again: showing the inspector and hiding the sidebar moved the rows.
+      #expect(selectFirstEntry(in: root.window), "no entry row to select with the inspector open")
       captureLog(
         "ledger window with inspector \(root.window.frame), content min \(root.window.contentMinSize), "
           + "fitting \(root.window.contentView?.fittingSize ?? .zero)")
@@ -156,9 +164,21 @@ private func selectFirstEntry(in window: NSWindow) -> Bool {
     }
     pump(0.5)
     if table.selectedRow < 0 {
-      // The click didn't land (for example the row moved); select it directly.
-      table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-      pump(0.3)
+      // The click didn't land (for example the row moved). Select it from the keyboard, which
+      // SwiftUI's selection follows; selecting rows directly in AppKit would bypass it.
+      window.makeFirstResponder(table)
+      for type in [NSEvent.EventType.keyDown, .keyUp] {
+        let down = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        if let event = NSEvent.keyEvent(
+          with: type, location: .zero, modifierFlags: [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+          context: nil, characters: down, charactersIgnoringModifiers: down, isARepeat: false,
+          keyCode: 125)
+        {
+          window.sendEvent(event)
+        }
+      }
+      pump(0.5)
     }
     return table.selectedRow >= 0
   }
