@@ -1,6 +1,6 @@
 # 0012 — Ledger Atlas stays native Swift (no Electron, no Rust/Tauri)
 
-Status: proposed 2026-11-06, pending Prax's acceptance.
+Status: accepted 2026-11-07 (merged as #175).
 
 Decision page with the matrix, blocker map, migration cost and council review:
 https://claude.ai/artifact/2AmUZUvYMUVmk8Kxc7Eh38 (copy: project files `plans/stack-decision-2026-11-06.md`).
