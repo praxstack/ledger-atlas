@@ -660,7 +660,7 @@ struct MoneyManagerV19AdapterTests {
     }
   }
 
-  @Test("unresolved category is sidecar-preserved so import is not blocked")
+  @Test("unresolved category is sidecar-preserved: the import proceeds, certification is blocked")
   func preservesUnresolvedCategory() throws {
     let staged = try makeAuthenticatedStage(transactionCategoryUID: "missing-category")
     let canonical = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -677,6 +677,7 @@ struct MoneyManagerV19AdapterTests {
     #expect(plan.blockedRecords.isEmpty)
     #expect(!plan.isBlocked)
     #expect(plan.preservedReasons.values.contains(.unresolvedCategory))
+    #expect(plan.blocksLosslessCertification)
     let request = try MoneyManagerV19Adapter.canonicalCommitRequest(
       canonicalDatabaseURL: canonical, stagingDatabaseURL: staged.url,
       expectedManifest: staged.manifest, expectedContentDigest: staged.digest,

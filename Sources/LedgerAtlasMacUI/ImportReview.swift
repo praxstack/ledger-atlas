@@ -810,7 +810,7 @@ struct ImportReviewView: View {
           Label("Money Manager import review", systemImage: "eye")
             .font(.headline)
           Text(
-            "Import Review shows redacted structural metadata for a Mac or iOS Money Manager backup. Approving a reviewable source writes a local canonical ledger; the original file stays read-only."
+            "Import Review shows redacted structural metadata for a Money Manager backup. Approving a reviewable source writes a local canonical ledger; the original file stays read-only."
           )
           .foregroundStyle(.secondary)
         }
