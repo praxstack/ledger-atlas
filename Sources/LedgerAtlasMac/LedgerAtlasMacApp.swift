@@ -49,6 +49,8 @@ private final class LedgerAtlasAppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApplication.shared.setActivationPolicy(.regular)
     NSApplication.shared.activate(ignoringOtherApps: true)
+    // Opening the daily reminder opens the entry form with Upcoming beside it (#171).
+    LedgerReminderResponder.shared.install()
     // The widget's first status. A build without a usable App Group (the ad-hoc DMG) skips it.
     guard LedgerWidgetAvailability.signingTeamIdentifier() != nil,
       let containerURL = FileManager.default.containerURL(
