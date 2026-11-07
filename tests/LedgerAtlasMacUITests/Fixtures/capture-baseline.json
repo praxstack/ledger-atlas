@@ -6,7 +6,7 @@
   },
   "01-transactions.daily-dark.populated.root-light.png" : {
     "lines" : 530,
-    "looks" : "aa2d9cb830b0919e",
+    "looks" : "ac1d9cb830b0919e",
     "text" : "8292a19956e56ebe9441d64da885813a43978278fc8fd7473095df8bbc9327a4"
   },
   "02-statistics.overview-monthly.expense-dark.png" : {
@@ -16,17 +16,17 @@
   },
   "02-statistics.overview-monthly.expense-light.png" : {
     "lines" : 356,
-    "looks" : "929a3a3839b85198",
+    "looks" : "929a3a3839b05198",
     "text" : "f48eaa7e4f4e438769e0438d2b4d400c01f641747daa1e42c0ef7d2f3e538bac"
   },
   "03-statistics.overview-annual.expense-dark.png" : {
     "lines" : 336,
-    "looks" : "e072e264e86062e4",
+    "looks" : "e072e060e06062e4",
     "text" : "0fac0711b77d148d9696197bd8d8fc5ab2c655829da116b934c3f20729adfa3a"
   },
   "03-statistics.overview-annual.expense-light.png" : {
     "lines" : 336,
-    "looks" : "8aac2c9c1e9a9c9c",
+    "looks" : "8aac2c9c1c9a9c9c",
     "text" : "99bb61fecd411fe04a0442e12966530a80672fa18dd13d3caf20e9b33cb2d20f"
   },
   "04-statistics.overview-annual.income.scrolled-dark.png" : {
@@ -81,62 +81,62 @@
   },
   "09-accounts.overview-upper.cards.totals-dark.png" : {
     "lines" : 300,
-    "looks" : "e0624247c76767ea",
+    "looks" : "e0624243c36363ea",
     "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
   },
   "09-accounts.overview-upper.cards.totals-light.png" : {
     "lines" : 300,
-    "looks" : "923cbcb030989992",
+    "looks" : "923cbcb034949892",
     "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
   },
   "10-accounts.overview-cards.savings.groups-dark.png" : {
     "lines" : 302,
-    "looks" : "e0624247c76767ea",
+    "looks" : "e0626243c36363ea",
     "text" : "051febd64b11068daa077fd94d4fe2306dc062d2e6dc1ec027404f4a83ccb496"
   },
   "10-accounts.overview-cards.savings.groups-light.png" : {
     "lines" : 302,
-    "looks" : "923cb8b030989192",
+    "looks" : "923cbcb034989092",
     "text" : "051febd64b11068daa077fd94d4fe2306dc062d2e6dc1ec027404f4a83ccb496"
   },
   "11-accounts.overview-lower.groups.active_scroll-dark.png" : {
     "lines" : 301,
-    "looks" : "e0626247c76767e2",
+    "looks" : "e0626243c36363e2",
     "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
   },
   "11-accounts.overview-lower.groups.active_scroll-light.png" : {
     "lines" : 301,
-    "looks" : "923cb8b030989092",
+    "looks" : "923cbcb034989092",
     "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
   },
   "12-accounts.overview-restored.chrome-dark.png" : {
     "lines" : 300,
-    "looks" : "e0624247c76767ea",
+    "looks" : "e0624243c36363ea",
     "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
   },
   "12-accounts.overview-restored.chrome-light.png" : {
     "lines" : 300,
-    "looks" : "923cbcb030989992",
+    "looks" : "923cbcb034949892",
     "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
   },
   "13-accounts.overview-investments.others.boundary-dark.png" : {
     "lines" : 301,
-    "looks" : "e0626247c76767e2",
+    "looks" : "e0626243c36363e2",
     "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
   },
   "13-accounts.overview-investments.others.boundary-light.png" : {
     "lines" : 301,
-    "looks" : "923cb8b030989092",
+    "looks" : "923cbcb034989092",
     "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
   },
   "14-accounts.account_info-existing.edit-dark.png" : {
     "lines" : 191,
-    "looks" : "a2606261e16165e2",
+    "looks" : "a2626261e16165a2",
     "text" : "64137b97619a658a6f60a97de79aaac961b5aa08e3e56a2279f85e29fa8c3c2d"
   },
   "14-accounts.account_info-existing.edit-light.png" : {
     "lines" : 191,
-    "looks" : "a23c38797830199a",
+    "looks" : "a23d38797830199a",
     "text" : "64137b97619a658a6f60a97de79aaac961b5aa08e3e56a2279f85e29fa8c3c2d"
   },
   "15-settings.configuration-index-dark.png" : {
@@ -151,17 +151,17 @@
   },
   "16-settings.accounts-index-dark.png" : {
     "lines" : 322,
-    "looks" : "e0604647c76767e2",
+    "looks" : "e0624247c56767e2",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "16-settings.accounts-index-light.png" : {
     "lines" : 322,
-    "looks" : "b03cb8b13098999a",
+    "looks" : "b03cb8b13898999a",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "17-settings.account_groups-edit.reorder.protected-dark.png" : {
     "lines" : 324,
-    "looks" : "e0604647c76767e2",
+    "looks" : "e0626645c76767e2",
     "text" : "a401d642953d6bbf02b425c650c643803f374cb9e43ac24bfa34d2ec7cc6b4fd"
   },
   "17-settings.account_groups-edit.reorder.protected-light.png" : {
@@ -171,27 +171,27 @@
   },
   "18-settings.account_list-upper.hidden_variant-dark.png" : {
     "lines" : 322,
-    "looks" : "e0604647c76767e2",
+    "looks" : "e0624247c56767e2",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "18-settings.account_list-upper.hidden_variant-light.png" : {
     "lines" : 322,
-    "looks" : "b03cb8b13098999a",
+    "looks" : "b03cb8b13898999a",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "19-settings.account_list-tail-dark.png" : {
     "lines" : 323,
-    "looks" : "e0606647c76767e2",
+    "looks" : "e0626245c76767e2",
     "text" : "68ba696387d6c5ec0e97e8eb37e515e9f96376c54beb6e0444bc02c313a6c372"
   },
   "19-settings.account_list-tail-light.png" : {
     "lines" : 323,
-    "looks" : "b03cb8b13099989a",
+    "looks" : "b03cb8b13899989a",
     "text" : "68ba696387d6c5ec0e97e8eb37e515e9f96376c54beb6e0444bc02c313a6c372"
   },
   "20-accounts.add-group_picker.open-dark.png" : {
     "lines" : 189,
-    "looks" : "c2606261f16565e2",
+    "looks" : "a2606261f14565a2",
     "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
   },
   "20-accounts.add-group_picker.open-light.png" : {
@@ -201,22 +201,22 @@
   },
   "21-accounts.add-name.focused-dark.png" : {
     "lines" : 189,
-    "looks" : "a2606261f16565e2",
+    "looks" : "a2626261f14565a2",
     "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
   },
   "21-accounts.add-name.focused-light.png" : {
     "lines" : 189,
-    "looks" : "a23c38796830119a",
+    "looks" : "a23d38796830119a",
     "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
     "lines" : 191,
-    "looks" : "c2606271e16165e2",
+    "looks" : "a2626271e16165a2",
     "text" : "79f396f32889d94bbb3100a49e5abf3a45b91353eda2b351bf2e6bf636744205"
   },
   "22-accounts.account_info-savings.edit-light.png" : {
     "lines" : 191,
-    "looks" : "823c38797830199a",
+    "looks" : "a23d38797830199a",
     "text" : "79f396f32889d94bbb3100a49e5abf3a45b91353eda2b351bf2e6bf636744205"
   },
   "23-security.set_passcode-first_entry.empty-dark.png" : {
@@ -230,34 +230,34 @@
     "text" : "9a811224163186c47363226c5da09828cd4c260bea11db83e05f13e5744713ca"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-dark.png" : {
-    "lines" : 218,
-    "looks" : "e4646440d04020a2",
-    "text" : "055773ace65002d09881d49c00d44ffba2b1796c24f05069f61ee9043910d011"
+    "lines" : 216,
+    "looks" : "e0606458d04020a2",
+    "text" : "1fe48a422017e2e9f737466f8deaeb37968033e1550ede7679c0dac3c4eb760f"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-light.png" : {
-    "lines" : 218,
-    "looks" : "929b98b020a04182",
-    "text" : "055773ace65002d09881d49c00d44ffba2b1796c24f05069f61ee9043910d011"
+    "lines" : 216,
+    "looks" : "9299982020a04182",
+    "text" : "1fe48a422017e2e9f737466f8deaeb37968033e1550ede7679c0dac3c4eb760f"
   },
   "25-backup.hub-all_entries-dark.png" : {
-    "lines" : 258,
-    "looks" : "e0666260e26060a2",
-    "text" : "65d0deac9ba3fe6e63dd670b7b5be159f0f131db3c74aafa22c105ecdda3f151"
+    "lines" : 282,
+    "looks" : "e0666660e26261e0",
+    "text" : "90a689266ad1a8fcefb661886321bde3f87124a830ac22b26b0c2a6c60e5ed9b"
   },
   "25-backup.hub-all_entries-light.png" : {
-    "lines" : 258,
-    "looks" : "92b9b09c3cbe5782",
-    "text" : "65d0deac9ba3fe6e63dd670b7b5be159f0f131db3c74aafa22c105ecdda3f151"
+    "lines" : 282,
+    "looks" : "92b0b09c3cbc5c92",
+    "text" : "90a689266ad1a8fcefb661886321bde3f87124a830ac22b26b0c2a6c60e5ed9b"
   },
   "key-balance-receipt-dark.png" : {
     "lines" : 129,
-    "looks" : "e663786cec6860e2",
-    "text" : "df6df0d1278b898a065f5a2c01c84bd6cefe3bc10ac6fbb35bdbd0ac41edb561"
+    "looks" : "ea63786cec6860e2",
+    "text" : "d9752b56f20914d74ba3acf8d332d61c7086fe9798f2f9555de6d84abecb5c3b"
   },
   "key-balance-receipt-light.png" : {
     "lines" : 129,
-    "looks" : "929ca6b232b69e9e",
-    "text" : "df6df0d1278b898a065f5a2c01c84bd6cefe3bc10ac6fbb35bdbd0ac41edb561"
+    "looks" : "929ca6b232b69c9e",
+    "text" : "d9752b56f20914d74ba3acf8d332d61c7086fe9798f2f9555de6d84abecb5c3b"
   },
   "key-empty-dark.png" : {
     "lines" : 97,
@@ -266,7 +266,7 @@
   },
   "key-empty-light.png" : {
     "lines" : 97,
-    "looks" : "9247c7c7c3c7c7e2",
+    "looks" : "9247c7c7c3c747e2",
     "text" : "e747abf8b630b27440ac797291f343d74e8ae1c3d721df50318a307f33825944"
   },
   "key-entry-suggestion-dark.png" : {
@@ -280,23 +280,23 @@
     "text" : "b938d8c63592885831ff0da85e574586286325c120ba68acfa46d74708c569d4"
   },
   "key-error-dark.png" : {
-    "lines" : 58,
-    "looks" : "e0617078787068e2",
-    "text" : "6739c60184b32803e9fab00973d0ecb53890174e4ddec3b36dcb33f39a7728f5"
+    "lines" : 88,
+    "looks" : "e0813878387824a2",
+    "text" : "c707cf3a96d0e87182d3aa4cbf093596065700906360a866d81ce0d9630a1a67"
   },
   "key-error-light.png" : {
-    "lines" : 58,
-    "looks" : "b051909494841582",
-    "text" : "6739c60184b32803e9fab00973d0ecb53890174e4ddec3b36dcb33f39a7728f5"
+    "lines" : 88,
+    "looks" : "b06bd0d4c4c45982",
+    "text" : "c707cf3a96d0e87182d3aa4cbf093596065700906360a866d81ce0d9630a1a67"
   },
   "key-lock-dark.png" : {
-    "lines" : 69,
-    "looks" : "e061603878706ce2",
-    "text" : "ca82857bb35208c7a4b226d368a9612e47c97b9dd7bbb94e5a8e6c17daeb258c"
+    "lines" : 87,
+    "looks" : "e0813078387824a2",
+    "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
   },
   "key-lock-light.png" : {
-    "lines" : 69,
-    "looks" : "b0d1c8d494841182",
-    "text" : "ca82857bb35208c7a4b226d368a9612e47c97b9dd7bbb94e5a8e6c17daeb258c"
+    "lines" : 87,
+    "looks" : "b061d8d4c4c45182",
+    "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
   }
 }
