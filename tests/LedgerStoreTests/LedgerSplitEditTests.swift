@@ -210,3 +210,27 @@ private struct SplitFixture {
   #expect(listing.unreadableGroupCount == 1)
   #expect(listing.unreadableTransactionIDs.count == 2)
 }
+
+@Test func searchFoldsMatchingSplitLinesIntoOnePurchaseWithItsTotal() throws {
+  let fixture = try SplitFixture()
+  let snapshot = try fixture.app.snapshot()
+
+  // One line matches: the whole purchase comes back once, with the total, not the partial line.
+  let food = LedgerApplication.searchGroupingSplitPurchases(
+    LedgerSearchQuery(textContains: "Food"), in: snapshot)
+  #expect(food.transactions.isEmpty)
+  #expect(food.splitPurchases.map(\.id) == [fixture.purchase.id])
+  #expect(food.splitPurchases.first?.parentAmount == (try usd("10.00")))
+
+  // Both lines match: still one purchase.
+  let both = LedgerApplication.searchGroupingSplitPurchases(
+    LedgerSearchQuery(kind: .expense), in: snapshot)
+  #expect(both.splitPurchases.map(\.id) == [fixture.purchase.id])
+  #expect(both.transactions.isEmpty)
+  #expect(LedgerApplication.search(LedgerSearchQuery(kind: .expense), in: snapshot).count == 2)
+
+  // No match: nothing.
+  let none = LedgerApplication.searchGroupingSplitPurchases(
+    LedgerSearchQuery(textContains: "Nothing like this"), in: snapshot)
+  #expect(none.transactions.isEmpty && none.splitPurchases.isEmpty)
+}

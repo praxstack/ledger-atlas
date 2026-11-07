@@ -6,10 +6,31 @@ internal import MMImport
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// One Search result: a transaction, or a split purchase shown whole with its total, as on
+/// Transactions.
+enum SearchResult: Identifiable {
+  case entry(LedgerBrowseEntry)
+  case split(LedgerSplitPurchase)
+
+  var id: String {
+    switch self {
+    case .entry(let entry): "entry-\(entry.id)"
+    case .split(let purchase): "split-\(purchase.id)"
+    }
+  }
+
+  var occurredAt: SourceLocalDateTime {
+    switch self {
+    case .entry(let entry): entry.occurredAt
+    case .split(let purchase): purchase.occurredAt.localDateTime
+    }
+  }
+}
+
 struct SearchSurface: View {
-  /// Matching transactions, newest first, built by `LedgerBrowser` so a result reads exactly
-  /// like the same entry on Transactions.
-  let results: [LedgerBrowseEntry]
+  /// Matching results, newest first. Entries are built by `LedgerBrowser` so a result reads
+  /// exactly like the same entry on Transactions.
+  let results: [SearchResult]
   let accountNames: [String: String]
   let categoryNames: [String: String]
   let tagNames: [String: String]
@@ -23,7 +44,7 @@ struct SearchSurface: View {
 
   private struct Day: Identifiable {
     let date: SourceLocalDate
-    var entries: [LedgerBrowseEntry]
+    var entries: [SearchResult]
     var id: SourceLocalDate { date }
   }
 
@@ -68,10 +89,16 @@ struct SearchSurface: View {
         List {
           ForEach(days) { day in
             Section {
-              ForEach(day.entries) { entry in
-                SearchResultRow(
-                  entry: entry, accountNames: accountNames, categoryNames: categoryNames,
-                  tagNames: tagNames)
+              ForEach(day.entries) { result in
+                switch result {
+                case .entry(let entry):
+                  SearchResultRow(
+                    entry: entry, accountNames: accountNames, categoryNames: categoryNames,
+                    tagNames: tagNames)
+                case .split(let purchase):
+                  SearchSplitResultRow(
+                    purchase: purchase, accountNames: accountNames, categoryNames: categoryNames)
+                }
               }
             } header: {
               Text(formatter.date(day.date, style: .full))
@@ -149,10 +176,14 @@ struct SearchResultRow: View {
     let detail = ([account.isEmpty ? nil : account, entry.note] + tags).compactMap { $0 }
       .joined(separator: " · ")
     let kind = category == nil ? nil : entry.kind.rawValue.capitalized
+    // A cross-currency transfer also shows what arrived and at what rate, like Transactions,
+    // unless amounts are hidden.
+    let conversion = formatter.hidesAmounts ? nil : entry.conversion
     let spoken = [
       title, kind, detail.isEmpty ? nil : detail,
       formatter.hidesAmounts
         ? LedgerDisplayFormatter.hiddenAmountLabel : formatter.parts(signed.amount, sign: signed.sign).text,
+      conversion,
       entry.lifecycle == .tombstoned ? "closed" : nil,
     ].compactMap { $0 }.joined(separator: ", ")
 
@@ -176,13 +207,79 @@ struct SearchResultRow: View {
       }
       .layoutPriority(1)
       Spacer(minLength: LedgerTheme.Space.s)
-      MoneyText(signed.amount, size: .row, sign: signed.sign)
+      VStack(alignment: .trailing, spacing: LedgerTheme.Space.xxs) {
+        MoneyText(signed.amount, size: .row, sign: signed.sign)
+        if let conversion {
+          Text(conversion)
+            .font(LedgerTheme.Typeface.caption)
+            .monospacedDigit()
+            .foregroundStyle(LedgerTheme.inkTertiary)
+            .lineLimit(1)
+        }
+      }
+      .fixedSize()
+    }
+    .frame(minHeight: LedgerTheme.Metrics.tableRow - 4)
+    .padding(.vertical, LedgerTheme.Space.xxs)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(spoken)
+  }
+}
+
+/// A split purchase in Search: one row with the purchase total and its categories, so a search
+/// that matches one line doesn't show a partial amount as if it were the whole expense.
+struct SearchSplitResultRow: View {
+  let purchase: LedgerSplitPurchase
+  let accountNames: [String: String]
+  let categoryNames: [String: String]
+  @Environment(\.ledgerFormatter) private var formatter
+
+  var body: some View {
+    var seenCategories = Set<String>()
+    let categoryIDs = purchase.lines.map(\.categoryID).filter { seenCategories.insert($0).inserted }
+    let categories = categoryIDs.compactMap { categoryNames[$0] }
+    let categoryCount = categoryIDs.count == 1 ? "1 category" : "\(categoryIDs.count) categories"
+    let detail = ([accountNames[purchase.accountID], purchase.note] + [categories.joined(separator: ", ")])
+      .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    let total = Self.negated(purchase.parentAmount)
+    let spoken = [
+      "Split purchase", categoryCount, detail.isEmpty ? nil : detail,
+      formatter.hidesAmounts
+        ? LedgerDisplayFormatter.hiddenAmountLabel : formatter.parts(total, sign: .always).text,
+    ].compactMap { $0 }.joined(separator: ", ")
+
+    HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(.symbol("square.split.2x1"), swatch: LedgerTheme.swatch(for: "Split purchase"))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+        Text("Split purchase")
+          .font(LedgerTheme.Typeface.body)
+          .foregroundStyle(LedgerTheme.ink)
+          .lineLimit(1)
+        if !detail.isEmpty {
+          Text(detail)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+      }
+      .layoutPriority(1)
+      Spacer(minLength: LedgerTheme.Space.s)
+      MoneyText(total, size: .row, sign: .always)
         .fixedSize()
     }
     .frame(minHeight: LedgerTheme.Metrics.tableRow - 4)
     .padding(.vertical, LedgerTheme.Space.xxs)
     .accessibilityElement(children: .combine)
     .accessibilityLabel(spoken)
+  }
+
+  /// A purchase is money out, shown with a minus like any expense in Search.
+  private static func negated(_ amount: CurrencyAmount) -> CurrencyAmount {
+    guard let zero = try? ExactDecimal("0"), let negative = try? zero.subtracting(amount.amount),
+      let result = try? CurrencyAmount(unitCode: amount.unitCode, amount: negative)
+    else { return amount }
+    return result
   }
 }
 

@@ -667,6 +667,34 @@ public struct LedgerApplication: LedgerClient {
     return snapshot.transactions.filter { matches($0, accounts: accounts, query: query) }
   }
 
+  /// `search`, with each matching line of a readable split purchase folded into that purchase,
+  /// as Transactions lists it. A purchase appears once however many of its lines match. Lines of
+  /// closed or unreadable purchases stay as plain transactions.
+  public static func searchGroupingSplitPurchases(
+    _ query: LedgerSearchQuery, in snapshot: LedgerStore.LedgerReadSnapshot
+  ) -> (transactions: [LedgerTransactionSnapshot], splitPurchases: [LedgerSplitPurchase]) {
+    let matched = search(query, in: snapshot)
+    guard matched.contains(where: { $0.links.contains { $0.kind == .split } }) else {
+      return (matched, [])
+    }
+    var purchaseByMember: [String: LedgerSplitPurchase] = [:]
+    for group in splitPurchaseGroups(from: snapshot) where !group.isClosed {
+      guard let purchase = try? group.read() else { continue }
+      for id in group.memberIDs { purchaseByMember[id] = purchase }
+    }
+    var transactions: [LedgerTransactionSnapshot] = []
+    var purchases: [LedgerSplitPurchase] = []
+    var seen: Set<String> = []
+    for transaction in matched {
+      if let purchase = purchaseByMember[transaction.id] {
+        if seen.insert(purchase.id).inserted { purchases.append(purchase) }
+      } else {
+        transactions.append(transaction)
+      }
+    }
+    return (transactions, purchases)
+  }
+
   static func matches(
     _ snapshot: LedgerTransactionSnapshot, accounts: [String: LedgerAccount],
     query: LedgerSearchQuery

@@ -1932,16 +1932,23 @@ public struct LedgerAtlasRootView: View {
   }
 
   /// Search matches as Transactions entries, newest first, so a result reads like its row there.
-  private var searchResults: [LedgerBrowseEntry] {
+  /// Matching transactions newest first, with matching split-purchase lines shown as their
+  /// whole purchase, as on Transactions.
+  private var searchResults: [SearchResult] {
     guard let snapshot = journey.snapshot else { return [] }
-    return LedgerBrowser(
-      transactions: LedgerApplication.search(journey.searchQuery, in: snapshot),
+    let found = LedgerApplication.searchGroupingSplitPurchases(journey.searchQuery, in: snapshot)
+    let entries = LedgerBrowser(
+      transactions: found.transactions,
       accountNames: Dictionary(snapshot.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
       categoryNames: Dictionary(
         snapshot.categories.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
       revisionTags: snapshot.revisionTags,
       tagNames: Dictionary(snapshot.tags.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-    ).entries
+    ).entries.map(SearchResult.entry)
+    guard !found.splitPurchases.isEmpty else { return entries }
+    return (entries + found.splitPurchases.map(SearchResult.split)).sorted {
+      $0.occurredAt != $1.occurredAt ? $0.occurredAt > $1.occurredAt : $0.id < $1.id
+    }
   }
 
   private var splitListing: LedgerSplitPurchaseListing? {
