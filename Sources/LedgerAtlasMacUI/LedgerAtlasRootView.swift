@@ -100,7 +100,7 @@ public struct LedgerAtlasRootView: View {
         importDisabled: journey.backgroundWork != nil,
         importBackup: chooseImportSource)
       .navigationTitle("Ledger Atlas")
-      .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+      .navigationSplitViewColumnWidth(min: 240, ideal: 250, max: 300)
     } detail: {
       Group {
         if appLock.isLocked {
@@ -121,7 +121,10 @@ public struct LedgerAtlasRootView: View {
       // Every screen sits on the same canvas: lists and forms drop their own white or grey
       // scroll background, so the base never changes shade from one screen to the next.
       .scrollContentBackground(.hidden)
-      .ledgerCanvas()
+      // Fill the whole column, including the strip under the toolbar and, on macOS 26, the part
+      // behind the floating sidebar; otherwise the system window colour shows there in light.
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(LedgerTheme.canvas, ignoresSafeAreaEdges: .all)
     }
     // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
     .onChange(of: productSettings.appearance, initial: true) { _, appearance in

@@ -263,6 +263,9 @@ struct LedgerBrowseList: View {
         }
       }
     }
+    // On macOS 26 a scroll view right under the toolbar draws the toolbar's edge effect over
+    // itself, which washed this row out to white in light mode.
+    .hidingScrollEdgeEffect()
   }
 
   private var accountTitle: String {
@@ -339,12 +342,12 @@ struct LedgerBrowseList: View {
   /// Money in, spending and net for what is shown, as figures: the first thing the eye
   /// reads on the screen. One group per currency.
   private var summaryStrip: some View {
-    HStack(alignment: .top, spacing: LedgerTheme.Space.xxl) {
+    HStack(alignment: .lastTextBaseline, spacing: LedgerTheme.Space.xxl) {
       ForEach(totals, id: \.unitCode) { total in
         if let figures = Self.summaryFigures(total) {
-          summaryFigure("Money in", figures.income, sign: .always)
-          summaryFigure("Spending", figures.expense)
-          summaryFigure("Net", figures.net, sign: .always)
+          summaryFigure("Money in", figures.income, size: .row, sign: .always)
+          summaryFigure("Spending", figures.expense, size: .row)
+          summaryFigure("Net", figures.net, size: .figure, sign: .always)
         } else {
           Text(Self.describe([total], formatter: formatter))
             .font(LedgerTheme.Typeface.secondary)
@@ -356,15 +359,17 @@ struct LedgerBrowseList: View {
     .accessibilityElement(children: .combine)
   }
 
-  /// Money in is green with "+"; spending stays in ink; net carries its sign.
+  /// Money in is green with "+"; spending stays in ink; net carries its sign. Net is the
+  /// figure the eye should land on, so only it is drawn large.
   private func summaryFigure(
-    _ label: String, _ amount: CurrencyAmount, sign: LedgerDisplayFormatter.SignStyle = .never
+    _ label: String, _ amount: CurrencyAmount, size: MoneyText.Size,
+    sign: LedgerDisplayFormatter.SignStyle = .never
   ) -> some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
       Text(label)
         .font(LedgerTheme.Typeface.caption)
         .foregroundStyle(LedgerTheme.inkSecondary)
-      MoneyText(amount, size: .figure, sign: sign, tone: sign == .always ? .automatic : .neutral)
+      MoneyText(amount, size: size, sign: sign, tone: sign == .always ? .automatic : .neutral)
     }
   }
 
@@ -854,5 +859,17 @@ package enum LedgerBrowseContent: Equatable {
       return mode == .note && !filterActive ? .noNotes : .noMatches
     }
     return .entries
+  }
+}
+
+extension View {
+  /// Hides the macOS 26 scroll edge effect; earlier systems draw none.
+  @ViewBuilder
+  fileprivate func hidingScrollEdgeEffect() -> some View {
+    if #available(macOS 26.0, *) {
+      scrollEdgeEffectHidden(true, for: .all)
+    } else {
+      self
+    }
   }
 }

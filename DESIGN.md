@@ -37,7 +37,7 @@ Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Inc
 | `inkTertiary` | `#69696D` | `#8E8E93` | Labels, captions, axis text |
 | `hairline` | black 8% | white 9% | Separators (22% / 26% with Increase Contrast) |
 | `inkQuiet`, `positiveQuiet`, `negativeQuiet` | their colour, faded only as far as 4.5:1 allows | same | The currency symbol and paise of a figure |
-| `fieldFill` | black 4.5% | white 7% | Fields, chips, segmented items |
+| `fieldFill` | black 6% | white 10% | Fields, chips, segmented items |
 | `accent` | `#09747D` | `#4FC3CE` | Selection, focus, primary action |
 | `accentSoft` | accent 11% | accent 16% | Selected rows, provenance note |
 | `positive` | `#1B774A` | `#4CC985` | Money in |

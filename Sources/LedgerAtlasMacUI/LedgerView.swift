@@ -115,7 +115,9 @@ struct LedgerView: View {
               Label(Self.newTransactionTitle, systemImage: "plus")
                 .labelStyle(.titleAndIcon)
             }
-            .buttonStyle(.borderedProminent)
+            // The app's own primary style, so it is the teal accent like every other primary
+            // action, not the system accent colour.
+            .buttonStyle(LedgerPrimaryButtonStyle())
             .help("New transaction: add income or an expense")
           }
         }
