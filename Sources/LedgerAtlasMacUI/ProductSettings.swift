@@ -66,6 +66,15 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
   public var motion: Motion
   public var remindersEnabled: Bool
   public var reminderHour: Int
+  /// Hide amounts (#173, ⇧⌘H): every figure on screen shows as bullets. Exports, the
+  /// loopback portal and App Intent results are not covered, and Settings says so.
+  public var hidesAmounts: Bool
+
+  /// What Hide amounts covers, as Settings states it.
+  public static let hideAmountsScope =
+    "Every amount, balance and chart figure on screen shows as bullets (⇧⌘H). Hide amounts does not apply to exports: PDF statements, spreadsheets, portable packages, the local web portal and Shortcuts results still show amounts. Amounts you type stay visible while you type them."
+  /// Said beside each export while amounts are hidden.
+  public static let hideAmountsExportNotice = "Hide amounts does not apply to exports."
 
   public init(
     appearance: Appearance = .system, localeIdentifier: String = "en_US",
@@ -73,7 +82,7 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
     firstWeekday: Int = 1, periodStartDay: Int = 1,
     startScreen: AppDestination = .overview, amountColors: AmountColors = .incomeGreen,
     carryOverEnabled: Bool = false, motion: Motion = .followSystem,
-    remindersEnabled: Bool = false, reminderHour: Int = 9
+    remindersEnabled: Bool = false, reminderHour: Int = 9, hidesAmounts: Bool = false
   ) {
     self.appearance = appearance
     self.localeIdentifier = localeIdentifier
@@ -86,6 +95,7 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
     self.motion = motion
     self.remindersEnabled = remindersEnabled
     self.reminderHour = min(max(reminderHour, Self.reminderHours.lowerBound), Self.reminderHours.upperBound)
+    self.hidesAmounts = hidesAmounts
   }
 
   // MARK: Validation
@@ -165,6 +175,7 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case appearance, localeIdentifier, timeZoneIdentifier, firstWeekday, periodStartDay
     case startScreen, amountColors, carryOverEnabled, motion, remindersEnabled, reminderHour
+    case hidesAmounts
   }
 
   /// Decodes field by field. A missing or invalid field falls back to its default instead of
@@ -189,6 +200,7 @@ public struct LedgerProductSettings: Codable, Equatable, Sendable {
     motion = value(.motion, defaults.motion)
     remindersEnabled = value(.remindersEnabled, defaults.remindersEnabled)
     reminderHour = value(.reminderHour, defaults.reminderHour) { Self.reminderHours.contains($0) }
+    hidesAmounts = value(.hidesAmounts, defaults.hidesAmounts)
   }
 
   private static func isKnownLocale(_ identifier: String) -> Bool {

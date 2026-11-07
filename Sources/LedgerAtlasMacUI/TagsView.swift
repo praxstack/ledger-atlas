@@ -77,10 +77,12 @@ enum AnnotationPresentation {
 
   static func templateSummary(
     _ template: LedgerTransactionTemplate, accounts: [LedgerAccount],
-    categories: [LedgerCategory]
+    categories: [LedgerCategory], hidingAmounts: Bool = false
   ) -> String {
     let name: (String?) -> String? = { id in accounts.first { $0.id == id }?.name }
-    let amount = "\(template.amount.amount.rawLiteral) \(template.amount.unitCode)"
+    let amount = LedgerDisplayFormatter(
+      locale: Locale(identifier: "en_US_POSIX"), hidesAmounts: hidingAmounts
+    ).plain(template.amount)
     let from = name(template.accountID) ?? "Unknown account"
     if template.kind == .transfer {
       let to = name(template.counterAccountID) ?? "Unknown account"
@@ -110,6 +112,7 @@ enum AnnotationPresentation {
 }
 
 struct TagsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let tags: [LedgerTag]
   let templates: [LedgerTransactionTemplate]
@@ -246,7 +249,8 @@ struct TagsView: View {
       }
       Button("Cancel", role: .cancel) { pendingUse = nil }
     } message: { use in
-      Text(AnnotationPresentation.templateSummary(use.template, accounts: accounts, categories: categories))
+      Text(AnnotationPresentation.templateSummary(
+        use.template, accounts: accounts, categories: categories, hidingAmounts: formatter.hidesAmounts))
     }
   }
 
@@ -294,7 +298,8 @@ struct TagsView: View {
         description: Text(isEditing ? "Save a transaction you repeat, then record it in one step." : "Begin editing to create templates."))
     } else {
       List(active, id: \.id) { template in
-        let summary = AnnotationPresentation.templateSummary(template, accounts: accounts, categories: categories)
+        let summary = AnnotationPresentation.templateSummary(
+          template, accounts: accounts, categories: categories, hidingAmounts: formatter.hidesAmounts)
         let tagNames = AnnotationPresentation.tagNames(template.tags, in: tags)
         HStack {
           VStack(alignment: .leading, spacing: 3) {

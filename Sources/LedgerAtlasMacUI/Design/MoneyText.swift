@@ -78,7 +78,7 @@ public struct MoneyText: View {
       .lineLimit(1)
       .fixedSize(horizontal: true, vertical: false)
       .accessibilityElement(children: .ignore)
-      .accessibilityLabel(parts.text)
+      .accessibilityLabel(formatter.hidesAmounts ? LedgerDisplayFormatter.hiddenAmountLabel : parts.text)
   }
 
   /// The figure's colour and its quiet partner (symbol, paise). Both are theme tokens, so they
@@ -89,6 +89,8 @@ public struct MoneyText: View {
     case .neutral: return ink
     case .secondary: return (LedgerTheme.inkSecondary, LedgerTheme.inkSecondaryQuiet)
     case .automatic:
+      // A hidden amount keeps plain ink: a colour would still tell money in from money out.
+      if formatter.hidesAmounts { return ink }
       if amount.amount.isNegative, negativeIsAlert || (sign == .always && amountColors.tintsSpending) {
         return (LedgerTheme.negative, LedgerTheme.negativeQuiet)
       }

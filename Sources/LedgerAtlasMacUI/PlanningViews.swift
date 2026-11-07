@@ -82,6 +82,7 @@ struct RecurrenceView: View {
 }
 
 private struct RecurrenceRow: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let rule: LedgerRecurrenceRule
   let accountName: String?
   let categoryName: String?
@@ -92,7 +93,7 @@ private struct RecurrenceRow: View {
   var body: some View {
     HStack {
       VStack(alignment: .leading, spacing: 4) {
-        Text("\(rule.kind.rawValue.capitalized) · \(rule.amount.amount.rawLiteral) \(rule.amount.unitCode)")
+        Text("\(rule.kind.rawValue.capitalized) · \(formatter.plain(rule.amount))")
         Text("Every \(rule.interval) \(rule.frequency.rawValue) · starts \(dateText(rule.start))")
           .font(.caption).foregroundStyle(.secondary)
         Text([accountName, categoryName].compactMap { $0 }.joined(separator: " · "))
@@ -129,7 +130,7 @@ private struct RecurrenceRow: View {
       .accessibilityLabel("Actions for recurrence rule")
     }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(rule.amount.amount.rawLiteral) \(rule.amount.unitCode)")
+    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(formatter.plain(rule.amount))")
   }
 
   private func dateText(_ date: SourceLocalDate) -> String {
@@ -222,6 +223,7 @@ private struct RecurrenceForm: View {
 }
 
 struct InstallmentsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let plans: [LedgerInstallmentPlan]
   let accounts: [LedgerAccount]
@@ -244,7 +246,7 @@ struct InstallmentsView: View {
         List(plans, id: \.id) { plan in
           HStack {
             VStack(alignment: .leading, spacing: 4) {
-              Text("\(plan.principal.amount.rawLiteral) \(plan.principal.unitCode)")
+              Text(formatter.plain(plan.principal))
               Text("\(plan.completedCount)/\(plan.occurrenceCount) occurrences · \(accounts.first(where: { $0.id == plan.accountID })?.name ?? "Unknown account")")
                 .font(.caption).foregroundStyle(.secondary)
               if let category = categories.first(where: { $0.id == plan.categoryID }) {
@@ -268,7 +270,7 @@ struct InstallmentsView: View {
             }
           }
           .accessibilityElement(children: .combine)
-          .accessibilityLabel("Installment plan, \(plan.principal.amount.rawLiteral) \(plan.principal.unitCode)")
+          .accessibilityLabel("Installment plan, \(formatter.plain(plan.principal))")
         }
       }
       if let lastFailure { Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure) }
@@ -438,24 +440,12 @@ struct BudgetsView: View {
     func money(_ value: ExactDecimal) -> String {
       (try? CurrencyAmount(unitCode: unit, amount: value)).map {
         formatter.parts($0, sign: .never).text
-      } ?? "\(value.rawLiteral) \(unit)"
+      } ?? formatter.plain(value, unitCode: unit)
     }
     let left = status.overspent.map { "over by \(money($0))" } ?? "\(money(status.remaining)) left"
     let carried = status.carried.isPositive ? " (includes \(money(status.carried)) rolled over)" : ""
     return
       "Spent \(money(status.spent)) of \(money(status.available)), \(left)\(carried), ends \(formatter.date(status.periodEnd))"
-  }
-
-  static func describe(_ status: LedgerBudgetStatus, unit: String) -> String {
-    let left =
-      status.overspent.map { "over by \($0.rawLiteral)" } ?? "\(status.remaining.rawLiteral) left"
-    let carried =
-      status.carried.isPositive ? " (includes \(status.carried.rawLiteral) rolled over)" : ""
-    let end = String(
-      format: "%04d-%02d-%02d", status.periodEnd.year, status.periodEnd.month,
-      status.periodEnd.day)
-    return
-      "Spent \(status.spent.rawLiteral) of \(status.available.rawLiteral) \(unit), \(left)\(carried), period ends \(end)"
   }
 }
 

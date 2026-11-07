@@ -97,6 +97,10 @@ struct InsightsSurface: View {
         Section("Export") {
           Button("Export PDF statement", action: exportPDF)
             .accessibilityLabel("Export PDF statement")
+          if formatter.hidesAmounts {
+            Text(LedgerProductSettings.hideAmountsExportNotice)
+              .font(.caption).foregroundStyle(.secondary)
+          }
         }
       }
       .navigationTitle("Insights")
@@ -196,6 +200,8 @@ struct InsightsSurface: View {
         }
       }
       .chartForegroundStyleScale(["Income": Color.green, "Expense": Color.orange])
+      // Hide amounts (#173): the axis would print the figures the bars stand for.
+      .chartYAxis(formatter.hidesAmounts ? .hidden : .automatic)
       .frame(height: 180)
       // The chart is one spoken element; the grid below it holds the same numbers as text.
       .accessibilityElement(children: .ignore)
@@ -228,6 +234,10 @@ struct InsightsSurface: View {
         exportPeriodPDF?(report, title, hideNamesInPDF)
       }
       .disabled(exportPeriodPDF == nil)
+      if formatter.hidesAmounts {
+        Text(LedgerProductSettings.hideAmountsExportNotice)
+          .font(.caption).foregroundStyle(.secondary)
+      }
       Text("Snapshot \(s.snapshotDigest.prefix(16)). The screen and the PDF show the same snapshot.")
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -248,6 +258,7 @@ struct InsightsSurface: View {
             x: .value("Amount", Self.double(row.totalAmount)),
             y: .value("Category", row.name))
         }
+        .chartXAxis(formatter.hidesAmounts ? .hidden : .automatic)
         .frame(height: CGFloat(min(top.count, 8)) * 28 + 20)
         // The chart is one spoken element; every line is listed as a row below it.
         .accessibilityElement(children: .ignore)
@@ -299,7 +310,7 @@ struct InsightsSurface: View {
 
   private func money(_ value: ExactDecimal, _ unit: String) -> String {
     (try? CurrencyAmount(unitCode: unit, amount: value)).map(formatter.amount)
-      ?? "\(value.rawLiteral) \(unit)"
+      ?? formatter.plain(value, unitCode: unit)
   }
 
   private func label(_ start: SourceLocalDate, _ kind: InsightsPeriodKind) -> String {

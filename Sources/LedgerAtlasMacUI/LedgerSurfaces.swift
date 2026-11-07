@@ -73,6 +73,7 @@ struct DataBackedSurface: View {
 }
 
 struct BackupSurface: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let rows: [LedgerJourney.SurfaceRow]
   let emptyMessage: String
   let lastFailure: String?
@@ -122,6 +123,10 @@ struct BackupSurface: View {
       }
       Text(VendorExport.notice).font(.caption).foregroundStyle(.secondary)
         .accessibilityLabel(VendorExport.notice)
+      if formatter.hidesAmounts {
+        Text(LedgerProductSettings.hideAmountsExportNotice)
+          .font(.caption).foregroundStyle(.secondary)
+      }
       if exportXLSX != nil || importXLSX != nil || reset != nil {
         HStack {
           if let exportXLSX {
