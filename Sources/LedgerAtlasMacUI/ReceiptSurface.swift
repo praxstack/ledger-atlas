@@ -119,6 +119,7 @@ struct ReceiptSurface: View {
         ForEach(matches, id: \.id) { row in
           Button("\(row.title) · \(row.detail)") { linkTarget = row.id }
             .buttonStyle(.link)
+            .accessibilityLabel("Link to \(row.title), \(row.detail)")
         }
       }
     }

@@ -131,7 +131,7 @@ struct CategoryBreadcrumbs: View {
     if isCurrent {
       Text(title).fontWeight(.semibold).accessibilityAddTraits(.isHeader)
     } else {
-      Button(title) { select(id) }.buttonStyle(.link)
+      Button(title) { select(id) }.buttonStyle(.link).accessibilityLabel(title)
     }
   }
 }

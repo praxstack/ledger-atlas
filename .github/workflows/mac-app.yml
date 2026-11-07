@@ -165,8 +165,15 @@ jobs:
           if [ "${{ steps.package.outputs.mode }}" = "ad-hoc" ]; then
             notes="$notes Not notarized: the first time you open it, go to System Settings > Privacy & Security and click Open Anyway."
           fi
+          # Written release notes, when the tag has them (docs/releases/<tag>.md), with the
+          # build line underneath.
+          if [ -f "docs/releases/$GITHUB_REF_NAME.md" ]; then
+            { cat "docs/releases/$GITHUB_REF_NAME.md"; printf '\n\n%s\n' "$notes"; } > "$RUNNER_TEMP/notes.md"
+          else
+            printf '%s\n' "$notes" > "$RUNNER_TEMP/notes.md"
+          fi
           gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.sha256 \
-            --title "Ledger Atlas $GITHUB_REF_NAME" --notes "$notes" --prerelease
+            --title "Ledger Atlas $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
 
       - name: Clean up keychain
         if: always()
