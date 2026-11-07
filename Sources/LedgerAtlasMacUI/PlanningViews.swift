@@ -80,6 +80,7 @@ struct RecurrenceView: View {
 }
 
 private struct RecurrenceRow: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let rule: LedgerRecurrenceRule
   let accountName: String?
   let categoryName: String?
@@ -145,11 +146,11 @@ private struct RecurrenceRow: View {
           toggle(revised)
         }
       }
-      .disabled(!isEditing)
+      .shownWhileEditing(isEditing)
       .accessibilityLabel("Actions for recurrence rule")
     }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(rule.amount.amount.rawLiteral) \(rule.amount.unitCode)")
+    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(formatter.amount(rule.amount))")
   }
 
   private func dateText(_ date: SourceLocalDate) -> String {
@@ -242,6 +243,7 @@ private struct RecurrenceForm: View {
 }
 
 struct InstallmentsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let plans: [LedgerInstallmentPlan]
   let accounts: [LedgerAccount]
@@ -304,7 +306,7 @@ struct InstallmentsView: View {
           }
           .padding(.vertical, LedgerTheme.Space.xs)
           .accessibilityElement(children: .combine)
-          .accessibilityLabel("Installment plan, \(plan.principal.amount.rawLiteral) \(plan.principal.unitCode)")
+          .accessibilityLabel("Installment plan, \(formatter.amount(plan.principal))")
         }
         .scrollContentBackground(.hidden)
       }

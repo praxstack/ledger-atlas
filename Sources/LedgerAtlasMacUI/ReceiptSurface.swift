@@ -30,19 +30,16 @@ struct ReceiptSurface: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+      if receipts.isEmpty {
+        emptyState
+      } else {
+        // The window title already names the screen; no second large title in the content.
         HStack(spacing: LedgerTheme.Space.m) {
-          Text("Receipts")
-            .font(LedgerTheme.Typeface.screenTitle)
-            .foregroundStyle(LedgerTheme.ink)
-            .accessibilityAddTraits(.isHeader)
-          Spacer(minLength: LedgerTheme.Space.s)
-          if isWorking {
-            ProgressView("Processing receipt…")
-              .controlSize(.small)
-              .font(LedgerTheme.Typeface.caption)
-              .foregroundStyle(LedgerTheme.inkSecondary)
+          if !journey.isEditing {
+            LedgerStatusLine(status: "Open a ledger for editing to add or link receipts.")
           }
+          Spacer(minLength: LedgerTheme.Space.s)
+          progress
           if journey.isEditing {
             Button("Add receipt…", action: chooseReceipt)
               .buttonStyle(LedgerPrimaryButtonStyle())
@@ -50,41 +47,35 @@ struct ReceiptSurface: View {
               .accessibilityLabel("Add receipt")
           }
         }
-        Text(
-          "Receipts are stored inside the open ledger, so backups carry them. Images are kept as picked, including any location data they carry. Text recognition runs on this Mac and only suggests values; nothing is recorded until you confirm."
-        )
-        .font(LedgerTheme.Typeface.secondary)
-        .foregroundStyle(LedgerTheme.inkSecondary)
-        // No fixedSize here: this screen doesn't scroll, and a fixed-height paragraph asked for
-        // its size at a narrow width made the window taller than the screen.
-        if !journey.isEditing {
-          LedgerStatusLine(status: "Open a ledger for editing to add or link receipts.")
-        }
-      }
-      .padding(LedgerTheme.Space.xxl)
-      HStack(alignment: .top, spacing: LedgerTheme.Space.l) {
-        receiptList.frame(minWidth: 220, maxWidth: 300)
-        if let selected {
-          ScrollView {
-            detail(for: selected).ledgerCard()
+        .padding(.horizontal, LedgerTheme.Space.l)
+        .padding(.vertical, LedgerTheme.Space.m)
+        HStack(alignment: .top, spacing: LedgerTheme.Space.l) {
+          receiptList.frame(minWidth: 220, maxWidth: 300)
+          if let selected {
+            ScrollView {
+              detail(for: selected).ledgerCard()
+            }
+          } else {
+            LedgerEmptyState(
+              "Choose a receipt", systemImage: "doc.text.viewfinder",
+              message: "Pick one from the list to link it to a transaction or record an expense from it.")
           }
-        } else if !receipts.isEmpty {
-          LedgerEmptyState(
-            "Choose a receipt", systemImage: "doc.text.viewfinder",
-            message: "Pick one from the list to link it to a transaction or record an expense from it.")
-        } else {
-          // Keeps the row as wide as the window, so the screen's width never depends on the
-          // wrapped intro text above it.
-          Spacer(minLength: 0)
         }
+        .padding(.horizontal, LedgerTheme.Space.l)
       }
-      .padding(.horizontal, LedgerTheme.Space.xxl)
       if let status {
         LedgerActionBar { LedgerStatusLine(status: status) }
           .padding(.top, LedgerTheme.Space.l)
-      } else {
-        Spacer(minLength: LedgerTheme.Space.l)
       }
+      // Privacy notes sit quietly at the foot, after the thing people came to do.
+      Text(Self.privacyNote)
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.inkTertiary)
+        // No fixedSize here: this screen doesn't scroll, and a fixed-height paragraph asked for
+        // its size at a narrow width made the window taller than the screen.
+        .frame(maxWidth: 560, alignment: .leading)
+        .padding(.horizontal, LedgerTheme.Space.l)
+        .padding(.vertical, LedgerTheme.Space.m)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .ledgerCanvas()
@@ -92,16 +83,55 @@ struct ReceiptSurface: View {
     .task(id: journey.snapshotGeneration) { reload() }
   }
 
+  static let privacyNote =
+    "Receipts live inside the open ledger, so backups carry them. Images are kept as picked, including any location data. Text recognition runs on this Mac and only suggests values; nothing is saved until you confirm."
+
+  @ViewBuilder private var progress: some View {
+    if isWorking {
+      ProgressView("Processing receipt…")
+        .controlSize(.small)
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+    }
+  }
+
+  /// A drop-zone style empty state inside a List, so the screen still reads as rows to
+  /// VoiceOver and the accessibility checks.
+  private var emptyState: some View {
+    List {
+      LedgerEmptyState(
+        "No receipts yet", systemImage: "receipt",
+        message: journey.isEditing
+          ? "Add a photo or PDF of a receipt, then link it to a transaction or record an expense from it."
+          : "Open a ledger for editing to add or link receipts."
+      ) {
+        if journey.isEditing {
+          Button("Add receipt…", action: chooseReceipt)
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            .disabled(isWorking)
+            .accessibilityLabel("Add receipt")
+        }
+        progress
+      }
+      .background(LedgerTheme.recessed, in: .rect(cornerRadius: LedgerTheme.Radius.card))
+      .overlay {
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.card)
+          .strokeBorder(LedgerTheme.hairline, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+      }
+      .listRowSeparator(.hidden)
+      .listRowBackground(Color.clear)
+      .listRowInsets(EdgeInsets())
+    }
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .contentMargins(LedgerTheme.Space.l, for: .scrollContent)
+  }
+
   /// A plain list of buttons rather than a selection list: Tab into a SwiftUI selection
   /// `List` on macOS 26 crashed AppKit (`viewAtColumn:` with no column) under Full Keyboard
   /// Access. Each receipt is a button that VoiceOver reads as selected when it is shown.
   private var receiptList: some View {
     List {
-      if receipts.isEmpty {
-        Text("No receipts yet.")
-          .font(LedgerTheme.Typeface.secondary)
-          .foregroundStyle(LedgerTheme.inkTertiary)
-      }
       ForEach(receipts, id: \.id) { receipt in
         let isSelected = receipt.id == selectedID
         Button {
@@ -147,7 +177,9 @@ struct ReceiptSurface: View {
   private func detail(for receipt: LedgerReceiptAttachment) -> some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
       LedgerCardHeader(Self.title(for: receipt)) {
-        Text("\(receipt.byteCount) bytes · SHA-256 \(receipt.sha256.prefix(12))…").monospacedDigit()
+        Text(
+          "\(ByteCountFormatter.string(fromByteCount: Int64(receipt.byteCount), countStyle: .file)) · SHA-256 \(receipt.sha256.prefix(12))…"
+        ).monospacedDigit()
       }
       if receipt.lifecycle == .tombstoned {
         LedgerStatusLine(
@@ -171,7 +203,7 @@ struct ReceiptSurface: View {
 
         LedgerRowDivider()
         Button("Remove receipt", role: .destructive) { remove(receipt) }
-          .buttonStyle(LedgerSecondaryButtonStyle())
+          .buttonStyle(LedgerDestructiveButtonStyle())
           .accessibilityHint("Permanent: a removed receipt can't be linked or added again.")
           .disabled(isWorking)
       }
@@ -193,7 +225,7 @@ struct ReceiptSurface: View {
       if !matches.isEmpty {
         ForEach(matches, id: \.id) { row in
           Button("\(row.title) · \(row.detail)") { linkTarget = row.id }
-            .buttonStyle(.link)
+            .buttonStyle(LedgerLinkButtonStyle())
             .accessibilityLabel("Link to \(row.title), \(row.detail)")
         }
       }

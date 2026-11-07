@@ -319,3 +319,11 @@ struct LedgerSessionEmptyState: View {
     }
   }
 }
+
+extension View {
+  /// Row actions appear only while the ledger is being edited. Shown but disabled, the
+  /// "Actions" menus read as broken, and in dark mode they nearly vanished.
+  @ViewBuilder func shownWhileEditing(_ isEditing: Bool) -> some View {
+    if isEditing { self }
+  }
+}
