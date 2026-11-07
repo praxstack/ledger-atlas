@@ -142,6 +142,12 @@ jobs:
       - name: Runner display (for UI tests that render windows)
         run: system_profiler SPDisplaysDataType | grep -iE 'resolution|display type' || true
       - run: swift build
+      # Full Keyboard Access (System Settings > Keyboard > Keyboard navigation), as a
+      # keyboard-only user has it, so the keyboard tests can Tab to every control (#57).
+      - name: Turn on Full Keyboard Access
+        run: |
+          defaults write -g AppleKeyboardUIMode -int 2
+          echo "LEDGER_EXPECT_FULL_KEYBOARD_ACCESS=1" >> "$GITHUB_ENV"
       # Serial on purpose: several tests block a thread (condition/semaphore waits,
       # waitUntilExit) while another test-side task finishes the work. On a 3-core
       # runner the parallel Swift Testing pool runs out of threads and every test

@@ -79,7 +79,7 @@ Release-one completion requires all 23 delivery tickets to meet their acceptance
 
 ### Accessibility and performance
 
-- Every screen supports keyboard completion, visible focus, logical focus order, row-level VoiceOver, 200 percent text, high contrast, reduced motion, and non-color state cues.
+- Every screen supports keyboard completion, visible focus, logical focus order, row-level VoiceOver, the largest text the Mac offers (every font a system text style, so it follows the macOS text size and display zoom settings; macOS has no Dynamic Type), high contrast, reduced motion, and non-color state cues.
 - Each chart has an exact accessible table and spoken summary.
 - All 25 screenshot traceability records receive synthetic privacy-safe Ledger Atlas captures. The source screenshots never enter the repository.
 - Ledger browsing, search, and report paths remain paged on a 100000-entry synthetic ledger and meet the ticketed response targets.

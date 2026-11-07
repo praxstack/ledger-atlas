@@ -38,6 +38,11 @@ private func day(_ year: Int, _ month: Int, _ day: Int) -> SourceLocalDate {
       #expect(loaded.colorScheme == .dark)
       #expect(LedgerProductSettings().colorScheme == nil)
     #endif
+    #if canImport(AppKit)
+      #expect(loaded.appearance.appearanceName == .darkAqua)
+      #expect(LedgerProductSettings(appearance: .light).appearance.appearanceName == .aqua)
+      #expect(LedgerProductSettings().appearance.appearanceName == nil)
+    #endif
   }
 }
 
