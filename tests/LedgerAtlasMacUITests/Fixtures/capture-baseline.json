@@ -241,13 +241,13 @@
   },
   "25-backup.hub-all_entries-dark.png" : {
     "lines" : 286,
-    "looks" : "e0666660e26261e0",
-    "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
+    "looks" : "e0666660e26062e4",
+    "text" : "25fc6ba7b73b136a54aa1927b2735c113d2632fe5e4c547510e5b151e02781e3"
   },
   "25-backup.hub-all_entries-light.png" : {
     "lines" : 286,
-    "looks" : "92b0b09c3cbc5c92",
-    "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
+    "looks" : "92b0b09c3cbc5c9a",
+    "text" : "25fc6ba7b73b136a54aa1927b2735c113d2632fe5e4c547510e5b151e02781e3"
   },
   "key-balance-receipt-dark.png" : {
     "lines" : 126,
