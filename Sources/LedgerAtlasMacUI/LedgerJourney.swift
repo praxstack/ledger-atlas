@@ -83,8 +83,8 @@ public final class LedgerJourney {
     backgroundWork = .preparingImport
     defer { backgroundWork = nil }
     let started = generation
-    let activity = Self.beginImportActivity("Reading a Money Manager backup")
-    defer { ProcessInfo.processInfo.endActivity(activity) }
+    let work = LedgerQuitGuard.shared.begin("Reading a Money Manager backup")
+    defer { work.end() }
     let workspace = workspace
     let request = ImportWorkspace.Request(
       sourceURL: sourceURL, stagingDatabaseURL: stagingDatabaseURL,
@@ -122,14 +122,6 @@ public final class LedgerJourney {
 
   /// Phone backups are a few megabytes; this leaves plenty of room.
   static let maximumBackupBytes: UInt64 = 256 * 1024 * 1024
-
-  /// Keeps the Mac awake and stops a quick quit from cutting off a long import step. A step cut
-  /// off anyway is safe: the commit is one SQLite transaction, so it rolls back, and choosing
-  /// the backup again prepares a fresh ledger file.
-  private static func beginImportActivity(_ reason: String) -> NSObjectProtocol {
-    ProcessInfo.processInfo.beginActivity(
-      options: [.userInitiated, .suddenTerminationDisabled], reason: reason)
-  }
 
   private func adopt(
     _ preparation: ImportWorkspace.Preparation, canonicalDatabaseURL: URL,
@@ -202,8 +194,8 @@ public final class LedgerJourney {
     backgroundWork = .importing
     defer { backgroundWork = nil }
     let started = generation
-    let activity = Self.beginImportActivity("Importing a Money Manager backup")
-    defer { ProcessInfo.processInfo.endActivity(activity) }
+    let work = LedgerQuitGuard.shared.begin("Importing a Money Manager backup")
+    defer { work.end() }
     let workspace = workspace
     do {
       let opened = try await Task.detached(priority: .userInitiated) {
