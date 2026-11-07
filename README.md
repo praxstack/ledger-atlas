@@ -1,24 +1,14 @@
 # Ledger Atlas
 
-Ledger Atlas contains the lightweight Next.js ledger surface and the macOS-first,
-local-first personal-finance product track. The native track includes a Money
-Manager compatibility boundary, a versioned canonical-ledger backend, and an
-early SwiftUI shell. Both tracks are kept in this repository; neither implies a
-universal compatibility or release claim.
+Ledger Atlas is a local-first personal-finance app for macOS. It imports
+Money Manager (Realbyte) Android v19 backups losslessly into a canonical
+ledger, and every import is checked against a certificate. Data stays on your
+Mac, inside the app's sandbox.
 
 **Installing the Mac app:** see [docs/INSTALL.md](docs/INSTALL.md) (download, first launch,
 where your ledgers live, backups and updates).
 
 ## Development
-
-```bash
-npm ci
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-For the native track:
 
 ```sh
 ./scripts/bootstrap.sh
@@ -26,40 +16,28 @@ For the native track:
 swift run mmctl
 ```
 
-The native `mmctl` surface is redacted `inspect`, `coverage`, `stage`, and
-`reconcile`. The positive import cell is a named synthetic text-only v19 subset;
-real Android v19 SQLite and `.mmbak` inputs remain classification-only.
+`mmctl` offers redacted `inspect`, `coverage`, `stage`, `reconcile` and
+`certify` commands. See
+[docs/compatibility/money-manager-v19-import-certificate.md](docs/compatibility/money-manager-v19-import-certificate.md)
+for what a certificate proves.
+
+The Next.js web demo that used to live in `app/` and `lib/` was removed (#199).
+Its last version is commit `0ea0ba4` on `main`.
 
 ## Cloud development and DMG builds
 
-CI runs the web and Python checks on every pull request, and the Swift checks on
+CI runs the Python checks on every pull request, and the Swift checks on
 pull requests that touch Swift, Xcode, or scripts. The `Mac app (DMG)` workflow
 builds an installable DMG on GitHub's macOS runners. See
 [docs/development/cloud-and-dmg.md](docs/development/cloud-and-dmg.md).
 
-## Scripts
-
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Start the development server |
-| `npm run build` | Create a production build |
-| `npm run start` | Run the production server |
-| `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run TypeScript checks |
-| `npm test` | Run unit tests |
-
-## API
-
-- `GET /api/transactions` — list transactions and current balance
-- `POST /api/transactions` — add a transaction (`description`, `amount`)
-
 ## Agent skills
 
-This repo ships 818+ project-local agent skills under `.agents/skills/` plus Spec Kit workflows in `.cursor/skills/`. See [docs/agent-skills-setup.md](docs/agent-skills-setup.md) for the full layered pipeline, core 10 commands, and install/update instructions.
+Agent skills are installed locally under `.agents/skills/` by `./scripts/install-skills.sh` (sources pinned in `skills-lock.json`) and are not committed, because many carry their own third-party licences (#185). Spec Kit workflows live in `.cursor/skills/`. See [docs/agent-skills-setup.md](docs/agent-skills-setup.md) for the pipeline and install/update instructions.
 
 ## Cloud Agent environment
 
-Repository-managed environment configuration lives in `.cursor/environment.json`. The install script at `.cursor/scripts/install.sh` runs `npm ci` after checkout.
+Repository-managed environment configuration lives in `.cursor/environment.json`. The install script at `.cursor/scripts/install.sh` sets up the Python tooling and installs the agent skills after checkout.
 
 Native development also follows `AGENTS.md`, `CONTEXT.md`, `SPEC.md`, and
 `docs/orchestration/RUNBOOK.md`. Real financial evidence stays in the separate
