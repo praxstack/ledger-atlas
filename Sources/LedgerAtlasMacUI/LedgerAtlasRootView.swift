@@ -675,7 +675,6 @@ public struct LedgerAtlasRootView: View {
       journey.closeLedger()
       let canonical = LedgerLocations.availableURL(
         named: "Money Manager import", in: try LedgerLocations.ledgersDirectory())
-      imported = canonical
       await journey.selectSourceInBackground(
         backup, stagingDatabaseURL: folder.appendingPathComponent("stage.sqlite"),
         canonicalDatabaseURL: canonical,
@@ -683,8 +682,9 @@ public struct LedgerAtlasRootView: View {
         sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: given == nil ? 0 : 19_800))
       log("import check: review \(journey.phase) after \(seconds()) \(journey.lastFailure ?? "")")
       await approveImport()
-      // Publication picks another name if the requested one was taken meanwhile.
-      if let published = journey.ledgerURL { imported = published }
+      // Clean up only what this check published: publication picks another name if the
+      // requested one was taken meanwhile, and a failed import publishes nothing.
+      imported = journey.ledgerURL
       log(
         "import check: approve \(journey.phase), \(journey.snapshot?.transactions.count ?? -1) transactions after \(seconds()) \(journey.lastFailure ?? "")"
       )
@@ -1195,6 +1195,8 @@ public struct LedgerAtlasRootView: View {
       return "Temporary files left beside this ledger by an earlier session were not recognised, so it was not opened. \(retry)"
     case .receiptKeyMissing:
       return receiptKeyMissingExplanation
+    case .insufficientSpace:
+      return "There isn't enough free space on this Mac to upgrade this ledger. For a short while the upgrade needs about three times the ledger's size. Free some space, then open it again. Nothing was changed."
     default:
       return operation == .create
         ? "Ledger could not be created. \(retry)" : "Ledger could not be opened. \(retry)"
