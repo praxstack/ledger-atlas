@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import LedgerCore
 import LedgerStore
+internal import MMImport
 import SwiftUI
 import os
 import UniformTypeIdentifiers
@@ -27,6 +28,8 @@ public struct LedgerAtlasRootView: View {
   }
   @State private var pendingIntent: LedgerIntentRequest?
   @State private var isChoosingImportSource = false
+  /// True from an approved import until the person moves on from its balance receipt.
+  @State private var justImported = false
   @State private var lifecycleMessage: String?
   @State private var lifecycleRetryOperation: LedgerLifecycleOperation?
   @State private var lifecycleGeneration = 0
@@ -192,6 +195,9 @@ public struct LedgerAtlasRootView: View {
     .onChange(of: journey.ledgerURL) { _, ledger in
       portal.ledgerDidChange(to: ledger)
     }
+    .onChange(of: selection) { _, destination in
+      if destination != .importReview { justImported = false }
+    }
     .onChange(of: appLock.isLocked) { _, locked in
       portal.lockDidChange(isLocked: locked)
       if locked {
@@ -323,7 +329,7 @@ public struct LedgerAtlasRootView: View {
     }
     let url = LedgerLocations.availableURL(named: "Sample Household", in: directory)
     do {
-      try LedgerDemoTour.makeDemoLedger(at: url)
+      try LedgerDemoTour.makeDemoLedger(at: url, withBalanceReceipt: false)
     } catch {
       journey.recordFailure("The sample ledger could not be made.")
       return
@@ -1257,7 +1263,35 @@ public struct LedgerAtlasRootView: View {
         return
       }
     }
-    selection = productSettings.startScreen
+    // #172: show the balance-match receipt first when the import produced one.
+    if journey.balanceReceipt != nil {
+      justImported = true
+      selection = .importReview
+    } else {
+      selection = productSettings.startScreen
+    }
+  }
+
+  /// The open ledger's receipt, unless a new backup is being reviewed: that review is about
+  /// another file, and the receipt belongs to the ledger already open.
+  private var shownBalanceReceipt: ImportBalanceReceipt? {
+    switch journey.phase {
+    case .reviewing, .blocked: nil
+    default: journey.balanceReceipt
+    }
+  }
+
+  private func exportBalanceReceipt() {
+    guard let receipt = journey.balanceReceipt else { return }
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [UTType.pdf]
+    panel.nameFieldStringValue = "ledger-atlas-balance-receipt.pdf"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try LedgerPDFStatementExporter.export(lines: receipt.statementLines(), to: url)
+    } catch {
+      journey.recordFailure("The balance receipt could not be saved.")
+    }
   }
 
   @ViewBuilder
@@ -1288,7 +1322,14 @@ public struct LedgerAtlasRootView: View {
         trySampleData: openSampleLedger)
     } else if selection == .importReview || selection == .onboarding {
       VStack(alignment: .leading, spacing: 16) {
-        ImportReviewView(summary: journey.phase == .idle ? importReviewSummary : journey.summary)
+        ImportReviewView(
+          summary: journey.phase == .idle ? importReviewSummary : journey.summary,
+          balanceReceipt: shownBalanceReceipt, saveReceipt: exportBalanceReceipt,
+          continueTitle: justImported ? "Continue to \(productSettings.startScreen.sidebarTitle)" : nil,
+          continueAfterReceipt: {
+            justImported = false
+            selection = productSettings.startScreen
+          })
         if let lastFailure = journey.lastFailure {
           Text(lastFailure)
             .foregroundStyle(.red)

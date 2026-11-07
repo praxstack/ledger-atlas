@@ -153,8 +153,8 @@ import Testing
     withJSONObject: index, options: [.prettyPrinted, .sortedKeys])
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
-  // 25 records and 3 key states, each in light and dark.
-  let expectedFiles: Int = 56
+  // 25 records and 4 key states, each in light and dark.
+  let expectedFiles: Int = 58
   #expect(index.count == expectedFiles)
   print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
   #expect(
@@ -162,7 +162,7 @@ import Testing
     "the main run loop was stopped too often; restarts are capped")
 }
 
-/// The empty state, the lock screen and a refused passcode, in light and dark. (Loaded and the
+/// The empty state, the lock screen, a refused passcode and the balance receipt, in light and dark. (Loaded and the
 /// edit sheet are records 1 and 14 above.)
 @MainActor
 private func captureKeyStates(into output: URL) async throws -> [[String: String]] {
@@ -222,6 +222,25 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     expectUsable(
       capture.png, text: text, expecting: ["That passcode was not accepted."], for: "error")
     try save(capture, "error", appearance, "A refused passcode, shown in words as well as colour.")
+  }
+  // #172: the balance-match receipt on Import Review, with a matching row, one that differs
+  // and a hidden account Money Manager has no figure for (the demo ledger's made-up receipt).
+  log("balance receipt")
+  let receipt = try await MountedRoot(
+    showing: .importReview, size: captureSize, appWindow: true, readsInProcess: true)
+  defer { receipt.close() }
+  for appearance in CaptureAppearance.allCases {
+    receipt.window.appearance = NSAppearance(named: appearance.name)
+    pump(0.6)
+    let capture = try #require(windowPNG(receipt.window))
+    let text = receipt.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
+    expectUsable(
+      capture.png, text: text,
+      expecting: ["Balances after import", "matches", "higher here"],
+      for: "balance-receipt")
+    try save(
+      capture, "balance-receipt", appearance,
+      "After an import: each account beside Money Manager's figure, with the difference in words.")
   }
   return index
 }

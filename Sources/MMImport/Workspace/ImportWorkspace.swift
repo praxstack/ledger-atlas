@@ -13,10 +13,15 @@ public struct ImportWorkspace: Sendable {
   fileprivate final class PreparedState: @unchecked Sendable {
     let id = UUID()
     let request: CanonicalCommitRequest
+    let sourceBalances: MoneyManagerV19SourceBalances
     var destination: DestinationState
 
-    init(request: CanonicalCommitRequest, destination: DestinationState) {
+    init(
+      request: CanonicalCommitRequest, sourceBalances: MoneyManagerV19SourceBalances,
+      destination: DestinationState
+    ) {
       self.request = request
+      self.sourceBalances = sourceBalances
       self.destination = destination
     }
   }
@@ -124,7 +129,9 @@ public struct ImportWorkspace: Sendable {
           MoneyManagerV19Vocabulary.blocksLosslessCertification($0)
         }.count,
         losslessCertificationBlocked: plan.blocksLosslessCertification),
-      preparedHandle: .init(state: PreparedState(request: commitRequest, destination: destination)))
+      preparedHandle: .init(
+        state: PreparedState(
+          request: commitRequest, sourceBalances: plan.sourceBalances, destination: destination)))
   }
 
   public func approve(_ handle: PreparedHandle) -> Approval {
@@ -155,6 +162,14 @@ public struct ImportWorkspace: Sendable {
     let result = try SQLiteCanonicalCommitter().commit(handle.state.request, expecting: expectation)
     handle.state.destination = .existing(checksum: result.canonicalChecksum)
     return .init(status: result.status, eventCount: result.eventCount)
+  }
+
+  /// Money Manager's own figure per account, for the balance-match receipt (#172). This is the
+  /// one place the workspace hands out source-derived values: account names and the sums the
+  /// phone shows, which the receipt exists to display. They come from the staged rows and
+  /// never from the ledger.
+  public func sourceBalances(_ handle: PreparedHandle) -> MoneyManagerV19SourceBalances {
+    handle.state.sourceBalances
   }
 
   private func destinationState(at url: URL) throws -> DestinationState {

@@ -1,5 +1,6 @@
 import Foundation
 import LedgerAtlasMacUI
+import PDFKit
 import LedgerCore
 import LedgerStore
 import Testing
@@ -162,5 +163,67 @@ private func snapshot(
   #expect(try Data(contentsOf: target) == Data("keep me".utf8))
   #expect(throws: LedgerPDFStatementExporter.Error.invalidDestination) {
     try LedgerPDFStatementExporter.export(report, to: directory)
+  }
+}
+
+/// #206 review: pages are cut by line count, so a line that wrapped when drawn ran off the
+/// page and was clipped. Lines are now broken to the page's columns before paging.
+@Test func pdfLinesAreBrokenToThePageWidthSoNothingIsClipped() {
+  let long =
+    "  Result: no Money Manager figure, because Money Manager keeps no balance for a debit card; its entries count in A Very Long Account Name"
+  let lines = LedgerPDFStatementExporter.wrapped(
+    [long, "short", String(repeating: "x", count: 90)], columns: 40)
+  #expect(lines.allSatisfy { $0.count <= 40 })
+  #expect(lines.contains("short"))
+  #expect(lines.first == "  Result: no Money Manager figure,")
+  #expect(lines[1].hasPrefix("    because"))
+  // Nothing is lost: the words come back in order.
+  let rejoined = lines.prefix { $0 != "short" }.map { $0.trimmingCharacters(in: .whitespaces) }
+    .joined(separator: " ")
+  #expect(rejoined == long.trimmingCharacters(in: .whitespaces))
+  #expect(lines.suffix(3).joined().filter { $0 == "x" }.count == 90)
+}
+
+/// Wide characters take more room than they count for, so the exporter measures each piece
+/// with the font that draws it instead of counting characters.
+@Test func pdfLinesAreBrokenByMeasuredWidthForWideCharacters() {
+  let wide = "日本語の口座名がとても長い場合でも切れないこと確認します"
+  let fits: (String) -> Bool = { $0.unicodeScalars.count * 2 <= 20 }
+  let lines = LedgerPDFStatementExporter.wrapped([wide], fits: fits)
+  #expect(lines.count > 1)
+  #expect(lines.allSatisfy(fits))
+  #expect(lines.map { $0.trimmingCharacters(in: .whitespaces) }.joined() == wide)
+}
+
+/// #206 review: the real export, read back from the PDF. Wide lines sit throughout, so some
+/// wrap across a page break; every marker and every wide character must come back.
+@Test func pdfExportKeepsEveryLineAndWideCharacterAcrossPages() throws {
+  let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "ledger-atlas-wide-\(UUID().uuidString).pdf")
+  defer { try? FileManager.default.removeItem(at: url) }
+  let wide = "日本語の口座名がとても長い場合でもページの境目で切れずに全部残ることを確認するための行です"
+  var lines: [String] = []
+  for row in 0..<150 {
+    lines.append("row-\(row)-end")
+    if row % 7 == 0 { lines.append("  \(wide)") }
+  }
+  try LedgerPDFStatementExporter.export(lines: lines, to: url)
+
+  let document = try #require(PDFDocument(url: url))
+  #expect(document.pageCount > 2)
+  let text = (0..<document.pageCount).compactMap { document.page(at: $0)?.string }.joined()
+    .filter { !$0.isWhitespace }
+  for row in 0..<150 { #expect(text.contains("row-\(row)-end"), "row \(row) is missing") }
+  #expect(text.components(separatedBy: wide).count - 1 == 22)
+  // Present in the text is not enough: every drawn character must also sit inside its page,
+  // within the margins, so nothing is clipped at a page break.
+  for index in 0..<document.pageCount {
+    let page = try #require(document.page(at: index))
+    let printable = page.bounds(for: .mediaBox).insetBy(dx: 18, dy: 18)
+    for character in 0..<page.numberOfCharacters {
+      let box = page.characterBounds(at: character)
+      guard box.width > 0, box.height > 0 else { continue }
+      #expect(printable.contains(box), "page \(index + 1), character \(character) is off the page")
+    }
   }
 }
