@@ -1806,10 +1806,7 @@ private func hasUnsupportedPortableProvenance(_ snapshot: LedgerStore.LedgerRead
     + snapshot.budgets.map(\.origin) + snapshot.installmentPlans.map(\.origin)
     + snapshot.tags.map(\.origin) + snapshot.transactionTemplates.map(\.origin)
     + snapshot.memos.map(\.origin)
-  let importedOriginID = String(repeating: "e", count: 64)
-  return origins.contains {
-    $0.provenanceID != nil || $0.id == importedOriginID || $0.label == LedgerOrigin.importedLabel
-  }
+  return origins.contains(where: \.carriesImportProvenance)
     || snapshot.revisionHistory.contains { revision in
       revision.draft.sourceLiterals.contains {
         $0.provenanceID != nil || $0.field.hasPrefix("import.")
@@ -1869,7 +1866,7 @@ extension LedgerApplication {
     // as rows made on this Mac. Ids don't depend on the origin, so nothing else changes.
     let native = try LedgerOrigin.macNative()
     func kept(_ origin: LedgerOrigin) -> LedgerOrigin {
-      isImportOrigin(origin) ? native : origin
+      origin.carriesImportProvenance ? native : origin
     }
     return try sealedPackage(
       LedgerCanonicalPackage(
@@ -1884,13 +1881,6 @@ extension LedgerApplication {
         tags: keepsSetup ? try snapshot.tags.map { try $0.reorigined(kept($0.origin)) } : [],
         transactionTemplates: keepsSetup
           ? try snapshot.transactionTemplates.map { try $0.reorigined(kept($0.origin)) } : []))
-  }
-
-  /// The same test `LedgerStore.applyExport` uses to refuse import provenance in a package
-  /// without an import graph.
-  private static func isImportOrigin(_ origin: LedgerOrigin) -> Bool {
-    origin.provenanceID != nil || origin.id == String(repeating: "e", count: 64)
-      || origin.label == LedgerOrigin.importedLabel
   }
 
   /// Adds what `incoming` has and `current` lacks. Transaction history is joined revision by

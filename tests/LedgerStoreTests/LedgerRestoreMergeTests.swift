@@ -184,10 +184,16 @@ private struct MergeFixture {
   let trip = try LedgerTag(
     id: StableLedgerID.tag(origin: imported, localKey: key("d")), name: "Trip",
     origin: imported)
+  let lunch = try LedgerTransactionTemplate(
+    id: StableLedgerID.transactionTemplate(origin: imported, localKey: key("c")), name: "Lunch",
+    kind: .expense, categoryID: food.id,
+    amount: CurrencyAmount(unitCode: "USD", amount: ExactDecimal("4.00")),
+    accountID: cash.id, origin: imported)
   let open = LedgerApplication(store: try makeMergeStore())
   try open.createAccount(cash)
   try open.createCategory(food)
   try open.createTag(trip)
+  try open.saveTransactionTemplate(lunch)
   let before = try open.checksum()
 
   let contents = try LedgerApplication.resetPackage(
@@ -205,6 +211,9 @@ private struct MergeFixture {
   #expect(snapshot.categories.map(\.origin) == [native])
   #expect(snapshot.tags.map(\.id) == [trip.id])
   #expect(snapshot.tags.map(\.origin) == [native])
+  #expect(snapshot.transactionTemplates.map(\.id) == [lunch.id])
+  #expect(snapshot.transactionTemplates.map(\.origin) == [native])
+  #expect(snapshot.transactionTemplates.first?.categoryID == food.id)
   #expect(snapshot.transactions.isEmpty)
   #expect(try open.checksum() == before)
 }

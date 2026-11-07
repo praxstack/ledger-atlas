@@ -12,6 +12,7 @@ private final class QuitRecorder {
   var answer = true
   var replies: [Bool] = []
   var endDuringQuestion: LedgerQuitGuard.Work?
+  var windows: [NSWindow] = []
 
   func makeGuard() -> LedgerQuitGuard {
     LedgerQuitGuard(
@@ -20,7 +21,8 @@ private final class QuitRecorder {
         endDuringQuestion?.end()
         return answer
       },
-      replyToTerminate: { [self] in replies.append($0) })
+      replyToTerminate: { [self] in replies.append($0) },
+      windows: { [self] in windows })
   }
 }
 
@@ -71,4 +73,31 @@ private final class QuitRecorder {
   recorder.endDuringQuestion = quitGuard.begin("synthetic import")
   #expect(quitGuard.terminateReply() == .terminateNow)
   #expect(recorder.replies.isEmpty)
+}
+
+// Closing the only window quits the app, and a window opened again would get its own lock and
+// session while the write still holds the ledger, so the window can't close during a write.
+@MainActor
+@Test func theWindowCantBeClosedWhileALedgerIsBeingWritten() {
+  let recorder = QuitRecorder()
+  let window = NSWindow(
+    contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+    styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered,
+    defer: true)
+  window.isReleasedWhenClosed = false
+  let panel = NSPanel(
+    contentRect: NSRect(x: 0, y: 0, width: 100, height: 50), styleMask: [.titled, .closable],
+    backing: .buffered, defer: true)
+  recorder.windows = [window, panel]
+  let quitGuard = recorder.makeGuard()
+
+  let importing = quitGuard.begin("synthetic import")
+  #expect(!window.styleMask.contains(.closable))
+  #expect(window.styleMask.contains(.miniaturizable))
+  #expect(panel.styleMask.contains(.closable))
+  let opening = quitGuard.begin("synthetic open")
+  importing.end()
+  #expect(!window.styleMask.contains(.closable))
+  opening.end()
+  #expect(window.styleMask.contains(.closable))
 }
