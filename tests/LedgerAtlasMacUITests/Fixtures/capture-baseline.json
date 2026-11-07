@@ -269,6 +269,16 @@
     "looks" : "9247c7c7c3c7c7e2",
     "text" : "e747abf8b630b27440ac797291f343d74e8ae1c3d721df50318a307f33825944"
   },
+  "key-entry-suggestion-dark.png" : {
+    "lines" : 17,
+    "looks" : "92c1e4e0c18862c2",
+    "text" : "b938d8c63592885831ff0da85e574586286325c120ba68acfa46d74708c569d4"
+  },
+  "key-entry-suggestion-light.png" : {
+    "lines" : 17,
+    "looks" : "8010181e3c3d9590",
+    "text" : "b938d8c63592885831ff0da85e574586286325c120ba68acfa46d74708c569d4"
+  },
   "key-error-dark.png" : {
     "lines" : 58,
     "looks" : "e0617078787068e2",
