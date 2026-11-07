@@ -393,6 +393,10 @@ private func captureKeyStates(
       text = inProcessAccessibilityTree(of: window).map { "\($0.spokenName) \($0.value)" }
       if let first = state.expects.first, text.contains(where: { $0.contains(first) }) { break }
     }
+    // The list opens its inspector a moment after it measures its width; let that land so
+    // every run captures the same layout, then read the screen again.
+    try await Task.sleep(for: .milliseconds(1_000))
+    text = inProcessAccessibilityTree(of: window).map { "\($0.spokenName) \($0.value)" }
     for appearance in CaptureAppearance.allCases {
       window.appearance = NSAppearance(named: appearance.name)
       pump(0.6)
