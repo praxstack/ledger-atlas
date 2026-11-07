@@ -2122,6 +2122,24 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
   }
 }
 
+// A finished upgrade leaves an empty upgrade-state file beside the ledger. It is not an upgrade
+// in flight, so it must not stop the crash repair on later opens.
+@Test func lifecycleRollsBackACrashedSaveAfterACompletedUpgrade() throws {
+  try withLifecycleDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    _ = try writeV10Ledger(to: url)
+    #expect(try LedgerStoreLifecycle.open(at: url).disposition == .upgraded)
+    let state = URL(fileURLWithPath: url.path + ".upgrade-state")
+    #expect(try Data(contentsOf: state).isEmpty)
+    let before = try simulateSaveCutOffByACrash(at: url)
+
+    let reopened = try LedgerStoreLifecycle.open(at: url)
+    #expect(reopened.disposition == .opened)
+    #expect(reopened.rolledBackInterruptedSave)
+    #expect(try reopened.store.readSnapshot().accounts.count == before)
+  }
+}
+
 // A hot journal whose binding doesn't name this file could hold anyone's pages, so it is never
 // rolled back into the ledger.
 @Test func lifecycleNeverRollsBackAHotJournalWithAForeignBinding() throws {

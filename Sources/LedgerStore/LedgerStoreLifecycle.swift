@@ -296,9 +296,10 @@ public enum LedgerStoreLifecycle {
       : false
     // A crash mid-save or a restore from backup leaves the journal in a shape the checks below
     // refuse. Repair the cases that are provably safe first (#178, #181). An upgrade in flight
-    // keeps its own companion rules, so it is left alone.
+    // keeps its own companion rules, so it is left alone. A finished upgrade leaves an empty
+    // state file behind, which is not in flight.
     let repair: LedgerStore.CompanionRepair
-    if stateExists {
+    if allowsUpgradeTransitionCompanions {
       repair = .none
     } else {
       do { repair = try LedgerStore.repairCompanions(at: url) } catch {
