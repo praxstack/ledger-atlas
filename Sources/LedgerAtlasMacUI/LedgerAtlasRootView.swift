@@ -126,6 +126,9 @@ public struct LedgerAtlasRootView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(LedgerTheme.canvas, ignoresSafeAreaEdges: .all)
     }
+    // The window's own background is the canvas too: on macOS 26 the toolbar's scroll edge
+    // effect is painted in the window colour, which left a white band above most screens.
+    .containerBackground(LedgerTheme.canvas, for: .window)
     // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
     .onChange(of: productSettings.appearance, initial: true) { _, appearance in
       LedgerAppearance.apply(appearance)
