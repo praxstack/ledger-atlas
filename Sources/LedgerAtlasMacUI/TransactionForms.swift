@@ -193,9 +193,15 @@ struct NativeTransactionForm: View {
     .accessibilityElement(children: .contain)
   }
 
+  /// A memo and kind as the matcher sees them: a case or spacing edit is the same memo, so it
+  /// neither withdraws the suggestion nor starts another lookup.
   private struct SuggestionKey: Equatable {
-    let note: String
+    let memo: String
     let kind: LedgerTransactionKind
+    init(note: String, kind: LedgerTransactionKind) {
+      memo = LedgerEntrySuggestion.normalizedMemo(note)
+      self.kind = kind
+    }
   }
 
   private func suggest() async {
@@ -215,7 +221,9 @@ struct NativeTransactionForm: View {
         forMemo: memo, kind: kind, accounts: accounts, categories: categories,
         transactions: entries)
     }.value
-    guard !Task.isCancelled, memo == entry.note, kind == self.kind else { return }
+    guard !Task.isCancelled,
+      SuggestionKey(note: memo, kind: kind) == SuggestionKey(note: entry.note, kind: self.kind)
+    else { return }
     withdrawSuggestion()
     guard let found else { return }
     entry.suggestion = found

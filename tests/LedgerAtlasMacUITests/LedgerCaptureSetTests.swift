@@ -254,7 +254,7 @@ private func captureKeyStates(
 
   // #169: the entry form after typing a memo an earlier entry used. Account and category are
   // filled from that entry and the form says so in words; nothing is saved yet.
-  log("entry suggestion")
+  captureLog("entry suggestion")
   let demo = FileManager.default.temporaryDirectory.appendingPathComponent(
     "entry-suggestion-\(UUID().uuidString).sqlite")
   defer { try? FileManager.default.removeItem(at: demo) }
