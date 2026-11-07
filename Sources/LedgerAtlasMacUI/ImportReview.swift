@@ -792,10 +792,20 @@ extension ImportReviewSummary {
 
 struct ImportReviewView: View {
   let summary: ImportReviewSummary
+  /// The open ledger's balance-match receipt (#172), shown above the review when there is one.
+  var balanceReceipt: ImportBalanceReceipt?
+  var saveReceipt: () -> Void = {}
+  var continueTitle: String?
+  var continueAfterReceipt: () -> Void = {}
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 20) {
+        if let balanceReceipt {
+          ImportBalanceReceiptView(
+            receipt: balanceReceipt, saveAsPDF: saveReceipt, continueTitle: continueTitle,
+            continueAction: continueAfterReceipt)
+        }
         VStack(alignment: .leading, spacing: 8) {
           Label("Money Manager import review", systemImage: "eye")
             .font(.headline)
@@ -806,12 +816,19 @@ struct ImportReviewView: View {
         }
         .accessibilityElement(children: .combine)
 
+        // With a receipt the import has already committed, so the preparation status ("ready
+        // for approval", or "Blocked" for a ledger reopened later) no longer applies.
         GroupBox {
-          Label(summary.decision.message, systemImage: summary.decision.systemImageName)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+          Label(
+            balanceReceipt == nil
+              ? summary.decision.message
+              : "This ledger was written from the backup. The receipt above compares every account with Money Manager.",
+            systemImage: balanceReceipt == nil ? summary.decision.systemImageName : "checkmark.seal"
+          )
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, 4)
         } label: {
-          Text(summary.decision.title)
+          Text(balanceReceipt == nil ? summary.decision.title : "Imported")
             .font(.title2.bold())
         }
         .accessibilityElement(children: .combine)
