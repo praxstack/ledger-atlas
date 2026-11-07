@@ -235,12 +235,15 @@ struct SearchSplitResultRow: View {
   @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
-    let categories = purchase.lines.compactMap { categoryNames[$0.categoryID] }
+    var seenCategories = Set<String>()
+    let categoryIDs = purchase.lines.map(\.categoryID).filter { seenCategories.insert($0).inserted }
+    let categories = categoryIDs.compactMap { categoryNames[$0] }
+    let categoryCount = categoryIDs.count == 1 ? "1 category" : "\(categoryIDs.count) categories"
     let detail = ([accountNames[purchase.accountID], purchase.note] + [categories.joined(separator: ", ")])
       .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     let total = Self.negated(purchase.parentAmount)
     let spoken = [
-      "Split purchase", "\(purchase.lines.count) categories", detail.isEmpty ? nil : detail,
+      "Split purchase", categoryCount, detail.isEmpty ? nil : detail,
       formatter.hidesAmounts
         ? LedgerDisplayFormatter.hiddenAmountLabel : formatter.parts(total, sign: .always).text,
     ].compactMap { $0 }.joined(separator: ", ")
