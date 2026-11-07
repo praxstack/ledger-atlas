@@ -294,6 +294,10 @@ reported, never dropped.
     `assetUid` as proof and still verify. A debit card naming no existing account keeps
     its entries, and the balance receipt says so. A transfer between a debit card and the
     account that pays it moves no money and stays preserved, like any same-account pair.
+    The adapter version stays v1 on purpose, so ledgers imported before #207 keep their
+    proofs. Committing the same backup again into such a ledger, when the backup has debit
+    cards, is refused with `idempotencyConflict` (its event set differs) rather than
+    remapped in place; import into a new ledger to get the debit-card mapping.
 
 ## Open questions (need the Money Manager app as an oracle)
 
