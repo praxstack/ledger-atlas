@@ -11,28 +11,44 @@ struct LockedSurface: View {
   @State private var biometricAttempted = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Label("Ledger Atlas is locked", systemImage: "lock.shield")
-        .font(.title2.bold())
-      Text("Unlock to view ledger content. The widget and this window stay redacted while locked.")
-        .foregroundStyle(.secondary)
+    VStack(spacing: LedgerTheme.Space.l) {
+      ZStack {
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.accentSoft)
+        Image(systemName: "lock.shield")
+          .font(LedgerTheme.Typeface.figureLarge)
+          .foregroundStyle(LedgerTheme.accent)
+      }
+      .frame(width: 56, height: 56)
+      .accessibilityHidden(true)
+      VStack(spacing: LedgerTheme.Space.xs) {
+        Text("Ledger Atlas is locked")
+          .font(LedgerTheme.Typeface.screenTitle)
+          .foregroundStyle(LedgerTheme.ink)
+          .accessibilityAddTraits(.isHeader)
+        Text("Unlock to view ledger content. The widget and this window stay redacted while locked.")
+          .font(LedgerTheme.Typeface.secondary)
+          .foregroundStyle(LedgerTheme.inkSecondary)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+      }
       SecureField("Passcode", text: $passcode)
         .textFieldStyle(.roundedBorder)
         .textContentType(.password)
+        .controlSize(.large)
         .accessibilityLabel("Ledger Atlas passcode")
       if lock.storageUnavailable {
-        Text("Credential storage is unavailable. Restore access and reopen Ledger Atlas.")
-          .foregroundStyle(.red)
+        LedgerStatusLine(failure: "Credential storage is unavailable. Restore access and reopen Ledger Atlas.")
       } else if let message = lock.lockoutMessage {
-        Text(message).foregroundStyle(.red).accessibilityLabel(message)
+        LedgerStatusLine(failure: message)
       } else if invalidAttempt {
-        Text("That passcode was not accepted.").foregroundStyle(.red)
+        LedgerStatusLine(failure: "That passcode was not accepted.")
       }
-      HStack {
+      HStack(spacing: LedgerTheme.Space.s) {
         Button("Unlock") {
           invalidAttempt = !unlock(passcode)
           if !invalidAttempt { passcode = "" }
         }
+        .buttonStyle(LedgerPrimaryButtonStyle(large: true))
         .keyboardShortcut(.defaultAction)
         if !biometricAttempted {
           Button("Use Touch ID") {
@@ -42,11 +58,14 @@ struct LockedSurface: View {
               biometricAttempted = false
             }
           }
+          .buttonStyle(LedgerSecondaryButtonStyle())
         }
       }
     }
-    .frame(maxWidth: 480, alignment: .leading)
-    .padding(40)
+    .ledgerCard(padding: LedgerTheme.Space.xxxl)
+    .frame(maxWidth: 400)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .ledgerCanvas()
     .accessibilityElement(children: .contain)
   }
 }
@@ -119,7 +138,8 @@ struct SettingsSurface: View {
 
   @ViewBuilder private func fieldError(_ field: LedgerProductSettings.Field) -> some View {
     if let invalid, invalid.field == field {
-      Text(invalid.message).font(.caption).foregroundStyle(.red).accessibilityLabel(invalid.message)
+      Text(invalid.message).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.negative)
+        .accessibilityLabel(invalid.message)
     }
   }
 
@@ -164,7 +184,7 @@ struct SettingsSurface: View {
         Text(
           "Financial content is redacted in the app and widget while locked. The lock hides the open ledger; it does not encrypt ledger files on disk."
         )
-        .font(.caption).foregroundStyle(.secondary)
+        .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
         if lock.hasPasscode {
           Button("Lock now", action: lockNow)
           Button("Change passcode…") { passcodeForm = .change }
@@ -186,7 +206,7 @@ struct SettingsSurface: View {
             ? "Keychain: macOS asks for your Mac password after each Ledger Atlas update, because each free build is signed differently."
             : "Private files only your Mac account can read, inside the app's storage. No password prompts after updates."
         )
-        .font(.caption).foregroundStyle(.secondary)
+        .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Section("Accessibility") {
         Picker("Motion", selection: $draft.motion) {
@@ -195,7 +215,7 @@ struct SettingsSurface: View {
         }
         LabeledContent("macOS Reduce Motion", value: reducedMotion ? "On" : "Off")
         Text("Keyboard navigation and explicit VoiceOver labels are used throughout the app.")
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Section("Presentation") {
         Picker("Appearance", selection: $draft.appearance) {
@@ -234,7 +254,7 @@ struct SettingsSurface: View {
         Text(
           "Locale and time zone change how amounts and dates look. Stored amounts and dates never change, and displayed text is never read back as data."
         )
-        .font(.caption).foregroundStyle(.secondary)
+        .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Section("Report periods") {
         Picker("First weekday", selection: $draft.firstWeekday) {
@@ -252,7 +272,7 @@ struct SettingsSurface: View {
         LabeledContent("Current month", value: currentPeriod)
         Toggle("Carry over unspent budget and balance", isOn: $draft.carryOverEnabled)
         Text("Months shorter than the start day begin on their last day, so every period has a boundary.")
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Section("Notifications") {
         Toggle("Daily reminder", isOn: $draft.remindersEnabled)
@@ -263,14 +283,14 @@ struct SettingsSurface: View {
         .focused($focusedField, equals: .reminderHour)
         fieldError(.reminderHour)
         Text("Reminders are scheduled only after macOS authorization. They never include amounts or names.")
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Section("Support") {
         Button("Export content-free diagnostics", action: exportDiagnostics)
         Text("The file contains schema versions and counts only. It excludes financial values, names, notes, and paths.")
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
-      if let message { Text(message).foregroundStyle(.secondary) }
+      if let message { LedgerStatusLine(status: message) }
     }
     .formStyle(.grouped)
     .navigationTitle("Settings")
@@ -350,7 +370,7 @@ struct PasscodeForm: View {
 
   var body: some View {
     Form {
-      Text(mode.title).font(.headline)
+      Text(mode.title).font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       if mode.needsCurrent {
         SecureField("Current passcode", text: $current).textContentType(.password)
       }
@@ -358,7 +378,7 @@ struct PasscodeForm: View {
         SecureField("New passcode", text: $passcode).textContentType(.newPassword)
         SecureField("Confirm new passcode", text: $confirmation).textContentType(.newPassword)
       }
-      if let error { Text(error).foregroundStyle(.red).accessibilityLabel(error) }
+      if let error { LedgerStatusLine(failure: error) }
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()

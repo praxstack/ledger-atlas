@@ -20,10 +20,16 @@ struct LedgerLifecycleGuidanceView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(guidance.text(retrying: retryOperation)).foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
+      Text(guidance.text(retrying: retryOperation))
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+        .fixedSize(horizontal: false, vertical: true)
       if let failure {
-        Text(failure).foregroundStyle(.red)
+        Text(failure)
+          .font(LedgerTheme.Typeface.secondary)
+          .foregroundStyle(LedgerTheme.negative)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
     .accessibilityElement(children: .combine)
@@ -43,19 +49,37 @@ struct LedgerLifecycleClosedSessionView: View {
   var importBackup: (() -> Void)? = nil
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text(title).font(.largeTitle.bold())
+    VStack(spacing: LedgerTheme.Space.m) {
+      ZStack {
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.fieldFill)
+        Image(systemName: "exclamationmark.triangle")
+          .font(LedgerTheme.Typeface.figure)
+          .foregroundStyle(LedgerTheme.warning)
+      }
+      .frame(width: 44, height: 44)
+      .accessibilityHidden(true)
+      Text(title)
+        .font(LedgerTheme.Typeface.screenTitle)
+        .foregroundStyle(LedgerTheme.ink)
+        .accessibilityAddTraits(.isHeader)
       LedgerLifecycleGuidanceView(
         guidance: guidance, failure: failure, retryOperation: retryOperation)
-      HStack {
+        .multilineTextAlignment(.center)
+      HStack(spacing: LedgerTheme.Space.s) {
         Button(retryOperation.retryButtonTitle) { retry(retryOperation) }
+          .buttonStyle(LedgerPrimaryButtonStyle())
           .accessibilityLabel(retryOperation.retryAccessibilityLabel)
         if let importBackup {
           Button(LedgerAtlasRootView.importBackupActionTitle, action: importBackup)
+            .buttonStyle(LedgerSecondaryButtonStyle())
         }
       }
+      .padding(.top, LedgerTheme.Space.xs)
     }
-    .padding(32)
+    .frame(maxWidth: 420)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .padding(LedgerTheme.Space.xxxl)
+    .ledgerCanvas()
     .accessibilityElement(children: .contain)
   }
 }
@@ -69,15 +93,32 @@ struct EmptyLedgerPrompt: View {
   let open: () -> Void
 
   var body: some View {
-    VStack(spacing: 12) {
-      Image(systemName: "folder").font(.largeTitle).foregroundStyle(.secondary)
-      Text(title).font(.title2.bold())
-      Text(description).foregroundStyle(.secondary)
+    VStack(spacing: LedgerTheme.Space.m) {
+      ZStack {
+        RoundedRectangle(cornerRadius: LedgerTheme.Radius.tile, style: .continuous).fill(LedgerTheme.fieldFill)
+        Image(systemName: "folder")
+          .font(LedgerTheme.Typeface.figure)
+          .foregroundStyle(LedgerTheme.inkSecondary)
+      }
+      .frame(width: 44, height: 44)
+      .accessibilityHidden(true)
+      Text(title)
+        .font(LedgerTheme.Typeface.screenTitle)
+        .foregroundStyle(LedgerTheme.ink)
+        .accessibilityAddTraits(.isHeader)
+      Text(description)
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+        .multilineTextAlignment(.center)
       LedgerLifecycleGuidanceView(guidance: guidance, failure: failure)
+        .multilineTextAlignment(.center)
       Button(buttonTitle, action: open)
+        .buttonStyle(LedgerPrimaryButtonStyle())
+        .padding(.top, LedgerTheme.Space.xs)
     }
+    .frame(maxWidth: 420)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .padding(32)
+    .padding(LedgerTheme.Space.xxxl)
   }
 }
 
@@ -98,12 +139,12 @@ struct ImportProgressView: View {
     TimelineView(.periodic(from: .now, by: 1)) { context in
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         ProgressView().controlSize(.small)
-        VStack(alignment: .leading, spacing: 2) {
-          Text(title)
+        VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+          Text(title).font(LedgerTheme.Typeface.bodyEmphasis).foregroundStyle(LedgerTheme.ink)
           Text(
             "\(LedgerElapsedTime.text(since: started, now: context.date)). A large backup can take several minutes."
           )
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
         }
       }
     }
@@ -127,7 +168,7 @@ struct OpeningLedgerView: View {
           Text(
             "Checking every record (\(LedgerElapsedTime.text(since: started, now: context.date))). The first open of a large ledger can take a minute or more; later opens are quick."
           )
-          .font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
           .multilineTextAlignment(.center)
           .frame(maxWidth: 360)
         }

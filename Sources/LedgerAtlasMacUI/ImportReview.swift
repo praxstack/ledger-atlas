@@ -790,83 +790,149 @@ extension ImportReviewSummary {
   }
 }
 
-struct ImportReviewView: View {
+/// The Import Review screen: what the backup is, the decision, the redacted metadata, and the
+/// actions that move the import on. Everything the person needs to approve sits on one page.
+struct ImportReviewSurface: View {
   let summary: ImportReviewSummary
+  let failure: String?
+  @Binding var sourceTimeZoneIdentifier: String
+  let timeZoneLocked: Bool
+  let backgroundWork: LedgerJourney.BackgroundWork?
+  let canApprove: Bool
+  let chooseBackup: () -> Void
+  let approve: () -> Void
   /// The open ledger's balance-match receipt (#172), shown above the review when there is one.
   var balanceReceipt: ImportBalanceReceipt?
   var saveReceipt: () -> Void = {}
   var continueTitle: String?
   var continueAfterReceipt: () -> Void = {}
 
+  private var decisionTint: Color {
+    if balanceReceipt != nil { return LedgerTheme.positive }
+    return switch summary.decision {
+    case .reviewable: LedgerTheme.positive
+    case .classificationReady: LedgerTheme.warning
+    case .blocked: LedgerTheme.negative
+    }
+  }
+
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 20) {
-        if let balanceReceipt {
-          ImportBalanceReceiptView(
-            receipt: balanceReceipt, saveAsPDF: saveReceipt, continueTitle: continueTitle,
-            continueAction: continueAfterReceipt)
-        }
-        VStack(alignment: .leading, spacing: 8) {
-          Label("Money Manager import review", systemImage: "eye")
-            .font(.headline)
-          Text(
-            "Import Review shows redacted structural metadata for a Money Manager backup. Approving a reviewable source writes a local canonical ledger; the original file stays read-only."
-          )
-          .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-
-        // With a receipt the import has already committed, so the preparation status ("ready
-        // for approval", or "Blocked" for a ledger reopened later) no longer applies.
-        GroupBox {
-          Label(
-            balanceReceipt == nil
-              ? summary.decision.message
-              : "This ledger was written from the backup. The receipt above compares every account with Money Manager.",
-            systemImage: balanceReceipt == nil ? summary.decision.systemImageName : "checkmark.seal"
-          )
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.vertical, 4)
-        } label: {
-          Text(balanceReceipt == nil ? summary.decision.title : "Imported")
-            .font(.title2.bold())
-        }
-        .accessibilityElement(children: .combine)
-
-        GroupBox("Redacted metadata") {
-          VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(summary.rows.enumerated()), id: \.offset) { offset, row in
-              HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text(row.label)
-                  .foregroundStyle(.secondary)
-                Spacer(minLength: 12)
-                Text(row.value)
-                  .multilineTextAlignment(.trailing)
-                  .textSelection(.disabled)
-              }
-              .padding(.vertical, 10)
-              .accessibilityElement(children: .ignore)
-              .accessibilityLabel(row.accessibilityLabel)
-
-              if offset < summary.rows.count - 1 {
-                Divider()
-              }
-            }
-          }
-        }
-
-        Text(
-          "Choose a Money Manager backup to classify it. The original file is never opened read-write."
-        )
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .accessibilityLabel(
-          "Choose a Money Manager backup to classify it. The original file is never opened read-write."
-        )
+    LedgerCardColumn {
+      if let balanceReceipt {
+        ImportBalanceReceiptView(
+          receipt: balanceReceipt, saveAsPDF: saveReceipt, continueTitle: continueTitle,
+          continueAction: continueAfterReceipt)
       }
-      .frame(maxWidth: 760, alignment: .leading)
-      .padding(32)
+      header
+      decisionCard
+      metadataCard
+      actionsCard
     }
     .navigationTitle("Import Review")
+  }
+
+  private var header: some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+      Label("Money Manager import review", systemImage: "eye")
+        .font(LedgerTheme.Typeface.screenTitle)
+        .foregroundStyle(LedgerTheme.ink)
+        .accessibilityAddTraits(.isHeader)
+      Text(
+        "Import Review shows redacted structural metadata for a Money Manager backup. Approving a reviewable source writes a local canonical ledger; the original file stays read-only."
+      )
+      .font(LedgerTheme.Typeface.secondary)
+      .foregroundStyle(LedgerTheme.inkSecondary)
+      .fixedSize(horizontal: false, vertical: true)
+    }
+    .accessibilityElement(children: .combine)
+  }
+
+  private var decisionCard: some View {
+    HStack(alignment: .top, spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(
+        .symbol(balanceReceipt == nil ? summary.decision.systemImageName : "checkmark.seal"),
+        swatch: LedgerTheme.Swatch(color: decisionTint, soft: LedgerTheme.fieldFill), size: 36)
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
+        // With a receipt the import has already committed, so the preparation status ("ready
+        // for approval", or "Blocked" for a ledger reopened later) no longer applies.
+        Text(balanceReceipt == nil ? summary.decision.title : "Imported")
+          .font(LedgerTheme.Typeface.figure)
+          .foregroundStyle(LedgerTheme.ink)
+        Text(
+          balanceReceipt == nil
+            ? summary.decision.message
+            : "This ledger was written from the backup. The receipt above compares every account with Money Manager."
+        )
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .ledgerCard()
+    .accessibilityElement(children: .combine)
+  }
+
+  private var metadataCard: some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Redacted metadata")
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(summary.rows.enumerated()), id: \.offset) { offset, row in
+          LedgerKeyValue(row.label, row.value)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(row.accessibilityLabel)
+          if offset < summary.rows.count - 1 { LedgerRowDivider() }
+        }
+      }
+      .padding(.horizontal, LedgerTheme.Space.m)
+      .ledgerGroupBox()
+    }
+    .ledgerCard()
+  }
+
+  private var actionsCard: some View {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader("Choose a backup")
+      Text("Choose a Money Manager backup to classify it. The original file is never opened read-write.")
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel(
+          "Choose a Money Manager backup to classify it. The original file is never opened read-write.")
+      LedgerStatusLine(failure: failure)
+      HStack(spacing: LedgerTheme.Space.m) {
+        Picker("Backup source time zone", selection: $sourceTimeZoneIdentifier) {
+          Text("Choose source time zone…").tag("")
+          ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { identifier in
+            Text(identifier).tag(identifier)
+          }
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+        .accessibilityLabel("Backup source time zone")
+        .accessibilityHint("Required to preserve the backup's civil date and time meaning.")
+        .disabled(timeZoneLocked)
+      }
+      HStack(spacing: LedgerTheme.Space.s) {
+        if canApprove {
+          Button("Approve import", action: approve)
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            .accessibilityLabel("Approve import")
+            .disabled(backgroundWork != nil)
+          Button("Choose Money Manager backup…", action: chooseBackup)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Choose Money Manager backup")
+            .disabled(sourceTimeZoneIdentifier.isEmpty || backgroundWork != nil)
+        } else {
+          Button("Choose Money Manager backup…", action: chooseBackup)
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            .accessibilityLabel("Choose Money Manager backup")
+            .disabled(sourceTimeZoneIdentifier.isEmpty || backgroundWork != nil)
+        }
+      }
+      if let backgroundWork {
+        ImportProgressView(work: backgroundWork)
+      }
+    }
+    .ledgerCard()
   }
 }

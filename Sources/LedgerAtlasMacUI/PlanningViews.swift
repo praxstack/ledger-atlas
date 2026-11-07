@@ -44,7 +44,7 @@ struct RecurrenceView: View {
   @State private var showingForm = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 0) {
       if rules.isEmpty {
         PlanningEmptyView(
           title: "No recurrence rules", message: "Create a rule to generate dated income or expenses.",
@@ -58,22 +58,20 @@ struct RecurrenceView: View {
             toggle: { onUpdate($0, .thisAndFuture) },
             generate: { onGenerate(rule, PlanningSupport.today()) })
         }
+        .scrollContentBackground(.hidden)
       }
-      if let lastFailure {
-        Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
-      }
-      HStack {
+      LedgerActionBar {
         if isEditing {
-          Button("New recurrence") { showingForm = true }
-        } else if !rules.isEmpty {
-          Button("Begin editing", action: beginEditing)
+          Button("New recurrence") { showingForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
+        } else if !rules.isEmpty || state.isLoaded {
+          Button("Begin editing", action: beginEditing).buttonStyle(LedgerSecondaryButtonStyle())
         } else {
-          Button("Open Ledger…", action: open)
+          Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
         }
+        if let lastFailure { LedgerStatusLine(failure: lastFailure) }
       }
-      .padding(.horizontal, 16)
-      .padding(.bottom, 12)
     }
+    .ledgerCanvas()
     .navigationTitle("Recurrence")
     .sheet(isPresented: $showingForm) {
       RecurrenceForm(accounts: accounts, categories: categories, onSave: onCreate)
@@ -90,18 +88,40 @@ private struct RecurrenceRow: View {
   let toggle: (LedgerRecurrenceRule) -> Void
   let generate: () -> Void
 
-  var body: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("\(rule.kind.rawValue.capitalized) · \(formatter.plain(rule.amount))")
-        Text("Every \(rule.interval) \(rule.frequency.rawValue) · starts \(dateText(rule.start))")
-          .font(.caption).foregroundStyle(.secondary)
-        Text([accountName, categoryName].compactMap { $0 }.joined(separator: " · "))
-          .font(.caption).foregroundStyle(.secondary)
+  private var cadence: String {
+    let unit: String =
+      switch rule.frequency {
+      case .daily: rule.interval == 1 ? "day" : "days"
+      case .weekly: rule.interval == 1 ? "week" : "weeks"
+      case .monthly: rule.interval == 1 ? "month" : "months"
+      case .yearly: rule.interval == 1 ? "year" : "years"
       }
-      Spacer()
-      if rule.paused { Label("Paused", systemImage: "pause.circle") }
-      if rule.lifecycle == .tombstoned { Label("Closed", systemImage: "archivebox") }
+    return rule.interval == 1 ? "Every \(unit)" : "Every \(rule.interval) \(unit)"
+  }
+
+  var body: some View {
+    HStack(spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(
+        .symbol(rule.kind == .income ? "arrow.down.left" : "arrow.up.right"),
+        swatch: LedgerTheme.swatch(for: categoryName ?? accountName ?? rule.id))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+        HStack(alignment: .firstTextBaseline, spacing: LedgerTheme.Space.s) {
+          Text(categoryName ?? rule.kind.rawValue.capitalized)
+            .font(LedgerTheme.Typeface.bodyEmphasis)
+            .foregroundStyle(rule.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
+            .strikethrough(rule.lifecycle == .tombstoned)
+          Spacer(minLength: LedgerTheme.Space.s)
+          MoneyText(
+            rule.amount, size: .row, sign: rule.kind == .income ? .always : .never,
+            tone: rule.lifecycle == .active ? .automatic : .secondary)
+        }
+        Text(
+          [cadence, "starts \(dateText(rule.start))", accountName].compactMap { $0 }.joined(separator: " · ")
+        )
+        .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
+      }
+      if rule.paused { LedgerBadge("Paused", systemImage: "pause.circle", tint: LedgerTheme.warning) }
+      if rule.lifecycle == .tombstoned { LedgerBadge("Closed", systemImage: "archivebox") }
       Menu("Actions") {
         if rule.lifecycle == .active {
           Button(rule.paused ? "Resume rule" : "Pause rule") {
@@ -177,7 +197,7 @@ private struct RecurrenceForm: View {
       TextField("Day of month (optional)", text: $dayOfMonth)
       TextField("Start date (YYYY-MM-DD)", text: $start)
       TextField("Until date (optional)", text: $until)
-      Text("Time zone: \(TimeZone.current.identifier)").font(.caption).foregroundStyle(.secondary)
+      Text("Time zone: \(TimeZone.current.identifier)").font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()
@@ -237,25 +257,40 @@ struct InstallmentsView: View {
   @State private var showingForm = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 0) {
       if plans.isEmpty {
         PlanningEmptyView(
           title: "No installment plans", message: "Create a plan to divide a purchase into exact monthly entries.",
           state: state, isEditing: isEditing, failure: lastFailure, open: open)
       } else {
         List(plans, id: \.id) { plan in
-          HStack {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(formatter.plain(plan.principal))
-              Text("\(plan.completedCount)/\(plan.occurrenceCount) occurrences · \(accounts.first(where: { $0.id == plan.accountID })?.name ?? "Unknown account")")
-                .font(.caption).foregroundStyle(.secondary)
-              if let category = categories.first(where: { $0.id == plan.categoryID }) {
-                Text(CategoryPresentation.label(category, in: categories))
-                  .font(.caption).foregroundStyle(.secondary)
+          let accountName = accounts.first(where: { $0.id == plan.accountID })?.name ?? "Unknown account"
+          let categoryName = categories.first(where: { $0.id == plan.categoryID })
+            .map { CategoryPresentation.label($0, in: categories) }
+          let progress = plan.occurrenceCount > 0 ? Double(plan.completedCount) / Double(plan.occurrenceCount) : 0
+          HStack(spacing: LedgerTheme.Space.m) {
+            LedgerIconTile(.symbol("calendar.badge.clock"), swatch: LedgerTheme.swatch(for: categoryName ?? accountName))
+            VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
+              HStack(alignment: .firstTextBaseline, spacing: LedgerTheme.Space.s) {
+                Text(categoryName ?? accountName)
+                  .font(LedgerTheme.Typeface.bodyEmphasis)
+                  .foregroundStyle(plan.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
+                  .strikethrough(plan.lifecycle == .cancelled)
+                Spacer(minLength: LedgerTheme.Space.s)
+                MoneyText(plan.principal, size: .row, sign: .never, tone: plan.lifecycle == .active ? .neutral : .secondary)
               }
+              LedgerProgressTrack(fraction: progress, tint: LedgerTheme.ink, height: 4)
+              Text(
+                [
+                  "\(plan.completedCount) of \(plan.occurrenceCount) monthly entries",
+                  categoryName == nil ? nil : accountName,
+                ].compactMap { $0 }.joined(separator: " · ")
+              )
+              .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
             }
-            Spacer()
-            Text(plan.lifecycle.rawValue.capitalized).font(.caption)
+            if plan.lifecycle != .active {
+              LedgerBadge(plan.lifecycle.rawValue.capitalized, systemImage: "archivebox")
+            }
             if isEditing {
               Button(plan.lifecycle == .active ? "Cancel" : "Restore") {
                 guard let revised = try? LedgerInstallmentPlan(
@@ -266,21 +301,27 @@ struct InstallmentsView: View {
                 else { return }
                 onUpdate(revised)
               }
-              .buttonStyle(.borderless)
+              .buttonStyle(LedgerSecondaryButtonStyle())
             }
           }
+          .padding(.vertical, LedgerTheme.Space.xs)
           .accessibilityElement(children: .combine)
           .accessibilityLabel("Installment plan, \(formatter.plain(plan.principal))")
         }
+        .scrollContentBackground(.hidden)
       }
-      if let lastFailure { Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure) }
-      HStack {
-        if isEditing { Button("New installment plan") { showingForm = true } }
-        else if !plans.isEmpty { Button("Begin editing", action: beginEditing) }
-        else { Button("Open Ledger…", action: open) }
+      LedgerActionBar {
+        if isEditing {
+          Button("New installment plan") { showingForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
+        } else if !plans.isEmpty || state.isLoaded {
+          Button("Begin editing", action: beginEditing).buttonStyle(LedgerSecondaryButtonStyle())
+        } else {
+          Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
+        }
+        if let lastFailure { LedgerStatusLine(failure: lastFailure) }
       }
-      .padding(.horizontal, 16).padding(.bottom, 12)
     }
+    .ledgerCanvas()
     .navigationTitle("Installments")
     .sheet(isPresented: $showingForm) {
       InstallmentForm(accounts: accounts, categories: categories, onSave: onCreate)
@@ -357,7 +398,7 @@ struct BudgetsView: View {
   @State private var showingForm = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 0) {
       if budgets.isEmpty {
         PlanningEmptyView(
           title: "No budgets", message: "Create a category budget and choose whether unused amounts roll over.",
@@ -408,14 +449,18 @@ struct BudgetsView: View {
                 ?? ""))
         }
       }
-      if let lastFailure { Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure) }
-      HStack {
-        if isEditing { Button("New budget") { showingForm = true } }
-        else if !budgets.isEmpty { Button("Begin editing", action: beginEditing) }
-        else { Button("Open Ledger…", action: open) }
+      LedgerActionBar {
+        if isEditing {
+          Button("New budget") { showingForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
+        } else if !budgets.isEmpty || state.isLoaded {
+          Button("Begin editing", action: beginEditing).buttonStyle(LedgerSecondaryButtonStyle())
+        } else {
+          Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
+        }
+        if let lastFailure { LedgerStatusLine(failure: lastFailure) }
       }
-      .padding(.horizontal, 16).padding(.bottom, 12)
     }
+    .ledgerCanvas()
     .navigationTitle("Budgets")
     .sheet(isPresented: $showingForm) {
       BudgetForm(accounts: accounts, categories: categories, onSave: onCreate)
@@ -524,29 +569,16 @@ private struct PlanningEmptyView: View {
   let open: () -> Void
 
   var body: some View {
-    Group {
-      switch state {
-      case .loaded:
-        ContentUnavailableView(title, systemImage: "calendar.badge.plus", description: Text(isEditing ? message : "Begin editing to manage this plan."))
-      case .loading:
-        ProgressView("Opening ledger…")
-      case .unavailable:
-        VStack(spacing: 12) {
-          Text("Ledger unavailable").font(.title2.bold())
-          Text("Choose a compatible ledger to view planning data.").foregroundStyle(.secondary)
-          if let failure { Text(failure).foregroundStyle(.red) }
-          Button("Open Ledger…", action: open)
-        }
-      case .noLedger:
-        VStack(spacing: 12) {
-          Text("Open a ledger").font(.title2.bold())
-          Text("Choose a Ledger Atlas ledger to view planning data.").foregroundStyle(.secondary)
-          if let failure { Text(failure).foregroundStyle(.red) }
-          Button("Open Ledger…", action: open)
-        }
-      }
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .padding(32)
+    LedgerSessionEmptyState(
+      state: state, title: title, systemImage: "calendar.badge.plus",
+      message: isEditing ? message : "Begin editing to manage this plan.", failure: failure, open: open)
+  }
+}
+
+extension LedgerSession.State {
+  /// A ledger is open, so an empty planning screen offers editing rather than opening one.
+  fileprivate var isLoaded: Bool {
+    if case .loaded = self { return true }
+    return false
   }
 }
