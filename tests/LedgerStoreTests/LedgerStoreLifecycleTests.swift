@@ -1999,31 +1999,148 @@ import Testing
   }
 }
 
-@Test func lifecycleInspectAndOpenRejectForgedInactiveJournalBindings() throws {
-  for operation in ["inspect", "open"] {
-    try withLifecycleDirectory { directory in
-      let url = directory.appendingPathComponent("ledger.sqlite")
-      do {
-        let created = try LedgerStoreLifecycle.create(at: url)
-        let origin = try LedgerOrigin(id: String(repeating: "3", count: 64), label: "synthetic")
-        try created.store.createAccount(
-          LedgerAccount(
-            id: String(repeating: "4", count: 64), name: "Synthetic", currencyUnit: "USD",
-            origin: origin))
-      }
-      let binding = URL(fileURLWithPath: url.path + "-journal.ledger-atlas-binding")
-      let authenticBinding = try Data(contentsOf: binding)
-      try Data(repeating: 0x78, count: authenticBinding.count).write(to: binding)
-      #expect(chmod(binding.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+@Test func lifecycleInspectRejectsAForgedBindingAndOpenRebindsTheEmptyJournal() throws {
+  try withLifecycleDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    try createSavedLedger(at: url)
+    let binding = URL(fileURLWithPath: url.path + "-journal.ledger-atlas-binding")
+    let authenticBinding = try Data(contentsOf: binding)
+    try Data(repeating: 0x78, count: authenticBinding.count).write(to: binding)
+    #expect(chmod(binding.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
 
-      #expect(throws: LedgerStoreLifecycle.Error.companionPresent) {
-        if operation == "inspect" {
-          _ = try LedgerStoreLifecycle.inspect(at: url)
-        } else {
-          _ = try LedgerStoreLifecycle.open(at: url)
-        }
-      }
+    // Inspecting only reads, so it still refuses.
+    #expect(throws: LedgerStoreLifecycle.Error.companionPresent) {
+      _ = try LedgerStoreLifecycle.inspect(at: url)
     }
+    // An empty journal has nothing to roll back, so open binds it to this file again (#181).
+    let reopened = try LedgerStoreLifecycle.open(at: url)
+    #expect(reopened.disposition == .opened)
+    #expect(!reopened.rolledBackInterruptedSave)
+    #expect(try Data(contentsOf: binding) == authenticBinding)
+    #expect(try fileMode(binding) == mode_t(S_IRUSR | S_IWUSR))
+  }
+}
+
+/// A ledger with one saved account, so the empty journal and its binding exist beside it.
+private func createSavedLedger(at url: URL, accountKey: Character = "4") throws {
+  let created = try LedgerStoreLifecycle.create(at: url)
+  try saveSyntheticAccount(created.store, key: accountKey)
+}
+
+private func saveSyntheticAccount(_ store: LedgerStore, key: Character) throws {
+  let origin = try LedgerOrigin(id: String(repeating: "3", count: 64), label: "synthetic")
+  try store.createAccount(
+    LedgerAccount(
+      id: String(repeating: key, count: 64), name: "Synthetic \(key)", currencyUnit: "USD",
+      origin: origin))
+}
+
+// A Time Machine restore, Migration Assistant or a copied folder brings the ledger, its empty
+// journal and the binding back with new inodes, so the binding names files that are gone (#181).
+@Test func lifecycleOpensAndSavesASavedLedgerRestoredToANewFolder() throws {
+  for bindingState in ["stale", "missing"] {
+    try withLifecycleDirectory { directory in
+      let original = directory.appendingPathComponent("original", isDirectory: true)
+      let restored = directory.appendingPathComponent("restored", isDirectory: true)
+      try FileManager.default.createDirectory(at: original, withIntermediateDirectories: true)
+      try FileManager.default.createDirectory(at: restored, withIntermediateDirectories: true)
+      let url = original.appendingPathComponent("ledger.sqlite")
+      try createSavedLedger(at: url)
+      let copy = restored.appendingPathComponent("ledger.sqlite")
+      for suffix in ["", "-journal", "-journal.ledger-atlas-binding"] {
+        if bindingState == "missing", suffix == "-journal.ledger-atlas-binding" { continue }
+        try FileManager.default.copyItem(
+          at: URL(fileURLWithPath: url.path + suffix), to: URL(fileURLWithPath: copy.path + suffix))
+        #expect(chmod(copy.path + suffix, mode_t(S_IRUSR | S_IWUSR)) == 0)
+      }
+      #expect(try Data(contentsOf: URL(fileURLWithPath: copy.path + "-journal")).isEmpty)
+
+      let reopened = try LedgerStoreLifecycle.open(at: copy)
+      #expect(reopened.disposition == .opened)
+      #expect(try reopened.store.readSnapshot().accounts.count == 1)
+      // The rebound journal takes the next save.
+      try saveSyntheticAccount(reopened.store, key: "5")
+      #expect(try reopened.store.readSnapshot().accounts.count == 2)
+      #expect(try Data(contentsOf: URL(fileURLWithPath: copy.path + "-journal")).isEmpty)
+    }
+  }
+}
+
+/// Leaves `url` as a crash in the middle of a save would: the ledger file already holds the
+/// save's pages and the journal beside it (same inode, so its binding still holds) holds the
+/// pages from before. Returns the account count from before the save.
+private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
+  let before = try LedgerStore.openReadOnly(at: url).readSnapshot().accounts.count
+  let journalPath = url.path + "-journal"
+  var journalDuringSave = Data()
+  do {
+    let store = try LedgerStore.openForMutation(at: url) { phase in
+      guard phase == .afterMutationWrite else { return }
+      journalDuringSave = try Data(contentsOf: URL(fileURLWithPath: journalPath))
+    }
+    try saveSyntheticAccount(store, key: "6")
+  }
+  #expect(journalDuringSave.count >= 512)
+  // Mark the header the way SQLite's no-sync journals are, so the record count comes from the
+  // journal's size, as for a journal whose header sync landed before the crash.
+  journalDuringSave.replaceSubrange(0..<8, with: [0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7])
+  journalDuringSave.replaceSubrange(8..<12, with: [0xff, 0xff, 0xff, 0xff])
+  // Write into the journal's own inode, as SQLite does, so the binding still names it.
+  let descriptor = Darwin.open(journalPath, O_WRONLY | O_CLOEXEC | O_NOFOLLOW)
+  guard descriptor >= 0 else { throw LifecycleTestError.sqlite }
+  defer { Darwin.close(descriptor) }
+  let written = journalDuringSave.withUnsafeBytes {
+    pwrite(descriptor, $0.baseAddress, $0.count, 0)
+  }
+  guard written == journalDuringSave.count, fsync(descriptor) == 0 else {
+    throw LifecycleTestError.sqlite
+  }
+  return before
+}
+
+// A crash, a kill or a power cut during a save leaves a hot journal beside the ledger. It used
+// to make the ledger unopenable forever (#178); the journal is bound to this exact file, so
+// opening now lets SQLite roll it back.
+@Test func lifecycleRollsBackASaveCutOffByACrash() throws {
+  try withLifecycleDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    try createSavedLedger(at: url)
+    let before = try simulateSaveCutOffByACrash(at: url)
+    let journal = URL(fileURLWithPath: url.path + "-journal")
+    #expect(try Data(contentsOf: journal).count >= 512)
+    #expect(throws: LedgerStoreLifecycle.Error.companionPresent) {
+      _ = try LedgerStoreLifecycle.inspect(at: url)
+    }
+
+    let reopened = try LedgerStoreLifecycle.open(at: url)
+    #expect(reopened.disposition == .opened)
+    #expect(reopened.rolledBackInterruptedSave)
+    #expect(try reopened.store.readSnapshot().accounts.count == before)
+    #expect(try Data(contentsOf: journal).isEmpty)
+    try saveSyntheticAccount(reopened.store, key: "7")
+    #expect(try reopened.store.readSnapshot().accounts.count == before + 1)
+  }
+}
+
+// A hot journal whose binding doesn't name this file could hold anyone's pages, so it is never
+// rolled back into the ledger.
+@Test func lifecycleNeverRollsBackAHotJournalWithAForeignBinding() throws {
+  try withLifecycleDirectory { directory in
+    let url = directory.appendingPathComponent("ledger.sqlite")
+    try createSavedLedger(at: url)
+    _ = try simulateSaveCutOffByACrash(at: url)
+    let binding = URL(fileURLWithPath: url.path + "-journal.ledger-atlas-binding")
+    let authentic = try Data(contentsOf: binding)
+    try Data(repeating: 0x78, count: authentic.count).write(to: binding)
+    #expect(chmod(binding.path, mode_t(S_IRUSR | S_IWUSR)) == 0)
+    let ledgerBytes = try Data(contentsOf: url)
+    let journalBytes = try Data(contentsOf: URL(fileURLWithPath: url.path + "-journal"))
+
+    #expect(throws: LedgerStoreLifecycle.Error.companionPresent) {
+      _ = try LedgerStoreLifecycle.open(at: url)
+    }
+    #expect(try Data(contentsOf: url) == ledgerBytes)
+    #expect(try Data(contentsOf: URL(fileURLWithPath: url.path + "-journal")) == journalBytes)
   }
 }
 

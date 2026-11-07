@@ -1030,11 +1030,17 @@ public struct LedgerAtlasRootView: View {
       case .upgraded: .upgraded
       }
     let recoveryExists = completion.recoveryImageURL != nil
+    let messages = [
+      completion.rolledBackInterruptedSave ? interruptedSaveRolledBackMessage : nil,
+      recoveryExists ? "Ledger upgraded. A validated recovery image is available." : nil,
+    ].compactMap { $0 }
     return .init(
       kind: kind, recoveryImageExists: recoveryExists,
-      message: recoveryExists
-        ? "Ledger upgraded. A validated recovery image is available." : nil)
+      message: messages.isEmpty ? nil : messages.joined(separator: " "))
   }
+
+  package static let interruptedSaveRolledBackMessage =
+    "A save was interrupted last time, so the ledger was put back to its last complete save."
 
   private static func publicationFailureMessage(
     operation: LedgerLifecycleOperation, phase: LedgerStoreLifecycle.PublicationPhase,

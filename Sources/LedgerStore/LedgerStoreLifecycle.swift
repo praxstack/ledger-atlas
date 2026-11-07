@@ -22,6 +22,9 @@ public enum LedgerStoreLifecycle {
     public let disposition: Disposition
     public let recoveryImageURL: URL?
     package let createdIdentity: FileIdentity?
+    /// True when a save cut off by a crash or a kill was rolled back while opening, so the
+    /// ledger is at its last complete save.
+    public var rolledBackInterruptedSave = false
   }
 
   package struct FileIdentity: Sendable, Equatable {
@@ -288,6 +291,18 @@ public enum LedgerStoreLifecycle {
       stateExists
       ? !(try inactiveUpgradeState(stateLeaf, parentDescriptor: destination.parentDescriptor))
       : false
+    // A crash mid-save or a restore from backup leaves the journal in a shape the checks below
+    // refuse. Repair the cases that are provably safe first (#178, #181). An upgrade in flight
+    // keeps its own companion rules, so it is left alone.
+    let repair: LedgerStore.CompanionRepair
+    if stateExists {
+      repair = .none
+    } else {
+      do { repair = try LedgerStore.repairCompanions(at: url) } catch {
+        throw Error.companionPresent
+      }
+      try lease.requireBound(destination)
+    }
     let source = try openPinned(
       at: url, allowingUpgradeTransitionCompanions: allowsUpgradeTransitionCompanions)
     defer { Darwin.close(source.descriptor) }
@@ -322,14 +337,16 @@ public enum LedgerStoreLifecycle {
       try requirePath(url, matches: source.identity)
       return Result(
         store: store, disposition: .opened, recoveryImageURL: recovered?.url,
-        createdIdentity: nil)
+        createdIdentity: nil, rolledBackInterruptedSave: repair == .rolledBackInterruptedSave)
     case .upgradeRequired:
       try invoke(hook, .afterSourceAuthenticated)
       try requirePath(url, matches: source.identity)
       try requireSourceCompanionsStillSafe(source, at: url)
       try requireLegacyMigrationSupported(source.descriptor)
       try clearUnpublishedUpgradeState(source, at: url, lease: lease, hook: hook)
-      return try upgrade(source, at: url, lease: lease, hook: hook)
+      var upgraded = try upgrade(source, at: url, lease: lease, hook: hook)
+      upgraded.rolledBackInterruptedSave = repair == .rolledBackInterruptedSave
+      return upgraded
     }
   }
 
