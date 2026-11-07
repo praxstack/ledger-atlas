@@ -702,7 +702,11 @@ final class MountedRoot {
   nonisolated(unsafe) private static var loopDepth = 0
   /// How many times the test runner's run of the main loop was stopped and run again.
   nonisolated(unsafe) static var runLoopRestarts = 0
-  static let maxRunLoopRestarts = 20
+  /// The cap is for the whole test process, not one test: each restart nests one more run of
+  /// the loop on the main thread's stack (a few kilobytes of frames), so 100 is far from
+  /// the stack's limit and leaves room as the suite grows; 20 was reached on 7 Nov 2026 by the
+  /// capture set, the lock tests and the privacy scan together.
+  static let maxRunLoopRestarts = 100
 
   /// The test process lives inside the test runner's own run of the main run loop, and that
   /// run should never end: when the tests finish, the runner calls exit() itself. Something in
