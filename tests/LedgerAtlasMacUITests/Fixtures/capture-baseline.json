@@ -298,5 +298,25 @@
     "lines" : 87,
     "looks" : "b061d8d4c4c45182",
     "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
+  },
+  "key-upcoming-empty-dark.png" : {
+    "lines" : 20,
+    "looks" : "a288cc8290000082",
+    "text" : "bad759880717a01d302717482e16eb672847a772517c90e0cb931c568dc83fdf"
+  },
+  "key-upcoming-empty-light.png" : {
+    "lines" : 20,
+    "looks" : "806733782c000080",
+    "text" : "bad759880717a01d302717482e16eb672847a772517c90e0cb931c568dc83fdf"
+  },
+  "key-upcoming-reminder-dark.png" : {
+    "lines" : 24,
+    "looks" : "a289c8889a020082",
+    "text" : "41888a61609ce72ce449f7ec306ac171e0fc28bcdad617f26025c204de63cf46"
+  },
+  "key-upcoming-reminder-light.png" : {
+    "lines" : 24,
+    "looks" : "8067337725010080",
+    "text" : "41888a61609ce72ce449f7ec306ac171e0fc28bcdad617f26025c204de63cf46"
   }
 }

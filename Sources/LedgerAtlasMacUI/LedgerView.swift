@@ -48,9 +48,8 @@ struct LedgerView: View {
   @State private var templatingID: String?
   @State private var amountLiteral = ""
   @State private var macAmountLiteral = ""
-  @State private var showingTransactionForm = false
+  @State private var entryForm: EntryFormRequest?
   /// Upcoming as it was when the reminder opened the form; kept while the form stays open.
-  @State private var formUpcoming: LedgerUpcoming?
   @State private var showingSplitForm = false
   /// + New was pressed while read-only: the form opens once editing has begun.
   @State private var opensFormWhenEditing = false
@@ -107,7 +106,7 @@ struct LedgerView: View {
             // The one primary action on the screen. Read-only, it begins editing first.
             Button {
               if isEditing {
-                showingTransactionForm = true
+                entryForm = EntryFormRequest()
               } else {
                 opensFormWhenEditing = true
                 beginEditing()
@@ -157,7 +156,7 @@ struct LedgerView: View {
                 lifecycleMessage ?? "This native ledger has no transactions yet."))
             if isEditing {
               HStack {
-                Button("New transaction") { showingTransactionForm = true }
+                Button("New transaction") { entryForm = EntryFormRequest() }
                   .accessibilityLabel("New income or expense")
                 Button("New split purchase") { showingSplitForm = true }
                   .accessibilityLabel("New split purchase")
@@ -186,7 +185,7 @@ struct LedgerView: View {
         }
       }
     }
-    .sheet(isPresented: $showingTransactionForm, onDismiss: { formUpcoming = nil }) {
+    .sheet(item: $entryForm) { request in
       EntryFormWithUpcoming(
         form: NativeTransactionForm(
           accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
@@ -197,7 +196,7 @@ struct LedgerView: View {
             if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
             return result
           }),
-        upcoming: formUpcoming, accounts: accounts, categories: categories)
+        upcoming: request.upcoming, accounts: accounts, categories: categories)
     }
     .sheet(isPresented: $showingSplitForm) {
       SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
@@ -248,7 +247,7 @@ struct LedgerView: View {
     .onChange(of: isEditing) { _, editing in
       guard editing, opensFormWhenEditing else { return }
       opensFormWhenEditing = false
-      showingTransactionForm = true
+      entryForm = EntryFormRequest()
     }
     .onDisappear { opensFormWhenEditing = false }
     .onAppear { presentIntentIfNeeded() }
@@ -290,7 +289,7 @@ struct LedgerView: View {
 
   @ViewBuilder private var createButtons: some View {
     Button {
-      showingTransactionForm = true
+      entryForm = EntryFormRequest()
     } label: {
       Label("New Transaction", systemImage: "plus")
     }
@@ -354,10 +353,9 @@ struct LedgerView: View {
   /// Opens the form for a Shortcuts request once the ledger's accounts have loaded, so the
   /// form never opens empty on a cold launch.
   private func presentIntentIfNeeded() {
-    guard let intentRequest, !showingTransactionForm, !accounts.isEmpty else { return }
+    guard let intentRequest, entryForm == nil, !accounts.isEmpty else { return }
     guard intentRequest.kind == .addExpense || intentRequest.kind == .addIncome else { return }
-    formUpcoming = intentRequest.showsUpcoming ? upcoming : nil
-    showingTransactionForm = true
+    entryForm = EntryFormRequest(upcoming: intentRequest.showsUpcoming ? upcoming : nil)
   }
 
   private func openPrompt(
@@ -381,6 +379,13 @@ struct LedgerView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(32)
   }
+}
+
+/// One showing of the entry form. Upcoming travels with it, so the sheet never shows a value
+/// from before it opened.
+struct EntryFormRequest: Identifiable {
+  let id = UUID()
+  var upcoming: LedgerUpcoming? = nil
 }
 
 /// The entry form, with Upcoming beside it when the daily reminder opened it (#171).
