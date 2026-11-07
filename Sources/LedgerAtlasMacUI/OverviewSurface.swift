@@ -14,9 +14,13 @@ struct OverviewSurface: View {
   let show: (AppDestination) -> Void
 
   @State private var model: OverviewModel?
+  /// The card link that has keyboard focus. A ScrollView does not follow focus by itself
+  /// (a List does), so Tab would land on a link below the fold; this scrolls to it.
+  @FocusState private var focusedLink: OverviewLink?
   @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
+    ScrollViewReader { proxy in
     ScrollView {
       if let model {
         ViewThatFits(in: .horizontal) {
@@ -35,6 +39,10 @@ struct OverviewSurface: View {
           .frame(maxWidth: .infinity)
           .padding(LedgerTheme.Space.xxxl)
       }
+    }
+    .onChange(of: focusedLink) { _, link in
+      if let link { proxy.scrollTo(link, anchor: .center) }
+    }
     }
     .ledgerCanvas()
     .navigationTitle("Overview")
@@ -70,18 +78,43 @@ struct OverviewSurface: View {
   private func leftColumn(_ model: OverviewModel) -> some View {
     VStack(spacing: LedgerTheme.Space.l) {
       NetWorthCard(model: model)
-      RecentCard(lines: model.recent) { show(.ledger) }
+      RecentCard(lines: model.recent, focus: $focusedLink) { show(.ledger) }
     }
   }
 
   private func rightColumn(_ model: OverviewModel) -> some View {
     VStack(spacing: LedgerTheme.Space.l) {
       CashFlowCard(model: model)
-      SpendingCard(model: model) { show(.insights) }
+      SpendingCard(model: model, focus: $focusedLink) { show(.insights) }
       if !model.budgets.isEmpty {
-        BudgetsCard(lines: Array(model.budgets.prefix(5))) { show(.budgets) }
+        BudgetsCard(lines: Array(model.budgets.prefix(5)), focus: $focusedLink) { show(.budgets) }
       }
     }
+  }
+}
+
+/// The "see all" links in the card headers.
+enum OverviewLink: Hashable {
+  case insights, budgets, transactions
+}
+
+/// A card header's "see all" link: named for VoiceOver and Full Keyboard Access, and
+/// scrolled into view when Tab reaches it.
+private struct OverviewCardLink: View {
+  let title: String
+  let spokenName: String
+  let hint: String
+  let link: OverviewLink
+  var focus: FocusState<OverviewLink?>.Binding
+  let action: () -> Void
+
+  var body: some View {
+    Button(title, action: action)
+      .buttonStyle(.link)
+      .focused(focus, equals: link)
+      .id(link)
+      .accessibilityLabel(spokenName)
+      .accessibilityHint(hint)
   }
 }
 
@@ -296,13 +329,16 @@ private struct CashFlowCard: View {
 
 private struct SpendingCard: View {
   let model: OverviewModel
+  var focus: FocusState<OverviewLink?>.Binding
   let showAll: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
       LedgerCardHeader("Spending by category") {
-        Button("Insights", action: showAll).buttonStyle(.link)
-          .accessibilityHint("Shows every category on the Insights screen.")
+        OverviewCardLink(
+          title: "Insights", spokenName: "Open Insights",
+          hint: "Shows every category on the Insights screen.", link: .insights, focus: focus,
+          action: showAll)
       }
       if model.spending.isEmpty {
         Text("No spending this month.")
@@ -338,14 +374,16 @@ private struct SpendingCard: View {
 
 private struct BudgetsCard: View {
   let lines: [OverviewModel.BudgetLine]
+  var focus: FocusState<OverviewLink?>.Binding
   let showAll: () -> Void
   @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
       LedgerCardHeader("Budgets") {
-        Button("All budgets", action: showAll).buttonStyle(.link)
-          .accessibilityHint("Shows the Budgets screen.")
+        OverviewCardLink(
+          title: "All budgets", spokenName: "All budgets", hint: "Shows the Budgets screen.",
+          link: .budgets, focus: focus, action: showAll)
       }
       ForEach(lines) { line in
         VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
@@ -378,14 +416,16 @@ private struct BudgetsCard: View {
 
 private struct RecentCard: View {
   let lines: [OverviewModel.RecentLine]
+  var focus: FocusState<OverviewLink?>.Binding
   let showAll: () -> Void
   @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
       LedgerCardHeader("Recent transactions") {
-        Button("All transactions", action: showAll).buttonStyle(.link)
-          .accessibilityHint("Shows the Transactions screen.")
+        OverviewCardLink(
+          title: "All transactions", spokenName: "All transactions",
+          hint: "Shows the Transactions screen.", link: .transactions, focus: focus, action: showAll)
       }
       if lines.isEmpty {
         Text("No transactions yet.")

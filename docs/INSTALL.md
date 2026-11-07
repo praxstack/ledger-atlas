@@ -37,8 +37,7 @@ You only do this once per version. (Right-click › Open no longer skips this on
 
 ## Bring in your Money Manager data
 
-Click **Import Money Manager Backup…** in the toolbar (or **File › Import Money Manager
-Backup…**, ⇧⌘I). Pick the backup's time zone, choose the `.mmbak` file, check the review, then
+Click **Import** in the toolbar (or **File › Import Money Manager Backup…**, ⇧⌘I). Pick the backup's time zone, choose the `.mmbak` file, check the review, then
 approve it. The new ledger opens by itself.
 
 **Open Ledger…** is for Ledger Atlas ledgers. If you pick a Money Manager backup there, the

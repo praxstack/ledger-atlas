@@ -197,7 +197,10 @@ struct InsightsSurface: View {
       }
       .chartForegroundStyleScale(["Income": Color.green, "Expense": Color.orange])
       .frame(height: 180)
-      .accessibilityHidden(true)
+      // The chart is one spoken element; the grid below it holds the same numbers as text.
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Trend chart, \(report.trend.count) \(report.kind == .year ? "years" : "months")")
+      .accessibilityValue(trendSummary(report))
       Grid(alignment: .trailing, horizontalSpacing: 16, verticalSpacing: 4) {
         GridRow {
           Text("Period").gridColumnAlignment(.leading)
@@ -246,7 +249,12 @@ struct InsightsSurface: View {
             y: .value("Category", row.name))
         }
         .frame(height: CGFloat(min(top.count, 8)) * 28 + 20)
-        .accessibilityHidden(true)
+        // The chart is one spoken element; every line is listed as a row below it.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) chart")
+        .accessibilityValue(
+          top.prefix(8).map { "\($0.name) \(money($0.totalAmount, report.unitCode))" }
+            .joined(separator: ", "))
         ForEach(rows) { row in
           Button {
             drillDown = row
@@ -281,6 +289,12 @@ struct InsightsSurface: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     .accessibilityElement(children: .combine)
+  }
+
+  private func trendSummary(_ report: InsightsReport) -> String {
+    report.trend.map {
+      "\(label($0.period.start, report.kind)): income \(money($0.income, report.unitCode)), expense \(money($0.expense, report.unitCode))"
+    }.joined(separator: ". ")
   }
 
   private func money(_ value: ExactDecimal, _ unit: String) -> String {
