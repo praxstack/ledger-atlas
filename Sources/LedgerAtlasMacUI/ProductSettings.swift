@@ -1,5 +1,8 @@
 import Foundation
 
+#if canImport(AppKit)
+  import AppKit
+#endif
 #if canImport(SwiftUI)
   import SwiftUI
 #endif
@@ -202,6 +205,19 @@ extension AppDestination: Codable {}
       case .system: nil
       case .light: .light
       case .dark: .dark
+      }
+    }
+  }
+#endif
+
+#if canImport(AppKit)
+  extension LedgerProductSettings.Appearance {
+    /// The AppKit appearance for this choice. `nil` follows the Mac's own setting.
+    public var appearanceName: NSAppearance.Name? {
+      switch self {
+      case .system: nil
+      case .light: .aqua
+      case .dark: .darkAqua
       }
     }
   }

@@ -801,9 +801,15 @@ struct ImportReviewSurface: View {
   let canApprove: Bool
   let chooseBackup: () -> Void
   let approve: () -> Void
+  /// The open ledger's balance-match receipt (#172), shown above the review when there is one.
+  var balanceReceipt: ImportBalanceReceipt?
+  var saveReceipt: () -> Void = {}
+  var continueTitle: String?
+  var continueAfterReceipt: () -> Void = {}
 
   private var decisionTint: Color {
-    switch summary.decision {
+    if balanceReceipt != nil { return LedgerTheme.positive }
+    return switch summary.decision {
     case .reviewable: LedgerTheme.positive
     case .classificationReady: LedgerTheme.warning
     case .blocked: LedgerTheme.negative
@@ -812,6 +818,11 @@ struct ImportReviewSurface: View {
 
   var body: some View {
     LedgerCardColumn {
+      if let balanceReceipt {
+        ImportBalanceReceiptView(
+          receipt: balanceReceipt, saveAsPDF: saveReceipt, continueTitle: continueTitle,
+          continueAction: continueAfterReceipt)
+      }
       header
       decisionCard
       metadataCard
@@ -839,16 +850,22 @@ struct ImportReviewSurface: View {
   private var decisionCard: some View {
     HStack(alignment: .top, spacing: LedgerTheme.Space.m) {
       LedgerIconTile(
-        .symbol(summary.decision.systemImageName),
+        .symbol(balanceReceipt == nil ? summary.decision.systemImageName : "checkmark.seal"),
         swatch: LedgerTheme.Swatch(color: decisionTint, soft: LedgerTheme.fieldFill), size: 36)
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
-        Text(summary.decision.title)
+        // With a receipt the import has already committed, so the preparation status ("ready
+        // for approval", or "Blocked" for a ledger reopened later) no longer applies.
+        Text(balanceReceipt == nil ? summary.decision.title : "Imported")
           .font(LedgerTheme.Typeface.figure)
           .foregroundStyle(LedgerTheme.ink)
-        Text(summary.decision.message)
-          .font(LedgerTheme.Typeface.secondary)
-          .foregroundStyle(LedgerTheme.inkSecondary)
-          .fixedSize(horizontal: false, vertical: true)
+        Text(
+          balanceReceipt == nil
+            ? summary.decision.message
+            : "This ledger was written from the backup. The receipt above compares every account with Money Manager."
+        )
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+        .fixedSize(horizontal: false, vertical: true)
       }
     }
     .ledgerCard()
