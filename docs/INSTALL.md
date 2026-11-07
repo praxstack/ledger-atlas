@@ -88,6 +88,19 @@ On the **Backup** screen:
   current ledger file is kept, so you can go back to it.
 - Backups are not encrypted in v1. Store them somewhere private.
 
+### Moving to another Mac
+
+A ledger with imported Money Manager history is checked with its receipt key, and that key
+stays on the Mac that imported it (see above). On a new Mac, or after the `Keys` folder is
+lost, the ledger itself is fine, but Ledger Atlas can't check it without the key.
+
+- With the ledger open, choose **Save recovery key…** on the Backup screen once and keep the
+  `.ledgerkey` file with your backups. It is not encrypted, so keep it as private as they are.
+- On the other Mac, open or restore the ledger. When Ledger Atlas says the receipt key isn't
+  on this Mac, choose **Choose Recovery Key…** and pick that file. The key is checked against
+  the ledger before it is added, and never replaces a different key.
+- A ledger you made in Ledger Atlas without importing needs no key.
+
 ## Updating
 
 Download the new DMG and drag the new **Ledger Atlas** into Applications, replacing the old

@@ -417,7 +417,74 @@ public struct LedgerAtlasRootView: View {
       lifecycleRetryOperation = outcome.retryOperation
       if [.created, .opened, .upgraded].contains(outcome.kind) {
         selection = productSettings.startScreen
+      } else if outcome.failure == .receiptKeyMissing, let url, installRecoveryKey(for: url) {
+        performLedgerSelection(.open, url: url, removingCopyIfRefused: removingCopyIfRefused)
       }
+    }
+  }
+
+  /// A ledger with imported history needs its receipt key, which stays on the Mac that made it.
+  /// Asks for the recovery key file saved there, checks that it opens `ledger`, and stores it.
+  /// True when the key was installed (#182).
+  private func installRecoveryKey(for ledger: URL) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "This ledger's receipt key isn't on this Mac"
+    alert.informativeText = Self.receiptKeyMissingExplanation
+    alert.addButton(withTitle: "Choose Recovery Key…")
+    alert.addButton(withTitle: "Cancel")
+    guard alert.runModal() == .alertFirstButtonReturn else { return false }
+    let panel = NSOpenPanel()
+    panel.title = "Choose the ledger's recovery key"
+    panel.prompt = "Use Key"
+    panel.allowedContentTypes = Self.recoveryKeyTypes
+    panel.allowsMultipleSelection = false
+    panel.canChooseDirectories = false
+    guard panel.runModal() == .OK, let file = panel.url else { return false }
+    let scoped = file.startAccessingSecurityScopedResource()
+    defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+    do {
+      // A recovery key file is under 200 bytes; reading a little more is enough to refuse a
+      // large file without loading it.
+      let handle = try FileHandle(forReadingFrom: file)
+      defer { try? handle.close() }
+      let data = try handle.read(upToCount: 2_048) ?? Data()
+      try LedgerStore.installRecoveryKey(data, for: ledger)
+      lifecycleMessage = Self.recoveryKeyInstalledMessage
+      return true
+    } catch {
+      journey.recordFailure(Self.recoveryKeyFailureMessage(for: error))
+      return false
+    }
+  }
+
+  /// Saves the open ledger's recovery key, to keep with its backups.
+  private func saveRecoveryKey() {
+    guard let ledger = journey.ledgerURL else { return }
+    let file: Data
+    do {
+      guard let made = try LedgerReceiptTrust.recoveryKeyFile(for: ledger) else {
+        lifecycleMessage = Self.recoveryKeyNotNeededMessage
+        return
+      }
+      file = made
+    } catch {
+      journey.recordFailure("The recovery key could not be read from this Mac.")
+      return
+    }
+    let panel = NSSavePanel()
+    panel.title = "Save recovery key"
+    panel.message = Self.recoveryKeySavePanelMessage
+    panel.allowedContentTypes = Self.recoveryKeyTypes
+    panel.nameFieldStringValue =
+      "\(ledger.deletingPathExtension().lastPathComponent) recovery key.ledgerkey"
+    guard panel.runModal() == .OK, let destination = panel.url else { return }
+    do {
+      try file.write(to: destination, options: .atomic)
+      try? FileManager.default.setAttributes(
+        [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: destination.path)
+      lifecycleMessage = Self.recoveryKeySavedMessage
+    } catch {
+      journey.recordFailure("The recovery key could not be saved there. Choose another place.")
     }
   }
 
@@ -705,7 +772,14 @@ public struct LedgerAtlasRootView: View {
       return
     }
     defer { source.stopAccessingSecurityScopedResource() }
-    guard let preview = try? LedgerStore.openReadOnly(at: source).readSnapshot() else {
+    var preview: LedgerStore.LedgerReadSnapshot?
+    do {
+      preview = try LedgerStore.openReadOnly(at: source).readSnapshot()
+    } catch LedgerStore.Error.receiptKeyMissing {
+      guard installRecoveryKey(for: source) else { return }
+      preview = try? LedgerStore.openReadOnly(at: source).readSnapshot()
+    } catch {}
+    guard let preview else {
       journey.recordFailure("The selected backup could not be validated.")
       return
     }
@@ -976,8 +1050,45 @@ public struct LedgerAtlasRootView: View {
     return alert.runModal() == .alertFirstButtonReturn
   }
 
-  package static func backupSavedMessage(sha256: String) -> String {
+  package static func backupSavedMessage(sha256: String, needsRecoveryKey: Bool = false)
+    -> String
+  {
     "Backup saved. SHA-256: \(sha256)"
+      + (needsRecoveryKey
+        ? " To open it on another Mac, also choose Save recovery key… once and keep the key with your backups."
+        : "")
+  }
+
+  /// A recovery key file. `.ledgerkey` is plain text, so it opens anywhere.
+  package static let recoveryKeyTypes: [UTType] = {
+    if let key = UTType(filenameExtension: "ledgerkey", conformingTo: .plainText) {
+      return [key, .plainText]
+    }
+    return [.plainText]
+  }()
+
+  package static let receiptKeyMissingExplanation =
+    "Nothing is damaged. This ledger holds imported Money Manager history, which Ledger Atlas checks with a receipt key kept on the Mac that imported it. To open it here, choose the recovery key saved on that Mac (Backup > Save recovery key…)."
+  package static let recoveryKeyInstalledMessage =
+    "Recovery key added to this Mac. The ledger opens normally from now on."
+  package static let recoveryKeySavedMessage =
+    "Recovery key saved. Keep it with your backups, somewhere private: with it, the ledger's imported history can be checked on another Mac."
+  package static let recoveryKeyNotNeededMessage =
+    "This ledger has no imported history, so it needs no recovery key. Its backups open on any Mac."
+  package static let recoveryKeySavePanelMessage =
+    "Keep this file with your backups. You need it to open them on another Mac."
+
+  package static func recoveryKeyFailureMessage(for error: any Swift.Error) -> String {
+    switch error as? LedgerReceiptTrustError {
+    case .invalidKey:
+      return "This file isn't the recovery key for this ledger. Nothing was changed. Choose the key saved for this ledger."
+    case .conflictingKeys:
+      return "This Mac already has a different receipt key for this ledger, so nothing was changed."
+    case .some:
+      return "The recovery key could not be stored on this Mac. Nothing was changed."
+    case nil:
+      return "This recovery key doesn't open this ledger, so it wasn't added. Nothing was changed."
+    }
   }
 
   package static func backupFailureMessage(for error: any Swift.Error) -> String {
@@ -1008,6 +1119,8 @@ public struct LedgerAtlasRootView: View {
       return "A ledger with that name already exists. Choose Create Ledger and pick another name."
     case .companionPresent:
       return "Temporary files left beside this ledger by an earlier session were not recognised, so it was not opened. \(retry)"
+    case .receiptKeyMissing:
+      return receiptKeyMissingExplanation
     default:
       return operation == .create
         ? "Ledger could not be created. \(retry)" : "Ledger could not be opened. \(retry)"
@@ -1501,7 +1614,11 @@ public struct LedgerAtlasRootView: View {
           guard panel.runModal() == .OK, let url = panel.url else { return }
           do {
             let digest = try journey.backupCanonicalLedger(to: url)
-            lifecycleMessage = Self.backupSavedMessage(sha256: digest)
+            // A backup with imported history opens on another Mac only with its recovery key.
+            let needsKey = journey.ledgerURL.map {
+              (try? LedgerReceiptTrust.recoveryKeyFile(for: $0)) != nil
+            } ?? false
+            lifecycleMessage = Self.backupSavedMessage(sha256: digest, needsRecoveryKey: needsKey)
           } catch {
             lifecycleMessage = nil
             journey.recordFailure(Self.backupFailureMessage(for: error))
@@ -1511,6 +1628,7 @@ public struct LedgerAtlasRootView: View {
         exportPackage: exportPortablePackage,
         restorePackage: restorePortablePackage,
         reset: journey.snapshot.map { _ in resetLedger },
+        saveRecoveryKey: journey.snapshot.map { _ in saveRecoveryKey },
         exportXLSX: journey.snapshot.map { _ in exportXLSXWorkbook },
         importXLSX: journey.snapshot.map { _ in importXLSXWorkbook }
       )
