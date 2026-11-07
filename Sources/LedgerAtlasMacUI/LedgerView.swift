@@ -40,6 +40,8 @@ struct LedgerView: View {
   var saveAsTemplate: ((String, String) -> Void)?
   var editSplit: ((LedgerSplitDraft) -> Void)?
   var closeSplit: ((String) -> Void)?
+  /// What is due soon (#171); the entry form shows it beside itself when the request asks.
+  var upcoming: LedgerUpcoming? = nil
   @State private var editingSplit: LedgerSplitPurchase?
   @State private var selectedID: String?
   @State private var taggingID: String?
@@ -47,6 +49,8 @@ struct LedgerView: View {
   @State private var amountLiteral = ""
   @State private var macAmountLiteral = ""
   @State private var showingTransactionForm = false
+  /// Upcoming as it was when the reminder opened the form; kept while the form stays open.
+  @State private var formUpcoming: LedgerUpcoming?
   @State private var showingSplitForm = false
   /// + New was pressed while read-only: the form opens once editing has begun.
   @State private var opensFormWhenEditing = false
@@ -182,16 +186,18 @@ struct LedgerView: View {
         }
       }
     }
-    .sheet(isPresented: $showingTransactionForm) {
-      NativeTransactionForm(
-        accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
-        entries: transactions,
-        onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
-          let result = createTransaction(
-            submissionID, amount, kind, accountID, categoryID, note, links)
-          if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
-          return result
-        })
+    .sheet(isPresented: $showingTransactionForm, onDismiss: { formUpcoming = nil }) {
+      EntryFormWithUpcoming(
+        form: NativeTransactionForm(
+          accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
+          entries: transactions,
+          onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
+            let result = createTransaction(
+              submissionID, amount, kind, accountID, categoryID, note, links)
+            if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
+            return result
+          }),
+        upcoming: formUpcoming, accounts: accounts, categories: categories)
     }
     .sheet(isPresented: $showingSplitForm) {
       SplitPurchaseForm(accounts: accounts, categories: categories, onSave: createSplit)
@@ -350,6 +356,7 @@ struct LedgerView: View {
   private func presentIntentIfNeeded() {
     guard let intentRequest, !showingTransactionForm, !accounts.isEmpty else { return }
     guard intentRequest.kind == .addExpense || intentRequest.kind == .addIncome else { return }
+    formUpcoming = intentRequest.showsUpcoming ? upcoming : nil
     showingTransactionForm = true
   }
 
@@ -373,5 +380,25 @@ struct LedgerView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .padding(32)
+  }
+}
+
+/// The entry form, with Upcoming beside it when the daily reminder opened it (#171).
+struct EntryFormWithUpcoming: View {
+  let form: NativeTransactionForm
+  let upcoming: LedgerUpcoming?
+  let accounts: [LedgerAccount]
+  let categories: [LedgerCategory]
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 0) {
+      form
+      if let upcoming {
+        Divider()
+        UpcomingPanel(upcoming: upcoming, accounts: accounts, categories: categories)
+          .frame(width: 300)
+          .frame(minHeight: 380, maxHeight: 560)
+      }
+    }
   }
 }

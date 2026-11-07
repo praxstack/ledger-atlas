@@ -41,24 +41,19 @@ struct RecurrenceView: View {
   let onUpdate: (LedgerRecurrenceRule, LedgerEditScope) -> Void
   let onGenerate: (LedgerRecurrenceRule, SourceLocalDate) -> Void
   let open: () -> Void
+  /// What is due soon (#171), shown beside the rules while a ledger is open.
+  var upcoming: LedgerUpcoming? = nil
   @State private var showingForm = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      if rules.isEmpty {
-        PlanningEmptyView(
-          title: "No recurrence rules", message: "Create a rule to generate dated income or expenses.",
-          state: state, isEditing: isEditing, failure: lastFailure, open: open)
-      } else {
-        List(rules, id: \.id) { rule in
-          RecurrenceRow(
-            rule: rule, accountName: accounts.first(where: { $0.id == rule.accountID })?.name,
-            categoryName: categories.first(where: { $0.id == rule.categoryID })?.name,
-            isEditing: isEditing,
-            toggle: { onUpdate($0, .thisAndFuture) },
-            generate: { onGenerate(rule, PlanningSupport.today()) })
+      HStack(alignment: .top, spacing: 0) {
+        rulesList.frame(maxWidth: .infinity, maxHeight: .infinity)
+        if let upcoming {
+          Divider()
+          UpcomingPanel(upcoming: upcoming, accounts: accounts, categories: categories)
+            .frame(width: 320)
         }
-        .scrollContentBackground(.hidden)
       }
       LedgerActionBar {
         if isEditing {
@@ -75,6 +70,24 @@ struct RecurrenceView: View {
     .navigationTitle("Recurrence")
     .sheet(isPresented: $showingForm) {
       RecurrenceForm(accounts: accounts, categories: categories, onSave: onCreate)
+    }
+  }
+
+  @ViewBuilder private var rulesList: some View {
+    if rules.isEmpty {
+      PlanningEmptyView(
+        title: "No recurrence rules", message: "Create a rule to generate dated income or expenses.",
+        state: state, isEditing: isEditing, failure: lastFailure, open: open)
+    } else {
+      List(rules, id: \.id) { rule in
+        RecurrenceRow(
+          rule: rule, accountName: accounts.first(where: { $0.id == rule.accountID })?.name,
+          categoryName: categories.first(where: { $0.id == rule.categoryID })?.name,
+          isEditing: isEditing,
+          toggle: { onUpdate($0, .thisAndFuture) },
+          generate: { onGenerate(rule, PlanningSupport.today()) })
+      }
+      .scrollContentBackground(.hidden)
     }
   }
 }

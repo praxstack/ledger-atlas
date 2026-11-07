@@ -15,20 +15,24 @@ public struct LedgerIntentRequest: Codable, Equatable, Sendable {
   public let note: String?
   /// When the request was queued. Requests from builds without it count as expired.
   public let createdAtMilliseconds: Int64
+  /// The entry form opens with Upcoming beside it (#171): the daily reminder asks for this.
+  public let showsUpcoming: Bool
 
   public init(
     id: String = UUID().uuidString, kind: Kind, amountLiteral: String? = nil, note: String? = nil,
-    createdAtMilliseconds: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    createdAtMilliseconds: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+    showsUpcoming: Bool = false
   ) {
     self.id = id
     self.kind = kind
     self.amountLiteral = amountLiteral
     self.note = note
     self.createdAtMilliseconds = createdAtMilliseconds
+    self.showsUpcoming = showsUpcoming
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, kind, amountLiteral, note, createdAtMilliseconds
+    case id, kind, amountLiteral, note, createdAtMilliseconds, showsUpcoming
   }
 
   public init(from decoder: any Decoder) throws {
@@ -39,6 +43,7 @@ public struct LedgerIntentRequest: Codable, Equatable, Sendable {
     note = try values.decodeIfPresent(String.self, forKey: .note)
     createdAtMilliseconds =
       try values.decodeIfPresent(Int64.self, forKey: .createdAtMilliseconds) ?? 0
+    showsUpcoming = try values.decodeIfPresent(Bool.self, forKey: .showsUpcoming) ?? false
   }
 
   /// A request older than this is dropped instead of acted on, so a request the app never got
