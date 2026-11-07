@@ -18,39 +18,34 @@ struct TransferSurface: View {
   @State private var showingForm = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let activeCount = accounts.filter { $0.lifecycle == .active }.count
+    VStack(alignment: .leading, spacing: 0) {
       if rows.isEmpty {
-        Text("No transfers yet").font(.title2.bold())
-        Text("Transfers, currency conversions, and fees will appear here.")
-          .foregroundStyle(.secondary)
+        LedgerEmptyState(
+          "No transfers yet", systemImage: "arrow.left.arrow.right",
+          message: "Transfers, currency conversions, and fees will appear here.")
       } else {
-        List(rows) { row in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(row.title)
-            Text(row.detail).font(.caption).foregroundStyle(.secondary)
-          }
-          .accessibilityElement(children: .combine)
-          .accessibilityLabel("\(row.title), \(row.detail)")
+        LedgerSurfaceRowList(rows: rows)
+      }
+      LedgerActionBar {
+        if isEditing {
+          Button("New transfer") { showingForm = true }
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            .accessibilityLabel("New transfer")
+            .disabled(activeCount < 2)
+        } else {
+          Button("Begin editing", action: beginEditing)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Begin editing")
+        }
+        if let lastFailure {
+          LedgerStatusLine(failure: lastFailure)
+        } else if activeCount < 2 {
+          LedgerStatusLine(status: "Create at least two active accounts before recording a transfer.")
         }
       }
-      if let lastFailure {
-        Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
-      }
-      if isEditing {
-        Button("New transfer") { showingForm = true }
-          .accessibilityLabel("New transfer")
-          .disabled(accounts.filter { $0.lifecycle == .active }.count < 2)
-      } else {
-        Button("Begin editing", action: beginEditing)
-          .accessibilityLabel("Begin editing")
-      }
-      if accounts.filter({ $0.lifecycle == .active }).count < 2 {
-        Text("Create at least two active accounts before recording a transfer.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
     }
-    .padding(16)
+    .ledgerCanvas()
     .navigationTitle("Transfers")
     .sheet(isPresented: $showingForm) {
       NativeTransferForm(
@@ -142,18 +137,18 @@ struct NativeTransferForm: View {
               destinationLiteral: destinationAmount, destinationUnit: destinationUnit)
           {
             Text("Rate: \(preview)")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
               .accessibilityLabel("Exchange rate \(preview)")
           } else {
             Text("The exchange rate is worked out from the two amounts.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
           }
         } else {
           Text("Destination amount equals the amount sent.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
         }
         TextField("Fee (optional)", text: $feeAmount)
           .accessibilityLabel("Transfer fee")

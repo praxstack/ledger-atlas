@@ -29,76 +29,149 @@ struct ReceiptSurface: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text("Receipts").font(.largeTitle.bold())
-      Text(
-        "Receipts are stored inside the open ledger, so backups carry them. Images are kept as picked, including any location data they carry. Text recognition runs on this Mac and only suggests values; nothing is recorded until you confirm."
-      )
-      .foregroundStyle(.secondary)
-      if journey.isEditing {
-        Button("Add receipt…", action: chooseReceipt)
-          .disabled(isWorking)
-          .accessibilityLabel("Add receipt")
-      } else {
-        Text("Open a ledger for editing to add or link receipts.").foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 0) {
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+        HStack(spacing: LedgerTheme.Space.m) {
+          Text("Receipts")
+            .font(LedgerTheme.Typeface.screenTitle)
+            .foregroundStyle(LedgerTheme.ink)
+            .accessibilityAddTraits(.isHeader)
+          Spacer(minLength: LedgerTheme.Space.s)
+          if isWorking {
+            ProgressView("Processing receipt…")
+              .controlSize(.small)
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+          }
+          if journey.isEditing {
+            Button("Add receipt…", action: chooseReceipt)
+              .buttonStyle(LedgerPrimaryButtonStyle())
+              .disabled(isWorking)
+              .accessibilityLabel("Add receipt")
+          }
+        }
+        Text(
+          "Receipts are stored inside the open ledger, so backups carry them. Images are kept as picked, including any location data they carry. Text recognition runs on this Mac and only suggests values; nothing is recorded until you confirm."
+        )
+        .font(LedgerTheme.Typeface.secondary)
+        .foregroundStyle(LedgerTheme.inkSecondary)
+        // No fixedSize here: this screen doesn't scroll, and a fixed-height paragraph asked for
+        // its size at a narrow width made the window taller than the screen.
+        if !journey.isEditing {
+          LedgerStatusLine(status: "Open a ledger for editing to add or link receipts.")
+        }
       }
-      if isWorking { ProgressView("Processing receipt…") }
-      HStack(alignment: .top, spacing: 20) {
+      .padding(LedgerTheme.Space.xxl)
+      HStack(alignment: .top, spacing: LedgerTheme.Space.l) {
         receiptList.frame(minWidth: 220, maxWidth: 300)
-        if let selected { detail(for: selected) }
+        if let selected {
+          ScrollView {
+            detail(for: selected).ledgerCard()
+          }
+        } else if !receipts.isEmpty {
+          LedgerEmptyState(
+            "Choose a receipt", systemImage: "doc.text.viewfinder",
+            message: "Pick one from the list to link it to a transaction or record an expense from it.")
+        } else {
+          // Keeps the row as wide as the window, so the screen's width never depends on the
+          // wrapped intro text above it.
+          Spacer(minLength: 0)
+        }
       }
-      if let status { Text(status).foregroundStyle(.secondary).accessibilityLabel(status) }
-      Spacer()
+      .padding(.horizontal, LedgerTheme.Space.xxl)
+      if let status {
+        LedgerActionBar { LedgerStatusLine(status: status) }
+          .padding(.top, LedgerTheme.Space.l)
+      } else {
+        Spacer(minLength: LedgerTheme.Space.l)
+      }
     }
-    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .ledgerCanvas()
     .navigationTitle("Receipts")
     .task(id: journey.snapshotGeneration) { reload() }
   }
 
+  /// A plain list of buttons rather than a selection list: Tab into a SwiftUI selection
+  /// `List` on macOS 26 crashed AppKit (`viewAtColumn:` with no column) under Full Keyboard
+  /// Access. Each receipt is a button that VoiceOver reads as selected when it is shown.
   private var receiptList: some View {
-    List(selection: $selectedID) {
+    List {
       if receipts.isEmpty {
-        Text("No receipts yet.").foregroundStyle(.secondary)
+        Text("No receipts yet.")
+          .font(LedgerTheme.Typeface.secondary)
+          .foregroundStyle(LedgerTheme.inkTertiary)
       }
       ForEach(receipts, id: \.id) { receipt in
-        VStack(alignment: .leading, spacing: 2) {
-          Text(Self.title(for: receipt)).font(.headline)
-          Text(linkText(for: receipt)).font(.caption).foregroundStyle(.secondary)
+        let isSelected = receipt.id == selectedID
+        Button {
+          selectedID = receipt.id
+        } label: {
+          HStack(spacing: LedgerTheme.Space.m) {
+            LedgerIconTile(
+              .symbol(receipt.mediaType == .pdf ? "doc.richtext" : "photo"),
+              swatch: LedgerTheme.swatch(for: receipt.id))
+            VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+              Text(Self.title(for: receipt))
+                .font(LedgerTheme.Typeface.bodyEmphasis)
+                .foregroundStyle(receipt.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
+              Text(linkText(for: receipt))
+                .font(LedgerTheme.Typeface.caption)
+                .foregroundStyle(LedgerTheme.inkTertiary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+          }
+          .padding(.vertical, LedgerTheme.Space.xs)
+          .padding(.horizontal, LedgerTheme.Space.xs)
+          .background(
+            isSelected ? LedgerTheme.accentSoft : LedgerTheme.card,
+            in: .rect(cornerRadius: LedgerTheme.Radius.row)
+          )
+          .contentShape(.rect)
         }
-        .tag(Optional(receipt.id))
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(Self.title(for: receipt)), \(linkText(for: receipt))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("Shows this receipt.")
+        .listRowSeparator(.hidden)
       }
     }
+    .scrollContentBackground(.hidden)
+    .ledgerGroupBox()
     .onChange(of: selectedID) { _, _ in resetForm() }
   }
 
   @ViewBuilder
   private func detail(for receipt: LedgerReceiptAttachment) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("\(receipt.byteCount) bytes · SHA-256 \(receipt.sha256.prefix(12))…")
-        .font(.caption.monospaced())
-        .foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+      LedgerCardHeader(Self.title(for: receipt)) {
+        Text("\(receipt.byteCount) bytes · SHA-256 \(receipt.sha256.prefix(12))…").monospacedDigit()
+      }
       if receipt.lifecycle == .tombstoned {
-        Text("Removed. It can't be linked or added again; its bytes stay in this ledger and its backups.")
-          .foregroundStyle(.secondary)
+        LedgerStatusLine(
+          status: "Removed. It can't be linked or added again; its bytes stay in this ledger and its backups.")
       } else if journey.isEditing {
         linkChooser
         Button("Save link") { saveLink(receipt) }
+          .buttonStyle(LedgerSecondaryButtonStyle())
           .disabled(isWorking || linkTarget == receipt.transactionID)
 
-        Divider()
+        LedgerRowDivider()
         if receipt.mediaType == .pdf {
-          Text("Text recognition reads images only. Fill in the expense yourself.")
-            .foregroundStyle(.secondary)
+          LedgerStatusLine(status: "Text recognition reads images only. Fill in the expense yourself.")
         } else {
           Button("Read text on this Mac") { recognize(receipt) }
+            .buttonStyle(LedgerSecondaryButtonStyle())
             .disabled(isWorking)
         }
         if let draft, draft.attachmentID == receipt.id { suggestions(draft) }
         expenseForm(for: receipt)
 
-        Divider()
+        LedgerRowDivider()
         Button("Remove receipt", role: .destructive) { remove(receipt) }
+          .buttonStyle(LedgerSecondaryButtonStyle())
           .accessibilityHint("Permanent: a removed receipt can't be linked or added again.")
           .disabled(isWorking)
       }
@@ -107,8 +180,10 @@ struct ReceiptSurface: View {
 
   /// Search instead of one long menu: the real ledger has thousands of transactions.
   private var linkChooser: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
       Text("Linked transaction: \(label(for: linkTarget))")
+        .font(LedgerTheme.Typeface.body)
+        .foregroundStyle(LedgerTheme.ink)
       HStack {
         TextField("Search transactions", text: $linkSearch)
           .accessibilityLabel("Search transactions to link")
@@ -151,7 +226,7 @@ struct ReceiptSurface: View {
   @ViewBuilder
   private func suggestions(_ draft: ReceiptOCRDraft) -> some View {
     if draft.lines.isEmpty {
-      Text("No text was recognized.").foregroundStyle(.secondary)
+      LedgerStatusLine(status: "No text was recognized.")
     } else {
       let candidates = draft.amountCandidates
       if !candidates.isEmpty {
@@ -177,8 +252,11 @@ struct ReceiptSurface: View {
     let categories = (journey.snapshot?.categories ?? [])
       .filter { $0.lifecycle == .active && !$0.hidden && $0.kind.accepts(.expense) }
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    return VStack(alignment: .leading, spacing: 8) {
-      Text("Record as an expense").font(.headline)
+    return VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+      Text("Record as an expense")
+        .font(LedgerTheme.Typeface.cardTitle)
+        .foregroundStyle(LedgerTheme.ink)
+        .accessibilityAddTraits(.isHeader)
       Picker("Account", selection: $accountID) {
         Text("Choose account…").tag("")
         ForEach(accounts, id: \.id) { Text($0.name).tag($0.id) }
@@ -189,6 +267,7 @@ struct ReceiptSurface: View {
       }
       TextField("Amount", text: $amount)
       Button("Confirm and record expense") { recordExpense(from: receipt) }
+        .buttonStyle(LedgerPrimaryButtonStyle())
         .disabled(isWorking || accountID.isEmpty || amount.isEmpty)
         .accessibilityHint("Records one expense from these values and links this receipt to it.")
     }

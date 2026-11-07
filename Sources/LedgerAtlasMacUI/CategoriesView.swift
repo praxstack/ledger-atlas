@@ -27,15 +27,16 @@ struct CategoriesView: View {
     let tree = self.tree
     let usage = CategoryUsage.counts(transactions, in: tree)
     let focus = focusID.flatMap { tree[$0] }
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 0) {
       if !categories.isEmpty {
         CategoryBreadcrumbs(path: focus.map { tree.path(to: $0.id) } ?? [], select: { focusID = $0 })
-          .padding(.horizontal, 16)
+          .padding(.horizontal, LedgerTheme.Space.l)
+          .padding(.vertical, LedgerTheme.Space.m)
         let visible = tree.children(of: focus?.id)
         if visible.isEmpty {
-          ContentUnavailableView(
+          LedgerEmptyState(
             "No subcategories", systemImage: "tag",
-            description: Text(isEditing ? "Create one to split this category further." : "This category has no subcategories."))
+            message: isEditing ? "Create one to split this category further." : "This category has no subcategories.")
         } else {
           List(visible, id: \.id) { category in
             CategoryTreeRow(
@@ -45,46 +46,33 @@ struct CategoriesView: View {
           }
         }
       } else if !rows.isEmpty {
-        List(rows) { row in
-          VStack(alignment: .leading, spacing: 4) {
-            Text(row.title)
-            Text(row.detail).font(.caption).foregroundStyle(.secondary)
-          }
-          .accessibilityElement(children: .combine)
-          .accessibilityLabel("\(row.title), \(row.detail)")
-        }
+        LedgerSurfaceRowList(rows: rows)
       } else {
-        switch state {
-        case .loaded:
-          ContentUnavailableView("No categories", systemImage: "tag", description: Text(isEditing ? "Create a category to classify transactions." : "Begin editing to manage categories."))
-        case .unavailable:
-          EmptyLedgerPrompt(title: "Ledger unavailable", description: "Choose a compatible ledger to view its categories.", guidance: .unavailable, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
-        case .noLedger:
-          EmptyLedgerPrompt(title: "Open a ledger", description: "Choose a Ledger Atlas ledger to view its categories.", guidance: .noLedger, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
-        case .loading:
-          ProgressView("Opening ledger…").frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        LedgerSessionEmptyState(
+          state: state, title: "No categories", systemImage: "tag",
+          message: isEditing ? "Create a category to classify transactions." : "Begin editing to manage categories.",
+          failure: lastFailure, open: open)
       }
-      if let lastFailure {
-        Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
-      }
-      HStack {
+      LedgerActionBar {
         if isEditing {
           // Only an open, visible category can take new subcategories (the store rule).
           let canAddChild = focus.map { $0.lifecycle == .active && !$0.hidden } ?? true
           Button(focus == nil ? "New category" : "New subcategory") { showingCategoryForm = true }
+            .buttonStyle(LedgerPrimaryButtonStyle())
             .disabled(!canAddChild)
             .help(canAddChild ? "" : "Restore or show this category before adding subcategories.")
             .accessibilityLabel(focus.map { "New subcategory of \($0.name)" } ?? "New category")
         } else if !categories.isEmpty || !rows.isEmpty {
-          Button("Begin editing", action: beginEditing).accessibilityLabel("Begin editing categories")
+          Button("Begin editing", action: beginEditing)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Begin editing categories")
         } else {
-          Button("Open Ledger…", action: open)
+          Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
         }
+        if let lastFailure { LedgerStatusLine(failure: lastFailure) }
       }
-      .padding(.horizontal, 16)
-      .padding(.bottom, 12)
     }
+    .ledgerCanvas()
     .navigationTitle(focus?.name ?? "Categories")
     .onChange(of: categories) { _, updated in
       // A reload can remove the focused category; fall back to the top level.
@@ -114,10 +102,12 @@ struct CategoryBreadcrumbs: View {
 
   var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 4) {
+      HStack(spacing: LedgerTheme.Space.xs) {
         crumb("All categories", id: nil, isCurrent: path.isEmpty)
         ForEach(Array(path.enumerated()), id: \.element.id) { index, category in
-          Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+          Image(systemName: "chevron.right")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
             .accessibilityHidden(true)
           crumb(category.name, id: category.id, isCurrent: index == path.count - 1)
         }
@@ -129,9 +119,15 @@ struct CategoryBreadcrumbs: View {
 
   @ViewBuilder private func crumb(_ title: String, id: String?, isCurrent: Bool) -> some View {
     if isCurrent {
-      Text(title).fontWeight(.semibold).accessibilityAddTraits(.isHeader)
+      Text(title)
+        .font(LedgerTheme.Typeface.screenTitle)
+        .foregroundStyle(LedgerTheme.ink)
+        .accessibilityAddTraits(.isHeader)
     } else {
-      Button(title) { select(id) }.buttonStyle(.link).accessibilityLabel(title)
+      Button(title) { select(id) }
+        .buttonStyle(.link)
+        .accessibilityLabel(title)
+        .font(LedgerTheme.Typeface.secondary)
     }
   }
 }
@@ -160,21 +156,30 @@ struct CategoryTreeRow: View {
   }
 
   var body: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 3) {
+    HStack(spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(.initials(AccountRow.initials(category.name)), swatch: LedgerTheme.swatch(for: category.name))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text(category.name)
-          .foregroundStyle(category.lifecycle == .active ? .primary : .secondary)
-        Text(summary).font(.caption).foregroundStyle(.secondary)
+          .font(LedgerTheme.Typeface.bodyEmphasis)
+          .foregroundStyle(category.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
+          .strikethrough(category.lifecycle == .tombstoned)
+        Text(summary).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
       }
-      Spacer()
-      if category.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
+      Spacer(minLength: LedgerTheme.Space.s)
+      if category.hidden { LedgerBadge("Hidden", systemImage: "eye.slash") }
       if isEditing { actions }
       if childCount > 0 {
-        Button { drillIn(category.id) } label: { Image(systemName: "chevron.right") }
-          .buttonStyle(.borderless)
-          .accessibilityLabel("Open subcategories of \(category.name)")
+        Button { drillIn(category.id) } label: {
+          Image(systemName: "chevron.right")
+            .font(LedgerTheme.Typeface.captionEmphasis)
+            .foregroundStyle(LedgerTheme.inkTertiary)
+            .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Open subcategories of \(category.name)")
       }
     }
+    .padding(.vertical, LedgerTheme.Space.xs)
     .contentShape(Rectangle())
     .onTapGesture(count: 2) { if childCount > 0 { drillIn(category.id) } }
     .accessibilityElement(children: .contain)
@@ -259,10 +264,10 @@ struct CategoryEditForm: View {
       }
       Toggle("Hidden", isOn: $hidden).disabled(hideBlocker != nil)
       if let hideBlocker, !hidden {
-        Text(hideBlocker).font(.caption).foregroundStyle(.secondary)
+        Text(hideBlocker).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Text("Past transactions keep this category when you rename or move it.")
-        .font(.caption).foregroundStyle(.secondary)
+        .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
         Spacer()

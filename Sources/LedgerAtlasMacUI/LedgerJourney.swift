@@ -547,6 +547,86 @@ public final class LedgerJourney {
       categoryID: nil, note: nil, createdAt: createdAt)
   }
 
+  nonisolated package static let entryAmountNotANumberMessage =
+    "Not saved. Write the amount as a number, like 1250 or 1250.50, without commas."
+  // A failure can come after the write (reading the ledger back), so the words promise only
+  // what is true either way: Save again is the same submission and never enters it twice.
+  nonisolated package static let entryNotSavedMessage =
+    "Ledger Atlas couldn't confirm this entry was saved. Everything you typed is still here; Save again finishes it without entering it twice."
+  /// An earlier Save of this entry had in fact been written, with what was typed then.
+  nonisolated package static let entrySavedEarlierMessage =
+    "An earlier Save had already recorded this entry as first typed, so your later changes weren't added. Edit it in Transactions to change it."
+  private static let entrySaveFailure = "Transaction could not be saved."
+
+  /// The entry form's Save (#169). The form stays open after a save, so it, not the window
+  /// behind it, says when nothing was written.
+  package func saveNativeEntry(
+    amountLiteral: String, kind: LedgerTransactionKind, accountID: String, categoryID: String?,
+    note: String?, createdAt: UTCInstant, submissionID: String, tags: LedgerTagLinks
+  ) -> NativeEntrySaveResult {
+    guard (try? ExactDecimal(amountLiteral)) != nil else {
+      return .notSaved(Self.entryAmountNotANumberMessage)
+    }
+    do {
+      _ = try createNativeTransaction(
+        amountLiteral: amountLiteral, kind: kind, accountID: accountID, categoryID: categoryID,
+        note: note, createdAt: createdAt, submissionID: submissionID, tags: tags)
+      clearEntrySaveFailure()
+      return .saved
+    } catch {
+      // The write may have landed on an earlier try (or on this one, before reading the ledger
+      // back failed). A retry that differs, by a changed field or a later day, is refused as
+      // a different submission, so look for the stored entry before saying it isn't saved.
+      if let stored = storedNativeEntry(submissionID: submissionID) {
+        clearEntrySaveFailure()
+        let same = storedEntry(
+          stored, matchesAmount: amountLiteral, kind: kind, accountID: accountID,
+          categoryID: categoryID, note: note, tags: tags)
+        return same ? .saved : .savedEarlier(Self.entrySavedEarlierMessage)
+      }
+      failClosed(message: Self.entrySaveFailure)
+      return .notSaved(Self.entryNotSavedMessage)
+    }
+  }
+
+  /// Whether the stored entry holds what the form now says (its day aside).
+  private func storedEntry(
+    _ stored: LedgerTransactionSnapshot, matchesAmount amountLiteral: String,
+    kind: LedgerTransactionKind, accountID: String, categoryID: String?, note: String?,
+    tags: LedgerTagLinks
+  ) -> Bool {
+    let draft = stored.currentRevision.draft
+    guard draft.kind == kind, draft.categoryID == categoryID, draft.note == note,
+      draft.effects.count == 1, draft.effects[0].accountID == accountID,
+      let account = snapshot?.accounts.first(where: { $0.id == accountID }),
+      let amount = try? CurrencyAmount(
+        unitCode: account.currencyUnit, amount: ExactDecimal(amountLiteral))
+    else { return false }
+    let storedTags = snapshot?.revisionTags[stored.currentRevision.id] ?? .empty
+    return draft.effects[0].amount == amount && storedTags == tags
+  }
+
+  /// Clears only the window's message this Save left, never another operation's.
+  private func clearEntrySaveFailure() {
+    if lastFailure == Self.entrySaveFailure { lastFailure = nil }
+  }
+
+  private static func nativeSubmissionKey(_ submissionID: String) -> String {
+    SHA256.hash(data: Data("mac-native-submission:\(submissionID)".utf8))
+      .map { String(format: "%02x", $0) }.joined()
+  }
+
+  /// The entry a form submission wrote, read fresh from the ledger, or nil.
+  private func storedNativeEntry(submissionID: String) -> LedgerTransactionSnapshot? {
+    guard let application, let fresh = try? application.snapshot(),
+      let origin = try? LedgerOrigin.macNative(),
+      let id = try? StableLedgerID.transaction(
+        origin: origin, localKey: Self.nativeSubmissionKey(submissionID))
+    else { return nil }
+    snapshot = fresh
+    return fresh.transactions.first { $0.id == id }
+  }
+
   public func createNativeTransaction(
     amountLiteral: String, kind: LedgerTransactionKind, accountID: String,
     categoryID: String?, note: String?, createdAt: UTCInstant, submissionID: String? = nil,
@@ -561,11 +641,13 @@ public final class LedgerJourney {
       unitCode: account.currencyUnit, amount: ExactDecimal(amountLiteral))
     let when = try Self.nativeTemporal(for: createdAt)
     // A form submission keys on its own ID, so pressing Save twice records one transaction.
-    let keyMaterial =
-      submissionID.map { "mac-native-submission:\($0)" }
-      ?? "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")"
-    let key = SHA256.hash(data: Data(keyMaterial.utf8)).map { String(format: "%02x", $0) }
-      .joined()
+    let key =
+      submissionID.map(Self.nativeSubmissionKey)
+      ?? SHA256.hash(
+        data: Data(
+          "mac-native:\(createdAt.epochMilliseconds):\(amountLiteral):\(kind.rawValue):\(accountID):\(categoryID ?? ""):\(note ?? "")"
+            .utf8)
+      ).map { String(format: "%02x", $0) }.joined()
     let draft = try LedgerTransactionDraft(
       effects: [
         try LedgerTransactionEffect(
@@ -1622,4 +1704,13 @@ private struct OpenedImport: @unchecked Sendable {
   let snapshot: LedgerStore.LedgerReadSnapshot
   let balanceReceipt: ImportBalanceReceipt?
   let url: URL
+}
+
+/// What the entry form's Save did (#169).
+package enum NativeEntrySaveResult: Equatable, Sendable {
+  case saved
+  /// Written by an earlier Save of the same entry, with what was typed then; the words say so.
+  case savedEarlier(String)
+  /// Nothing new was written; the words say why.
+  case notSaved(String)
 }

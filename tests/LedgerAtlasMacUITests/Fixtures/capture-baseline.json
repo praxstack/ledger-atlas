@@ -10,68 +10,68 @@
     "text" : "8292a19956e56ebe9441d64da885813a43978278fc8fd7473095df8bbc9327a4"
   },
   "02-statistics.overview-monthly.expense-dark.png" : {
-    "lines" : 394,
-    "looks" : "c064c240c64268e2",
-    "text" : "637ac8586f3e07345968d3e9f55183d110961a5d6ebc15aaa5582ca9f18d3536"
+    "lines" : 356,
+    "looks" : "c260e062e26262e2",
+    "text" : "f48eaa7e4f4e438769e0438d2b4d400c01f641747daa1e42c0ef7d2f3e538bac"
   },
   "02-statistics.overview-monthly.expense-light.png" : {
-    "lines" : 394,
-    "looks" : "b29339b231b19390",
-    "text" : "637ac8586f3e07345968d3e9f55183d110961a5d6ebc15aaa5582ca9f18d3536"
+    "lines" : 356,
+    "looks" : "929a3a3839b85198",
+    "text" : "f48eaa7e4f4e438769e0438d2b4d400c01f641747daa1e42c0ef7d2f3e538bac"
   },
   "03-statistics.overview-annual.expense-dark.png" : {
-    "lines" : 394,
-    "looks" : "c443e363c16561e2",
-    "text" : "2fe1d3b45676bd47280b0fbd4615ed27b13e60707dc47f10e770c004155a77f7"
+    "lines" : 336,
+    "looks" : "e072e264e86062e4",
+    "text" : "0fac0711b77d148d9696197bd8d8fc5ab2c655829da116b934c3f20729adfa3a"
   },
   "03-statistics.overview-annual.expense-light.png" : {
-    "lines" : 394,
-    "looks" : "92bd1c9c3498999a",
-    "text" : "2fe1d3b45676bd47280b0fbd4615ed27b13e60707dc47f10e770c004155a77f7"
+    "lines" : 336,
+    "looks" : "8aac2c9c1e9a9c9c",
+    "text" : "99bb61fecd411fe04a0442e12966530a80672fa18dd13d3caf20e9b33cb2d20f"
   },
   "04-statistics.overview-annual.income.scrolled-dark.png" : {
-    "lines" : 397,
-    "looks" : "e04bca4bc94b63e2",
-    "text" : "578b62ef29bc4e69037de3690075b0f29574b91c27a76fe3b13aa6f20b331cae"
+    "lines" : 317,
+    "looks" : "ea62e262c26263e2",
+    "text" : "7f289cb76327ac41ff5f3889fccbdd3a236865e882785bf921d4cef046fdb434"
   },
   "04-statistics.overview-annual.income.scrolled-light.png" : {
-    "lines" : 397,
-    "looks" : "92b135b030b09092",
-    "text" : "578b62ef29bc4e69037de3690075b0f29574b91c27a76fe3b13aa6f20b331cae"
+    "lines" : 317,
+    "looks" : "92b1303030b058b0",
+    "text" : "12b90f16e2200c13b2dca9886115631a61370717506a62d539e5dca498738889"
   },
   "05-statistics.category_detail-annual.income.category-dark.png" : {
     "lines" : 256,
-    "looks" : "e8454440d0d020e2",
+    "looks" : "e8614040c0d020ea",
     "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
   },
   "05-statistics.category_detail-annual.income.category-light.png" : {
     "lines" : 256,
-    "looks" : "b0b9b9b020205192",
+    "looks" : "b031b9b820205192",
     "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-dark.png" : {
     "lines" : 256,
-    "looks" : "e8454440d0d020e2",
+    "looks" : "e8614040c0d020ea",
     "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-light.png" : {
     "lines" : 256,
-    "looks" : "b0b9b9b020205192",
+    "looks" : "b031b9b820205192",
     "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
   },
   "07-statistics.category_detail-annual.expense.subcategory-dark.png" : {
     "lines" : 256,
-    "looks" : "e8454440d0d020e2",
+    "looks" : "e8614040c0d020ea",
     "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
   },
   "07-statistics.category_detail-annual.expense.subcategory-light.png" : {
     "lines" : 256,
-    "looks" : "b0b9b9b020205192",
+    "looks" : "b031b9b820205192",
     "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
   },
   "08-statistics.total_balance-monthly.trend-dark.png" : {
     "lines" : 206,
-    "looks" : "e261d040d04060e2",
+    "looks" : "e261d040d04060ea",
     "text" : "6a530f5242e7438444bd55ffd0f202ecb1268919363272a4b61439e268899a5d"
   },
   "08-statistics.total_balance-monthly.trend-light.png" : {
@@ -141,52 +141,52 @@
   },
   "15-settings.configuration-index-dark.png" : {
     "lines" : 316,
-    "looks" : "c2436647c24266e2",
+    "looks" : "c24b6645ca626eea",
     "text" : "133fa78fce0412abba8b27881b29c0b6fc345bcd12a23e9ec62ed8d8a48b87f9"
   },
   "15-settings.configuration-index-light.png" : {
     "lines" : 316,
-    "looks" : "92b099b03db59192",
+    "looks" : "92b498b835b59192",
     "text" : "133fa78fce0412abba8b27881b29c0b6fc345bcd12a23e9ec62ed8d8a48b87f9"
   },
   "16-settings.accounts-index-dark.png" : {
     "lines" : 322,
-    "looks" : "e0624647c76767e2",
+    "looks" : "e0604647c76767e2",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "16-settings.accounts-index-light.png" : {
     "lines" : 322,
-    "looks" : "923cb8b13098999a",
+    "looks" : "b03cb8b13098999a",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "17-settings.account_groups-edit.reorder.protected-dark.png" : {
     "lines" : 324,
-    "looks" : "e0624647c76767e2",
+    "looks" : "e0604647c76767e2",
     "text" : "a401d642953d6bbf02b425c650c643803f374cb9e43ac24bfa34d2ec7cc6b4fd"
   },
   "17-settings.account_groups-edit.reorder.protected-light.png" : {
     "lines" : 324,
-    "looks" : "923cb8b13098999a",
+    "looks" : "b03cb8b13098999a",
     "text" : "a401d642953d6bbf02b425c650c643803f374cb9e43ac24bfa34d2ec7cc6b4fd"
   },
   "18-settings.account_list-upper.hidden_variant-dark.png" : {
     "lines" : 322,
-    "looks" : "e0624647c76767e2",
+    "looks" : "e0604647c76767e2",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "18-settings.account_list-upper.hidden_variant-light.png" : {
     "lines" : 322,
-    "looks" : "923cb8b13098999a",
+    "looks" : "b03cb8b13098999a",
     "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
   },
   "19-settings.account_list-tail-dark.png" : {
     "lines" : 323,
-    "looks" : "e0626647c76767e2",
+    "looks" : "e0606647c76767e2",
     "text" : "68ba696387d6c5ec0e97e8eb37e515e9f96376c54beb6e0444bc02c313a6c372"
   },
   "19-settings.account_list-tail-light.png" : {
     "lines" : 323,
-    "looks" : "923cb8b13099989a",
+    "looks" : "b03cb8b13099989a",
     "text" : "68ba696387d6c5ec0e97e8eb37e515e9f96376c54beb6e0444bc02c313a6c372"
   },
   "20-accounts.add-group_picker.open-dark.png" : {
@@ -211,17 +211,17 @@
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
     "lines" : 191,
-    "looks" : "a2606271e16165e2",
+    "looks" : "c2606271e16165e2",
     "text" : "79f396f32889d94bbb3100a49e5abf3a45b91353eda2b351bf2e6bf636744205"
   },
   "22-accounts.account_info-savings.edit-light.png" : {
     "lines" : 191,
-    "looks" : "a23c38797830199a",
+    "looks" : "823c38797830199a",
     "text" : "79f396f32889d94bbb3100a49e5abf3a45b91353eda2b351bf2e6bf636744205"
   },
   "23-security.set_passcode-first_entry.empty-dark.png" : {
     "lines" : 178,
-    "looks" : "c2416571f24a66e2",
+    "looks" : "a2436571f24066ea",
     "text" : "9a811224163186c47363226c5da09828cd4c260bea11db83e05f13e5744713ca"
   },
   "23-security.set_passcode-first_entry.empty-light.png" : {
@@ -230,34 +230,34 @@
     "text" : "9a811224163186c47363226c5da09828cd4c260bea11db83e05f13e5744713ca"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-dark.png" : {
-    "lines" : 200,
-    "looks" : "e2646041514161a2",
-    "text" : "f28f2209ae7aa69fb02a72004f3cfe4926b52dba5723d07c87787db8c294e5c3"
+    "lines" : 218,
+    "looks" : "e4646440d04020a2",
+    "text" : "055773ace65002d09881d49c00d44ffba2b1796c24f05069f61ee9043910d011"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-light.png" : {
-    "lines" : 200,
-    "looks" : "9019192121214182",
-    "text" : "f28f2209ae7aa69fb02a72004f3cfe4926b52dba5723d07c87787db8c294e5c3"
+    "lines" : 218,
+    "looks" : "929b98b020a04182",
+    "text" : "055773ace65002d09881d49c00d44ffba2b1796c24f05069f61ee9043910d011"
   },
   "25-backup.hub-all_entries-dark.png" : {
-    "lines" : 230,
-    "looks" : "e0414040d04260e0",
-    "text" : "74cb0ebdee1b826ddc412b511bb8f947326ec9a1dfaba418a1a398d28b4a57c6"
+    "lines" : 258,
+    "looks" : "e0666260e26060a2",
+    "text" : "65d0deac9ba3fe6e63dd670b7b5be159f0f131db3c74aafa22c105ecdda3f151"
   },
   "25-backup.hub-all_entries-light.png" : {
-    "lines" : 230,
-    "looks" : "92b1b0a020a09796",
-    "text" : "74cb0ebdee1b826ddc412b511bb8f947326ec9a1dfaba418a1a398d28b4a57c6"
+    "lines" : 258,
+    "looks" : "92b9b09c3cbe5782",
+    "text" : "65d0deac9ba3fe6e63dd670b7b5be159f0f131db3c74aafa22c105ecdda3f151"
   },
   "key-balance-receipt-dark.png" : {
-    "lines" : 130,
-    "looks" : "ca63706cec6860e2",
-    "text" : "904e9f95ab314385b896f20faa53951d58d98136da315cc51f7d416abade8117"
+    "lines" : 129,
+    "looks" : "e663786cec6860e2",
+    "text" : "df6df0d1278b898a065f5a2c01c84bd6cefe3bc10ac6fbb35bdbd0ac41edb561"
   },
   "key-balance-receipt-light.png" : {
-    "lines" : 130,
-    "looks" : "929caeb232b61e9a",
-    "text" : "904e9f95ab314385b896f20faa53951d58d98136da315cc51f7d416abade8117"
+    "lines" : 129,
+    "looks" : "929ca6b232b69e9e",
+    "text" : "df6df0d1278b898a065f5a2c01c84bd6cefe3bc10ac6fbb35bdbd0ac41edb561"
   },
   "key-empty-dark.png" : {
     "lines" : 97,
@@ -269,24 +269,34 @@
     "looks" : "9247c7c7c3c7c7e2",
     "text" : "e747abf8b630b27440ac797291f343d74e8ae1c3d721df50318a307f33825944"
   },
+  "key-entry-suggestion-dark.png" : {
+    "lines" : 17,
+    "looks" : "92c1e4e0c18862c2",
+    "text" : "b938d8c63592885831ff0da85e574586286325c120ba68acfa46d74708c569d4"
+  },
+  "key-entry-suggestion-light.png" : {
+    "lines" : 17,
+    "looks" : "8010181e3c3d9590",
+    "text" : "b938d8c63592885831ff0da85e574586286325c120ba68acfa46d74708c569d4"
+  },
   "key-error-dark.png" : {
-    "lines" : 88,
-    "looks" : "e2812271357528a2",
-    "text" : "f4a48720a049c6675c3606f8d4311100de8b0e2a94310a780fd2cf4e081ac09a"
+    "lines" : 58,
+    "looks" : "e0617078787068e2",
+    "text" : "6739c60184b32803e9fab00973d0ecb53890174e4ddec3b36dcb33f39a7728f5"
   },
   "key-error-light.png" : {
-    "lines" : 88,
-    "looks" : "b060614f4f4f60e0",
-    "text" : "f4a48720a049c6675c3606f8d4311100de8b0e2a94310a780fd2cf4e081ac09a"
+    "lines" : 58,
+    "looks" : "b051909494841582",
+    "text" : "6739c60184b32803e9fab00973d0ecb53890174e4ddec3b36dcb33f39a7728f5"
   },
   "key-lock-dark.png" : {
-    "lines" : 87,
-    "looks" : "e2812471357528a2",
-    "text" : "e19d7c8948dd83e52ad062c21b043f4ab889755062fd14bfc2a9b89e34ce57f7"
+    "lines" : 69,
+    "looks" : "e061603878706ce2",
+    "text" : "ca82857bb35208c7a4b226d368a9612e47c97b9dd7bbb94e5a8e6c17daeb258c"
   },
   "key-lock-light.png" : {
-    "lines" : 87,
-    "looks" : "b060604f4f4b60e0",
-    "text" : "e19d7c8948dd83e52ad062c21b043f4ab889755062fd14bfc2a9b89e34ce57f7"
+    "lines" : 69,
+    "looks" : "b0d1c8d494841182",
+    "text" : "ca82857bb35208c7a4b226d368a9612e47c97b9dd7bbb94e5a8e6c17daeb258c"
   }
 }
