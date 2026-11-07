@@ -588,7 +588,8 @@ final class MountedRoot {
   init(
     showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
     size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
-    readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil
+    readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil,
+    appearance: LedgerProductSettings.Appearance = .system
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
@@ -613,7 +614,8 @@ final class MountedRoot {
       appLock ?? LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
     let root = LedgerAtlasRootView(
       initialSelection: destination, appLock: lock,
-      productSettings: .init(startScreen: destination), bookmarkStore: bookmarks,
+      productSettings: .init(appearance: appearance, startScreen: destination),
+      bookmarkStore: bookmarks,
       // A widget store in the test folder, as the app has its App Group container. Without
       // one every screen reports "Widget status could not be published".
       widgetProjectionPublisher: RedactedWidgetProjectionPublisher(
@@ -739,6 +741,8 @@ final class MountedRoot {
   }
 
   func close() {
+    // A forced appearance (the `appearance:` parameter) must not leak into later tests.
+    NSApplication.shared.appearance = nil
     window.orderOut(nil)
     autoreleasepool {
       window.contentViewController = nil
