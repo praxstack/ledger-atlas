@@ -160,8 +160,10 @@ Replay still accepts events written by earlier builds that used that reading.
 ### ASSETS: accounts
 
 Balances (observed): balance = +type 0, −type 1, −type 3, +type 4, +type 7, −type 8.
-A Debit Card account has no balance of its own: its rows move the account named in
-`cardAssetUid`. Rows of deleted accounts still count in income/expense totals.
+A Debit Card account (its group's `TYPE` is 3) has no balance of its own: its rows move the
+account named in `cardAssetUid`. A credit card (group `TYPE` 2) also names its paying account
+there, but its rows stay on the card. Rows of deleted accounts still count in income/expense
+totals.
 
 | Column | Meaning | Label |
 |---|---|---|
@@ -283,6 +285,19 @@ reported, never dropped.
    checks this for photos (paths only), recurring rules, and drift columns and tables.
 9. Fixtures in Git are synthetic only, built from the DDL file. Real backups stay
    outside the repo (see `EVIDENCE.md`).
+10. Book a Debit Card account's entries, transfer legs and recurring rules on the account
+    its `cardAssetUid` names, when that is another existing account (#207). The card is
+    still imported, with no entries of its own. The entry's account proof is then the
+    card's `ASSETS.cardAssetUid` field, not the row's `assetUid`; replay checks that the
+    row's `assetUid` names that card and that the card's group has `TYPE` 3. The row's own
+    `assetUid` stays retained byte-exact. Ledgers imported before #207 keep the row's
+    `assetUid` as proof and still verify. A debit card naming no existing account keeps
+    its entries, and the balance receipt says so. A transfer between a debit card and the
+    account that pays it moves no money and stays preserved, like any same-account pair.
+    The adapter version stays v1 on purpose, so ledgers imported before #207 keep their
+    proofs. Committing the same backup again into such a ledger, when the backup has debit
+    cards, is refused with `idempotencyConflict` (its event set differs) rather than
+    remapped in place; import into a new ledger to get the debit-card mapping.
 
 ## Open questions (need the Money Manager app as an oracle)
 

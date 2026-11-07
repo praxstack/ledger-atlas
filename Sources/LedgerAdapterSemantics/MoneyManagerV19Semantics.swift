@@ -63,6 +63,102 @@ public enum MoneyManagerV19Semantics {
   /// group holds exactly one type-3 and one type-4 row.
   public static let transferGroupAliases = ["txUidTrans", "TX_UID_TRANS", "ZTXUIDTRANS"]
 
+  // MARK: Debit cards (#207)
+
+  public static let assetGroupTables: Set<String> = ["ASSETGROUP", "ZASSETGROUP"]
+  public static let groupUIDAliases = ["groupUid", "GROUP_UID", "ZGROUPUID"]
+  public static let groupTypeAliases = ["TYPE", "ZTYPE"]
+  public static let cardAssetAliases = ["cardAssetUid", "CARD_ASSET_UID", "ZCARDASSETUID"]
+  /// `ASSETGROUP.TYPE` of the Debit Card group.
+  public static let debitCardGroupType = "3"
+
+  /// Money Manager keeps no balance for a Debit Card account (its group's `TYPE` is 3): its
+  /// rows move the account named in its `cardAssetUid`. A credit card (`TYPE` 2) also names a
+  /// paying account there, but its rows stay on the card. The import, the balance receipt and
+  /// ledger replay all read cards through this one rule.
+  public struct DebitCards: Equatable, Sendable {
+    /// Every account in the Debit Card group.
+    public let cards: Set<String>
+    /// For each debit card that names another existing account: that account.
+    public let payingAccountByCard: [String: String]
+
+    /// `accounts` and `groups` are each record's mapping literals by column name.
+    public init(accounts: [[String: String]], groups: [[String: String]]) {
+      // A group uid listed twice with different types proves nothing.
+      var typeByGroup: [String: String?] = [:]
+      for group in groups {
+        guard let uid = aliased(group, uidAliases), !uid.isEmpty,
+          let type = aliased(group, groupTypeAliases)
+        else { continue }
+        if let seen = typeByGroup[uid], seen != type {
+          typeByGroup[uid] = .some(nil)
+        } else {
+          typeByGroup[uid] = type
+        }
+      }
+      var accountByUID: [String: [String: String]] = [:]
+      for account in accounts {
+        guard let uid = aliased(account, uidAliases), !uid.isEmpty else { continue }
+        accountByUID[uid] = accountByUID[uid] ?? account
+      }
+      var cards: Set<String> = []
+      var paying: [String: String] = [:]
+      for (uid, account) in accountByUID {
+        guard let group = aliased(account, groupUIDAliases),
+          typeByGroup[group] == .some(debitCardGroupType)
+        else { continue }
+        cards.insert(uid)
+        if let payer = aliased(account, cardAssetAliases), !payer.isEmpty, payer != uid,
+          accountByUID[payer] != nil
+        {
+          paying[uid] = payer
+        }
+      }
+      self.cards = cards
+      self.payingAccountByCard = paying
+    }
+
+    /// The account a row booked on `accountUID` moves.
+    public func movedAccount(_ accountUID: String) -> String {
+      payingAccountByCard[accountUID] ?? accountUID
+    }
+  }
+
+  /// The retained `ASSETS` and `ASSETGROUP` fields of one import, which replay reads to check a
+  /// debit-card entry's account proof.
+  public struct RetainedAccounts: Sendable {
+    let fieldsByRecord: [String: [String: String]]
+    public let debitCards: DebitCards
+
+    public init(fields: [RetainedSidecar]) {
+      var records: [String: [String: String]] = [:]
+      var groups: [String: [String: String]] = [:]
+      for field in fields {
+        let table = field.locator.table
+        guard let column = field.locator.columnName,
+          accountTables.contains(table) || assetGroupTables.contains(table),
+          let literal = mappingLiteral(storageClass: field.storageClass, payload: field.payload)
+        else { continue }
+        let key = Self.key(table, field.locator.recordKey)
+        if accountTables.contains(table) {
+          records[key, default: [:]][column] = literal
+        } else {
+          groups[key, default: [:]][column] = literal
+        }
+      }
+      fieldsByRecord = records
+      debitCards = DebitCards(
+        accounts: records.keys.sorted().map { records[$0]! },
+        groups: groups.keys.sorted().map { groups[$0]! })
+    }
+
+    static func key(_ table: String, _ recordKey: String) -> String { table + "\u{0}" + recordKey }
+
+    func fields(_ locator: SourceLocator) -> [String: String]? {
+      fieldsByRecord[Self.key(locator.table, locator.recordKey)]
+    }
+  }
+
   public static func isTransferType(_ type: String) -> Bool {
     type == transferDebitType || type == transferCreditType
   }
@@ -183,10 +279,12 @@ public enum MoneyManagerV19Semantics {
       ?? "fixed:\(timeZone.fixedOffsetSeconds!)"
   }
 
+  /// `accounts` is needed only for an entry made with a debit card, whose account binding
+  /// names the card's `cardAssetUid` instead of the row's own `assetUid` (#207).
   public static func validateReplay(
     profileID: String, adapterVersion: String, event: CanonicalEconomicEvent,
     fields: [RetainedField], sidecars: [RetainedSidecar] = [],
-    temporalCommitment: String
+    accounts: RetainedAccounts? = nil, temporalCommitment: String
   ) -> ReplayResult {
     guard admittedProfileIDs.contains(profileID) else { return .notAdmitted }
     guard adapterVersion == self.adapterVersion else { return .invalid }
@@ -203,8 +301,7 @@ public enum MoneyManagerV19Semantics {
       amountAliases.contains(amount.locator.columnName ?? ""),
       transactionTables.contains(occurredAt.locator.table),
       zdateAliases.contains(occurredAt.locator.columnName ?? ""),
-      transactionTables.contains(account.locator.table),
-      assetAliases.contains(account.locator.columnName ?? ""),
+      accountProofHolds(account, sidecars: sidecars, accounts: accounts),
       transactionTables.contains(kind.locator.table),
       doTypeAliases.contains(kind.locator.columnName ?? ""),
       currencyTables.contains(currency.locator.table),
@@ -235,6 +332,34 @@ public enum MoneyManagerV19Semantics {
       observedDay(wdateLiteral) == event.occurredAt.localDateTime.date
     else { return .invalid }
     return .valid
+  }
+
+  /// Two forms prove an event's account. The row's own `assetUid` (every entry before #207,
+  /// and every entry not made with a debit card). Or, for a debit card, the card's
+  /// `ASSETS.cardAssetUid`: the row's `assetUid` must name that card, and the card must sit in
+  /// the Debit Card group and name another existing account.
+  static func accountProofHolds(
+    _ account: RetainedField, sidecars: [RetainedSidecar], accounts: RetainedAccounts?
+  ) -> Bool {
+    let column = account.locator.columnName ?? ""
+    if transactionTables.contains(account.locator.table) {
+      return assetAliases.contains(column)
+    }
+    guard accountTables.contains(account.locator.table), cardAssetAliases.contains(column),
+      let accounts, let card = accounts.fields(account.locator),
+      let cardUID = aliased(card, uidAliases),
+      let payer = mappingLiteral(storageClass: account.storageClass, payload: account.payload),
+      card[column] == payer, accounts.debitCards.payingAccountByCard[cardUID] == payer
+    else { return false }
+    let rowAccounts = sidecars.filter {
+      transactionTables.contains($0.locator.table)
+        && assetAliases.contains($0.locator.columnName ?? "")
+    }
+    guard rowAccounts.count == 1,
+      let rowAccount = mappingLiteral(
+        storageClass: rowAccounts[0].storageClass, payload: rowAccounts[0].payload)
+    else { return false }
+    return rowAccount == cardUID
   }
 
   /// The canonical temporal for a ZDATE epoch: ZDATE is the UTC instant, and the local wall

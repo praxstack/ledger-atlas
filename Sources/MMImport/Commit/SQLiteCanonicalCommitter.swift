@@ -933,7 +933,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
     let provenance = binding.provenance
     guard
       field.recordID == event.sourceRecordID
-        || (observedV19Authorized && binding.semantic == .currency),
+        || (observedV19Authorized && (binding.semantic == .currency || binding.semantic == .account)),
       provenance.artifactSHA256 == manifest.artifactSHA256,
       provenance.profileID == manifest.profileID,
       provenance.adapterVersion == manifest.adapterVersion,
@@ -955,6 +955,15 @@ public struct SQLiteCanonicalCommitter: Sendable {
         return literal == event.amount.unitCode
           && MoneyManagerV19Vocabulary.currencyTables.contains(provenance.locator.table)
           && MoneyManagerV19Vocabulary.isoAliases.contains(
+            provenance.locator.columnName ?? "")
+      }
+      // A debit card's entry binds the card's `cardAssetUid` (#207); the observed-graph check
+      // proves which card and group.
+      if binding.semantic == .account, field.recordID != event.sourceRecordID {
+        return (try? StableCanonicalID.account(profileID: manifest.profileID, sourceAccountID: literal))
+          == event.accountID
+          && MoneyManagerV19Vocabulary.accountTables.contains(provenance.locator.table)
+          && MoneyManagerV19Vocabulary.cardAssetAliases.contains(
             provenance.locator.columnName ?? "")
       }
       return true
@@ -1190,6 +1199,27 @@ public struct SQLiteCanonicalCommitter: Sendable {
       return
     }
     let fieldsByRecord = Dictionary(grouping: graph.fields.values, by: \.recordID)
+    // A rule on a debit card moves the account that pays it, like the card's entries (#207).
+    var accountLiterals: [[String: String]] = []
+    var groupLiterals: [[String: String]] = []
+    for (recordID, record) in graph.records.sorted(by: { $0.key < $1.key }) {
+      guard let table = graph.tables[record.tableID] else { continue }
+      let isAccount = MoneyManagerV19Vocabulary.accountTables.contains(table.name)
+      guard isAccount || MoneyManagerV19Vocabulary.assetGroupTables.contains(table.name) else {
+        continue
+      }
+      var literals: [String: String] = [:]
+      for field in fieldsByRecord[recordID] ?? [] {
+        if let literal = MoneyManagerV19Vocabulary.mappingLiteral(
+          storageClass: field.storageClass, payload: field.payload)
+        {
+          literals[field.columnName] = literal
+        }
+      }
+      if isAccount { accountLiterals.append(literals) } else { groupLiterals.append(literals) }
+    }
+    let cards = MoneyManagerV19Vocabulary.DebitCards(
+      accounts: accountLiterals, groups: groupLiterals)
     for (recordID, record) in graph.records.sorted(by: { $0.key < $1.key }) {
       guard let table = graph.tables[record.tableID],
         MoneyManagerV19Vocabulary.recurrenceTables.contains(table.name)
@@ -1218,7 +1248,7 @@ public struct SQLiteCanonicalCommitter: Sendable {
         doType == "0" || doType == "1",
         text(MoneyManagerV19Vocabulary.toAssetAliases) == nil,
         let accountUID = text(MoneyManagerV19Vocabulary.assetAliases),
-        let account = accountsByUID[accountUID],
+        let account = accountsByUID[cards.movedAccount(accountUID)],
         let amountField = field(MoneyManagerV19Vocabulary.recurrenceAmountAliases),
         amountField.storageClass == CanonicalFieldStorageClass.real.rawValue,
         let amount = MoneyManagerV19Vocabulary.recurrenceAmountLiteral(
