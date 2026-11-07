@@ -63,6 +63,11 @@ struct ImportBalanceReceiptView: View {
             .accessibilityLabel(continueTitle)
         }
       }
+      if formatter.hidesAmounts {
+        Text(LedgerProductSettings.hideAmountsExportNotice)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkSecondary)
+      }
     }
     .ledgerCard()
   }
@@ -191,16 +196,18 @@ struct ImportBalanceReceiptView: View {
     }
   }
 
-  /// "₹5.00 higher here", from Ledger Atlas's side.
-  private func differenceText(_ row: ImportBalanceReceipt.Row) -> String? {
+  /// "₹5.00 higher here", from Ledger Atlas's side. With amounts hidden the figure shows as
+  /// bullets and VoiceOver hears only the direction.
+  private func differenceText(_ row: ImportBalanceReceipt.Row, spoken: Bool = false) -> String? {
     guard case .differs(let literal) = row.outcome else { return nil }
     let negative = literal.hasPrefix("-")
     let magnitude = negative ? String(literal.dropFirst()) : literal
+    let direction = negative ? "lower here" : "higher here"
+    if spoken, formatter.hidesAmounts { return direction }
     guard let amount = Self.amount(magnitude, unit: row.currencyUnit) else {
-      return "Differs by \(literal) \(row.currencyUnit)"
+      return "Differs by \(formatter.figure(literal)) \(row.currencyUnit)"
     }
-    let text = formatter.parts(amount).text
-    return negative ? "\(text) lower here" : "\(text) higher here"
+    return "\(formatter.parts(amount).text) \(direction)"
   }
 
   private func note(for row: ImportBalanceReceipt.Row) -> String? {
@@ -238,7 +245,7 @@ struct ImportBalanceReceiptView: View {
         ?? "Money Manager figure not stored in the backup")
     switch row.outcome {
     case .equal: parts.append("matches")
-    case .differs: parts.append("differs, \(differenceText(row) ?? "")")
+    case .differs: parts.append("differs, \(differenceText(row, spoken: true) ?? "")")
     case .notStored: parts.append("no figure to compare")
     case .notInLedger: parts.append("missing from this ledger")
     case .differentCurrency: parts.append("differs, in a different currency")
@@ -248,7 +255,8 @@ struct ImportBalanceReceiptView: View {
   }
 
   private func spokenAmount(_ literal: String, unit: String) -> String {
-    Self.amount(literal, unit: unit).map { formatter.parts($0).text } ?? "\(literal) \(unit)"
+    if formatter.hidesAmounts { return LedgerDisplayFormatter.hiddenAmountLabel }
+    return Self.amount(literal, unit: unit).map { formatter.parts($0).text } ?? "\(literal) \(unit)"
   }
 
   private static func amount(_ literal: String, unit: String) -> CurrencyAmount? {

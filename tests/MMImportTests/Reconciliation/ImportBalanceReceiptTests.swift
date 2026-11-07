@@ -132,14 +132,14 @@ struct ImportBalanceReceiptTests {
           == .unavailable(
             reason: "Money Manager keeps no balance for a debit card; its entries count in Bank"))
 
-      // The importer still books the card's entry on the card (#207), so the receipt shows
-      // the gap instead of a false match.
+      // The importer books the card's entry on the bank that pays it (#207), so they match.
       let bank = try #require(imported.receipt.rows.first { $0.name == "Bank" })
-      #expect(bank.ledgerBalance == "142")
+      #expect(bank.ledgerBalance == "135")
       #expect(bank.sourceBalance == "135")
-      #expect(bank.outcome == .differs(difference: "7"))
+      #expect(bank.outcome == .equal)
       #expect(bank.debitCardEntryCount == 1)
       let cardRow = try #require(imported.receipt.rows.first { $0.name == "Bank Debit" })
+      #expect(cardRow.ledgerBalance == "0")
       #expect(cardRow.sourceBalance == nil)
       #expect(cardRow.movesAccountName == "Bank")
       #expect(imported.receipt.statementLines().contains("  Includes 1 entry made with a linked debit card"))

@@ -84,12 +84,6 @@ enum MoneyManagerV19BalanceOracle {
   static let shownStateAliases = ["ZDATA", "ZZDATA", "IS_SHOW"]
   static let excludedFromTotalsAliases = ["ZDATA2", "ZZDATA2"]
   static let displayOrderAliases = ["ORDERSEQ", "ORDER_SEQ", "ZORDERSEQ"]
-  static let assetGroupTables: Set<String> = ["ASSETGROUP", "ZASSETGROUP"]
-  static let groupUIDAliases = ["groupUid", "GROUP_UID", "ZGROUPUID"]
-  static let groupTypeAliases = ["TYPE", "ZTYPE"]
-  static let cardAssetAliases = ["cardAssetUid", "CARD_ASSET_UID", "ZCARDASSETUID"]
-  /// `ASSETGROUP.TYPE` of the Debit Card group.
-  static let debitCardGroupType = "3"
   static let deletedAccountState = "1"
   static let hiddenAccountState = "3"
   static let excludedFromTotalsFlag = "1"
@@ -122,30 +116,13 @@ enum MoneyManagerV19BalanceOracle {
     }
 
     // Debit cards: their rows count in the account that pays them.
-    var groupTypeByUID: [String: String] = [:]
-    for group in input.allRecords where assetGroupTables.contains(group.tableName) {
-      guard let uid = literal(group, MoneyManagerV19Vocabulary.uidAliases),
-        let type = literal(group, groupTypeAliases)
-      else { continue }
-      groupTypeByUID[uid] = type
-    }
+    let cardRule = MoneyManagerV19Vocabulary.debitCards(in: input)
+    let debitCards = cardRule.cards
+    let payingAccountByCard = cardRule.payingAccountByCard
     var assetsByUID: [String: MoneyManagerV19SourceRecord] = [:]
     for asset in input.assets {
       if let uid = literal(asset, MoneyManagerV19Vocabulary.uidAliases), !uid.isEmpty {
         assetsByUID[uid] = assetsByUID[uid] ?? asset
-      }
-    }
-    var debitCards: Set<String> = []
-    var payingAccountByCard: [String: String] = [:]
-    for (uid, asset) in assetsByUID {
-      guard let group = literal(asset, groupUIDAliases),
-        groupTypeByUID[group] == debitCardGroupType
-      else { continue }
-      debitCards.insert(uid)
-      if let paying = literal(asset, cardAssetAliases), !paying.isEmpty, paying != uid,
-        assetsByUID[paying] != nil
-      {
-        payingAccountByCard[uid] = paying
       }
     }
 

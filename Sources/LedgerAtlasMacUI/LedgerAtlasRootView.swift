@@ -96,6 +96,23 @@ public struct LedgerAtlasRootView: View {
         importBackup: chooseImportSource)
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+      .toolbar {
+        // Hide amounts (⇧⌘H) sits in the sidebar's part of the toolbar, which has room to
+        // spare; in the screen's part it pushed New into the overflow menu at the default size.
+        if !appLock.isLocked, session.screen == .loaded {
+          ToolbarItem {
+            Button {
+              productSettings.hidesAmounts.toggle()
+            } label: {
+              Label(
+                productSettings.hidesAmounts ? "Show Amounts" : "Hide Amounts",
+                systemImage: productSettings.hidesAmounts ? "eye.slash" : "eye")
+            }
+            .accessibilityLabel(productSettings.hidesAmounts ? "Show amounts" : "Hide amounts")
+            .help(productSettings.hidesAmounts ? "Show amounts (⇧⌘H)" : "Hide amounts (⇧⌘H)")
+          }
+        }
+      }
     } detail: {
       Group {
         if appLock.isLocked {
@@ -131,6 +148,8 @@ public struct LedgerAtlasRootView: View {
     }
     .environment(\.ledgerFormatter, LedgerDisplayFormatter(settings: productSettings))
     .environment(\.ledgerAmountColors, productSettings.amountColors)
+    .focusedSceneValue(\.ledgerHidesAmounts, $productSettings.hidesAmounts)
+    .onChange(of: productSettings.hidesAmounts) { productSettings.save() }
     .tint(LedgerTheme.accent)
     .task(id: journey.snapshotGeneration) {
       // The balance sheet walks every entry, so it is built off the main thread; a newer
@@ -1457,7 +1476,7 @@ public struct LedgerAtlasRootView: View {
         .id(selection)
     } else if selection == .backupRestore {
       BackupSurface(
-        rows: journey.rows(for: .backupRestore),
+        rows: journey.rows(for: .backupRestore, hidesAmounts: productSettings.hidesAmounts),
         emptyMessage: selection.emptyStateMessage,
         lastFailure: journey.lastFailure,
         status: lifecycleMessage,
@@ -1486,7 +1505,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .transfers {
       TransferSurface(
-        rows: journey.rows(for: .transfers),
+        rows: journey.rows(for: .transfers, hidesAmounts: productSettings.hidesAmounts),
         transfers: (journey.snapshot?.transactions ?? [])
           .filter { $0.currentRevision.draft.kind == .transfer && $0.currentRevision.lifecycle == .active }
           .sorted { $0.currentRevision.draft.occurredAt.instant > $1.currentRevision.draft.occurredAt.instant },
@@ -1512,7 +1531,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
       } else if selection == .accounts {
       AccountsView(
-        state: session.state, rows: journey.rows(for: .accounts),
+        state: session.state, rows: journey.rows(for: .accounts, hidesAmounts: productSettings.hidesAmounts),
         accounts: journey.snapshot?.accounts ?? [], groups: journey.snapshot?.accountGroups ?? [],
         transactions: journey.snapshot?.transactions ?? [],
         isEditing: journey.isEditing, lastFailure: lifecycleMessage ?? journey.lastFailure,
@@ -1537,7 +1556,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .categories {
       CategoriesView(
-        state: session.state, rows: journey.rows(for: .categories),
+        state: session.state, rows: journey.rows(for: .categories, hidesAmounts: productSettings.hidesAmounts),
         categories: journey.snapshot?.categories ?? [],
         transactions: journey.snapshot?.transactions ?? [],
         snapshot: journey.snapshot, generation: journey.snapshotGeneration, settings: productSettings,
@@ -1666,7 +1685,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .search {
       SearchSurface(
-        rows: journey.rows(for: .search),
+        rows: journey.rows(for: .search, hidesAmounts: productSettings.hidesAmounts),
         query: journey.searchQuery.textContains ?? journey.searchQuery.noteContains ?? "",
         emptyMessage: selection.emptyStateMessage
       ) { text in
@@ -1678,7 +1697,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .insights {
       InsightsSurface(
-        rows: journey.rows(for: .insights),
+        rows: journey.rows(for: .insights, hidesAmounts: productSettings.hidesAmounts),
         table: journey.insightTable,
         emptyMessage: selection.emptyStateMessage,
         snapshot: journey.snapshot,
@@ -1691,7 +1710,7 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else {
       DataBackedSurface(
-        destination: selection, rows: journey.rows(for: selection),
+        destination: selection, rows: journey.rows(for: selection, hidesAmounts: productSettings.hidesAmounts),
         emptyMessage: selection.emptyStateMessage
       ) { openLedger() }
       .id(selection)

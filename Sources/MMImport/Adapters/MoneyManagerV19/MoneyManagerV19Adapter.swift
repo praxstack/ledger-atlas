@@ -265,10 +265,23 @@ public enum MoneyManagerV19Adapter {
     }
     let accountUIDs = try uniqueUIDs(input.assets)
     let categoryUIDs = try uniqueUIDs(input.categories)
+    // A debit card's rows move the account that pays it (#207). The event's account binding
+    // is then the card's own `cardAssetUid` field, which replay checks against the card's group.
+    let cards = MoneyManagerV19Vocabulary.debitCards(in: input)
+    var payingFieldByCard: [String: MoneyManagerV19SourceField] = [:]
+    for asset in input.assets {
+      guard let uid = sourceField(asset, aliases: MoneyManagerV19Vocabulary.uidAliases)
+        .flatMap(mappingLiteral),
+        let payer = cards.payingAccountByCard[uid],
+        let field = sourceField(asset, aliases: MoneyManagerV19Vocabulary.cardAssetAliases),
+        mappingLiteral(field) == payer
+      else { continue }
+      payingFieldByCard[uid] = field
+    }
     for transaction in input.transactions {
       switch try map(
         transaction, accountUIDs: accountUIDs, categoryUIDs: categoryUIDs,
-        currenciesByUID: currenciesByUID)
+        currenciesByUID: currenciesByUID, payingFieldByCard: payingFieldByCard)
       {
       case .mapped(let event): events.append(event)
       case .preserved(let reason):
@@ -619,7 +632,8 @@ public enum MoneyManagerV19Adapter {
     _ record: MoneyManagerV19SourceRecord,
     accountUIDs: Set<String>,
     categoryUIDs: Set<String>,
-    currenciesByUID: [String: MoneyManagerV19SourceField]
+    currenciesByUID: [String: MoneyManagerV19SourceField],
+    payingFieldByCard: [String: MoneyManagerV19SourceField] = [:]
   ) throws -> Mapping {
     func blocked(_ reason: MoneyManagerV19BlockReason) -> Mapping {
       .blocked(.init(sourceRecordID: record.sourceRecordID, fields: record.fields, reason: reason))
@@ -681,7 +695,7 @@ public enum MoneyManagerV19Adapter {
     return .mapped(
       .init(
         sourceRecordID: record.sourceRecordID,
-        kind: kind, account: account, amount: amount,
+        kind: kind, account: payingFieldByCard[accountKey] ?? account, amount: amount,
         currency: currency,
         timestamp: .init(
           wdate: wdate, zdate: zdate, localDay: day, localEpochMilliseconds: localEpoch),

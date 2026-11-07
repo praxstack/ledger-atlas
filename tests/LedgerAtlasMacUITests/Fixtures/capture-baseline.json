@@ -1,263 +1,263 @@
 {
   "01-transactions.daily-dark.populated.root-dark.png" : {
-    "lines" : 530,
+    "lines" : 532,
     "looks" : "f2e26342c34263e2",
-    "text" : "8292a19956e56ebe9441d64da885813a43978278fc8fd7473095df8bbc9327a4"
+    "text" : "5a1025593eada7c65b154f004e0724ef75501e47198a3c9edf463d6b08032d6d"
   },
   "01-transactions.daily-dark.populated.root-light.png" : {
-    "lines" : 530,
-    "looks" : "ac1d9cb830b0919e",
-    "text" : "8292a19956e56ebe9441d64da885813a43978278fc8fd7473095df8bbc9327a4"
+    "lines" : 532,
+    "looks" : "aa2d9cb830b0919e",
+    "text" : "5a1025593eada7c65b154f004e0724ef75501e47198a3c9edf463d6b08032d6d"
   },
   "02-statistics.overview-monthly.expense-dark.png" : {
-    "lines" : 356,
+    "lines" : 358,
     "looks" : "c260e062e26262e2",
-    "text" : "f48eaa7e4f4e438769e0438d2b4d400c01f641747daa1e42c0ef7d2f3e538bac"
+    "text" : "1cee306e762029455ad696f04d615e88903381bea08c38f8b140c0b2f5d5df85"
   },
   "02-statistics.overview-monthly.expense-light.png" : {
-    "lines" : 356,
+    "lines" : 358,
     "looks" : "929a3a3839b05198",
-    "text" : "f48eaa7e4f4e438769e0438d2b4d400c01f641747daa1e42c0ef7d2f3e538bac"
+    "text" : "1cee306e762029455ad696f04d615e88903381bea08c38f8b140c0b2f5d5df85"
   },
   "03-statistics.overview-annual.expense-dark.png" : {
-    "lines" : 336,
+    "lines" : 338,
     "looks" : "e072e060e06062e4",
-    "text" : "0fac0711b77d148d9696197bd8d8fc5ab2c655829da116b934c3f20729adfa3a"
+    "text" : "c7e3ce15cb3d9cbf8dfafdc97b946d58de27d0e2af74ae6173648792a1392565"
   },
   "03-statistics.overview-annual.expense-light.png" : {
-    "lines" : 336,
+    "lines" : 338,
     "looks" : "8aac2c9c1c9a9c9c",
-    "text" : "99bb61fecd411fe04a0442e12966530a80672fa18dd13d3caf20e9b33cb2d20f"
+    "text" : "7273c6a6d1de9aec05d2f7e478e2ff0be98f8be6e23e77a2367bf9550b8ffffc"
   },
   "04-statistics.overview-annual.income.scrolled-dark.png" : {
-    "lines" : 317,
+    "lines" : 319,
     "looks" : "ea62e262c26263e2",
-    "text" : "7f289cb76327ac41ff5f3889fccbdd3a236865e882785bf921d4cef046fdb434"
+    "text" : "92b934fff441da5a45c274d88bd291e6ce9f4aab5402f1015f187b8471fe1a3b"
   },
   "04-statistics.overview-annual.income.scrolled-light.png" : {
-    "lines" : 317,
+    "lines" : 319,
     "looks" : "92b1303030b058b0",
-    "text" : "12b90f16e2200c13b2dca9886115631a61370717506a62d539e5dca498738889"
+    "text" : "9704fc8d2ca6eec8abfe3f86af8ff72a90478ff1fa7e0d2c90cb2a92a59c9d4c"
   },
   "05-statistics.category_detail-annual.income.category-dark.png" : {
-    "lines" : 256,
+    "lines" : 258,
     "looks" : "e8614040c0d020ea",
-    "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
+    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
   },
   "05-statistics.category_detail-annual.income.category-light.png" : {
-    "lines" : 256,
+    "lines" : 258,
     "looks" : "b031b9b820205192",
-    "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
+    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-dark.png" : {
-    "lines" : 256,
+    "lines" : 258,
     "looks" : "e8614040c0d020ea",
-    "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
+    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-light.png" : {
-    "lines" : 256,
+    "lines" : 258,
     "looks" : "b031b9b820205192",
-    "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
+    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
   },
   "07-statistics.category_detail-annual.expense.subcategory-dark.png" : {
-    "lines" : 256,
+    "lines" : 258,
     "looks" : "e8614040c0d020ea",
-    "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
+    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
   },
   "07-statistics.category_detail-annual.expense.subcategory-light.png" : {
-    "lines" : 256,
+    "lines" : 258,
     "looks" : "b031b9b820205192",
-    "text" : "f2a40496658a295007700a8efd193f8ec1e383c1f696e337fdcdfce62f1f8411"
+    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
   },
   "08-statistics.total_balance-monthly.trend-dark.png" : {
-    "lines" : 206,
+    "lines" : 208,
     "looks" : "e261d040d04060ea",
-    "text" : "6a530f5242e7438444bd55ffd0f202ecb1268919363272a4b61439e268899a5d"
+    "text" : "8f76e72f62bc65bf1d48131d5fddc17a44fb9aad5e7bcf82516719c02b6f1598"
   },
   "08-statistics.total_balance-monthly.trend-light.png" : {
-    "lines" : 206,
-    "looks" : "921b22a020a05192",
-    "text" : "6a530f5242e7438444bd55ffd0f202ecb1268919363272a4b61439e268899a5d"
+    "lines" : 208,
+    "looks" : "b21b22a020a05192",
+    "text" : "8f76e72f62bc65bf1d48131d5fddc17a44fb9aad5e7bcf82516719c02b6f1598"
   },
   "09-accounts.overview-upper.cards.totals-dark.png" : {
-    "lines" : 300,
+    "lines" : 302,
     "looks" : "e0624243c36363ea",
-    "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
+    "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "09-accounts.overview-upper.cards.totals-light.png" : {
-    "lines" : 300,
-    "looks" : "923cbcb034949892",
-    "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
+    "lines" : 302,
+    "looks" : "b03cbcb034949892",
+    "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "10-accounts.overview-cards.savings.groups-dark.png" : {
-    "lines" : 302,
+    "lines" : 304,
     "looks" : "e0626243c36363ea",
-    "text" : "051febd64b11068daa077fd94d4fe2306dc062d2e6dc1ec027404f4a83ccb496"
+    "text" : "eb89bbc61bf9686f8663cf7058e3286d6e02d15cae029f93481035c965ccba16"
   },
   "10-accounts.overview-cards.savings.groups-light.png" : {
-    "lines" : 302,
-    "looks" : "923cbcb034989092",
-    "text" : "051febd64b11068daa077fd94d4fe2306dc062d2e6dc1ec027404f4a83ccb496"
+    "lines" : 304,
+    "looks" : "b03cbcb034989092",
+    "text" : "eb89bbc61bf9686f8663cf7058e3286d6e02d15cae029f93481035c965ccba16"
   },
   "11-accounts.overview-lower.groups.active_scroll-dark.png" : {
-    "lines" : 301,
+    "lines" : 303,
     "looks" : "e0626243c36363e2",
-    "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
+    "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "11-accounts.overview-lower.groups.active_scroll-light.png" : {
-    "lines" : 301,
-    "looks" : "923cbcb034989092",
-    "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
+    "lines" : 303,
+    "looks" : "b03cbcb034989092",
+    "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "12-accounts.overview-restored.chrome-dark.png" : {
-    "lines" : 300,
+    "lines" : 302,
     "looks" : "e0624243c36363ea",
-    "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
+    "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "12-accounts.overview-restored.chrome-light.png" : {
-    "lines" : 300,
-    "looks" : "923cbcb034949892",
-    "text" : "b993b54b81fd89bcd68c0062f896d12f62af8c1decd3809aafb6a7f82b8c8e50"
+    "lines" : 302,
+    "looks" : "b03cbcb034949892",
+    "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "13-accounts.overview-investments.others.boundary-dark.png" : {
-    "lines" : 301,
+    "lines" : 303,
     "looks" : "e0626243c36363e2",
-    "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
+    "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "13-accounts.overview-investments.others.boundary-light.png" : {
-    "lines" : 301,
-    "looks" : "923cbcb034989092",
-    "text" : "0d3f23af1fbadeaeaf3206da82151c7a7bf30c2ce48196f5a429c7f1659c7d03"
+    "lines" : 303,
+    "looks" : "b03cbcb034989092",
+    "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "14-accounts.account_info-existing.edit-dark.png" : {
-    "lines" : 191,
+    "lines" : 192,
     "looks" : "a2626261e16165a2",
-    "text" : "64137b97619a658a6f60a97de79aaac961b5aa08e3e56a2279f85e29fa8c3c2d"
+    "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "14-accounts.account_info-existing.edit-light.png" : {
-    "lines" : 191,
+    "lines" : 192,
     "looks" : "a23d38797830199a",
-    "text" : "64137b97619a658a6f60a97de79aaac961b5aa08e3e56a2279f85e29fa8c3c2d"
+    "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "15-settings.configuration-index-dark.png" : {
-    "lines" : 316,
+    "lines" : 324,
     "looks" : "c24b6645ca626eea",
-    "text" : "133fa78fce0412abba8b27881b29c0b6fc345bcd12a23e9ec62ed8d8a48b87f9"
+    "text" : "ce5cd4064c35867bd6cb9e11fc0fe36505c7e3ecc577817b50aa9926b02b4ace"
   },
   "15-settings.configuration-index-light.png" : {
-    "lines" : 316,
+    "lines" : 324,
     "looks" : "92b498b835b59192",
-    "text" : "133fa78fce0412abba8b27881b29c0b6fc345bcd12a23e9ec62ed8d8a48b87f9"
+    "text" : "ce5cd4064c35867bd6cb9e11fc0fe36505c7e3ecc577817b50aa9926b02b4ace"
   },
   "16-settings.accounts-index-dark.png" : {
-    "lines" : 322,
+    "lines" : 324,
     "looks" : "e0624247c56767e2",
-    "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
+    "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "16-settings.accounts-index-light.png" : {
-    "lines" : 322,
+    "lines" : 324,
     "looks" : "b03cb8b13898999a",
-    "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
+    "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "17-settings.account_groups-edit.reorder.protected-dark.png" : {
-    "lines" : 324,
+    "lines" : 326,
     "looks" : "e0626645c76767e2",
-    "text" : "a401d642953d6bbf02b425c650c643803f374cb9e43ac24bfa34d2ec7cc6b4fd"
+    "text" : "6b0d572fc20a6d12bb383868e1d3a9e04d61590d3aec52ca56d005483305b37f"
   },
   "17-settings.account_groups-edit.reorder.protected-light.png" : {
-    "lines" : 324,
+    "lines" : 326,
     "looks" : "b03cb8b13098999a",
-    "text" : "a401d642953d6bbf02b425c650c643803f374cb9e43ac24bfa34d2ec7cc6b4fd"
+    "text" : "6b0d572fc20a6d12bb383868e1d3a9e04d61590d3aec52ca56d005483305b37f"
   },
   "18-settings.account_list-upper.hidden_variant-dark.png" : {
-    "lines" : 322,
+    "lines" : 324,
     "looks" : "e0624247c56767e2",
-    "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
+    "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "18-settings.account_list-upper.hidden_variant-light.png" : {
-    "lines" : 322,
+    "lines" : 324,
     "looks" : "b03cb8b13898999a",
-    "text" : "1b0c701f78ca8193601168bf5e14be6c5b1a73dc17a56944645240660d8107ed"
+    "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "19-settings.account_list-tail-dark.png" : {
-    "lines" : 323,
+    "lines" : 325,
     "looks" : "e0626245c76767e2",
-    "text" : "68ba696387d6c5ec0e97e8eb37e515e9f96376c54beb6e0444bc02c313a6c372"
+    "text" : "db391d751d1576f29acfd2e4a1aa101af3535fac822fd442d039428dfb5475b7"
   },
   "19-settings.account_list-tail-light.png" : {
-    "lines" : 323,
+    "lines" : 325,
     "looks" : "b03cb8b13899989a",
-    "text" : "68ba696387d6c5ec0e97e8eb37e515e9f96376c54beb6e0444bc02c313a6c372"
+    "text" : "db391d751d1576f29acfd2e4a1aa101af3535fac822fd442d039428dfb5475b7"
   },
   "20-accounts.add-group_picker.open-dark.png" : {
-    "lines" : 189,
-    "looks" : "a2606261f14565a2",
-    "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
+    "lines" : 190,
+    "looks" : "c2606261f14565a2",
+    "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "20-accounts.add-group_picker.open-light.png" : {
-    "lines" : 189,
+    "lines" : 190,
     "looks" : "823c38796830119a",
-    "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
+    "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "21-accounts.add-name.focused-dark.png" : {
-    "lines" : 189,
-    "looks" : "a2626261f14565a2",
-    "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
+    "lines" : 190,
+    "looks" : "c2606261f14565a2",
+    "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "21-accounts.add-name.focused-light.png" : {
-    "lines" : 189,
-    "looks" : "a23d38796830119a",
-    "text" : "bb52c9231028bbe30abeeb767c8173bbd8e1dad38b085b80a4db13b0a4817749"
+    "lines" : 190,
+    "looks" : "823c38796830119a",
+    "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
-    "lines" : 191,
-    "looks" : "a2626271e16165a2",
-    "text" : "79f396f32889d94bbb3100a49e5abf3a45b91353eda2b351bf2e6bf636744205"
+    "lines" : 192,
+    "looks" : "c2606271e16165a2",
+    "text" : "d84ff7b9645d6ae9ced22319abf572cbfe16dad2ea5228dcc3cf411d39d7d7b0"
   },
   "22-accounts.account_info-savings.edit-light.png" : {
-    "lines" : 191,
-    "looks" : "a23d38797830199a",
-    "text" : "79f396f32889d94bbb3100a49e5abf3a45b91353eda2b351bf2e6bf636744205"
+    "lines" : 192,
+    "looks" : "823c38797830199a",
+    "text" : "d84ff7b9645d6ae9ced22319abf572cbfe16dad2ea5228dcc3cf411d39d7d7b0"
   },
   "23-security.set_passcode-first_entry.empty-dark.png" : {
-    "lines" : 178,
-    "looks" : "a2436571f24066ea",
-    "text" : "9a811224163186c47363226c5da09828cd4c260bea11db83e05f13e5744713ca"
+    "lines" : 182,
+    "looks" : "82436571f24066ea",
+    "text" : "d0067620aec7e5520234570ca4b1abeec4911f2de9f509c7f951598552974661"
   },
   "23-security.set_passcode-first_entry.empty-light.png" : {
-    "lines" : 178,
-    "looks" : "8230903839351192",
-    "text" : "9a811224163186c47363226c5da09828cd4c260bea11db83e05f13e5744713ca"
+    "lines" : 182,
+    "looks" : "8230903839341192",
+    "text" : "d0067620aec7e5520234570ca4b1abeec4911f2de9f509c7f951598552974661"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-dark.png" : {
-    "lines" : 216,
+    "lines" : 218,
     "looks" : "e0606458d04020a2",
-    "text" : "1fe48a422017e2e9f737466f8deaeb37968033e1550ede7679c0dac3c4eb760f"
+    "text" : "95c9760d24c01ac4ee623f5e737b2d1defb18fd0df612ce9f0439402fd162900"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-light.png" : {
-    "lines" : 216,
+    "lines" : 218,
     "looks" : "9299982020a04182",
-    "text" : "1fe48a422017e2e9f737466f8deaeb37968033e1550ede7679c0dac3c4eb760f"
+    "text" : "95c9760d24c01ac4ee623f5e737b2d1defb18fd0df612ce9f0439402fd162900"
   },
   "25-backup.hub-all_entries-dark.png" : {
-    "lines" : 282,
+    "lines" : 284,
     "looks" : "e0666660e26261e0",
-    "text" : "90a689266ad1a8fcefb661886321bde3f87124a830ac22b26b0c2a6c60e5ed9b"
+    "text" : "56bd32c4cf88777de13424474979d1fef93a7ededad4f0bb5890741dd7a3236d"
   },
   "25-backup.hub-all_entries-light.png" : {
-    "lines" : 282,
+    "lines" : 284,
     "looks" : "92b0b09c3cbc5c92",
-    "text" : "90a689266ad1a8fcefb661886321bde3f87124a830ac22b26b0c2a6c60e5ed9b"
+    "text" : "56bd32c4cf88777de13424474979d1fef93a7ededad4f0bb5890741dd7a3236d"
   },
   "key-balance-receipt-dark.png" : {
-    "lines" : 129,
+    "lines" : 130,
     "looks" : "ea63786cec6860e2",
-    "text" : "d9752b56f20914d74ba3acf8d332d61c7086fe9798f2f9555de6d84abecb5c3b"
+    "text" : "fe0fefb5fa82c445a3608dc27749fd4a001bcf07b31b9e805b6ba18ae386949f"
   },
   "key-balance-receipt-light.png" : {
-    "lines" : 129,
+    "lines" : 130,
     "looks" : "929ca6b232b69c9e",
-    "text" : "d9752b56f20914d74ba3acf8d332d61c7086fe9798f2f9555de6d84abecb5c3b"
+    "text" : "fe0fefb5fa82c445a3608dc27749fd4a001bcf07b31b9e805b6ba18ae386949f"
   },
   "key-empty-dark.png" : {
     "lines" : 97,

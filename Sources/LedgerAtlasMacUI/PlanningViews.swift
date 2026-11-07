@@ -537,24 +537,12 @@ struct BudgetsView: View {
     func money(_ value: ExactDecimal) -> String {
       (try? CurrencyAmount(unitCode: unit, amount: value)).map {
         formatter.parts($0, sign: .never).text
-      } ?? "\(value.rawLiteral) \(unit)"
+      } ?? formatter.plain(value, unitCode: unit)
     }
     let left = status.overspent.map { "over by \(money($0))" } ?? "\(money(status.remaining)) left"
     let carried = status.carried.isPositive ? " (includes \(money(status.carried)) rolled over)" : ""
     return
       "Spent \(money(status.spent)) of \(money(status.available)), \(left)\(carried), ends \(formatter.date(status.periodEnd))"
-  }
-
-  static func describe(_ status: LedgerBudgetStatus, unit: String) -> String {
-    let left =
-      status.overspent.map { "over by \($0.rawLiteral)" } ?? "\(status.remaining.rawLiteral) left"
-    let carried =
-      status.carried.isPositive ? " (includes \(status.carried.rawLiteral) rolled over)" : ""
-    let end = String(
-      format: "%04d-%02d-%02d", status.periodEnd.year, status.periodEnd.month,
-      status.periodEnd.day)
-    return
-      "Spent \(status.spent.rawLiteral) of \(status.available.rawLiteral) \(unit), \(left)\(carried), period ends \(end)"
   }
 }
 

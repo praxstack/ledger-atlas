@@ -34,6 +34,8 @@ struct LedgerAtlasMacApp: App {
         }
         .keyboardShortcut("i", modifiers: [.command, .shift])
       }
+      LedgerHideAmountsCommands()
+      LedgerViewExportCommands()
     }
   }
 }

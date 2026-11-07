@@ -386,6 +386,10 @@ struct InsightsSurface: View {
         .buttonStyle(LedgerPrimaryButtonStyle())
         .disabled(exportPeriodPDF == nil)
       }
+      if formatter.hidesAmounts {
+        Text(LedgerProductSettings.hideAmountsExportNotice)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+      }
       Text("Snapshot \(report.statistics.snapshotDigest.prefix(16)). The screen and the PDF show the same snapshot.")
         .font(LedgerTheme.Typeface.caption)
         .foregroundStyle(LedgerTheme.inkTertiary)
@@ -397,11 +401,14 @@ struct InsightsSurface: View {
   private var accessibleTableCard: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
       LedgerCardHeader("Accessible table")
-      Text(table)
+      // The table is every figure again as text, so while amounts are hidden it says so
+      // instead of showing a wall of masks (#173).
+      let shownTable = formatter.hidesAmounts ? LedgerProductSettings.hiddenTableNotice : table
+      Text(shownTable)
         .font(LedgerTheme.Typeface.mono)
         .foregroundStyle(LedgerTheme.ink)
         .textSelection(.enabled)
-        .accessibilityLabel(table)
+        .accessibilityLabel(shownTable)
         .accessibilityAddTraits(.isStaticText)
     }
     .ledgerCard()
@@ -430,13 +437,17 @@ struct InsightsSurface: View {
       Button("Export PDF statement", action: exportPDF)
         .buttonStyle(LedgerSecondaryButtonStyle())
         .accessibilityLabel("Export PDF statement")
+      if formatter.hidesAmounts {
+        Text(LedgerProductSettings.hideAmountsExportNotice)
+          .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+      }
     }
     .ledgerCard()
   }
 
   private func money(_ value: ExactDecimal, _ unit: String) -> String {
     (try? CurrencyAmount(unitCode: unit, amount: value)).map(formatter.amount)
-      ?? "\(value.rawLiteral) \(unit)"
+      ?? formatter.plain(value, unitCode: unit)
   }
 
   private func label(_ start: SourceLocalDate, _ kind: InsightsPeriodKind) -> String {
