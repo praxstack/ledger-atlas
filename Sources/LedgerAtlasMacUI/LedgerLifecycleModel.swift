@@ -66,11 +66,13 @@ struct LedgerLifecycleCompletion: @unchecked Sendable {
   let store: LedgerStore
   let disposition: LedgerStoreLifecycle.Disposition
   let recoveryImageURL: URL?
+  let rolledBackInterruptedSave: Bool
 
   init(_ result: LedgerStoreLifecycle.Result) {
     store = result.store
     disposition = result.disposition
     recoveryImageURL = result.recoveryImageURL
+    rolledBackInterruptedSave = result.rolledBackInterruptedSave
   }
 }
 

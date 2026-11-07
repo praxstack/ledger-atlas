@@ -84,6 +84,8 @@ struct BackupSurface: View {
   let restorePackage: () -> Void
   /// Contents-only or complete reset. Nil hides the button.
   var reset: (() -> Void)? = nil
+  /// Saves the open ledger's receipt key for another Mac (#182). Nil hides the button.
+  var saveRecoveryKey: (() -> Void)? = nil
   /// Spreadsheet exchange, wired by the XLSX work. Nil hides the buttons.
   var exportXLSX: (() -> Void)? = nil
   var importXLSX: (() -> Void)? = nil
@@ -130,6 +132,12 @@ struct BackupSurface: View {
             .accessibilityLabel("Restore backup")
           Button("Open ledger…", action: open)
             .buttonStyle(LedgerSecondaryButtonStyle())
+        }
+        if let saveRecoveryKey {
+          Button("Save recovery key…", action: saveRecoveryKey)
+            .buttonStyle(LedgerSecondaryButtonStyle())
+            .accessibilityLabel("Save recovery key")
+            .help("A ledger with imported history needs this key to open on another Mac.")
         }
       }
       .ledgerCard()

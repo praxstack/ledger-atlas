@@ -111,6 +111,128 @@ func authenticatedV19BackupReopensOnSameDevice() throws {
   }
 }
 
+// A new Mac, a wiped container or a lost Keys folder has no receipt key. The ledger is fine,
+// so it must say the key is missing, not that it is damaged, and the recovery key saved on the
+// first Mac must bring it back (#182).
+// removeKeyForTesting exists only in debug builds; the release-mode CI job skips these.
+#if DEBUG
+@Test("a missing receipt key is reported as missing, and the ledger's recovery key restores it")
+func missingReceiptKeyIsReportedAndRecoveryKeyRestoresIt() throws {
+  // Its own receipt identity, so removing its key can't touch other tests' ledgers.
+  let unique = CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8))
+  let fixture = try V19Fixture(artifactSHA256: unique)
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: fixture) { url, _ in
+    let file = try #require(try LedgerReceiptTrust.recoveryKeyFile(for: url))
+    let saved = try LedgerReceiptTrust.recoveryKey(from: file, for: url)
+    try LedgerReceiptTrust.removeKeyForTesting(account: saved.account)
+    #expect(try LedgerReceiptTrust.key(for: url, create: false) == nil)
+
+    #expect(throws: LedgerStore.Error.receiptKeyMissing) {
+      _ = try LedgerStore.openReadOnly(at: url)
+    }
+    #expect(throws: LedgerStore.Error.receiptKeyMissing) {
+      _ = try LedgerStore.openForMutation(at: url)
+    }
+    #expect(throws: LedgerStoreLifecycle.Error.receiptKeyMissing) {
+      _ = try LedgerStoreLifecycle.open(at: url)
+    }
+
+    // A wrong key never gets installed, so the right one still can be.
+    var wrong = saved.key
+    wrong[0] ^= 0x01
+    let forged = Data(
+      ([LedgerReceiptTrust.recoveryKeyHeader, saved.account, CanonicalReceiptDigest.hex(wrong), ""]
+        .joined(separator: "\n")).utf8)
+    #expect(throws: (any Error).self) { try LedgerStore.installRecoveryKey(forged, for: url) }
+    #expect(try LedgerReceiptTrust.key(for: url, create: false) == nil)
+    #expect(throws: LedgerReceiptTrustError.invalidKey) {
+      _ = try LedgerReceiptTrust.recoveryKey(from: Data("not a key".utf8), for: url)
+    }
+
+    // The same file after a trip through Windows or a mail client.
+    let crlf = Data(String(decoding: file, as: UTF8.self)
+      .replacingOccurrences(of: "\n", with: "\r\n").utf8)
+    #expect(try LedgerReceiptTrust.recoveryKey(from: crlf, for: url).key == saved.key)
+
+    try LedgerStore.installRecoveryKey(file, for: url)
+    #expect(try LedgerReceiptTrust.key(for: url, create: false) == saved.key)
+    _ = try LedgerStore.openReadOnly(at: url)
+    #expect(try LedgerStoreLifecycle.open(at: url).disposition == .opened)
+    try LedgerReceiptTrust.removeKeyForTesting(account: saved.account)
+  }
+}
+
+@Test("a damaged ledger without its key is still reported as damaged")
+func damagedLedgerWithoutKeyIsNotReportedAsKeyMissing() throws {
+  let fixture = try V19Fixture(
+    artifactSHA256: CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8)))
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: fixture) { url, _ in
+    let file = try #require(try LedgerReceiptTrust.recoveryKeyFile(for: url))
+    let account = try LedgerReceiptTrust.recoveryKey(from: file, for: url).account
+    // A tag link to a tag that doesn't exist: only the foreign-key check sees it.
+    try withSQLite(url) {
+      try execute(
+        $0,
+        """
+        PRAGMA foreign_keys=OFF;
+        INSERT INTO ledger_revision_tag
+          SELECT revision_id, 'missing-tag' FROM ledger_transaction_revision LIMIT 1;
+        """)
+    }
+    try LedgerReceiptTrust.removeKeyForTesting(account: account)
+    defer { try? LedgerReceiptTrust.removeKeyForTesting(account: account) }
+    #expect(throws: LedgerStore.Error.incompatibleCanonicalStore) {
+      _ = try LedgerStore.openReadOnly(at: url)
+    }
+  }
+}
+
+@Test("a recovery key never replaces a different key already on this Mac")
+func recoveryKeyNeverReplacesAKeyOnThisMac() throws {
+  let fixture = try V19Fixture(
+    artifactSHA256: CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8)))
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: fixture) { url, _ in
+    let file = try #require(try LedgerReceiptTrust.recoveryKeyFile(for: url))
+    let saved = try LedgerReceiptTrust.recoveryKey(from: file, for: url)
+    defer { try? LedgerReceiptTrust.removeKeyForTesting(account: saved.account) }
+    var wrong = saved.key
+    wrong[0] ^= 0x01
+    let other = Data(
+      ([LedgerReceiptTrust.recoveryKeyHeader, saved.account, CanonicalReceiptDigest.hex(wrong), ""]
+        .joined(separator: "\n")).utf8)
+    #expect(throws: LedgerReceiptTrustError.conflictingKeys) {
+      try LedgerStore.installRecoveryKey(other, for: url)
+    }
+    // The same key again changes nothing.
+    try LedgerStore.installRecoveryKey(file, for: url)
+    #expect(try LedgerReceiptTrust.key(for: url, create: false) == saved.key)
+  }
+}
+
+@Test("a recovery key file is refused for a different ledger")
+func recoveryKeyFileIsRefusedForAnotherLedger() throws {
+  let first = try V19Fixture(
+    artifactSHA256: CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8)))
+  try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: first) { url, _ in
+    let file = try #require(try LedgerReceiptTrust.recoveryKeyFile(for: url))
+    let account = try LedgerReceiptTrust.recoveryKey(from: file, for: url).account
+    defer { try? LedgerReceiptTrust.removeKeyForTesting(account: account) }
+    let other = try V19Fixture(
+      artifactSHA256: CanonicalReceiptDigest.sha256(Data(UUID().uuidString.utf8)))
+    try withPersistedV19Ledger(version: CanonicalLedgerSchema.version, fixture: other) {
+      otherURL, _ in
+      #expect(throws: LedgerReceiptTrustError.invalidKey) {
+        try LedgerStore.installRecoveryKey(file, for: otherURL)
+      }
+      if let otherFile = try LedgerReceiptTrust.recoveryKeyFile(for: otherURL) {
+        try? LedgerReceiptTrust.removeKeyForTesting(
+          account: LedgerReceiptTrust.recoveryKey(from: otherFile, for: otherURL).account)
+      }
+    }
+  }
+}
+#endif
+
 @Test("current v11 receipt verification rejects a missing external trust key")
 func currentV11RejectsMissingExternalTrustKey() throws {
   try withPersistedV19Ledger(version: CanonicalLedgerSchema.version) { url, _ in
@@ -1090,7 +1212,7 @@ private struct V19DigestOverrides {
 }
 
 private struct V19Fixture {
-  let artifactSHA256 = String(repeating: "a", count: 64)
+  let artifactSHA256: String
   let profileID = MoneyManagerProfile.profileID
   let adapterVersion: String
   let stagingDigest: String
@@ -1106,8 +1228,13 @@ private struct V19Fixture {
       stagingID: receiptID, sourceSubjectID: transaction.id(in: self), kind: .record)
   }
 
-  init(adapterVersion: String = MoneyManagerProfile.adapterVersion) throws {
+  /// Fixtures share one receipt key unless `artifactSHA256` differs.
+  init(
+    adapterVersion: String = MoneyManagerProfile.adapterVersion,
+    artifactSHA256: String = String(repeating: "a", count: 64)
+  ) throws {
     self.adapterVersion = adapterVersion
+    self.artifactSHA256 = artifactSHA256
     let receiptID = CanonicalStagingID.stage(
       artifactSHA256: artifactSHA256, profileID: profileID, adapterVersion: adapterVersion)
     self.receiptID = receiptID
@@ -1366,7 +1493,7 @@ private struct V19Fixture {
 }
 
 private func withPersistedV19Ledger(
-  version: Int, includeCommitment: Bool = true,
+  version: Int, includeCommitment: Bool = true, fixture given: V19Fixture? = nil,
   _ body: (URL, V19Fixture) throws -> Void
 ) throws {
   guard version == 10 || version == CanonicalLedgerSchema.version else { throw ReplayError.sqlite }
@@ -1374,7 +1501,7 @@ private func withPersistedV19Ledger(
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: directory) }
   let url = directory.appendingPathComponent("ledger.sqlite")
-  let fixture = try V19Fixture()
+  let fixture = try given ?? V19Fixture()
   try writeV19V10Ledger(to: url, fixture: fixture, includeCommitment: includeCommitment)
   if version == 10 {
     #expect(try LedgerStoreLifecycle.inspect(at: url) == .upgradeRequired)
@@ -1825,13 +1952,19 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
         }
       }
     }
-    // Save at least 150 times, and keep saving until 5 more reads have completed while saves
-    // run: fast saves can otherwise all finish before either reader gets one full read (seen
-    // after #152). Reads that finished before the first save don't count.
+    // A load is refused while a save's journal is on disk, so back-to-back saves can starve
+    // the readers on a busy machine (seen after #152 and on #176, #212). Every 10 saves, wait
+    // for one more load to finish, so loads and saves always interleave. Reads that finished
+    // before the first save don't count.
     let readsBeforeSaves = reads.value
     var index = 0
-    while index < 150 || (reads.value < readsBeforeSaves + 5 && index < 5_000) {
+    while index < 150 {
       defer { index += 1 }
+      if index % 10 == 9 {
+        let target = reads.value + 1
+        let deadline = Date().addingTimeInterval(10)
+        while reads.value < target, Date() < deadline { usleep(1_000) }
+      }
       let renamed = try LedgerAccount(
         id: account.id, name: "Save \(index)", currencyUnit: account.currencyUnit,
         origin: account.origin, lifecycle: account.lifecycle, groupID: account.groupID,
@@ -1848,7 +1981,7 @@ func savesSurviveConcurrentReadOnlyOpens() throws {
     readers.wait()
     #expect(failures.all.isEmpty, "\(failures.all.prefix(5))")
     #expect(
-      readsDuringSaves >= 5,
+      readsDuringSaves >= 15,
       "only \(readsDuringSaves) read-only loads finished during \(index) saves, so too little overlapped")
     #expect(try store.readSnapshot().accounts.first { $0.id == account.id }?.name == "Save \(index - 1)")
   }
