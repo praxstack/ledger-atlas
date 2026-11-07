@@ -60,8 +60,21 @@ public final class LedgerJourney {
   private var prepared: ImportWorkspace.PreparedHandle?
   private let workspace = ImportWorkspace()
   private var application: LedgerApplication?
-  private var mutableStore: LedgerStore?
-  private var openedStore: LedgerStore?
+  private var mutableStore: LedgerStore? {
+    didSet { refreshImportedHistory() }
+  }
+  private var openedStore: LedgerStore? {
+    didSet { refreshImportedHistory() }
+  }
+  /// The open ledger was made by importing a backup (it has an import receipt). False for an
+  /// empty or hand-made ledger, so Get Started doesn't mark the import step done for those.
+  /// Follows whichever store is active, so it holds when editing swaps the read-only store
+  /// for a writable one.
+  package private(set) var hasImportedHistory = false
+
+  private func refreshImportedHistory() {
+    hasImportedHistory = (mutableStore ?? openedStore)?.latestImportID() != nil
+  }
 
   public init() {}
 

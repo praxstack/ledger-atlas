@@ -38,7 +38,7 @@ public enum LedgerTheme {
     highContrastLightAlpha: 0.09)
   /// Fill for fields, chips and unselected segmented items.
   public static let fieldFill = dynamic(
-    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.045, darkAlpha: 0.07,
+    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.06, darkAlpha: 0.10,
     highContrastLightAlpha: 0.09, highContrastDarkAlpha: 0.14)
 
   /// The single accent: selection, focus and the one primary action per surface.
@@ -87,11 +87,11 @@ public enum LedgerTheme {
   /// Pressed states for the two button styles.
   public static let accentPressed = dynamic(light: 0x07636B, dark: 0x3FAAB4, highContrastLight: 0x00474D, highContrastDark: 0x9FE8EE)
   public static let fieldFillPressed = dynamic(
-    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.09, darkAlpha: 0.13,
+    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.11, darkAlpha: 0.16,
     highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.22)
   /// Track behind progress bars.
   public static let track = dynamic(
-    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.06, darkAlpha: 0.08,
+    light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.10, darkAlpha: 0.12,
     highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.2)
 
   /// Colours that draw text. Each reaches 4.5:1 on the canvas and on cards, and 7:1 with
@@ -228,6 +228,8 @@ public enum LedgerTheme {
     public static let sidebarRow: CGFloat = 27
     public static let iconTile: CGFloat = 28
     public static let inspectorWidth: CGFloat = 320
+    /// The widest a paragraph of explanation runs (about 80 characters).
+    public static let readableWidth: CGFloat = 560
   }
 
   // MARK: Type
