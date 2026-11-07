@@ -14,8 +14,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# A PR's newer push cancels its older run. Pushes to main and tags get a group per commit, so
+# their runs never cancel or replace each other.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
