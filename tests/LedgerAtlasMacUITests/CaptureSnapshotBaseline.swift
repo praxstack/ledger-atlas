@@ -12,9 +12,9 @@ import Testing
 /// Two readings per capture, so a change in words and a change in looks are both caught:
 ///
 /// - **Text**: a hash of what the screen says (the Accessibility text the capture test already
-///   reads), with digits, month and day names, relative days, UUIDs and temp paths masked. The
-///   demo ledger's rows are fixed, but the screens use today's date, so the text would otherwise
-///   change every day. The hash must match exactly.
+///   reads), with digits, month and day names, relative days, UUIDs, object addresses and temp
+///   paths masked. The demo ledger's rows are fixed, but the screens use today's date, so the text
+///   would otherwise change every day. The hash must match exactly.
 /// - **Looks**: a 64-bit difference hash of the PNG (9×8 greyscale, each bit says whether a
 ///   pixel is brighter than its right neighbour). Hamming distance up to `looksTolerance` bits
 ///   passes, so anti-aliasing, a changed digit or a moved scroll bar don't fail; a moved
@@ -102,6 +102,8 @@ final class CaptureSnapshots {
 
   static func normalise(_ lines: [String]) -> String {
     let masks: [(String, String)] = [
+      // Object addresses in Accessibility descriptions, e.g. <NSAccessibilitySegment: 0x6000…>.
+      (#"0x[0-9a-fA-F]+"#, "ADDR"),
       (#"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#, "UUID"),
       (#"(/private)?/var/folders/\S+"#, "TMPPATH"),
       (#"\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b"#, "MONTH"),
