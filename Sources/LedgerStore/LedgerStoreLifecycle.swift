@@ -357,12 +357,16 @@ public enum LedgerStoreLifecycle {
   private static func upgrade(
     _ source: PinnedFile, at url: URL, lease: LifecycleLease, hook: TestHook?
   ) throws -> Result {
-    // The recovery image, the scratch migration and the replacement: three copies at most.
-    try requireMigrationSpace(source.descriptor, copies: 3)
     let destination = try Destination(url)
     defer { Darwin.close(destination.parentDescriptor) }
     let recoveryURL = recoveryImageURL(for: url)
     let recoveryLeaf = recoveryURL.lastPathComponent
+    // The recovery image, the scratch migration and the replacement: three copies at most. An
+    // upgrade resumed after its recovery image was published reuses that image (it is
+    // validated below), so it needs room for the other two.
+    try requireMigrationSpace(
+      source.descriptor,
+      copies: entryExists(recoveryLeaf, in: destination.parentDescriptor) ? 2 : 3)
     var temporaryRecovery: TemporaryFile?
     var recoveryPublished = false
     var didPublishRecovery = false
@@ -1824,10 +1828,13 @@ public enum LedgerStoreLifecycle {
     let root = FileManager.default.temporaryDirectory.path
     removeAbandonedMigrations(in: root)
     var template = Array((root + "/" + scratchPrefix + "XXXXXX").utf8CString)
-    guard let made = template.withUnsafeMutableBufferPointer({ mkdtemp($0.baseAddress!) }) else {
+    // The path is read inside the closure: mkdtemp's result points into `template`'s buffer.
+    let made: String? = template.withUnsafeMutableBufferPointer { buffer in
+      mkdtemp(buffer.baseAddress!).map { String(cString: $0) }
+    }
+    guard let directory = made else {
       throw errno == ENOSPC ? Error.insufficientSpace : Error.invalidStore
     }
-    let directory = String(cString: made)
     let scratch = directory + "/" + scratchName
     let lock = Darwin.open(
       directory + "/" + scratchLockName, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
@@ -2237,13 +2244,36 @@ public enum LedgerStoreLifecycle {
     }
 
     func beginWrite(of data: Data) {
+      releaseCopySource()
       expectedContent = .data(data)
       authoredLength = 0
     }
 
+    /// Keeps its own descriptor for the source, so a copy cut short can still be checked against
+    /// it and neutralized after the caller has closed the source (a scratch migration, #180).
     func beginCopy(from source: Int32) throws {
-      expectedContent = .descriptor(source, identity: try LedgerStoreLifecycle.identity(of: source))
+      releaseCopySource()
+      let owned = dup(source)
+      guard owned >= 0 else { throw Error.publicationFailed }
+      do {
+        expectedContent = .descriptor(owned, identity: try LedgerStoreLifecycle.identity(of: owned))
+      } catch {
+        Darwin.close(owned)
+        throw error
+      }
       authoredLength = 0
+    }
+
+    /// The copy finished and its state is recorded: the file is exactly `lastAuthoredState`, so
+    /// the source is no longer needed to recognise it, and its space can be freed.
+    func finishCopy() {
+      releaseCopySource()
+      expectedContent = .complete
+    }
+
+    private func releaseCopySource() {
+      if case .descriptor(let owned, _) = expectedContent { Darwin.close(owned) }
+      expectedContent = nil
     }
 
     func recordAuthoredBytes(_ count: Int) {
@@ -2269,6 +2299,7 @@ public enum LedgerStoreLifecycle {
           try? unlinkIfStillBoundAndEmpty()
         }
       }
+      releaseCopySource()
       Darwin.close(descriptor)
     }
 
@@ -2312,6 +2343,10 @@ public enum LedgerStoreLifecycle {
           try LedgerStoreLifecycle.prefixMatches(
             descriptor, source: source, length: authoredLength)
         else { throw Error.pathChanged }
+      case .complete:
+        guard try LedgerStoreLifecycle.digest(descriptor) == lastAuthoredState.digest else {
+          throw Error.pathChanged
+        }
       }
       guard ftruncate(descriptor, 0) == 0, fsync(descriptor) == 0,
         fsync(parentDescriptor) == 0
@@ -2321,7 +2356,10 @@ public enum LedgerStoreLifecycle {
 
   private enum ExpectedTemporaryContent {
     case data(Data)
+    /// A descriptor the temporary file owns and closes.
     case descriptor(Int32, identity: stat)
+    /// A finished copy: the whole file is its last authored state.
+    case complete
   }
 
   private static func openPublished(
@@ -2718,6 +2756,7 @@ public enum LedgerStoreLifecycle {
       throw Error.publicationFailed
     }
     try temporary.recordAuthoredState()
+    temporary.finishCopy()
   }
 
   private static func filesEqual(_ lhs: Int32, _ rhs: Int32) -> Bool {
