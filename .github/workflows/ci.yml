@@ -62,7 +62,9 @@ jobs:
       contents: read
       pull-requests: read   # paths-filter lists the PR's changed files
     outputs:
-      swift: ${{ steps.filter.outputs.swift }}
+      # GitHub lists at most 3,000 files of a PR, so the filter can miss Swift changes in a
+      # bigger one; such a PR always runs the Swift jobs.
+      swift: ${{ steps.filter.outputs.swift == 'true' || github.event.pull_request.changed_files >= 3000 }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

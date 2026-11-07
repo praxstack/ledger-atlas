@@ -919,7 +919,7 @@ public struct LedgerAtlasRootView: View {
       return true
     } catch {
       LedgerWidgetAvailability.log.error(
-        "widget status \(state.rawValue, privacy: .public) not written: \(String(describing: error), privacy: .public)")
+        "widget status \(state.rawValue, privacy: .public) not written: \(String(describing: error), privacy: .private)")
       // The widget must not keep showing an open ledger's summary after the ledger closed or
       // locked, so a failed non-ready status removes the old one. The widget then shows
       // "Open Ledger Atlas to continue."
@@ -1196,7 +1196,7 @@ public struct LedgerAtlasRootView: View {
           : lifecycleFailureMessage(operation, error)
       }
       lifecycleLog.error(
-        "\(operation == .create ? "create" : "open", privacy: .public) failed: \(String(describing: error), privacy: .public)")
+        "\(operation == .create ? "create" : "open", privacy: .public) failed: \(String(describing: error), privacy: .private)")
       publishWidget(
         permissionDenied ? .permissionDenied : .reopenRequired, publisher: widgetPublisher,
         journey: journey)
