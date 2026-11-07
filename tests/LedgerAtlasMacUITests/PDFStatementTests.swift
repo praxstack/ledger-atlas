@@ -215,4 +215,15 @@ private func snapshot(
     .filter { !$0.isWhitespace }
   for row in 0..<150 { #expect(text.contains("row-\(row)-end"), "row \(row) is missing") }
   #expect(text.components(separatedBy: wide).count - 1 == 22)
+  // Present in the text is not enough: every drawn character must also sit inside its page,
+  // within the margins, so nothing is clipped at a page break.
+  for index in 0..<document.pageCount {
+    let page = try #require(document.page(at: index))
+    let printable = page.bounds(for: .mediaBox).insetBy(dx: 18, dy: 18)
+    for character in 0..<page.numberOfCharacters {
+      let box = page.characterBounds(at: character)
+      guard box.width > 0, box.height > 0 else { continue }
+      #expect(printable.contains(box), "page \(index + 1), character \(character) is off the page")
+    }
+  }
 }
