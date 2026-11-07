@@ -44,6 +44,13 @@ Swift feedback comes from the `CI` workflow on the pull request.
    **System Settings › Privacy & Security** and click **Open Anyway** (once per build).
    Alternatively: `xattr -dr com.apple.quarantine "/Applications/Ledger Atlas.app"`.
 
+### Checks after installing a new DMG
+
+- **CSV export (#170).** Open a ledger, narrow the Daily view (pick one account or type a
+  search), then **File › Export › CSV of This View…**. Open the file in Numbers or Excel: it has
+  the same rows in the same order as the screen, amounts are plain numbers (no grouping,
+  minus for money out), and a memo that starts with `=` shows as text.
+
 For a tagged release: `git tag v0.2.0 && git push origin v0.2.0` publishes a GitHub
 Release (marked pre-release) with the DMG and its SHA-256.
 
