@@ -1,5 +1,6 @@
 import Foundation
 import LedgerAtlasMacUI
+import PDFKit
 import LedgerCore
 import LedgerStore
 import Testing
@@ -192,4 +193,26 @@ private func snapshot(
   #expect(lines.count > 1)
   #expect(lines.allSatisfy(fits))
   #expect(lines.map { $0.trimmingCharacters(in: .whitespaces) }.joined() == wide)
+}
+
+/// #206 review: the real export, read back from the PDF. Wide lines sit throughout, so some
+/// wrap across a page break; every marker and every wide character must come back.
+@Test func pdfExportKeepsEveryLineAndWideCharacterAcrossPages() throws {
+  let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "ledger-atlas-wide-\(UUID().uuidString).pdf")
+  defer { try? FileManager.default.removeItem(at: url) }
+  let wide = "日本語の口座名がとても長い場合でもページの境目で切れずに全部残ることを確認するための行です"
+  var lines: [String] = []
+  for row in 0..<150 {
+    lines.append("row-\(row)-end")
+    if row % 7 == 0 { lines.append("  \(wide)") }
+  }
+  try LedgerPDFStatementExporter.export(lines: lines, to: url)
+
+  let document = try #require(PDFDocument(url: url))
+  #expect(document.pageCount > 2)
+  let text = (0..<document.pageCount).compactMap { document.page(at: $0)?.string }.joined()
+    .filter { !$0.isWhitespace }
+  for row in 0..<150 { #expect(text.contains("row-\(row)-end"), "row \(row) is missing") }
+  #expect(text.components(separatedBy: wide).count - 1 == 22)
 }

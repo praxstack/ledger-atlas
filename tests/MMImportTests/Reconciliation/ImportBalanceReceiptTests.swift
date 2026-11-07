@@ -229,9 +229,23 @@ struct ImportBalanceReceiptTests {
     try withImportedFixture { imported in
       let ledger = imported.canonicalURL
       try imported.receipt.write(besideLedgerAt: ledger)
+      let accounts = imported.snapshot.accounts
+      #expect(imported.receipt.importID == imported.importID)
       #expect(
-        ImportBalanceReceipt.read(besideLedgerAt: ledger, accounts: imported.snapshot.accounts)
+        ImportBalanceReceipt.read(
+          besideLedgerAt: ledger, accounts: accounts, latestImportID: imported.importID)
           == imported.receipt)
+      // A later import from a newer backup keeps the same account IDs, so the accounts alone
+      // can't tell the receipts apart. A sidecar left from the earlier import (say its removal
+      // failed) names an import that is no longer the ledger's newest, and is not shown.
+      #expect(
+        ImportBalanceReceipt.read(
+          besideLedgerAt: ledger, accounts: accounts, latestImportID: "a-later-import") == nil)
+      // Nor is a receipt that names no import beside a ledger that has one.
+      let unnamed = ImportBalanceReceipt(
+        importedAtEpochMilliseconds: imported.receipt.importedAtEpochMilliseconds,
+        throughDay: imported.receipt.throughDay, rows: imported.receipt.rows)
+      #expect(!unnamed.describes(accounts: accounts, latestImportID: imported.importID))
       // A replacement ledger without these accounts does not inherit the receipt.
       let other = try LedgerAccount(
         id: StableLedgerID.account(
@@ -239,7 +253,9 @@ struct ImportBalanceReceiptTests {
           localKey: String(repeating: "a", count: 64)),
         name: "Other", currencyUnit: "USD",
         origin: LedgerOrigin(id: String(repeating: "7", count: 64), label: "other"))
-      #expect(ImportBalanceReceipt.read(besideLedgerAt: ledger, accounts: [other]) == nil)
+      #expect(
+        ImportBalanceReceipt.read(
+          besideLedgerAt: ledger, accounts: [other], latestImportID: imported.importID) == nil)
       #expect(!imported.receipt.describes(accounts: []))
       // A receipt that found no account in its ledger is tied to none, so no ledger takes it.
       let unbound = ImportBalanceReceipt(
@@ -383,6 +399,7 @@ private struct ImportedFixture {
   let commitResult: ImportWorkspace.CommitResult
   let source: MoneyManagerV19SourceBalances
   let snapshot: LedgerStore.LedgerReadSnapshot
+  let importID: String?
   let receipt: ImportBalanceReceipt
 }
 
@@ -407,11 +424,14 @@ private func withImportedFixture(
   let result = try workspace.commit(handle, approval: workspace.approve(handle))
   #expect(result.status == .committed)
   let balances = workspace.sourceBalances(handle)
-  let snapshot = try LedgerStore.openReadOnly(at: canonical).readSnapshot()
+  let store = try LedgerStore.openReadOnly(at: canonical)
+  let snapshot = try store.readSnapshot()
+  let importID = store.latestImportID()
+  #expect(importID != nil)
   let built = Result {
     try ImportBalanceReceipt.build(
       source: balances, accounts: snapshot.accounts, transactions: snapshot.transactions,
-      importedAt: UTCInstant(epochMilliseconds: 1_762_000_000_000))
+      importedAt: UTCInstant(epochMilliseconds: 1_762_000_000_000), importID: importID)
   }
   let receipt =
     allowUnbuiltReceipt
@@ -422,7 +442,7 @@ private func withImportedFixture(
   try body(
     ImportedFixture(
       canonicalURL: canonical, commitResult: result, source: balances, snapshot: snapshot,
-      receipt: receipt))
+      importID: importID, receipt: receipt))
 }
 
 private func execute(at url: URL, sql: String) throws {

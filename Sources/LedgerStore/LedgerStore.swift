@@ -551,6 +551,14 @@ public final class LedgerStore {
     }
   }
 
+  /// The idempotency key of the newest import committed to this ledger, or nil when it has
+  /// none. The import balance receipt (#172) records it, so a receipt is shown only beside the
+  /// import that made it.
+  public func latestImportID() -> String? {
+    Self.scalarText(
+      "SELECT idempotency_key FROM main.import_receipt ORDER BY rowid DESC LIMIT 1", on: database)
+  }
+
   public func readSnapshot() throws -> LedgerReadSnapshot {
     do {
       try Self.execute("BEGIN", on: database)

@@ -107,6 +107,10 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
   public let throughDay: String?
   /// Plain words for where the Money Manager figure comes from, shown on the receipt.
   public let sourceRule: String
+  /// The ledger's newest import when this receipt was made (`LedgerStore.latestImportID`).
+  /// A receipt is shown again only while that is still the ledger's newest import, so a
+  /// sidecar left over from an earlier import never passes for a later one's.
+  public let importID: String?
   public let rows: [Row]
 
   public static let v19SourceRule =
@@ -114,12 +118,14 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
 
   public init(
     formatVersion: Int = Self.currentFormatVersion, importedAtEpochMilliseconds: Int64,
-    throughDay: String?, sourceRule: String = Self.v19SourceRule, rows: [Row]
+    throughDay: String?, sourceRule: String = Self.v19SourceRule, importID: String? = nil,
+    rows: [Row]
   ) {
     self.formatVersion = formatVersion
     self.importedAtEpochMilliseconds = importedAtEpochMilliseconds
     self.throughDay = throughDay
     self.sourceRule = sourceRule
+    self.importID = importID
     self.rows = rows
   }
 
@@ -137,7 +143,7 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
   /// uses, so what the receipt says equal is what the Accounts screen shows.
   public static func build(
     source: MoneyManagerV19SourceBalances, accounts: [LedgerAccount],
-    transactions: [LedgerTransactionSnapshot], importedAt: UTCInstant
+    transactions: [LedgerTransactionSnapshot], importedAt: UTCInstant, importID: String? = nil
   ) throws -> ImportBalanceReceipt {
     let sheet = try LedgerAccountBalanceSheet(accounts: accounts, transactions: transactions)
     let accountsByID = Dictionary(accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -206,7 +212,7 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     }
     return ImportBalanceReceipt(
       importedAtEpochMilliseconds: importedAt.epochMilliseconds, throughDay: source.throughDay,
-      rows: rows)
+      importID: importID, rows: rows)
   }
 
   // MARK: Saved as PDF
@@ -309,15 +315,22 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     return receipt
   }
 
-  /// `read(besideLedgerAt:)`, kept only when it describes the ledger that is open: every
-  /// account the receipt found in the ledger must still be there. A sidecar left beside a
-  /// ledger that was replaced by another backup names accounts the new ledger lacks, so it is
-  /// not shown as that ledger's receipt.
+  /// `read(besideLedgerAt:)`, kept only when it describes the ledger that is open. It must
+  /// have been made for the ledger's newest import (`latestImportID`), and every account it
+  /// found in the ledger must still be there. A sidecar left beside a ledger that was replaced,
+  /// or that a later import moved past, is not shown as that ledger's receipt, even when
+  /// removing it failed.
   public static func read(
-    besideLedgerAt ledgerURL: URL, accounts: [LedgerAccount]
+    besideLedgerAt ledgerURL: URL, accounts: [LedgerAccount], latestImportID: String?
   ) -> ImportBalanceReceipt? {
     guard let receipt = read(besideLedgerAt: ledgerURL) else { return nil }
-    return receipt.describes(accounts: accounts) ? receipt : nil
+    return receipt.describes(accounts: accounts, latestImportID: latestImportID) ? receipt : nil
+  }
+
+  /// True when the receipt was made for the import `latestImportID` names and describes
+  /// `accounts` (see `describes(accounts:)`).
+  public func describes(accounts: [LedgerAccount], latestImportID: String?) -> Bool {
+    importID == latestImportID && describes(accounts: accounts)
   }
 
   /// True when the receipt found at least one account in the ledger and every such account is

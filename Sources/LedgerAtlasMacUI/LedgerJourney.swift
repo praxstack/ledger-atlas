@@ -192,7 +192,8 @@ public final class LedgerJourney {
     let store = try LedgerStore.openReadOnly(at: canonicalDatabaseURL)
     let read = try store.readSnapshot()
     let receipt = Self.balanceReceipt(
-      for: read, sourceBalances: workspace.sourceBalances(prepared), ledgerURL: canonicalDatabaseURL)
+      for: read, sourceBalances: workspace.sourceBalances(prepared),
+      importID: store.latestImportID(), ledgerURL: canonicalDatabaseURL)
     snapshot = read
     balanceReceipt = receipt
     openedStore = store
@@ -206,7 +207,7 @@ public final class LedgerJourney {
   /// already committed, and the receipt is a courtesy on top.
   nonisolated private static func balanceReceipt(
     for snapshot: LedgerStore.LedgerReadSnapshot, sourceBalances: MoneyManagerV19SourceBalances,
-    ledgerURL: URL
+    importID: String?, ledgerURL: URL
   ) -> ImportBalanceReceipt? {
     // Whatever was beside this file before describes another import; it must not reopen as
     // this one's receipt if the new one cannot be built or saved.
@@ -214,18 +215,21 @@ public final class LedgerJourney {
     guard
       let receipt = try? ImportBalanceReceipt.build(
         source: sourceBalances, accounts: snapshot.accounts, transactions: snapshot.transactions,
-        importedAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+        importedAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+        importID: importID)
     else { return nil }
     try? receipt.write(besideLedgerAt: ledgerURL)
     return receipt
   }
 
-  /// The receipt saved beside `url`, kept only when it describes `snapshot`'s ledger.
+  /// The receipt saved beside `url`, kept only when it was made for `store`'s newest import
+  /// and describes `snapshot`'s accounts.
   private static func savedReceipt(
-    at url: URL, for snapshot: LedgerStore.LedgerReadSnapshot?
+    at url: URL, store: LedgerStore?, snapshot: LedgerStore.LedgerReadSnapshot?
   ) -> ImportBalanceReceipt? {
-    guard let snapshot else { return nil }
-    return ImportBalanceReceipt.read(besideLedgerAt: url, accounts: snapshot.accounts)
+    guard let store, let snapshot else { return nil }
+    return ImportBalanceReceipt.read(
+      besideLedgerAt: url, accounts: snapshot.accounts, latestImportID: store.latestImportID())
   }
 
   /// `approveAndOpen` with the commit and the first read off the main thread. On a real
@@ -252,7 +256,8 @@ public final class LedgerJourney {
         let read = try store.readSnapshot()
         // Built here, off the main thread: the balance sheet walks every entry.
         let receipt = Self.balanceReceipt(
-          for: read, sourceBalances: workspace.sourceBalances(prepared), ledgerURL: canonicalURL)
+          for: read, sourceBalances: workspace.sourceBalances(prepared),
+          importID: store.latestImportID(), ledgerURL: canonicalURL)
         return OpenedImport(store: store, snapshot: read, balanceReceipt: receipt)
       }.value
       // The ledger was closed, replaced or locked while this ran. The new file stays in the
@@ -284,7 +289,7 @@ public final class LedgerJourney {
     do {
       let store = try LedgerStore.openReadOnly(at: url)
       snapshot = try store.readSnapshot()
-      balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
+      balanceReceipt = Self.savedReceipt(at: url, store: store, snapshot: snapshot)
       openedStore = store
       ledgerURL = url
       canonicalURL = url
@@ -317,7 +322,7 @@ public final class LedgerJourney {
     disconnectLedger()
     lastFailure = nil
     self.snapshot = snapshot
-    balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
+    balanceReceipt = Self.savedReceipt(at: url, store: store, snapshot: snapshot)
     openedStore = store
     ledgerURL = url
     canonicalURL = url
@@ -330,7 +335,8 @@ public final class LedgerJourney {
     openedStore = nil
     application = LedgerApplication(store: store)
     snapshot = try store.readSnapshot()
-    if ledgerURL != url { balanceReceipt = Self.savedReceipt(at: url, for: snapshot) }
+    // Read again even for the same file: the receipt must still match what is now on disk.
+    balanceReceipt = Self.savedReceipt(at: url, store: store, snapshot: snapshot)
     canonicalURL = url
     ledgerURL = url
     phase = .imported
@@ -1372,7 +1378,8 @@ public final class LedgerJourney {
     if let application, ledgerURL == url {
       try application.importPackage(manifest: manifest, payload: payload)
       snapshot = try application.snapshot()
-      balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
+      balanceReceipt = Self.savedReceipt(
+        at: url, store: mutableStore ?? openedStore, snapshot: snapshot)
       phase = .imported
       return
     }
@@ -1382,7 +1389,7 @@ public final class LedgerJourney {
     mutableStore = store
     self.application = application
     snapshot = try application.snapshot()
-    balanceReceipt = Self.savedReceipt(at: url, for: snapshot)
+    balanceReceipt = Self.savedReceipt(at: url, store: store, snapshot: snapshot)
     canonicalURL = url
     ledgerURL = url
     phase = .imported

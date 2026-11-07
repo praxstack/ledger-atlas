@@ -104,9 +104,12 @@ public enum LedgerPDFStatementExporter {
       let graphics = NSGraphicsContext(cgContext: context, flipped: true)
       NSGraphicsContext.saveGraphicsState()
       NSGraphicsContext.current = graphics
-      let text = pageLines.joined(separator: "\n")
-      NSAttributedString(string: text, attributes: attributes).draw(
-        in: CGRect(x: 36, y: 36, width: pageSize.width - 72, height: pageSize.height - 72))
+      // Each line at its own fixed baseline: drawn as one block, a fallback font with taller
+      // lines (CJK, say) would push the page's last lines past its rectangle and clip them.
+      for (row, line) in pageLines.enumerated() {
+        NSAttributedString(string: line, attributes: attributes).draw(
+          at: CGPoint(x: 36, y: 36 + CGFloat(row) * lineHeight))
+      }
       NSGraphicsContext.restoreGraphicsState()
       context.endPDFPage()
     }
