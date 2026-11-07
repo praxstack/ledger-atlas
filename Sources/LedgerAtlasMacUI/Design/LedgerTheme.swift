@@ -125,10 +125,7 @@ public enum LedgerTheme {
 
   /// Category and account colours: muted, equal in perceived lightness, used only as
   /// small keys, thin bars and soft tiles.
-  public static let palette: [Swatch] = [
-    (0x5B7FB8, 0x7D9FD6), (0xC27A46, 0xDF9764), (0x6E9E72, 0x8CBF90), (0xC2A245, 0xDCBD60),
-    (0xA7709D, 0xC690BB), (0x5E9EA3, 0x7DBDC2), (0xB5666A, 0xD68589), (0x8B8F97, 0xA3A7AE),
-  ].map { light, dark in
+  public static let palette: [Swatch] = paletteHex.map { light, dark in
     Swatch(
       color: dynamic(light: light, dark: dark),
       soft: dynamic(
@@ -170,8 +167,14 @@ public enum LedgerTheme {
     return result
   }
 
+  /// The palette's light and dark values, in order.
+  static let paletteHex: [(light: UInt32, dark: UInt32)] = [
+    (0x5B7FB8, 0x7D9FD6), (0xC27A46, 0xDF9764), (0x6E9E72, 0x8CBF90), (0xC2A245, 0xDCBD60),
+    (0xA7709D, 0xC690BB), (0x5E9EA3, 0x7DBDC2), (0xB5666A, 0xD68589), (0x8B8F97, 0xA3A7AE),
+  ]
+
   /// The palette's rose, kept off account keys because it reads as a warning beside red figures.
-  static let roseIndex = 6
+  static let roseIndex = paletteHex.firstIndex { $0.light == 0xB5666A } ?? 6
 
   static func stableHash(_ key: String) -> UInt64 {
     // FNV-1a: stable across launches, unlike `Hasher`.

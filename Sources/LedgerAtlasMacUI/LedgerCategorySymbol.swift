@@ -5,7 +5,8 @@ import LedgerCore
 /// Categories are named by the person, so the match is by common words in the name; anything
 /// unrecognised falls back to the transaction kind's symbol.
 enum LedgerCategorySymbol {
-  /// Words that pick a symbol. A word matches a key exactly, or starts with it when the key
+  /// Words that pick a symbol; the first rule with a matching word wins, so money-owed words
+  /// (loan, credit) come before what they pay for (bill). A word matches a key exactly, or starts with it when the key
   /// has four letters or more ("groceries" matches "grocer", "card" does not match "car").
   static let rules: [(symbol: String, keys: [String])] = [
     ("fork.knife", ["food", "dining", "dine", "restaurant", "eat", "eating", "meal", "meals", "lunch", "dinner", "breakfast", "cafe", "coffee", "snack", "snacks", "swiggy", "zomato"]),
@@ -17,6 +18,7 @@ enum LedgerCategorySymbol {
     ("bag.fill", ["shop", "shopping", "cloth", "clothes", "apparel", "fashion", "amazon"]),
     ("cross.case.fill", ["health", "medical", "doctor", "pharma", "medicine", "hospital", "clinic", "dental"]),
     ("figure.run", ["fitness", "gym", "sport", "sports", "yoga"]),
+    ("creditcard.fill", ["emi", "loan", "loans", "credit", "fees", "charges"]),
     ("bolt.fill", ["utilit", "electric", "electricity", "power", "water", "gas", "bill", "bills"]),
     ("wifi", ["internet", "wifi", "broadband"]),
     ("phone.fill", ["phone", "mobile", "recharge"]),
@@ -28,9 +30,8 @@ enum LedgerCategorySymbol {
     ("building.columns.fill", ["tax", "taxes", "govt", "government"]),
     ("repeat", ["subscript", "membership"]),
     ("pawprint.fill", ["pet", "pets"]),
-    ("scissors", ["beauty", "salon", "grooming", "haircut", "personal"]),
+    ("scissors", ["beauty", "salon", "grooming", "haircut"]),
     ("figure.2.and.child.holdinghands", ["kid", "kids", "child", "children", "baby", "family"]),
-    ("creditcard.fill", ["emi", "loan", "loans", "credit", "fees", "charges"]),
   ]
 
   /// The symbol for a category name, or for the kind when there is no category or no match.

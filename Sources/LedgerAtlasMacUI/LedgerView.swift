@@ -104,6 +104,12 @@ struct LedgerView: View {
               } else {
                 opensFormWhenEditing = true
                 beginEditing()
+                // If editing can't begin (ledger busy or locked), forget the request, so a
+                // later Begin editing never pops the form up unasked.
+                Task {
+                  try? await Task.sleep(for: .seconds(3))
+                  opensFormWhenEditing = false
+                }
               }
             } label: {
               Label(Self.newTransactionTitle, systemImage: "plus")
@@ -231,6 +237,7 @@ struct LedgerView: View {
       opensFormWhenEditing = false
       showingTransactionForm = true
     }
+    .onDisappear { opensFormWhenEditing = false }
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
