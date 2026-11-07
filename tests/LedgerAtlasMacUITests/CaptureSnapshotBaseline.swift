@@ -23,7 +23,8 @@ import Testing
 /// Every run writes the current readings to `ui-captures/capture-baseline.json` and the
 /// normalised text of each capture to `ui-captures/snapshot-text/` in the CI artifact. To update
 /// the committed baseline after a deliberate change, download that `ui-captures` artifact from
-/// the run and copy its `capture-baseline.json` over `Fixtures/capture-baseline.json`.
+/// the run and copy its `capture-baseline.json` over `Fixtures/capture-baseline.json`, or run
+/// `scripts/ci/update-capture-baseline.sh <run-id>`, which does both.
 @MainActor
 final class CaptureSnapshots {
   static let looksTolerance = 10
