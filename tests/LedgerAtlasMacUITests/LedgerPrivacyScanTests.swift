@@ -150,14 +150,17 @@ func theAppCannotOpenNetworkConnections(_ file: String) throws {
 /// no interpolation, plus the listed exceptions.
 @Test func shippedCodeDoesNotLogLedgerData() throws {
   let console = try Regex(
-    #"(?<![A-Za-z_.])(print|NSLog|os_log|debugPrint|dump|fputs)\(|\bOSLog\(|FileHandle\.standard(Error|Output)"#)
+    #"(^|[^A-Za-z0-9_.])(print|NSLog|os_log|debugPrint|dump|fputs)\(|\bOSLog\(|FileHandle\.standard(Error|Output)"#)
   let logCall = try Regex(#"\b\w*[lL]og(ger)?\.(log|trace|debug|info|notice|warning|error|critical|fault)\("#)
   let allowedConsole = ["[demo-tour]"]
   // Log calls that interpolate, each with why it carries no ledger value.
   let allowedInterpolation = [
     // The operation name ("create" or "open") is public; the error's description, which for a
     // file error carries the ledger's path, is `privacy: .private`, so the system log redacts it.
-    "LedgerAtlasRootView.swift: lifecycleLog.error("
+    "LedgerAtlasRootView.swift: lifecycleLog.error(",
+    // The widget status name is public; the error's description, which for a file error
+    // carries the App Group container's path (with the user's name), is `privacy: .private`.
+    "LedgerAtlasRootView.swift: LedgerWidgetAvailability.log.error(",
   ]
   var offenders: [String] = []
   for (file, lines) in try shippedSources() {
@@ -190,6 +193,10 @@ func theAppCannotOpenNetworkConnections(_ file: String) throws {
         let interpolates = statement.contains("\\(")
         if interpolates, !allowedInterpolation.contains(where: { "\(file): \(code)".hasPrefix($0) }) {
           offenders.append("\(file):\(index + 1): log message interpolates a value: \(code)")
+        }
+        // Even an allowed message must keep an error's description private.
+        if statement.contains("String(describing: error), privacy: .public") {
+          offenders.append("\(file):\(index + 1): an error's description is logged publicly")
         }
       }
     }
