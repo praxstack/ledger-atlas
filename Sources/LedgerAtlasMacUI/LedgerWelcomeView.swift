@@ -125,13 +125,16 @@ struct LedgerWelcomeView: View {
   private var alternatives: some View {
     HStack(spacing: LedgerTheme.Space.s) {
       Button("Start an empty ledger", action: createLedger)
+        .accessibilityLabel("Start an empty ledger")
         .accessibilityHint("Makes a new, empty Ledger Atlas ledger.")
       Text("·").foregroundStyle(LedgerTheme.inkTertiary).accessibilityHidden(true)
       // The exact title "Open a ledger" is what the empty-state checks look for.
       Button("Open a ledger", action: openLedger)
+        .accessibilityLabel("Open a ledger")
         .accessibilityHint("Opens an existing Ledger Atlas ledger. A ledger from elsewhere is copied in.")
       Text("·").foregroundStyle(LedgerTheme.inkTertiary).accessibilityHidden(true)
       Button("Try sample data", action: trySampleData)
+        .accessibilityLabel("Try sample data")
         .accessibilityHint("Opens a made-up household ledger to explore. Your data is not touched.")
     }
     .buttonStyle(.link)
