@@ -423,7 +423,7 @@ struct LedgerBrowseList: View {
           }
           .buttonStyle(.plain)
           .accessibilityLabel(
-            "\(Self.dayTitle(day.date)), \(day.count) transactions. \(Self.describe(day.totals))")
+            "\(Self.dayTitle(day.date)), \(day.count) transactions. \(Self.describe(day.totals, hidingAmounts: formatter.hidesAmounts))")
           .accessibilityAddTraits(filter.day == day.date ? .isSelected : [])
         }
       }
@@ -797,10 +797,12 @@ struct LedgerBrowseList: View {
     .joined(separator: "; ")
   }
 
-  static func describe(_ totals: [LedgerBrowseTotal]) -> String {
-    totals.map { total in
-      let income = total.income?.rawLiteral ?? "unavailable"
-      let expense = total.expense?.rawLiteral ?? "unavailable"
+  static func describe(_ totals: [LedgerBrowseTotal], hidingAmounts: Bool) -> String {
+    let money = LedgerDisplayFormatter(
+      locale: Locale(identifier: "en_US_POSIX"), hidesAmounts: hidingAmounts)
+    return totals.map { total in
+      let income = total.income.map { money.plain($0) } ?? "unavailable"
+      let expense = total.expense.map { money.plain($0) } ?? "unavailable"
       return "\(total.unitCode) in \(income), out \(expense)"
     }
     .joined(separator: "; ")

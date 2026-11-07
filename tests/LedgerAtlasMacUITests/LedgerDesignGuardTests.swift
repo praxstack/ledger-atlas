@@ -71,11 +71,11 @@ private struct DesignGuardRule {
       "raw amount",
       fix: "Show money with MoneyText, or formatter.parts(_:).text in a sentence.",
       patterns: [#"\\\([\w.$]*rawLiteral\)"#],
-      remaining: [
-        "InsightsSurface.swift": 1, "LedgerJourney.swift": 4, "LedgerSession.swift": 1,
-        "PlanningViews.swift": 6, "TransactionForms.swift": 2,
-      ],
-      exempt: ["InsightsReport.swift": "plain-text export, not shown on screen"]),
+      remaining: ["LedgerJourney.swift": 1, "TransactionForms.swift": 2],
+      exempt: [
+        "InsightsReport.swift": "plain-text export, not shown on screen",
+        "LedgerDisplayFormatter.swift": "is the formatter",
+      ]),
     DesignGuardRule(
       "raw caption font",
       fix: "Use LedgerTheme.Typeface.caption (Subheadline); .caption is below the design's size.",

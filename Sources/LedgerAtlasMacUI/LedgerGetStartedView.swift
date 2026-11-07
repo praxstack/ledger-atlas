@@ -5,8 +5,10 @@ import SwiftUI
 /// Bringing over the Money Manager history comes first and shows as done once a ledger is
 /// open; the rest open the screen where that step happens.
 struct LedgerGetStartedView: View {
-  /// A ledger is open, so the history has been brought over (or the person started fresh).
+  /// A ledger is open, so the later steps have somewhere to go.
   let hasLedger: Bool
+  /// The open ledger came from an import, so step one is done.
+  let historyImported: Bool
   let importDisabled: Bool
   let importBackup: () -> Void
   let show: (AppDestination) -> Void
@@ -68,7 +70,7 @@ struct LedgerGetStartedView: View {
         .foregroundStyle(LedgerTheme.ink)
         .accessibilityAddTraits(.isHeader)
       Text(
-        hasLedger
+        historyImported
           ? "Your history is here. Four short steps keep it up to date and safe."
           : "Start by bringing over your Money Manager history; the rest takes a few minutes."
       )
@@ -83,14 +85,14 @@ struct LedgerGetStartedView: View {
   private var importStep: some View {
     HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
       LedgerIconTile(
-        .symbol(hasLedger ? "checkmark" : "square.and.arrow.down"),
-        swatch: hasLedger ? LedgerTheme.palette[2] : LedgerTheme.palette[5])
+        .symbol(historyImported ? "checkmark" : "square.and.arrow.down"),
+        swatch: historyImported ? LedgerTheme.palette[2] : LedgerTheme.palette[5])
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text("Bring over your Money Manager history")
           .font(LedgerTheme.Typeface.bodyEmphasis)
           .foregroundStyle(LedgerTheme.ink)
         Text(
-          hasLedger
+          historyImported
             ? "Done. Import Review shows what came across."
             : "Choose the backup, check it, then approve. The backup is only read, never changed."
         )
@@ -99,7 +101,7 @@ struct LedgerGetStartedView: View {
         .fixedSize(horizontal: false, vertical: true)
       }
       Spacer(minLength: LedgerTheme.Space.m)
-      if hasLedger {
+      if historyImported {
         Button("Open Import Review") { show(.importReview) }
           .buttonStyle(LedgerSecondaryButtonStyle())
           .accessibilityLabel("Open Import Review")
@@ -115,7 +117,7 @@ struct LedgerGetStartedView: View {
     }
     .padding(LedgerTheme.Space.l)
     .accessibilityElement(children: .contain)
-    .accessibilityLabel(hasLedger ? "Step 1, done: bring over your Money Manager history" : "Step 1: bring over your Money Manager history")
+    .accessibilityLabel(historyImported ? "Step 1, done: bring over your Money Manager history" : "Step 1: bring over your Money Manager history")
   }
 
   private func row(_ step: Step) -> some View {

@@ -1,4 +1,5 @@
 import Foundation
+import LedgerCore
 import LedgerStore
 import Observation
 
@@ -63,7 +64,16 @@ package final class LedgerSession {
     struct Transaction: Identifiable, Sendable {
       let id: String
       let title: String
-      let detail: String
+      let day: String
+      let amount: CurrencyAmount
+      var detail: String { detail(hidingAmounts: false) }
+
+      /// "2026-03-01 · 12.30 USD", with the amount as bullets when amounts are hidden (#173).
+      func detail(hidingAmounts: Bool) -> String {
+        let money = LedgerDisplayFormatter(
+          locale: Locale(identifier: "en_US_POSIX"), hidesAmounts: hidingAmounts)
+        return "\(day) · \(money.plain(amount))"
+      }
     }
 
     let accounts: [Account]
@@ -85,8 +95,8 @@ package final class LedgerSession {
           title: tombstone
             ? "Tombstoned \($0.currentRevision.draft.kind.rawValue.capitalized)"
             : $0.currentRevision.draft.kind.rawValue.capitalized,
-          detail:
-            "\(String(format: "%04d-%02d-%02d", date.year, date.month, date.day)) · \(effect.amount.amount.rawLiteral) \(effect.amount.unitCode)"
+          day: String(format: "%04d-%02d-%02d", date.year, date.month, date.day),
+          amount: effect.amount
         )
       }
       undisplayedImportedEventCount = snapshot.undisplayedImportedEventCount

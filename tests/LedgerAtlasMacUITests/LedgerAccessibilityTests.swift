@@ -605,7 +605,8 @@ final class MountedRoot {
     size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
     readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil,
     appearance: LedgerProductSettings.Appearance = .system,
-    columns: NavigationSplitViewVisibility = .automatic
+    columns: NavigationSplitViewVisibility = .automatic,
+    settings: LedgerProductSettings? = nil
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
@@ -633,7 +634,7 @@ final class MountedRoot {
       appLock ?? LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
     let root = LedgerAtlasRootView(
       initialSelection: destination, appLock: lock,
-      productSettings: .init(appearance: appearance, startScreen: destination),
+      productSettings: settings ?? .init(appearance: appearance, startScreen: destination),
       bookmarkStore: bookmarks,
       // A widget store in the test folder, as the app has its App Group container. Without
       // one every screen reports "Widget status could not be published".

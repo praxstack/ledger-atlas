@@ -57,7 +57,12 @@ public final class LedgerJourney {
   private let workspace = ImportWorkspace()
   private var application: LedgerApplication?
   private var mutableStore: LedgerStore?
-  private var openedStore: LedgerStore?
+  private var openedStore: LedgerStore? {
+    didSet { hasImportedHistory = openedStore?.latestImportID() != nil }
+  }
+  /// The open ledger was made by importing a backup (it has an import receipt). False for an
+  /// empty or hand-made ledger, so Get Started doesn't mark the import step done for those.
+  package private(set) var hasImportedHistory = false
 
   public init() {}
 
@@ -1508,8 +1513,11 @@ public final class LedgerJourney {
     return try LedgerApplication(store: reader).checksum()
   }
 
-  public func rows(for destination: AppDestination) -> [SurfaceRow] {
+  /// The rows a simple surface lists. With `hidesAmounts`, every amount in them is bullets
+  /// (#173); counts and dates are left as they are.
+  public func rows(for destination: AppDestination, hidesAmounts: Bool = false) -> [SurfaceRow] {
     guard let snapshot else { return [] }
+    let money = LedgerDisplayFormatter(locale: Locale(identifier: "en_US_POSIX"), hidesAmounts: hidesAmounts)
     switch destination {
     case .overview:
       return [
@@ -1536,9 +1544,7 @@ public final class LedgerJourney {
     case .ledger:
       return snapshot.transactions.map {
         let draft = $0.currentRevision.draft
-        let amount =
-          draft.effects.first.map { "\($0.amount.amount.rawLiteral) \($0.amount.unitCode)" }
-          ?? "0"
+        let amount = draft.effects.first.map { money.plain($0.amount) } ?? money.figure("0")
         return SurfaceRow(
           id: $0.id, title: draft.kind.rawValue,
           detail: "\(amount) · \($0.currentRevision.lifecycle.rawValue)")
@@ -1576,14 +1582,13 @@ public final class LedgerJourney {
     case .installments:
       return snapshot.installmentPlans.map {
         SurfaceRow(
-          id: $0.id, title: $0.principal.amount.rawLiteral,
+          id: $0.id, title: money.plain($0.principal.amount),
           detail: "\($0.completedCount)/\($0.occurrenceCount) · \($0.lifecycle.rawValue)")
       }
     case .budgets:
       return snapshot.budgets.map {
         SurfaceRow(
-          id: $0.id, title: $0.name,
-          detail: "\($0.amount.amount.rawLiteral) \($0.amount.unitCode)")
+          id: $0.id, title: $0.name, detail: money.plain($0.amount))
       }
     case .insights:
       let unit =
@@ -1594,7 +1599,7 @@ public final class LedgerJourney {
       let activity = (report?.rows ?? []).map {
         SurfaceRow(
           id: $0.id, title: $0.label,
-          detail: "\($0.amountLiteral) \($0.unitCode) (\($0.count))")
+          detail: "\(money.figure("\($0.amountLiteral) \($0.unitCode)")) (\($0.count))")
       }
       let inventory = (report?.inventory ?? []).map {
         SurfaceRow(id: $0.id, title: $0.label, detail: "\($0.count)")
@@ -1630,7 +1635,7 @@ public final class LedgerJourney {
         analysis.append(
           SurfaceRow(
             id: "net-activity", title: "Net (income − expense)",
-            detail: "\(net.rawLiteral) \(unit)"))
+            detail: money.plain(net, unitCode: unit)))
       }
       return activity + inventory + analysis
     case .search:
