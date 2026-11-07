@@ -78,7 +78,13 @@ struct TransferSurface: View {
       ForEach(transfers, id: \.id) { transfer in
         TransferMoneyRow(transfer: transfer, accountNames: names)
       }
-      ForEach(rows.filter { !transferIDs.contains($0.id) && $0.title != "Transfer" }) { row in
+      // Rows for transfer transactions carry the transfer kind as detail; only the source
+      // records kept from a backup remain.
+      ForEach(
+        rows.filter {
+          !transferIDs.contains($0.id) && $0.detail != LedgerTransactionKind.transfer.rawValue
+        }
+      ) { row in
         LedgerRow(row.title, detail: row.detail)
           .accessibilityElement(children: .combine)
           .accessibilityLabel("\(row.title), \(row.detail)")
