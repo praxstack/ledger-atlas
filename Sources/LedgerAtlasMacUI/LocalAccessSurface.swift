@@ -10,36 +10,63 @@ struct LocalAccessSurface: View {
   @State private var isStarting = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text("Local Web Access").font(.largeTitle.bold())
-      Text("This is a temporary read-only status view on this Mac. It exposes no mutation route and contains no financial amounts, names, notes, or paths.")
-        .foregroundStyle(.secondary)
-      if let portalURL = portal.url {
-        Label("Portal running", systemImage: "network")
-        Text(portalURL.absoluteString)
-          .font(.caption.monospaced())
-          .textSelection(.enabled)
-          .accessibilityLabel("Read-only portal address")
-        HStack {
-          Button("Copy address") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(portalURL.absoluteString, forType: .string)
-            message = "Address copied."
-          }
-          Button("Stop portal", role: .destructive) {
-            portal.stop()
-            message = "Portal stopped."
-          }
-        }
-      } else {
-        Text(Self.stoppedText(portal.lastStopReason)).foregroundStyle(.secondary)
-        Button(isStarting ? "Starting…" : "Start read-only portal") { start() }
-          .disabled(isStarting)
+    LedgerCardColumn(maxWidth: 640) {
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+        Text("Local Web Access")
+          .font(LedgerTheme.Typeface.screenTitle)
+          .foregroundStyle(LedgerTheme.ink)
+          .accessibilityAddTraits(.isHeader)
+        Text("This is a temporary read-only status view on this Mac. It exposes no mutation route and contains no financial amounts, names, notes, or paths.")
+          .font(LedgerTheme.Typeface.secondary)
+          .foregroundStyle(LedgerTheme.inkSecondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
-      if let message { Text(message).foregroundStyle(.secondary).accessibilityLabel(message) }
-      Spacer()
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+        if let portalURL = portal.url {
+          HStack(spacing: LedgerTheme.Space.s) {
+            LedgerIconTile(.symbol("network"), swatch: LedgerTheme.Swatch(color: LedgerTheme.positive, soft: LedgerTheme.fieldFill))
+            Text("Portal running").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
+            LedgerBadge("Read-only", systemImage: "eye", tint: LedgerTheme.positive)
+          }
+          .accessibilityElement(children: .combine)
+          Text(portalURL.absoluteString)
+            .font(LedgerTheme.Typeface.mono)
+            .foregroundStyle(LedgerTheme.ink)
+            .textSelection(.enabled)
+            .padding(.horizontal, LedgerTheme.Space.m)
+            .padding(.vertical, LedgerTheme.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.row))
+            .accessibilityLabel("Read-only portal address")
+          HStack(spacing: LedgerTheme.Space.s) {
+            Button("Copy address") {
+              NSPasteboard.general.clearContents()
+              NSPasteboard.general.setString(portalURL.absoluteString, forType: .string)
+              message = "Address copied."
+            }
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            Button("Stop portal", role: .destructive) {
+              portal.stop()
+              message = "Portal stopped."
+            }
+            .buttonStyle(LedgerSecondaryButtonStyle())
+          }
+        } else {
+          HStack(spacing: LedgerTheme.Space.s) {
+            LedgerIconTile(.symbol("network.slash"), swatch: LedgerTheme.Swatch(color: LedgerTheme.inkSecondary, soft: LedgerTheme.fieldFill))
+            Text(Self.stoppedText(portal.lastStopReason))
+              .font(LedgerTheme.Typeface.body)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+          }
+          .accessibilityElement(children: .combine)
+          Button(isStarting ? "Starting…" : "Start read-only portal") { start() }
+            .buttonStyle(LedgerPrimaryButtonStyle())
+            .disabled(isStarting)
+        }
+        if let message { LedgerStatusLine(status: message) }
+      }
+      .ledgerCard()
     }
-    .padding(24)
     .navigationTitle("Local Web Access")
     .onDisappear { portal.stop() }
   }
