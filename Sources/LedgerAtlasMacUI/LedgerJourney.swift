@@ -522,6 +522,32 @@ public final class LedgerJourney {
       categoryID: nil, note: nil, createdAt: createdAt)
   }
 
+  package static let entryAmountNotANumberMessage =
+    "Not saved. Write the amount as a number, like 1250 or 1250.50, without commas."
+  package static let entryNotSavedMessage =
+    "Not saved: Ledger Atlas could not write this entry. Everything you typed is still here; try Save again."
+
+  /// The entry form's Save (#169): nil when the entry was written, otherwise the words the form
+  /// shows. The form stays open after a save, so it, not the window behind it, says when
+  /// nothing was written.
+  package func saveNativeEntry(
+    amountLiteral: String, kind: LedgerTransactionKind, accountID: String, categoryID: String?,
+    note: String?, createdAt: UTCInstant, submissionID: String, tags: LedgerTagLinks
+  ) -> String? {
+    guard (try? ExactDecimal(amountLiteral)) != nil else {
+      return Self.entryAmountNotANumberMessage
+    }
+    do {
+      _ = try createNativeTransaction(
+        amountLiteral: amountLiteral, kind: kind, accountID: accountID, categoryID: categoryID,
+        note: note, createdAt: createdAt, submissionID: submissionID, tags: tags)
+      return nil
+    } catch {
+      failClosed(message: "Transaction could not be saved.")
+      return Self.entryNotSavedMessage
+    }
+  }
+
   public func createNativeTransaction(
     amountLiteral: String, kind: LedgerTransactionKind, accountID: String,
     categoryID: String?, note: String?, createdAt: UTCInstant, submissionID: String? = nil,

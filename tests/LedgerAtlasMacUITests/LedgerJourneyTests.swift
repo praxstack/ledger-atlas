@@ -904,6 +904,46 @@ import Testing
   #expect(journey.snapshot?.transactions.count == before + 2)
 }
 
+/// #169: the entry form stays open after Save, so its save says when nothing was written.
+@MainActor
+@Test func theEntryFormSaveSaysWhenNothingWasWritten() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+  let journey = LedgerJourney()
+  try journey.selectSource(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: canonical, sourceTimeZone: SourceTimeZone(fixedOffsetSeconds: 0))
+  try journey.approveAndOpen(canonicalDatabaseURL: canonical)
+  try journey.performBeginEditing()
+  let account = try #require(journey.snapshot?.accounts.first)
+  let before = try #require(journey.snapshot).transactions.count
+  let checksum = try journey.checksum()
+  func save(_ amount: String) -> String? {
+    journey.saveNativeEntry(
+      amountLiteral: amount, kind: .expense, accountID: account.id, categoryID: nil,
+      note: "Chai", createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+      submissionID: UUID().uuidString, tags: .empty)
+  }
+
+  // An amount that isn't a number: the form is told, and nothing is written.
+  for amount in ["abc", "12,5,0", "1,250"] {
+    #expect(save(amount) == LedgerJourney.entryAmountNotANumberMessage)
+  }
+  #expect(try journey.checksum() == checksum)
+
+  // A good amount saves.
+  #expect(save("4.00") == nil)
+  #expect(journey.snapshot?.transactions.count == before + 1)
+
+  // The ledger can no longer be written (closed, as after a lost lease): the form is told.
+  journey.closeLedger()
+  #expect(save("4.00") == LedgerJourney.entryNotSavedMessage)
+}
+
 @MainActor
 @Test func staleEditsReportAConflictInsteadOfAGenericFailure() {
   #expect(

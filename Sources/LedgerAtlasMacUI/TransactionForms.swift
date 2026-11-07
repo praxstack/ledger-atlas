@@ -15,29 +15,21 @@ struct NativeTransactionForm: View {
   let tags: [LedgerTag]
   /// The open ledger's entries, searched for an earlier entry with the memo typed (#169).
   let entries: [LedgerTransactionSnapshot]
-  /// (submission ID, amount literal, kind, account ID, category ID, note, tags).  The submission
-  /// ID is fixed for one entry, so a repeated Save is the same submission, not a new entry.
+  /// (submission ID, amount literal, kind, account ID, category ID, note, tags), answering nil
+  /// when the entry was saved or the message to show when it was not. The submission ID is
+  /// fixed for one entry, so a repeated Save is the same submission, not a new entry.
   let onSave:
-    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> Void
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> String?
   @Environment(\.dismiss) private var dismiss
   @Environment(\.ledgerFormatter) private var formatter
   @AppStorage(Self.lastAccountKey) private var lastAccountID = ""
-  @State private var submissionID = UUID().uuidString
   @State private var isSaving = false
-  @State private var amount = ""
+  /// What this entry holds; a save that succeeds starts a fresh one.
+  @State private var entry: NativeEntryFields
   @State private var kind: LedgerTransactionKind = .expense
   @State private var accountID = ""
-  @State private var categoryID: String?
-  @State private var note = ""
-  @State private var selectedTags: Set<String> = []
-  /// Set once the person picks an account or category themselves; a suggestion never
-  /// overrides a choice.
-  @State private var accountChosen = false
-  @State private var categoryChosen = false
-  @State private var suggestion: LedgerEntrySuggestion?
   /// The account a new entry starts on: the last one saved, so a suggestion can be taken back.
   @State private var defaultAccountID = ""
-  @State private var savedCount = 0
   @FocusState private var amountFocused: Bool
 
   init(
@@ -45,7 +37,7 @@ struct NativeTransactionForm: View {
     tags: [LedgerTag] = [], entries: [LedgerTransactionSnapshot] = [],
     onSave: @escaping (
       String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks
-    ) -> Void
+    ) -> String?
   ) {
     self.accounts = accounts
     self.categories = categories
@@ -53,9 +45,11 @@ struct NativeTransactionForm: View {
     self.tags = tags
     self.entries = entries
     self.onSave = onSave
-    _amount = State(initialValue: intent?.amountLiteral ?? "")
+    var entry = NativeEntryFields()
+    entry.amount = intent?.amountLiteral ?? ""
+    entry.note = intent?.note ?? ""
+    _entry = State(initialValue: entry)
     _kind = State(initialValue: intent?.kind == .addIncome ? .income : .expense)
-    _note = State(initialValue: intent?.note ?? "")
   }
 
   private var availableCategories: [LedgerCategory] {
@@ -68,10 +62,12 @@ struct NativeTransactionForm: View {
 
   /// "Account and category from 3 Oct", while the form still shows what was suggested.
   private var suggestionText: String? {
-    guard let suggestion else { return nil }
-    let account = suggestion.accountID != nil && suggestion.accountID == accountID && !accountChosen
+    guard let suggestion = entry.suggestion else { return nil }
+    let account =
+      suggestion.accountID != nil && suggestion.accountID == accountID && !entry.accountChosen
     let category =
-      suggestion.categoryID != nil && suggestion.categoryID == categoryID && !categoryChosen
+      suggestion.categoryID != nil && suggestion.categoryID == entry.categoryID
+      && !entry.categoryChosen
     let what: String
     switch (account, category) {
     case (true, true): what = "Account and category"
@@ -89,7 +85,7 @@ struct NativeTransactionForm: View {
           "No accounts", systemImage: "rectangle.stack",
           description: Text("Create an account before entering a transaction."))
       } else {
-        TextField("Amount", text: $amount)
+        TextField("Amount", text: $entry.amount)
           .focused($amountFocused)
         Picker("Type", selection: $kind) {
           Text("Expense").tag(LedgerTransactionKind.expense)
@@ -98,7 +94,7 @@ struct NativeTransactionForm: View {
         Picker(
           "Account",
           selection: Binding(
-            get: { accountID }, set: { accountID = $0; accountChosen = true })
+            get: { accountID }, set: { accountID = $0; entry.accountChosen = true })
         ) {
           ForEach(activeAccounts, id: \.id) { account in
             Text("\(account.name) (\(account.currencyUnit))").tag(account.id)
@@ -107,14 +103,14 @@ struct NativeTransactionForm: View {
         Picker(
           "Category",
           selection: Binding(
-            get: { categoryID }, set: { categoryID = $0; categoryChosen = true })
+            get: { entry.categoryID }, set: { entry.categoryID = $0; entry.categoryChosen = true })
         ) {
           Text("No category").tag(String?.none)
           ForEach(availableCategories, id: \.id) { category in
             Text(CategoryPresentation.label(category, in: categories)).tag(Optional(category.id))
           }
         }
-        TextField("Note (optional)", text: $note)
+        TextField("Note (optional)", text: $entry.note)
         if let suggestionText {
           Text(suggestionText)
             .font(LedgerTheme.Typeface.caption)
@@ -128,25 +124,34 @@ struct NativeTransactionForm: View {
               Toggle(
                 tag.name,
                 isOn: Binding(
-                  get: { selectedTags.contains(tag.id) },
-                  set: { if $0 { selectedTags.insert(tag.id) } else { selectedTags.remove(tag.id) } }))
+                  get: { entry.selectedTags.contains(tag.id) },
+                  set: {
+                    if $0 { entry.selectedTags.insert(tag.id) } else { entry.selectedTags.remove(tag.id) }
+                  }))
             }
           }
         }
-        if savedCount > 0 {
-          Text(savedCount == 1 ? "Saved. Enter the next one." : "Saved \(savedCount). Enter the next one.")
+        if let error = entry.saveError {
+          Text(error)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.negative)
+            .fixedSize(horizontal: false, vertical: true)
+        } else if entry.savedCount > 0 {
+          Text(
+            entry.savedCount == 1
+              ? "Saved. Enter the next one." : "Saved \(entry.savedCount). Enter the next one.")
             .font(LedgerTheme.Typeface.caption)
             .foregroundStyle(LedgerTheme.inkSecondary)
         }
         HStack {
           // Escape closes; Return saves and starts the next entry with the account kept.
-          Button(savedCount == 0 ? "Cancel" : "Done", role: .cancel) { dismiss() }
+          Button(entry.savedCount == 0 ? "Cancel" : "Done", role: .cancel) { dismiss() }
             .keyboardShortcut(.cancelAction)
           Spacer()
           Button("Save") { save() }
             .keyboardShortcut(.defaultAction)
             .disabled(
-              isSaving || amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              isSaving || entry.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || accountID.isEmpty)
         }
       }
@@ -163,13 +168,15 @@ struct NativeTransactionForm: View {
       amountFocused = true
     }
     .onChange(of: kind) { _, _ in
-      if let categoryID, !availableCategories.contains(where: { $0.id == categoryID }) {
-        self.categoryID = nil
+      if let categoryID = entry.categoryID,
+        !availableCategories.contains(where: { $0.id == categoryID })
+      {
+        entry.categoryID = nil
       }
     }
     // Looked up a moment after typing stops, off the main thread: on a 100,000-entry ledger
     // the scan takes a noticeable fraction of a second.
-    .task(id: SuggestionKey(note: note, kind: kind)) {
+    .task(id: SuggestionKey(note: entry.note, kind: kind)) {
       await suggest()
     }
     .accessibilityElement(children: .contain)
@@ -181,7 +188,7 @@ struct NativeTransactionForm: View {
   }
 
   private func suggest() async {
-    let memo = note
+    let memo = entry.note
     let kind = kind
     guard !LedgerEntrySuggestion.normalizedMemo(memo).isEmpty, !entries.isEmpty else {
       withdrawSuggestion()
@@ -194,18 +201,20 @@ struct NativeTransactionForm: View {
         forMemo: memo, kind: kind, accounts: accounts, categories: categories,
         transactions: entries)
     }.value
-    guard !Task.isCancelled, memo == note, kind == self.kind else { return }
+    guard !Task.isCancelled, memo == entry.note, kind == self.kind else { return }
     withdrawSuggestion()
     guard let found else { return }
-    suggestion = found
+    entry.suggestion = found
     // Fill only what the person hasn't chosen; nothing is saved until they save.
-    if !accountChosen, let id = found.accountID, activeAccounts.contains(where: { $0.id == id }) {
+    if !entry.accountChosen, let id = found.accountID,
+      activeAccounts.contains(where: { $0.id == id })
+    {
       accountID = id
     }
-    if !categoryChosen, let id = found.categoryID,
+    if !entry.categoryChosen, let id = found.categoryID,
       availableCategories.contains(where: { $0.id == id })
     {
-      categoryID = id
+      entry.categoryID = id
     }
   }
 
@@ -213,41 +222,61 @@ struct NativeTransactionForm: View {
   /// field never keeps a suggested value without the words that say where it came from.
   /// Anything the person picked themselves stays.
   private func withdrawSuggestion() {
-    guard let old = suggestion else { return }
-    suggestion = nil
-    if !accountChosen, old.accountID != nil, accountID == old.accountID {
+    guard let old = entry.suggestion else { return }
+    entry.suggestion = nil
+    if !entry.accountChosen, old.accountID != nil, accountID == old.accountID {
       accountID = defaultAccountID
     }
-    if !categoryChosen, old.categoryID != nil, categoryID == old.categoryID {
-      categoryID = nil
+    if !entry.categoryChosen, old.categoryID != nil, entry.categoryID == old.categoryID {
+      entry.categoryID = nil
     }
   }
 
   private func save() {
     guard !isSaving else { return }
-    let cleanAmount = amount.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanAmount = entry.amount.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleanAmount.isEmpty, !accountID.isEmpty else { return }
     isSaving = true
-    let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-    let links = (try? LedgerTagLinks(Array(selectedTags))) ?? .empty
-    onSave(
-      submissionID, cleanAmount, kind, accountID, categoryID, cleanNote.isEmpty ? nil : cleanNote,
-      links)
+    defer { isSaving = false }
+    let cleanNote = entry.note.trimmingCharacters(in: .whitespacesAndNewlines)
+    let links = (try? LedgerTagLinks(Array(entry.selectedTags))) ?? .empty
+    let failure = onSave(
+      entry.submissionID, cleanAmount, kind, accountID, entry.categoryID,
+      cleanNote.isEmpty ? nil : cleanNote, links)
+    entry.finishSave(failure: failure)
+    guard failure == nil else { return }
     lastAccountID = accountID
     defaultAccountID = accountID
-    // A fresh form for the next entry: same kind and account, everything else cleared, and a
-    // new submission ID so the next Save is a new entry.
-    submissionID = UUID().uuidString
-    amount = ""
-    note = ""
-    categoryID = nil
-    selectedTags = []
-    accountChosen = false
-    categoryChosen = false
-    suggestion = nil
-    savedCount += 1
-    isSaving = false
     amountFocused = true
+  }
+}
+
+/// What one entry in the form holds (#169), and what a save keeps of it.
+struct NativeEntryFields: Equatable {
+  var submissionID = UUID().uuidString
+  var amount = ""
+  var note = ""
+  var categoryID: String?
+  var selectedTags: Set<String> = []
+  /// Set once the person picks an account or category themselves; a suggestion never
+  /// overrides a choice.
+  var accountChosen = false
+  var categoryChosen = false
+  var suggestion: LedgerEntrySuggestion?
+  /// Entries saved since the form opened, for "Saved. Enter the next one."
+  var savedCount = 0
+  /// Why the last Save did not save, shown under the form until the next Save.
+  var saveError: String?
+
+  /// After `onSave` answers. Saved (nil): a fresh entry with a new submission ID, so the next
+  /// Save is a new entry; the form keeps the kind and account. Not saved: every field and the
+  /// same submission ID stay, so nothing typed is lost and Save again is the same submission.
+  mutating func finishSave(failure: String?) {
+    if let failure {
+      saveError = failure
+      return
+    }
+    self = NativeEntryFields(savedCount: savedCount + 1)
   }
 }
 

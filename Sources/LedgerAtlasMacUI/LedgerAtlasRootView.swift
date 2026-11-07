@@ -1385,15 +1385,11 @@ public struct LedgerAtlasRootView: View {
             createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
         },
         createTransaction: { submissionID, amount, kind, accountID, categoryID, note, tags in
-          do {
-            _ = try journey.createNativeTransaction(
-              amountLiteral: amount, kind: kind, accountID: accountID,
-              categoryID: categoryID, note: note,
-              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
-              submissionID: submissionID, tags: tags)
-          } catch {
-            journey.recordFailure("Transaction could not be saved.")
-          }
+          journey.saveNativeEntry(
+            amountLiteral: amount, kind: kind, accountID: accountID, categoryID: categoryID,
+            note: note,
+            createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+            submissionID: submissionID, tags: tags)
         },
         createSplit: { draft in
           do {

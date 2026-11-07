@@ -26,8 +26,9 @@ struct LedgerView: View {
   let tombstone: (String) -> Void
   let copy: (String) -> Void
   let addMacTransaction: (String) -> Void
+  /// Answers nil when saved, or the message the entry form shows when not.
   let createTransaction:
-    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> Void
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> String?
   let createSplit: (LedgerSplitDraft) -> Void
   var tags: [LedgerTag] = []
   var revisionTags: [String: LedgerTagLinks] = [:]
@@ -153,8 +154,10 @@ struct LedgerView: View {
         accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
         entries: transactions,
         onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
-          createTransaction(submissionID, amount, kind, accountID, categoryID, note, links)
-          if intentRequest != nil { consumeIntent() }
+          let failure = createTransaction(
+            submissionID, amount, kind, accountID, categoryID, note, links)
+          if failure == nil, intentRequest != nil { consumeIntent() }
+          return failure
         })
     }
     .sheet(isPresented: $showingSplitForm) {
