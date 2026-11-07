@@ -1,6 +1,6 @@
 # Agent Skills — Super-Pro Developer Workflow
 
-This repository ships a curated, project-local skill library under `.agents/skills/` so Cloud Agents and local Cursor sessions share the same workflows.
+This repository installs a curated, project-local skill library under `.agents/skills/` so Cloud Agents and local Cursor sessions share the same workflows. The library is not committed (many packs carry their own licences, #185): `./scripts/install-skills.sh` recreates it from `skills-lock.json`, and the Cursor environment runs it after checkout.
 
 ## 2026 architecture
 
@@ -210,12 +210,9 @@ Matt Pocock skills read from `docs/agents/issue-tracker.md`, `triage-labels.md`,
 
 **Ledger Atlas (this repo)**
 ```bash
-npm ci
-npm run dev          # http://localhost:3000
-npm test
-npm run typecheck
-npm run lint
-npm run build
+./scripts/bootstrap.sh
+./scripts/verify.sh --fast   # ruff, pytest, swift build + test (Swift needs macOS)
+swift run mmctl
 ```
 
 ## Install / update skills
@@ -323,7 +320,7 @@ For project-local browser verification harnesses, run `/create-verification-skil
 ## Directory layout
 
 ```
-.agents/skills/          # Project skills (committed — works in Cloud Agents)
+.agents/skills/          # Project skills (installed, gitignored; recreated by install-skills.sh)
   find-skills/
   agent-browser/
   poteto-mode/
@@ -352,4 +349,4 @@ CLAUDE.md                # Agent skills entry point
 - `agent-browser` CLI: install with `npm install -g agent-browser --prefix ~/.npm-global` then `agent-browser install`.
 - gstack's browse binary is installed globally; browser QA skills need Playwright/Chrome.
 - Review skill security assessments at [skills.sh](https://skills.sh) before enabling in sensitive repos.
-- ESLint ignores `.agents/**` and `vendor/**` — `npm run lint` only checks app source.
+- `.agents/` and `vendor/` are gitignored, so scanners and linters only see first-party code.

@@ -123,10 +123,14 @@ extension MoneyManagerV19Semantics {
     return try? SourceLocalDate(year: civil.year, month: civil.month, day: civil.day)
   }
 
+  /// A preserved transaction row that should have become a ledger event. The import still
+  /// proceeds (the row is kept as a sidecar), but the result cannot be called lossless, and the
+  /// review counts the row as unresolved. A same-account transfer is excluded on purpose: it moves
+  /// no money, so keeping its legs as source records loses nothing.
   static func blocksLosslessCertification(_ reason: MoneyManagerV19BlockReason) -> Bool {
     switch reason {
     case .unknownTransactionType, .unsupportedTransactionType, .transferDirectionUnproven,
-      .flaggedDeleted:
+      .flaggedDeleted, .missingRequiredField, .unresolvedCategory:
       true
     default:
       false
