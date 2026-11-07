@@ -269,6 +269,26 @@
     "looks" : "80802c2f77618180",
     "text" : "16bca73a8e572feea43419a5c6b2e3f554a6be07f13f37f739cd425961aa4d92"
   },
+  "key-bulk-done-dark.png" : {
+    "lines" : 175,
+    "looks" : "a68088898828888a",
+    "text" : "3f088f7a0f906306d3f87392d5e27606b5ec011b4ff009df33d3b020e5ea2c05"
+  },
+  "key-bulk-done-light.png" : {
+    "lines" : 175,
+    "looks" : "9c79614041414180",
+    "text" : "3f088f7a0f906306d3f87392d5e27606b5ec011b4ff009df33d3b020e5ea2c05"
+  },
+  "key-bulk-selection-dark.png" : {
+    "lines" : 178,
+    "looks" : "a680b88989890888",
+    "text" : "546e2cd427ac1755da311ddce55ebf19eaac0b898fb5974162c8cfb0f8f1dfe3"
+  },
+  "key-bulk-selection-light.png" : {
+    "lines" : 178,
+    "looks" : "9c794346444441c2",
+    "text" : "546e2cd427ac1755da311ddce55ebf19eaac0b898fb5974162c8cfb0f8f1dfe3"
+  },
   "key-empty-dark.png" : {
     "lines" : 97,
     "looks" : "ea98785935387892",
