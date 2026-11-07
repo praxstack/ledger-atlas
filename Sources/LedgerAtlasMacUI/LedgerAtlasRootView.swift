@@ -1893,7 +1893,13 @@ public struct LedgerAtlasRootView: View {
       .id(selection)
     } else if selection == .search {
       SearchSurface(
-        rows: journey.rows(for: .search, hidesAmounts: productSettings.hidesAmounts),
+        results: searchResults,
+        accountNames: Dictionary(
+          (journey.snapshot?.accounts ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
+        categoryNames: Dictionary(
+          (journey.snapshot?.categories ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
+        tagNames: Dictionary(
+          (journey.snapshot?.tags ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
         query: journey.searchQuery.textContains ?? journey.searchQuery.noteContains ?? "",
         emptyMessage: selection.emptyStateMessage
       ) { text in
@@ -1923,6 +1929,19 @@ public struct LedgerAtlasRootView: View {
       ) { openLedger() }
       .id(selection)
     }
+  }
+
+  /// Search matches as Transactions entries, newest first, so a result reads like its row there.
+  private var searchResults: [LedgerBrowseEntry] {
+    guard let snapshot = journey.snapshot else { return [] }
+    return LedgerBrowser(
+      transactions: LedgerApplication.search(journey.searchQuery, in: snapshot),
+      accountNames: Dictionary(snapshot.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
+      categoryNames: Dictionary(
+        snapshot.categories.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }),
+      revisionTags: snapshot.revisionTags,
+      tagNames: Dictionary(snapshot.tags.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+    ).entries
   }
 
   private var splitListing: LedgerSplitPurchaseListing? {

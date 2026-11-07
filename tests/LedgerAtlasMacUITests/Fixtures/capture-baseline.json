@@ -230,24 +230,24 @@
     "text" : "d0067620aec7e5520234570ca4b1abeec4911f2de9f509c7f951598552974661"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-dark.png" : {
-    "lines" : 218,
-    "looks" : "e0606458d04020a2",
-    "text" : "95c9760d24c01ac4ee623f5e737b2d1defb18fd0df612ce9f0439402fd162900"
+    "lines" : 216,
+    "looks" : "e2606040d04020a2",
+    "text" : "aef2e2f24dfeea4d6598739267d7435e8ec50cb02bb882ffd61221ea8194db75"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-light.png" : {
-    "lines" : 218,
-    "looks" : "9299982020a04182",
-    "text" : "95c9760d24c01ac4ee623f5e737b2d1defb18fd0df612ce9f0439402fd162900"
+    "lines" : 216,
+    "looks" : "92b39ab820a04182",
+    "text" : "aef2e2f24dfeea4d6598739267d7435e8ec50cb02bb882ffd61221ea8194db75"
   },
   "25-backup.hub-all_entries-dark.png" : {
     "lines" : 286,
     "looks" : "e0666660e26062e4",
-    "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
+    "text" : "d7edcff2851a6751c3ee85bda0519f98f16ae316fd936bd710462ba304077f46"
   },
   "25-backup.hub-all_entries-light.png" : {
     "lines" : 286,
     "looks" : "92b0b09e3cbc5c9a",
-    "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
+    "text" : "d7edcff2851a6751c3ee85bda0519f98f16ae316fd936bd710462ba304077f46"
   },
   "key-balance-receipt-dark.png" : {
     "lines" : 126,
@@ -311,23 +311,23 @@
   },
   "key-error-dark.png" : {
     "lines" : 88,
-    "looks" : "e0813878387824a2",
-    "text" : "c707cf3a96d0e87182d3aa4cbf093596065700906360a866d81ce0d9630a1a67"
+    "looks" : "e0813078387824a2",
+    "text" : "7272494512f584a6a52218a9bdad371c29dfab952c5b1c29cdad417f9204262c"
   },
   "key-error-light.png" : {
     "lines" : 88,
-    "looks" : "b06bd0d4c4c45982",
-    "text" : "c707cf3a96d0e87182d3aa4cbf093596065700906360a866d81ce0d9630a1a67"
+    "looks" : "b06bd0d4c6c45182",
+    "text" : "7272494512f584a6a52218a9bdad371c29dfab952c5b1c29cdad417f9204262c"
   },
   "key-lock-dark.png" : {
     "lines" : 87,
     "looks" : "e0813078387826a2",
-    "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
+    "text" : "9322dcf30eb213f40682e7cb459080646ef6bc7b164f26ad6d7d8ea92500c234"
   },
   "key-lock-light.png" : {
     "lines" : 87,
-    "looks" : "b061d8d4c4c45982",
-    "text" : "73d588c57f43b11328b5abdec5163c86b2da819b277ee2facab49b723d3a8647"
+    "looks" : "b061d0d4c6c45182",
+    "text" : "9322dcf30eb213f40682e7cb459080646ef6bc7b164f26ad6d7d8ea92500c234"
   },
   "key-upcoming-empty-dark.png" : {
     "lines" : 20,

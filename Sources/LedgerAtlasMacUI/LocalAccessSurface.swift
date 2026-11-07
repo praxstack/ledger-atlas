@@ -11,14 +11,14 @@ struct LocalAccessSurface: View {
 
   var body: some View {
     LedgerCardColumn(maxWidth: 640) {
-      // The window title already names the screen; no second large title in the content.
-      VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
-        Text("This is a temporary read-only status view on this Mac. It exposes no mutation route and contains no financial amounts, names, notes, or paths.")
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
+        // The window title already names the screen; no second large title in the content.
+        LedgerCardHeader("Read-only portal") { statusLabel }
+        Text("Open a status page for this ledger in a browser on this Mac. It shows counts only, never amounts, names, notes or file paths, and nothing can be changed from it. It stops when you leave this screen.")
           .font(LedgerTheme.Typeface.secondary)
           .foregroundStyle(LedgerTheme.inkSecondary)
+          .frame(maxWidth: 560, alignment: .leading)
           .fixedSize(horizontal: false, vertical: true)
-      }
-      VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
         if let portalURL = portal.url {
           HStack(spacing: LedgerTheme.Space.s) {
             LedgerIconTile(.symbol("network"), swatch: LedgerTheme.Swatch(color: LedgerTheme.positive, soft: LedgerTheme.fieldFill))
@@ -64,8 +64,23 @@ struct LocalAccessSurface: View {
       }
       .ledgerCard()
     }
-    .navigationTitle("Local Web Access")
+    .navigationTitle(AppDestination.localAccess.sidebarTitle)
     .onDisappear { portal.stop() }
+  }
+
+  /// A dot and one word, so the state reads at a glance and never by colour alone.
+  private var statusLabel: some View {
+    let running = portal.url != nil
+    return HStack(spacing: LedgerTheme.Space.xs) {
+      Image(systemName: "circle.fill")
+        .font(LedgerTheme.Typeface.caption)
+        .imageScale(.small)
+        .foregroundStyle(running ? LedgerTheme.positive : LedgerTheme.inkTertiary)
+        .accessibilityHidden(true)
+      Text(running ? "Running" : "Stopped")
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(running ? "Portal running" : "Portal stopped")
   }
 
   private func start() {

@@ -918,6 +918,27 @@ public final class LedgerJourney {
     return object?["importGraph"].map { !($0 is NSNull) } ?? false
   }
 
+  /// The Backup screen's portable-package row. An export that can't be made here (too large, has
+  /// receipts, or otherwise not representable) is a known limit with a 1:1 backup as the answer, so it
+  /// is never shown as a failed integrity check.
+  private func backupExportRow() -> SurfaceRow {
+    let detail: String
+    do {
+      try refuseWhenReceiptsArePresent()
+      let exported = try exportPackage()
+      return SurfaceRow(
+        id: "manifest", title: "Portable package",
+        detail: "Ready · schema \(exported.manifest.schemaVersion)")
+    } catch ReceiptAttachmentError.receiptsCannotTravelInPackages {
+      detail = "Has receipts · use Save 1:1 backup"
+    } catch LedgerApplication.Error.packageTooLarge {
+      detail = "Too large · use Save 1:1 backup"
+    } catch {
+      detail = "Not available · use Save 1:1 backup"
+    }
+    return SurfaceRow(id: "manifest-limit", title: "Portable package", detail: detail)
+  }
+
   package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
     if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
       return
@@ -1776,15 +1797,12 @@ public final class LedgerJourney {
           detail: $0.currentRevision.draft.note ?? $0.currentRevision.lifecycle.rawValue)
       }
     case .backupRestore:
-      let exported = try? exportPackage()
       return [
         SurfaceRow(
-          id: "schema", title: "Canonical package",
+          id: "schema", title: "Contents",
           detail:
             "\(snapshot.accounts.count) accounts · \(snapshot.transactions.count) transactions"),
-        SurfaceRow(
-          id: "manifest", title: "Integrity",
-          detail: exported.map { "schema \($0.manifest.schemaVersion)" } ?? "unavailable"),
+        backupExportRow(),
       ]
     case .importReview:
       return summary.rows.map { SurfaceRow(id: $0.label, title: $0.label, detail: $0.value) }

@@ -173,6 +173,8 @@ struct InsightsSurface: View {
       )
       .font(LedgerTheme.Typeface.caption)
       .foregroundStyle(LedgerTheme.inkTertiary)
+      // About 70 characters a line; the full card width ran to 115.
+      .frame(maxWidth: 560, alignment: .leading)
       .fixedSize(horizontal: false, vertical: true)
     }
     .ledgerCard()
