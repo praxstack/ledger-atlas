@@ -30,6 +30,8 @@ struct NativeTransactionForm: View {
   @State private var accountID = ""
   /// The account a new entry starts on: the last one saved, so a suggestion can be taken back.
   @State private var defaultAccountID = ""
+  /// The memo and kind the shown suggestion was looked up for.
+  @State private var suggestedFor: SuggestionKey?
   @FocusState private var amountFocused: Bool
 
   init(
@@ -197,6 +199,9 @@ struct NativeTransactionForm: View {
       withdrawSuggestion()
       return
     }
+    // The old suggestion goes the moment the memo or kind changes, not after the lookup, so a
+    // Save pressed while typing never carries values chosen for different words.
+    if suggestedFor != SuggestionKey(note: memo, kind: kind) { withdrawSuggestion() }
     do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
     let (accounts, categories, entries) = (accounts, categories, entries)
     let found = await Task.detached(priority: .userInitiated) {
@@ -208,6 +213,7 @@ struct NativeTransactionForm: View {
     withdrawSuggestion()
     guard let found else { return }
     entry.suggestion = found
+    suggestedFor = SuggestionKey(note: memo, kind: kind)
     // Fill only what the person hasn't chosen; nothing is saved until they save.
     if !entry.accountChosen, let id = found.accountID,
       activeAccounts.contains(where: { $0.id == id })
@@ -225,6 +231,7 @@ struct NativeTransactionForm: View {
   /// field never keeps a suggested value without the words that say where it came from.
   /// Anything the person picked themselves stays.
   private func withdrawSuggestion() {
+    suggestedFor = nil
     guard let old = entry.suggestion else { return }
     entry.suggestion = nil
     if !entry.accountChosen, old.accountID != nil, accountID == old.accountID {
@@ -237,6 +244,10 @@ struct NativeTransactionForm: View {
 
   private func save() {
     guard !isSaving else { return }
+    // Return can come before the lookup task has run for the latest keystroke.
+    if entry.suggestion != nil, suggestedFor != SuggestionKey(note: entry.note, kind: kind) {
+      withdrawSuggestion()
+    }
     let cleanAmount = entry.amount.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleanAmount.isEmpty, !accountID.isEmpty else { return }
     isSaving = true
