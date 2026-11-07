@@ -192,7 +192,8 @@ private struct RecurrenceRow: View {
       }
       .ledgerRowActionsMenu()
       .shownWhileEditing(isEditing)
-      .accessibilityLabel("Actions for recurrence rule")
+      .accessibilityLabel(
+        "Actions for \(categoryName ?? rule.kind.rawValue.capitalized), \(formatter.amount(rule.amount))")
     }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(

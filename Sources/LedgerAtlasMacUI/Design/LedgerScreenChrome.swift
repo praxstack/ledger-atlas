@@ -338,6 +338,8 @@ struct LedgerRowActionsLabel: View {
     Image(systemName: "ellipsis.circle")
       .font(LedgerTheme.Typeface.body)
       .foregroundStyle(LedgerTheme.inkSecondary)
+      .frame(minWidth: 24, minHeight: 24)
+      .contentShape(Rectangle())
       .accessibilityHidden(true)
   }
 }
