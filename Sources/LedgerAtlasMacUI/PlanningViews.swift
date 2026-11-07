@@ -145,7 +145,7 @@ private struct RecurrenceRow: View {
           toggle(revised)
         }
       }
-      .disabled(!isEditing)
+      .shownWhileEditing(isEditing)
       .accessibilityLabel("Actions for recurrence rule")
     }
     .accessibilityElement(children: .combine)

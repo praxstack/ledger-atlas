@@ -32,6 +32,10 @@ public enum LedgerTheme {
   public static let hairlineSoft = dynamic(
     light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.045, darkAlpha: 0.05,
     highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.2)
+  /// A card's soft drop shadow: light mode only (dark cards are lifted by their fill).
+  public static let cardShadow = dynamic(
+    light: 0x000000, dark: 0x000000, lightAlpha: 0.05, darkAlpha: 0,
+    highContrastLightAlpha: 0.09)
   /// Fill for fields, chips and unselected segmented items.
   public static let fieldFill = dynamic(
     light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.045, darkAlpha: 0.07,
@@ -107,6 +111,7 @@ public enum LedgerTheme {
       ("hairlineSoft", hairlineSoft), ("fieldFill", fieldFill), ("fieldFillPressed", fieldFillPressed),
       ("accentSoft", accentSoft), ("accentPressed", accentPressed), ("onAccent", onAccent),
       ("track", track), ("positiveSoft", positiveSoft), ("inkSoft", inkSoft),
+      ("cardShadow", cardShadow),
     ]
 
   /// Tokens that keep their colour under Increase Contrast, and why. The window surfaces
@@ -115,6 +120,7 @@ public enum LedgerTheme {
   static let increaseContrastExceptions: [String: String] = [
     "canvas": "window background", "recessed": "window background",
     "card": "already white in light mode (dark mode changes)", "onAccent": "label on the accent",
+    "cardShadow": "no shadow in dark mode (light mode deepens)",
   ]
 
   /// A palette colour with its soft fill (icon tiles, selected chips).

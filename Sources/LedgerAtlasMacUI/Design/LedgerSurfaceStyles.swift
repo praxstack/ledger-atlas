@@ -14,9 +14,7 @@ extension View {
 
   /// A grouped box for key-value rows (inspector, sheets).
   public func ledgerGroupBox() -> some View {
-    background(LedgerTheme.card, in: .rect(cornerRadius: LedgerTheme.Radius.group))
-      .overlay(
-        RoundedRectangle(cornerRadius: LedgerTheme.Radius.group).strokeBorder(LedgerTheme.hairline, lineWidth: 0.5))
+    modifier(LedgerHairlineBox(radius: LedgerTheme.Radius.group, shadow: false))
   }
 
   /// A floating glass capsule for toolbar-like control groups drawn inside content.
@@ -42,9 +40,27 @@ struct LedgerCardModifier: ViewModifier {
     content
       .padding(padding)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(LedgerTheme.card, in: .rect(cornerRadius: LedgerTheme.Radius.card))
+      .modifier(LedgerHairlineBox(radius: LedgerTheme.Radius.card, shadow: true))
+  }
+}
+
+/// A solid card fill with a one-pixel hairline edge (0.5 pt drew nothing on 1x screens) and,
+/// for raised cards, a soft light-mode shadow.
+struct LedgerHairlineBox: ViewModifier {
+  let radius: CGFloat
+  let shadow: Bool
+  @Environment(\.displayScale) private var displayScale
+
+  func body(content: Content) -> some View {
+    content
+      .background {
+        RoundedRectangle(cornerRadius: radius)
+          .fill(LedgerTheme.card)
+          .shadow(color: shadow ? LedgerTheme.cardShadow : .clear, radius: 3, y: 1)
+      }
       .overlay(
-        RoundedRectangle(cornerRadius: LedgerTheme.Radius.card).strokeBorder(LedgerTheme.hairline, lineWidth: 0.5)
+        RoundedRectangle(cornerRadius: radius)
+          .strokeBorder(LedgerTheme.hairline, lineWidth: 1 / max(displayScale, 1))
       )
   }
 }

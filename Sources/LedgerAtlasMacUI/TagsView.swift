@@ -275,7 +275,7 @@ struct TagsView: View {
               Button("Rename tag") { renamingTag = tag }
               Button("Retire tag") { if let retired = try? tag.tombstoned() { updateTag(retired) } }
             }
-            .disabled(!isEditing)
+            .shownWhileEditing(isEditing)
             .accessibilityLabel("Actions for \(tag.name)")
           }
         }
@@ -317,7 +317,7 @@ struct TagsView: View {
               if let retired = try? template.tombstoned() { saveTemplate(retired) }
             }
           }
-          .disabled(!isEditing)
+          .shownWhileEditing(isEditing)
           .accessibilityLabel("Actions for \(template.name)")
         }
         .accessibilityElement(children: .contain)
@@ -349,7 +349,7 @@ struct TagsView: View {
             Button("Edit memo") { editingMemo = memo }
             Button("Delete memo") { if let deleted = try? memo.tombstoned() { saveMemo(deleted) } }
           }
-          .disabled(!isEditing)
+          .shownWhileEditing(isEditing)
           .accessibilityLabel("Actions for memo on \(date)")
         }
         .accessibilityElement(children: .contain)
