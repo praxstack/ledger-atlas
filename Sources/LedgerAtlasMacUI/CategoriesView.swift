@@ -38,12 +38,16 @@ struct CategoriesView: View {
       if !categories.isEmpty {
         HStack(alignment: .firstTextBaseline, spacing: LedgerTheme.Space.m) {
           CategoryBreadcrumbs(path: focus.map { tree.path(to: $0.id) } ?? [], select: { focusID = $0 })
+          let visibleCount = tree.children(of: focus?.id).count
+          Spacer(minLength: LedgerTheme.Space.s)
           if let figures {
-            Text(formatter.monthTitle(figures.month))
+            Text(
+              "\(visibleCount == 1 ? "1 category" : "\(visibleCount) categories") · \(formatter.monthTitle(figures.month))")
               .font(LedgerTheme.Typeface.caption)
               .foregroundStyle(LedgerTheme.inkTertiary)
               .fixedSize()
-              .accessibilityLabel("Figures for \(formatter.monthTitle(figures.month))")
+              .accessibilityLabel(
+                "\(visibleCount) categories, figures for \(formatter.monthTitle(figures.month))")
           }
         }
         .padding(.horizontal, LedgerTheme.Space.l)
@@ -236,7 +240,7 @@ struct CategoryTreeRow: View {
     if category.lifecycle == .tombstoned { parts.append("closed") }
     parts.append(usage.total == 1 ? "1 transaction" : "\(usage.total) transactions")
     if childCount > 0 {
-      parts.append("\(usage.direct) here")
+      parts.append("\(usage.direct) not in a subcategory")
       parts.append(childCount == 1 ? "1 subcategory" : "\(childCount) subcategories")
     }
     return parts.joined(separator: " · ")
@@ -301,7 +305,7 @@ struct CategoryTreeRow: View {
     let index = siblings.firstIndex(where: { $0.id == category.id }) ?? 0
     let closeBlocker = tree.closeBlocker(for: category.id)
     let restoreBlocker = tree.restoreBlocker(for: category.id)
-    return Menu("Actions") {
+    return Menu {
       Button("Edit category…") { edit(category) }
       Button("Move up") { move(by: -1) }.disabled(index == 0)
       Button("Move down") { move(by: 1) }.disabled(index >= siblings.count - 1)
@@ -322,7 +326,10 @@ struct CategoryTreeRow: View {
           .disabled(restoreBlocker != nil)
           .help(restoreBlocker ?? "Make it available again.")
       }
+    } label: {
+      LedgerRowActionsLabel()
     }
+    .ledgerRowActionsMenu()
     .fixedSize()
     .accessibilityLabel("Actions for \(category.name)")
   }
