@@ -21,7 +21,13 @@ import Testing
   let output = try reviewDirectory()
   var index: [[String: String]] = []
   FullSizeTestWindow.drawsAsActive = true
-  defer { FullSizeTestWindow.drawsAsActive = false }
+  // An accessory process is never made the active app on the runner, so its title bar,
+  // traffic lights and selections draw in the inactive grey. A regular app can be.
+  NSApplication.shared.setActivationPolicy(.regular)
+  defer {
+    FullSizeTestWindow.drawsAsActive = false
+    NSApplication.shared.setActivationPolicy(.accessory)
+  }
 
   func record(
     _ root: MountedRoot, _ name: String, note: String, after prepare: () -> Void = {}
@@ -31,7 +37,8 @@ import Testing
       root.window.appearance = NSAppearance(named: appearance.name)
       activate(root.window)
       prepare()
-      pump(0.8)
+      // The toolbar and its glass settle a moment after a change of appearance.
+      pump(1.2)
       let (png, method) = try #require(windowPNG(root.window), "\(name) could not be captured")
       let text = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
       expectUsableReviewCapture(png, text: text, for: name)
@@ -57,43 +64,38 @@ import Testing
     try record(root, name, note: "\(destination.sidebarTitle) with the demo ledger open.")
 
     if destination == .ledger {
-      // The same screen with the first entry selected, so the inspector shows its details.
-      // The inspector hides itself in a narrow window, so it is opened from the toolbar.
-      let selected = selectFirstEntry(in: root.window)
-      #expect(selected, "no entry row to select on the Transactions screen")
+      // The same screen with an entry selected and its inspector open. Sidebar, table and a
+      // 320 pt inspector need about 1,270 pt and the runner's display is 1,024 pt wide, so this
+      // window starts with the sidebar hidden, as a person on a small screen would have it.
+      let wide = try await MountedRoot(
+        showing: .ledger, size: captureSize, appWindow: true, readsInProcess: true,
+        columns: .detailOnly)
+      defer { wide.close() }
       let hide = LedgerBrowseList.hideInspectorTitle
-      captureLog("ledger window before inspector \(root.window.frame)")
-      if !root.accessibilityElements().contains(where: { $0.spokenName == hide }),
-        !root.click(named: LedgerBrowseList.showInspectorTitle)
+      if !wide.accessibilityElements().contains(where: { $0.spokenName == hide }),
+        !wide.click(named: LedgerBrowseList.showInspectorTitle)
       {
         // The toolbar button can sit in the overflow menu at this width; ⌥⌘I is the same toggle.
         if let event = NSEvent.keyEvent(
           with: .keyDown, location: .zero, modifierFlags: [.command, .option],
-          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: root.window.windowNumber,
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: wide.window.windowNumber,
           context: nil, characters: "i", charactersIgnoringModifiers: "i", isARepeat: false,
           keyCode: 34)
         {
-          captureLog("toolbar toggle not found; ⌥⌘I handled: \(root.window.performKeyEquivalent(with: event))")
+          captureLog("toolbar toggle not found; ⌥⌘I handled: \(wide.window.performKeyEquivalent(with: event))")
         }
       }
-      try await root.settle()
-      // Sidebar, table and a 320 pt inspector need about 1,250 pt; the runner's display is
-      // 1,024 pt wide. Collapse the sidebar, as a person on a small screen would, so the shot
-      // shows the table and the inspector whole instead of a clipped window.
-      NSApplication.shared.sendAction(
-        #selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: root.window)
-      try await root.settle()
-      // Select again: showing the inspector and hiding the sidebar moved the rows.
-      #expect(selectFirstEntry(in: root.window), "no entry row to select with the inspector open")
+      try await wide.settle()
+      #expect(selectFirstEntry(in: wide.window), "no entry row to select with the inspector open")
       captureLog(
-        "ledger window with inspector \(root.window.frame), content min \(root.window.contentMinSize), "
-          + "fitting \(root.window.contentView?.fittingSize ?? .zero)")
+        "ledger window with inspector \(wide.window.frame), content min \(wide.window.contentMinSize), "
+          + "fitting \(wide.window.contentView?.fittingSize ?? .zero)")
       #expect(
-        root.accessibilityElements().contains(where: { $0.spokenName == hide }),
+        wide.accessibilityElements().contains(where: { $0.spokenName == hide }),
         "the inspector did not open, so this capture would repeat the plain Transactions shot")
       try record(
-        root, String(format: "%02d-%@-inspector", number + 1, destination.rawValue),
-        note: "Transactions with an entry selected and the inspector open.")
+        wide, String(format: "%02d-%@-inspector", number + 1, destination.rawValue),
+        note: "Transactions with the sidebar hidden, an entry selected and the inspector open.")
       // Showing it is remembered; later tests start undecided again.
       UserDefaults.standard.removeObject(forKey: LedgerBrowseList.inspectorDefaultsKey)
     }

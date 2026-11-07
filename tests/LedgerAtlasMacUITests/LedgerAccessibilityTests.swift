@@ -604,7 +604,8 @@ final class MountedRoot {
     showing destination: AppDestination, withLedger: Bool = true, appLock: LedgerAppLock? = nil,
     size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
     readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil,
-    appearance: LedgerProductSettings.Appearance = .system
+    appearance: LedgerProductSettings.Appearance = .system,
+    columns: NavigationSplitViewVisibility = .automatic
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
@@ -638,7 +639,7 @@ final class MountedRoot {
       // one every screen reports "Widget status could not be published".
       widgetProjectionPublisher: RedactedWidgetProjectionPublisher(
         store: .init(containerURL: directory)),
-      scopeStarter: { _ in true }, scopeStopper: { _ in })
+      scopeStarter: { _ in true }, scopeStopper: { _ in }, initialColumnVisibility: columns)
     // `appWindow` builds the window the way the app's WindowGroup does (full-size content
     // under a hosting controller), so the detail column starts beside the sidebar instead of
     // under it. Captures need that; the Accessibility checks don't.

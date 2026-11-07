@@ -17,6 +17,9 @@ public struct LedgerAtlasRootView: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var selection: AppDestination
+  /// Which columns show. The sidebar's own toggle and ⌃⌘S change it; tests start with the
+  /// detail alone to capture the table and inspector at a small display's width.
+  @State private var columnVisibility: NavigationSplitViewVisibility
   @State private var session: LedgerSession
   @State private var appLock: LedgerAppLock
   @State private var journey = LedgerJourney()
@@ -71,9 +74,11 @@ public struct LedgerAtlasRootView: View {
     widgetProjectionPublisher: RedactedWidgetProjectionPublisher? = nil,
     intentConsumer: @escaping () -> LedgerIntentRequest? = { nil },
     scopeStarter: @escaping (URL) -> Bool = { LedgerLocations.startAccess($0) },
-    scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) }
+    scopeStopper: @escaping (URL) -> Void = { LedgerLocations.stopAccess($0) },
+    initialColumnVisibility: NavigationSplitViewVisibility = .automatic
   ) {
     _selection = State(initialValue: initialSelection)
+    _columnVisibility = State(initialValue: initialColumnVisibility)
     _session = State(
       initialValue: LedgerSession(testingScopeStarter: scopeStarter, testingScopeStopper: scopeStopper))
     _appLock = State(initialValue: appLock)
@@ -87,7 +92,7 @@ public struct LedgerAtlasRootView: View {
   }
 
   public var body: some View {
-    NavigationSplitView {
+    NavigationSplitView(columnVisibility: $columnVisibility) {
       LedgerSidebar(
         selection: $selection, focusedAccountID: $focusedAccountID,
         accounts: appLock.isLocked ? [] : sidebarAccounts,
