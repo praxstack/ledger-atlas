@@ -231,13 +231,13 @@
   },
   "24-local_web_access.idle-passcode_off.service_stopped-dark.png" : {
     "lines" : 216,
-    "looks" : "e6606040d04020a2",
-    "text" : "19fc9841fd6375f5c355c89f741248a3a1f7befe81c68ec2339d46fb06b5f3fa"
+    "looks" : "e2606040d04020a2",
+    "text" : "aef2e2f24dfeea4d6598739267d7435e8ec50cb02bb882ffd61221ea8194db75"
   },
   "24-local_web_access.idle-passcode_off.service_stopped-light.png" : {
     "lines" : 216,
-    "looks" : "929c9ca020a04182",
-    "text" : "19fc9841fd6375f5c355c89f741248a3a1f7befe81c68ec2339d46fb06b5f3fa"
+    "looks" : "92b39ab820a04182",
+    "text" : "aef2e2f24dfeea4d6598739267d7435e8ec50cb02bb882ffd61221ea8194db75"
   },
   "25-backup.hub-all_entries-dark.png" : {
     "lines" : 286,
