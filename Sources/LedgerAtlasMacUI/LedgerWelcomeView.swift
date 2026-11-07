@@ -45,6 +45,8 @@ struct LedgerWelcomeView: View {
         .foregroundStyle(LedgerTheme.inkSecondary)
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
+        // About 480 pt, so the sentence breaks into two even lines without an orphan.
+        .frame(maxWidth: 480)
     }
   }
 

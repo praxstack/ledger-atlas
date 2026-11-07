@@ -330,3 +330,23 @@ extension View {
     if isEditing { self }
   }
 }
+
+/// The label of a row's actions menu: a quiet ellipsis instead of a bordered "Actions ⌄"
+/// button on every row. The menu's accessibility label names the row ("Actions for Cash").
+struct LedgerRowActionsLabel: View {
+  var body: some View {
+    Image(systemName: "ellipsis.circle")
+      .font(LedgerTheme.Typeface.body)
+      .foregroundStyle(LedgerTheme.inkSecondary)
+      .accessibilityHidden(true)
+  }
+}
+
+extension View {
+  /// Borderless with no disclosure arrow, so only the ellipsis shows.
+  func ledgerRowActionsMenu() -> some View {
+    menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+  }
+}
