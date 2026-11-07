@@ -376,10 +376,15 @@ private let screensWithDemoLists: Set<AppDestination> = [
   #expect(offenders.isEmpty, "\(offenders)")
 }
 
-/// Guard for not using colour alone: every coloured foreground in the app sits on text, so the meaning is in
-/// words too (errors are red text, never a red mark on its own).
+/// Guard for not using colour alone: every coloured foreground in the app sits on text, or on a
+/// symbol beside its text, so the meaning is in words too (errors are red text, never a red mark on
+/// its own). System colours are banned by the design guards, so this checks the theme's signal
+/// colours as well.
 @Test func colourIsNeverTheOnlySignal() throws {
-  let colours = [".red", ".green", ".orange", ".yellow", ".blue", ".pink", ".purple"]
+  let colours = [
+    ".red", ".green", ".orange", ".yellow", ".blue", ".pink", ".purple",
+    "LedgerTheme.negative", "LedgerTheme.warning", "LedgerTheme.positive",
+  ]
   var offenders: [String] = []
   var checked = 0
   for (file, lines) in try appSources() {
@@ -389,8 +394,10 @@ private let screensWithDemoLists: Set<AppDestination> = [
         continue
       }
       checked += 1
-      let context = lines[max(0, index - 5)...index].joined(separator: " ")
-      if !context.contains("Text(") && !context.contains("Label(") {
+      let context = lines[max(0, index - 5)...min(lines.count - 1, index + 5)].joined(separator: " ")
+      if !context.contains("Text(") && !context.contains("Label(")
+        && !context.contains("configuration.label")
+      {
         offenders.append("\(file):\(index + 1): \(line.trimmingCharacters(in: .whitespaces))")
       }
     }
@@ -608,6 +615,7 @@ final class MountedRoot {
     size: NSSize = NSSize(width: 1100, height: 900), appWindow: Bool = false,
     readsInProcess: Bool = false, prepareLedger: ((URL) throws -> Void)? = nil,
     appearance: LedgerProductSettings.Appearance = .system,
+    columns: NavigationSplitViewVisibility = .automatic,
     settings: LedgerProductSettings? = nil
   ) async throws {
     self.readsInProcess = readsInProcess
@@ -644,7 +652,7 @@ final class MountedRoot {
         store: .init(containerURL: directory)),
       scopeStarter: { _ in true }, scopeStopper: { _ in },
       // Upcoming (#171) is made for a fixed day, so what the screens say doesn't change daily.
-      today: { MountedRoot.fixedToday })
+      initialColumnVisibility: columns, today: { MountedRoot.fixedToday })
     // `appWindow` builds the window the way the app's WindowGroup does (full-size content
     // under a hosting controller), so the detail column starts beside the sidebar instead of
     // under it. Captures need that; the Accessibility checks don't.
