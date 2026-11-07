@@ -14,7 +14,7 @@ struct LocalAccessSurface: View {
       VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
         // The window title already names the screen; no second large title in the content.
         LedgerCardHeader("Read-only portal") { statusLabel }
-        Text("Open a status page for this ledger in a browser on this Mac. It shows counts only, never amounts, names, notes or file paths, and nothing can be changed from it.")
+        Text("Open a status page for this ledger in a browser on this Mac. It shows counts only, never amounts, names, notes or file paths, and nothing can be changed from it. It stops when you leave this screen.")
           .font(LedgerTheme.Typeface.secondary)
           .foregroundStyle(LedgerTheme.inkSecondary)
           .frame(maxWidth: 560, alignment: .leading)

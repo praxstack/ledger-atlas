@@ -208,6 +208,15 @@ struct DataBackedSurface: View {
 
 struct BackupSurface: View {
   @Environment(\.ledgerFormatter) private var formatter
+
+  static func exportStatusSymbol(for rowID: String) -> (symbol: String, tint: Color)? {
+    switch rowID {
+    case "manifest": ("checkmark.seal.fill", LedgerTheme.positive)
+    case "manifest-limit": ("info.circle.fill", LedgerTheme.inkSecondary)
+    case "manifest-failed": ("exclamationmark.triangle.fill", LedgerTheme.negative)
+    default: nil
+    }
+  }
   let rows: [LedgerJourney.SurfaceRow]
   let emptyMessage: String
   let lastFailure: String?
@@ -238,11 +247,10 @@ struct BackupSurface: View {
           VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
               HStack(spacing: LedgerTheme.Space.s) {
-                if row.id == "manifest" {
-                  // Healthy or not at a glance, and never by colour alone: the words say it too.
-                  let healthy = row.detail != "Unavailable"
-                  Image(systemName: healthy ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(healthy ? LedgerTheme.positive : LedgerTheme.negative)
+                if let status = Self.exportStatusSymbol(for: row.id) {
+                  // Healthy, limited or failed at a glance, and never by colour alone: the words say it too.
+                  Image(systemName: status.symbol)
+                    .foregroundStyle(status.tint)
                     .accessibilityHidden(true)
                 }
                 LedgerKeyValue(row.title, row.detail)

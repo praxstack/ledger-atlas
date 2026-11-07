@@ -815,6 +815,25 @@ public final class LedgerJourney {
     return object?["importGraph"].map { !($0 is NSNull) } ?? false
   }
 
+  /// The Backup screen's export row. A ledger that is simply too big for a portable package, or that
+  /// carries receipts, is a known limit with a 1:1 backup as the answer, not a failed integrity check.
+  private func backupExportRow() -> SurfaceRow {
+    do {
+      let exported = try exportPackage()
+      return SurfaceRow(
+        id: "manifest", title: "Integrity",
+        detail: "Exports cleanly · schema \(exported.manifest.schemaVersion)")
+    } catch ReceiptAttachmentError.receiptsCannotTravelInPackages {
+      return SurfaceRow(
+        id: "manifest-limit", title: "Portable package", detail: "Has receipts · use Save 1:1 backup")
+    } catch LedgerApplication.Error.packageTooLarge {
+      return SurfaceRow(
+        id: "manifest-limit", title: "Portable package", detail: "Too large · use Save 1:1 backup")
+    } catch {
+      return SurfaceRow(id: "manifest-failed", title: "Integrity", detail: "Unavailable")
+    }
+  }
+
   package static func packageExportFailureMessage(for error: any Swift.Error) -> String {
     if case ReceiptAttachmentError.receiptsCannotTravelInPackages = error {
       return
@@ -1673,15 +1692,12 @@ public final class LedgerJourney {
           detail: $0.currentRevision.draft.note ?? $0.currentRevision.lifecycle.rawValue)
       }
     case .backupRestore:
-      let exported = try? exportPackage()
       return [
         SurfaceRow(
           id: "schema", title: "Contents",
           detail:
             "\(snapshot.accounts.count) accounts · \(snapshot.transactions.count) transactions"),
-        SurfaceRow(
-          id: "manifest", title: "Integrity",
-          detail: exported.map { "Exports cleanly · schema \($0.manifest.schemaVersion)" } ?? "Unavailable"),
+        backupExportRow(),
       ]
     case .importReview:
       return summary.rows.map { SurfaceRow(id: $0.label, title: $0.label, detail: $0.value) }
