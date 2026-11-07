@@ -114,6 +114,8 @@ func authenticatedV19BackupReopensOnSameDevice() throws {
 // A new Mac, a wiped container or a lost Keys folder has no receipt key. The ledger is fine,
 // so it must say the key is missing, not that it is damaged, and the recovery key saved on the
 // first Mac must bring it back (#182).
+// removeKeyForTesting exists only in debug builds; the release-mode CI job skips these.
+#if DEBUG
 @Test("a missing receipt key is reported as missing, and the ledger's recovery key restores it")
 func missingReceiptKeyIsReportedAndRecoveryKeyRestoresIt() throws {
   // Its own receipt identity, so removing its key can't touch other tests' ledgers.
@@ -182,6 +184,7 @@ func recoveryKeyFileIsRefusedForAnotherLedger() throws {
     }
   }
 }
+#endif
 
 @Test("current v11 receipt verification rejects a missing external trust key")
 func currentV11RejectsMissingExternalTrustKey() throws {
