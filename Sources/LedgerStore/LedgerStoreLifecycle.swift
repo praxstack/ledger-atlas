@@ -363,7 +363,9 @@ public enum LedgerStoreLifecycle {
     let recoveryLeaf = recoveryURL.lastPathComponent
     // The recovery image, the scratch migration and the replacement: three copies at most. An
     // upgrade resumed after its recovery image was published reuses that image (it is
-    // validated below), so it needs room for the other two.
+    // validated below), so it needs room for the other two. Scratch copies a killed upgrade
+    // left behind go first, so their space counts.
+    removeAbandonedMigrations()
     try requireMigrationSpace(
       source.descriptor,
       copies: entryExists(recoveryLeaf, in: destination.parentDescriptor) ? 2 : 3)
