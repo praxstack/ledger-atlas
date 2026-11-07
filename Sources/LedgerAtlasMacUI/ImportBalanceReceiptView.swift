@@ -25,16 +25,16 @@ struct ImportBalanceReceiptView: View {
       }
       .accessibilityElement(children: .combine)
 
-      HStack(spacing: LedgerTheme.Space.s) {
-        LedgerChip("\(receipt.equalCount) match", systemImage: "checkmark.circle")
+      HStack(spacing: LedgerTheme.Space.l) {
+        summaryLabel("\(receipt.equalCount) match", systemImage: "checkmark.circle")
         if receipt.differingCount > 0 {
-          LedgerChip("\(receipt.differingCount) differ", systemImage: "exclamationmark.triangle")
+          summaryLabel("\(receipt.differingCount) differ", systemImage: "exclamationmark.triangle")
         }
         if receipt.missingFromLedgerCount > 0 {
-          LedgerChip("\(receipt.missingFromLedgerCount) not in this ledger", systemImage: "xmark.circle")
+          summaryLabel("\(receipt.missingFromLedgerCount) not in this ledger", systemImage: "xmark.circle")
         }
         if receipt.notStoredCount > 0 {
-          LedgerChip("\(receipt.notStoredCount) without a figure", systemImage: "questionmark.circle")
+          summaryLabel("\(receipt.notStoredCount) without a figure", systemImage: "questionmark.circle")
         }
       }
       .accessibilityElement(children: .combine)
@@ -130,9 +130,11 @@ struct ImportBalanceReceiptView: View {
           if let ledger = row.ledgerBalance {
             figure(ledger, unit: row.currencyUnit)
           } else {
-            Text("Not in this ledger")
-              .font(LedgerTheme.Typeface.secondary)
+            // A dash keeps the figure column's rag; the result column says why.
+            Text("—")
+              .font(LedgerTheme.Typeface.body)
               .foregroundStyle(LedgerTheme.inkTertiary)
+              .accessibilityLabel("Not in this ledger")
           }
         }
         .frame(minWidth: Self.figureWidth, alignment: .trailing)
@@ -140,9 +142,10 @@ struct ImportBalanceReceiptView: View {
           if let source = row.sourceBalance {
             figure(source, unit: row.sourceUnit)
           } else {
-            Text("Not stored in the backup")
-              .font(LedgerTheme.Typeface.secondary)
+            Text("—")
+              .font(LedgerTheme.Typeface.body)
               .foregroundStyle(LedgerTheme.inkTertiary)
+              .accessibilityLabel("Not stored in the backup")
           }
         }
         .frame(minWidth: Self.figureWidth, alignment: .trailing)
@@ -159,6 +162,14 @@ struct ImportBalanceReceiptView: View {
     .padding(.vertical, LedgerTheme.Space.s)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(spoken(row))
+  }
+
+  /// A count in the summary line. Plain text with a symbol: these are totals, not filters,
+  /// so they don't look like chips you can press.
+  private func summaryLabel(_ text: String, systemImage: String) -> some View {
+    Label(text, systemImage: systemImage)
+      .font(LedgerTheme.Typeface.captionEmphasis)
+      .foregroundStyle(LedgerTheme.inkSecondary)
   }
 
   @ViewBuilder

@@ -259,16 +259,17 @@ struct AccountTotalsSummary: View {
   var body: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
       ForEach(sheet.summaries, id: \.unitCode) { summary in
-        HStack(alignment: .bottom, spacing: LedgerTheme.Space.xxl) {
+        // Figures of different sizes share one baseline, and so do their labels.
+        HStack(alignment: .lastTextBaseline, spacing: LedgerTheme.Space.xxl) {
           figure("Net worth", summary.unitCode, summary.net, size: .figure, alert: true)
           figure("Assets", summary.unitCode, summary.assets, size: .row, alert: false)
           figure("Liabilities", summary.unitCode, summary.liabilities, size: .row, alert: false)
           Spacer(minLength: 0)
-          Text("\(summary.accountCount) accounts")
+          Text(summary.accountCount == 1 ? "1 account" : "\(summary.accountCount) accounts")
             .font(LedgerTheme.Typeface.caption)
             .foregroundStyle(LedgerTheme.inkTertiary)
         }
-        .ledgerCard(padding: LedgerTheme.Space.l)
+        .ledgerCard()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
           "\(summary.unitCode): assets \(text(summary.unitCode, summary.assets)), liabilities \(text(summary.unitCode, summary.liabilities)), net \(text(summary.unitCode, summary.net)), \(summary.accountCount) accounts counted")
@@ -321,12 +322,12 @@ struct AccountRow: View {
   var body: some View {
     HStack(spacing: LedgerTheme.Space.m) {
       LedgerIconTile(
-        .initials(Self.initials(account.name)), swatch: swatch ?? LedgerTheme.swatch(for: account.name))
+        .symbol(Self.symbol(for: account)), swatch: swatch ?? LedgerTheme.swatch(for: account.name))
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text(account.name)
           .font(LedgerTheme.Typeface.body)
           .foregroundStyle(LedgerTheme.ink)
-        Text("\(account.currencyUnit) · \(account.variant.rawValue) · \(account.lifecycle.rawValue)")
+        Text("\(Self.kindLabel(account.variant)) · \(account.currencyUnit)")
           .font(LedgerTheme.Typeface.caption)
           .foregroundStyle(LedgerTheme.inkTertiary)
       }
@@ -339,7 +340,7 @@ struct AccountRow: View {
           balance, size: .row, tone: account.countsInTotals ? .automatic : .secondary,
           negativeIsAlert: account.accountClass == .asset)
       }
-      Menu("Actions") {
+      Menu {
         Button("Edit account") { edit(account) }
         if let moveUp { Button("Move up", action: moveUp) }
         if let moveDown { Button("Move down", action: moveDown) }
@@ -352,7 +353,10 @@ struct AccountRow: View {
         Button(account.lifecycle == .active ? "Close account" : "Restore account") {
           update(lifecycle: account.lifecycle == .active ? .tombstoned : .active)
         }
+      } label: {
+        LedgerRowActionsLabel()
       }
+      .ledgerRowActionsMenu()
       .shownWhileEditing(isEditing)
       .accessibilityLabel("Actions for \(account.name)")
     }
@@ -366,6 +370,35 @@ struct AccountRow: View {
     if account.hidden { parts.append("hidden") }
     if !account.includeInTotals { parts.append("excluded from totals") }
     return parts.joined(separator: ", ")
+  }
+
+  /// What kind of account it is, in words a person uses.
+  static func kindLabel(_ variant: LedgerAccountVariant) -> String {
+    switch variant {
+    case .standard: "Account"
+    case .investment: "Investment"
+    case .loan: "Loan"
+    case .overdraft: "Credit or overdraft"
+    }
+  }
+
+  /// A symbol for the account's type: one icon language with the category tiles, instead of
+  /// initials that read like contact avatars.
+  static func symbol(for account: LedgerAccount) -> String {
+    switch account.variant {
+    case .investment: return "chart.line.uptrend.xyaxis"
+    case .loan: return "building.columns"
+    case .overdraft: return "creditcard"
+    case .standard:
+      let name = account.name.lowercased()
+      if name.contains("card") { return "creditcard" }
+      if name.contains("cash") { return "banknote" }
+      if name.contains("wallet") { return "wallet.pass" }
+      if name.contains("saving") || name.contains("emergency") || name.contains("deposit") {
+        return "lock.shield"
+      }
+      return "building.columns"
+    }
   }
 
   static func initials(_ name: String) -> String {
