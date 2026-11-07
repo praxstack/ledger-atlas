@@ -4,7 +4,8 @@ name: Mac app (DMG)
 #
 # When it runs:
 #   - every push to main          -> DMG attached to the run as an artifact (kept 30 days)
-#   - a tag like v1.2.0           -> DMG also published as a GitHub Release
+#   - a tag like v1.2.0           -> DMG also published as a GitHub Release, once CI has
+#                                    passed on the same commit (docs/RELEASING.md)
 #   - Actions tab > "Run workflow" -> on any branch, e.g. to try a feature branch on your Mac
 #   - a pull request labelled "build-dmg"
 #
@@ -34,11 +35,13 @@ jobs:
       || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'build-dmg'))
     concurrency:
       group: mac-app-${{ github.ref }}
-      cancel-in-progress: true
+      # Only PR builds are cancelled by a newer push; main and tag builds always finish.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90   # a tag build also waits for CI on its commit
     permissions:
       contents: write   # only used to publish a Release on v* tags
+      checks: read      # the release gate reads CI's results on the tagged commit
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -156,6 +159,13 @@ jobs:
           path: .build/xcode.log
           if-no-files-found: ignore
 
+      # A release only ships from a commit whose CI ran to the end and passed (#186).
+      - name: Wait for green CI on this commit (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait-for-green-ci.sh "$GITHUB_SHA" 45
+
       - name: Publish GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -172,8 +182,12 @@ jobs:
           else
             printf '%s\n' "$notes" > "$RUNNER_TEMP/notes.md"
           fi
+          # v1.0.0-test.1 or v1.0.0-rc.1 is a pre-release; v1.0.0 is a full release, so it gets
+          # the Latest badge that docs/INSTALL.md sends people to.
+          kind=(--latest)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then kind=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.sha256 \
-            --title "Ledger Atlas $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
+            --title "Ledger Atlas $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${kind[@]}"
 
       - name: Clean up keychain
         if: always()
