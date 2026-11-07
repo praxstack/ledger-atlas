@@ -157,7 +157,7 @@ struct CategoryTreeRow: View {
 
   var body: some View {
     HStack(spacing: LedgerTheme.Space.m) {
-      LedgerIconTile(.initials(AccountRow.initials(category.name)), swatch: LedgerTheme.swatch(for: category.name))
+      LedgerIconTile(.symbol(Self.symbol(for: category)), swatch: LedgerTheme.swatch(for: category.name))
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text(category.name)
           .font(LedgerTheme.Typeface.bodyEmphasis)
@@ -184,6 +184,17 @@ struct CategoryTreeRow: View {
     .onTapGesture(count: 2) { if childCount > 0 { drillIn(category.id) } }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("\(category.name), \(summary)\(category.hidden ? ", hidden" : "")")
+  }
+
+  /// A symbol for what the money was for; unrecognised names fall back to the kind's arrow.
+  static func symbol(for category: LedgerCategory) -> String {
+    let kind: LedgerTransactionKind =
+      switch category.kind {
+      case .income: .income
+      case .expense: .expense
+      case .neutral: .adjustment
+      }
+    return LedgerCategorySymbol.name(for: category.name, kind: kind)
   }
 
   private var actions: some View {

@@ -861,7 +861,7 @@ struct ImportReviewSurface: View {
         Text(
           balanceReceipt == nil
             ? summary.decision.message
-            : "This ledger was written from the backup. The receipt above compares every account with Money Manager."
+            : "This ledger was written from the backup. The receipt above compares every account with Money Manager. From today, log on the Mac. Re-importing newer phone backups arrives in January."
         )
         .font(LedgerTheme.Typeface.secondary)
         .foregroundStyle(LedgerTheme.inkSecondary)
