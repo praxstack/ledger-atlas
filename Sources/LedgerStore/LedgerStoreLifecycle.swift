@@ -1781,6 +1781,15 @@ public enum LedgerStoreLifecycle {
     }
   }
 
+  /// The app's temporary folder with its symlinks resolved. On macOS it lives under /var, a
+  /// symlink to /private/var, and SQLite's no-follow open refuses any path through a symlink.
+  private static func scratchRoot() -> String {
+    let path = FileManager.default.temporaryDirectory.path
+    guard let resolved = realpath(path, nil) else { return path }
+    defer { free(resolved) }
+    return String(cString: resolved)
+  }
+
   private static let scratchPrefix = "ledger-atlas-migration-"
   private static let scratchName = "migration.sqlite"
   /// Held (flock) for as long as its upgrade runs, so a sweep can tell a live scratch
@@ -1791,9 +1800,9 @@ public enum LedgerStoreLifecycle {
   /// plaintext copy of a ledger and takes the room the next upgrade needs. A live upgrade holds
   /// its lock and is skipped; a folder without a lock yet is skipped until `grace` has passed,
   /// since its upgrade may be about to take the lock.
-  package static func removeAbandonedMigrations(
-    in root: String = FileManager.default.temporaryDirectory.path, grace: TimeInterval = 600
-  ) {
+  package static func removeAbandonedMigrations(in given: String? = nil, grace: TimeInterval = 600)
+  {
+    let root = given ?? scratchRoot()
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return }
     for name in names where name.hasPrefix(scratchPrefix) {
       let directory = root + "/" + name
@@ -1827,7 +1836,7 @@ public enum LedgerStoreLifecycle {
     // A private directory (mkdtemp makes it owner-only) in the app's own temporary folder.
     // That folder is in the app's container, but the space check below looks at the volume it
     // is actually on rather than assuming it shares the ledger's.
-    let root = FileManager.default.temporaryDirectory.path
+    let root = scratchRoot()
     removeAbandonedMigrations(in: root)
     var template = Array((root + "/" + scratchPrefix + "XXXXXX").utf8CString)
     // The path is read inside the closure: mkdtemp's result points into `template`'s buffer.
