@@ -31,13 +31,13 @@
   },
   "04-statistics.overview-annual.income.scrolled-dark.png" : {
     "lines" : 401,
-    "looks" : "c04bca4b494b67e2",
-    "text" : "cd3332398a2611cf5236fe1687388b487720e22cfd2343444960741897b8509d"
+    "looks" : "c04bca4b494b63e2",
+    "text" : "2bdc6fa93284211a649b13e86b043505594e6e3ab8b73bf88a29d80a4f8bd5f8"
   },
   "04-statistics.overview-annual.income.scrolled-light.png" : {
     "lines" : 401,
     "looks" : "b031313030301090",
-    "text" : "cd3332398a2611cf5236fe1687388b487720e22cfd2343444960741897b8509d"
+    "text" : "2bdc6fa93284211a649b13e86b043505594e6e3ab8b73bf88a29d80a4f8bd5f8"
   },
   "05-statistics.category_detail-annual.income.category-dark.png" : {
     "lines" : 260,
@@ -191,12 +191,12 @@
   },
   "20-accounts.add-group_picker.open-dark.png" : {
     "lines" : 191,
-    "looks" : "82624061f16565e2",
+    "looks" : "82604061f16565e2",
     "text" : "1aaaf1d2c4c504bf3eb05a4ba8165199b87e31468f7bc757677f6e04bacfa963"
   },
   "20-accounts.add-group_picker.open-light.png" : {
     "lines" : 191,
-    "looks" : "923d38796830599a",
+    "looks" : "a23d38796830599a",
     "text" : "1aaaf1d2c4c504bf3eb05a4ba8165199b87e31468f7bc757677f6e04bacfa963"
   },
   "21-accounts.add-name.focused-dark.png" : {
@@ -211,12 +211,12 @@
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
     "lines" : 193,
-    "looks" : "82606071e16165e2",
+    "looks" : "82626071e16165e2",
     "text" : "4f51d6a02880f62e7671e802353113eba938fe0bed8917ad771733b152c20f55"
   },
   "22-accounts.account_info-savings.edit-light.png" : {
     "lines" : 193,
-    "looks" : "a23d39797830519a",
+    "looks" : "923d39797830519a",
     "text" : "4f51d6a02880f62e7671e802353113eba938fe0bed8917ad771733b152c20f55"
   },
   "23-security.set_passcode-first_entry.empty-dark.png" : {
@@ -248,6 +248,16 @@
     "lines" : 232,
     "looks" : "b031302020205786",
     "text" : "b2359d41af1dca3388b240d0caab5fe05af55e7199eb31df64a4cb55f94a48b1"
+  },
+  "key-balance-receipt-dark.png" : {
+    "lines" : 132,
+    "looks" : "c863716c6c6860e4",
+    "text" : "2219dff7010e302637cbf23d4b4823cae1415077d6fb7710a87c990056863c6c"
+  },
+  "key-balance-receipt-light.png" : {
+    "lines" : 132,
+    "looks" : "a01c2e3233375f9c",
+    "text" : "2219dff7010e302637cbf23d4b4823cae1415077d6fb7710a87c990056863c6c"
   },
   "key-empty-dark.png" : {
     "lines" : 100,

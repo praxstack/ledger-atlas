@@ -24,7 +24,8 @@ import Testing
 /// normalised text of each capture to `ui-captures/snapshot-text/` in the CI artifact. To update
 /// the committed baseline after a deliberate change, download that `ui-captures` artifact from
 /// the run and copy its `capture-baseline.json` over `Fixtures/capture-baseline.json`, or run
-/// `scripts/ci/update-capture-baseline.sh <run-id>`, which does both.
+/// `scripts/ci/update-capture-baseline.sh <run-id>`, which does both. A deliberate UI change ships
+/// with its updated baseline in the same PR.
 @MainActor
 final class CaptureSnapshots {
   static let looksTolerance = 10
@@ -69,6 +70,7 @@ final class CaptureSnapshots {
     }
     let baseline = try JSONDecoder().decode([String: Reading].self, from: data)
     var problems: [String] = []
+    var distances: [Int] = []
     for file in Set(baseline.keys).union(readings.keys).sorted() {
       guard let expected = baseline[file] else {
         problems.append("\(file): captured, but not in the baseline")
@@ -84,6 +86,7 @@ final class CaptureSnapshots {
         )
       }
       if let distance = Self.distance(actual.looks, expected.looks) {
+        distances.append(distance)
         if distance > Self.looksTolerance {
           problems.append("\(file): the picture changed (\(distance) of 64 bits, tolerance \(Self.looksTolerance))")
         }
@@ -91,7 +94,10 @@ final class CaptureSnapshots {
         problems.append("\(file): no difference hash (\(expected.looks) vs \(actual.looks))")
       }
     }
-    print("SNAPSHOT \(readings.count) captures compared with the baseline, \(problems.count) changed")
+    let mean = distances.isEmpty ? 0 : Double(distances.reduce(0, +)) / Double(distances.count)
+    print(
+      "SNAPSHOT \(readings.count) captures compared with the baseline, \(problems.count) changed; looks distance max \(distances.max() ?? 0), mean \(String(format: "%.1f", mean)) of 64 bits"
+    )
     #expect(
       problems.isEmpty,
       "captures differ from the committed baseline. If the change is intended, update Fixtures/capture-baseline.json from the ui-captures artifact.\n\(problems.joined(separator: "\n"))"
