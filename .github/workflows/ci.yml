@@ -189,6 +189,16 @@ jobs:
           path: ${{ runner.temp }}/test-artifacts/ui-captures
           retention-days: 30
           if-no-files-found: ignore
+      # The design-review set: every screen in light and dark with the window active, for the
+      # screenshot council and the before/after page.
+      - name: Upload design-review captures
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: design-review
+          path: ${{ runner.temp }}/test-artifacts/design-review
+          retention-days: 30
+          if-no-files-found: ignore
       - name: Upload test captures on failure
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5

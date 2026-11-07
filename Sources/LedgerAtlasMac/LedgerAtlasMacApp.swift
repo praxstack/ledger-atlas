@@ -13,6 +13,17 @@ struct LedgerAtlasMacApp: App {
     .defaultSize(width: 980, height: 680)
     .commands {
       CommandGroup(after: .newItem) {
+        Button("New Ledger…") {
+          NotificationCenter.default.post(
+            name: LedgerAtlasRootView.createLedgerRequested, object: nil)
+        }
+        .keyboardShortcut("n", modifiers: [.command, .shift])
+        Button("Open Ledger…") {
+          NotificationCenter.default.post(
+            name: LedgerAtlasRootView.openLedgerRequested, object: nil)
+        }
+        .keyboardShortcut("o", modifiers: .command)
+        Divider()
         Button("Import Money Manager Backup…") {
           NotificationCenter.default.post(
             name: LedgerAtlasRootView.importBackupRequested, object: nil)
