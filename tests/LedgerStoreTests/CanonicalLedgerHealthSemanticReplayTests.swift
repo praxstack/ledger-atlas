@@ -147,6 +147,11 @@ func missingReceiptKeyIsReportedAndRecoveryKeyRestoresIt() throws {
       _ = try LedgerReceiptTrust.recoveryKey(from: Data("not a key".utf8), for: url)
     }
 
+    // The same file after a trip through Windows or a mail client.
+    let crlf = Data(String(decoding: file, as: UTF8.self)
+      .replacingOccurrences(of: "\n", with: "\r\n").utf8)
+    #expect(try LedgerReceiptTrust.recoveryKey(from: crlf, for: url).key == saved.key)
+
     try LedgerStore.installRecoveryKey(file, for: url)
     #expect(try LedgerReceiptTrust.key(for: url, create: false) == saved.key)
     _ = try LedgerStore.openReadOnly(at: url)

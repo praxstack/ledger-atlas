@@ -84,6 +84,11 @@ package enum LedgerLocations {
     var candidate = destination
     for _ in 0..<100 {
       if renamex_np(inProgress.path, candidate.path, UInt32(RENAME_EXCL)) == 0 {
+        // What SQLite or the store kept beside the hidden name is for that name only. The
+        // journal itself was checked absent above.
+        for suffix in ["-journal.ledger-atlas-binding", "-wal", "-shm"] {
+          unlink(inProgress.path + suffix)
+        }
         let parent = Darwin.open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         if parent >= 0 {
           _ = fsync(parent)

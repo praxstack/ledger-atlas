@@ -479,10 +479,13 @@ public struct LedgerAtlasRootView: View {
       "\(ledger.deletingPathExtension().lastPathComponent) recovery key.ledgerkey"
     guard panel.runModal() == .OK, let destination = panel.url else { return }
     do {
-      try file.write(to: destination, options: .atomic)
-      try? FileManager.default.setAttributes(
-        [.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: destination.path)
+      // Owner-only (0600) from the start, never following a link or replacing a file. The
+      // sandbox lets the app write the picked file but nothing beside it.
+      try LedgerPortablePackageFile.publish(file, to: destination)
       lifecycleMessage = Self.recoveryKeySavedMessage
+    } catch LedgerPortablePackageFile.Error.destinationExists {
+      journey.recordFailure(
+        "A file with that name is already there, and it wasn't replaced. Choose another name.")
     } catch {
       journey.recordFailure("The recovery key could not be saved there. Choose another place.")
     }
@@ -1055,7 +1058,7 @@ public struct LedgerAtlasRootView: View {
   {
     "Backup saved. SHA-256: \(sha256)"
       + (needsRecoveryKey
-        ? " To open it on another Mac, also choose Save recovery key… once and keep the key with your backups."
+        ? " To open it on another Mac you'll also need its recovery key: choose Save recovery key… once and keep the key separate from your backups (a password manager is ideal)."
         : "")
   }
 
@@ -1072,11 +1075,11 @@ public struct LedgerAtlasRootView: View {
   package static let recoveryKeyInstalledMessage =
     "Recovery key added to this Mac. The ledger opens normally from now on."
   package static let recoveryKeySavedMessage =
-    "Recovery key saved. Keep it with your backups, somewhere private: with it, the ledger's imported history can be checked on another Mac."
+    "Recovery key saved. Keep it separate from your backups, somewhere private (a password manager is ideal). Anyone with both a backup and its key could change the imported history without it showing."
   package static let recoveryKeyNotNeededMessage =
     "This ledger has no imported history, so it needs no recovery key. Its backups open on any Mac."
   package static let recoveryKeySavePanelMessage =
-    "Keep this file with your backups. You need it to open them on another Mac."
+    "You need this file to open your backups on another Mac. Keep it apart from them, ideally in a password manager."
 
   package static func recoveryKeyFailureMessage(for error: any Swift.Error) -> String {
     switch error as? LedgerReceiptTrustError {

@@ -49,3 +49,20 @@ import Testing
     try LedgerLocations.importCopy(of: source, into: directory).lastPathComponent
       == "Shared ledger 2.sqlite")
 }
+
+/// A published import leaves nothing under its hidden name: the store's journal binding and any
+/// SQLite companions go with it (#178).
+@Test func publishingAnImportLeavesNoHiddenCompanions() throws {
+  let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: base) }
+  let directory = try LedgerLocations.ledgersDirectory(base: base)
+  let hidden = LedgerLocations.importInProgressURL(in: directory)
+  try Data("ledger".utf8).write(to: hidden)
+  try Data("binding".utf8).write(to: URL(fileURLWithPath: hidden.path + "-journal.ledger-atlas-binding"))
+
+  let published = try LedgerLocations.publishImport(
+    hidden, as: directory.appendingPathComponent("Home.sqlite"))
+
+  #expect(published.lastPathComponent == "Home.sqlite")
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["Home.sqlite"])
+}

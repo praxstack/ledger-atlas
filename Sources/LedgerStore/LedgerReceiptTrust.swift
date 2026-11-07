@@ -182,7 +182,10 @@ package enum LedgerReceiptTrust {
     guard file.count <= 1_024, let text = String(data: file, encoding: .utf8) else {
       throw LedgerReceiptTrustError.invalidKey
     }
-    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    // A file that passed through Windows or a mail client may have \r\n line endings, which
+    // Swift reads as one Character, so split on any newline.
+    let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+      .map(String.init)
     guard lines.count >= 3, lines[0] == recoveryKeyHeader,
       lines.dropFirst(3).allSatisfy(\.isEmpty),
       let identity = persistedReceiptIdentity(at: url),
