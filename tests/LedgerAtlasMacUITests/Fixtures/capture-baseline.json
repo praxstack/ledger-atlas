@@ -131,12 +131,12 @@
   },
   "14-accounts.account_info-existing.edit-dark.png" : {
     "lines" : 192,
-    "looks" : "a2626261e16165a2",
+    "looks" : "c2606261e16165a2",
     "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "14-accounts.account_info-existing.edit-light.png" : {
     "lines" : 192,
-    "looks" : "a23d38797830199a",
+    "looks" : "823c38797830199a",
     "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "15-settings.configuration-index-dark.png" : {
@@ -201,12 +201,12 @@
   },
   "21-accounts.add-name.focused-dark.png" : {
     "lines" : 190,
-    "looks" : "a2626261f14565a2",
+    "looks" : "c2606261f14565a2",
     "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "21-accounts.add-name.focused-light.png" : {
     "lines" : 190,
-    "looks" : "a23d38796830119a",
+    "looks" : "823c38796830119a",
     "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
@@ -240,14 +240,14 @@
     "text" : "19fc9841fd6375f5c355c89f741248a3a1f7befe81c68ec2339d46fb06b5f3fa"
   },
   "25-backup.hub-all_entries-dark.png" : {
-    "lines" : 284,
+    "lines" : 286,
     "looks" : "e0666660e26261e0",
-    "text" : "c0057b1ad671483f3277d5fe39936f7d46d0cc93b24b24cd1b472bf0470f40dd"
+    "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
   },
   "25-backup.hub-all_entries-light.png" : {
-    "lines" : 284,
+    "lines" : 286,
     "looks" : "92b0b09c3cbc5c92",
-    "text" : "c0057b1ad671483f3277d5fe39936f7d46d0cc93b24b24cd1b472bf0470f40dd"
+    "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
   },
   "key-balance-receipt-dark.png" : {
     "lines" : 126,

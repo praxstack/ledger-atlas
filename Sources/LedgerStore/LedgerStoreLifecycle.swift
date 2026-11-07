@@ -22,6 +22,9 @@ public enum LedgerStoreLifecycle {
     public let disposition: Disposition
     public let recoveryImageURL: URL?
     package let createdIdentity: FileIdentity?
+    /// True when a save cut off by a crash or a kill was rolled back while opening, so the
+    /// ledger is at its last complete save.
+    public var rolledBackInterruptedSave = false
   }
 
   package struct FileIdentity: Sendable, Equatable {
@@ -50,6 +53,9 @@ public enum LedgerStoreLifecycle {
     case publicationFailed
     case publicationCompleted(phase: PublicationPhase, recoveryImageExists: Bool)
     case interrupted
+    /// The ledger holds imported history and its receipt key isn't on this Mac. Nothing is
+    /// damaged; installing the key (or the Keys folder) lets it open (#182).
+    case receiptKeyMissing
   }
 
   package enum TestPhase: Equatable, Sendable {
@@ -288,6 +294,19 @@ public enum LedgerStoreLifecycle {
       stateExists
       ? !(try inactiveUpgradeState(stateLeaf, parentDescriptor: destination.parentDescriptor))
       : false
+    // A crash mid-save or a restore from backup leaves the journal in a shape the checks below
+    // refuse. Repair the cases that are provably safe first (#178, #181). An upgrade in flight
+    // keeps its own companion rules, so it is left alone. A finished upgrade leaves an empty
+    // state file behind, which is not in flight.
+    let repair: LedgerStore.CompanionRepair
+    if allowsUpgradeTransitionCompanions {
+      repair = .none
+    } else {
+      do { repair = try LedgerStore.repairCompanions(at: url) } catch {
+        throw Error.companionPresent
+      }
+      try lease.requireBound(destination)
+    }
     let source = try openPinned(
       at: url, allowingUpgradeTransitionCompanions: allowsUpgradeTransitionCompanions)
     defer { Darwin.close(source.descriptor) }
@@ -322,14 +341,16 @@ public enum LedgerStoreLifecycle {
       try requirePath(url, matches: source.identity)
       return Result(
         store: store, disposition: .opened, recoveryImageURL: recovered?.url,
-        createdIdentity: nil)
+        createdIdentity: nil, rolledBackInterruptedSave: repair == .rolledBackInterruptedSave)
     case .upgradeRequired:
       try invoke(hook, .afterSourceAuthenticated)
       try requirePath(url, matches: source.identity)
       try requireSourceCompanionsStillSafe(source, at: url)
       try requireLegacyMigrationSupported(source.descriptor)
       try clearUnpublishedUpgradeState(source, at: url, lease: lease, hook: hook)
-      return try upgrade(source, at: url, lease: lease, hook: hook)
+      var upgraded = try upgrade(source, at: url, lease: lease, hook: hook)
+      upgraded.rolledBackInterruptedSave = repair == .rolledBackInterruptedSave
+      return upgraded
     }
   }
 
@@ -2100,7 +2121,9 @@ public enum LedgerStoreLifecycle {
         verifiedFiles: verifiedFiles, testing: nil)
       guard store.matchesPinnedInode(expected) else { throw Error.pathChanged }
       return store
-    } catch let error as Error { throw error } catch { throw Error.invalidStore }
+    } catch let error as Error { throw error } catch LedgerStore.Error.receiptKeyMissing {
+      throw Error.receiptKeyMissing
+    } catch { throw Error.invalidStore }
   }
 
   private static func invoke(_ hook: TestHook?, _ phase: TestPhase) throws {
