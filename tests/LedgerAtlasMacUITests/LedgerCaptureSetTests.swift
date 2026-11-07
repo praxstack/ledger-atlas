@@ -38,13 +38,13 @@ import Testing
   for (screen, group) in Dictionary(grouping: screens, by: { ScreenKey($0.1) })
     .sorted(by: { $0.value[0].0.number < $1.value[0].0.number })
   {
-    log("screen \(screen.destination) editing=\(screen.editing)")
+    captureLog("screen \(screen.destination) editing=\(screen.editing)")
     let root = try await MountedRoot(
       showing: screen.destination, size: captureSize, appWindow: true, readsInProcess: true)
     defer { root.close() }
     #expect(!root.showsNoLedgerPrompt, "\(screen.destination) never showed the demo ledger")
     if screen.editing {
-      log("clicking Begin editing")
+      captureLog("clicking Begin editing")
       #expect(root.click(named: "Begin editing accounts"), "no Begin editing button")
       try await root.settle()
     }
@@ -53,7 +53,7 @@ import Testing
     let before = root.accessibilityElements().map { "\($0.spokenName) \($0.value)" }
     for (record, shot) in group.sorted(by: { $0.0.number < $1.0.number }) {
       let plan = try #require(capturePlan[record.key])
-      log("record \(record.number) \(record.key)")
+      captureLog("record \(record.number) \(record.key)")
       var pair: [Data] = []
       for appearance in CaptureAppearance.allCases {
         root.window.appearance = NSAppearance(named: appearance.name)
@@ -96,7 +96,7 @@ import Testing
   }
   for record in sheetRecords {
     guard let plan = capturePlan[record.key], case .sheet(let sheet) = plan.shot else { continue }
-    log("sheet \(record.number) \(record.key)")
+    captureLog("sheet \(record.number) \(record.key)")
     let root = try await MountedRoot(
       showing: sheet.destination, size: captureSize, appWindow: true, readsInProcess: true)
     defer {
@@ -112,7 +112,7 @@ import Testing
         for _ in 0..<30 where root.window.attachedSheet != nil { pump(0.1) }
       }
       if let attached = root.window.attachedSheet {
-        log("Cancel did not close the sheet")
+        captureLog("Cancel did not close the sheet")
         root.window.endSheet(attached)
       }
       drainLog("sheet ended")
@@ -121,17 +121,17 @@ import Testing
       // the loop here so the stop lands in this run and not in the test's own.
       drainLog("window closed", seconds: 3)
     }
-    log("mounted \(sheet.destination)")
+    captureLog("mounted \(sheet.destination)")
     guard let sheetWindow = try await sheet.open(in: root) else {
       Issue.record("\(record.key): the \(sheet.title) did not open")
       continue
     }
-    log("opened \(sheet.title)")
+    captureLog("opened \(sheet.title)")
     pump(0.6)
     // The sheet and the window behind it, read on the main thread.
     let text = (inProcessAccessibilityTree(of: sheetWindow) + root.accessibilityElements())
       .map { "\($0.spokenName) \($0.value)" }
-    log("read \(text.count) elements")
+    captureLog("read \(text.count) elements")
     var pair: [Data] = []
     for appearance in CaptureAppearance.allCases {
       root.window.appearance = NSAppearance(named: appearance.name)
@@ -180,7 +180,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     ])
   }
 
-  log("empty state")
+  captureLog("empty state")
   let empty = try await MountedRoot(
     showing: .ledger, withLedger: false, size: captureSize, appWindow: true,
     readsInProcess: true)
@@ -197,7 +197,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   let lock = LedgerAppLock(reader: { _ in nil }, writer: { _, _ in }, kdfIterations: 1_000)
   try lock.setPasscode("2468")
   lock.lock()
-  log("lock screen")
+  captureLog("lock screen")
   let locked = try await MountedRoot(
     showing: .ledger, appLock: lock, size: captureSize, appWindow: true, readsInProcess: true)
   defer { locked.close() }
@@ -211,7 +211,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     try save(capture, "lock", appearance, "App Lock on: ledger content is hidden until unlock.")
   }
   // An error: Unlock with no passcode is refused.
-  log("clicking Unlock with no passcode")
+  captureLog("clicking Unlock with no passcode")
   #expect(locked.click(named: "Unlock"), "no Unlock button")
   pump(0.6)
   for appearance in CaptureAppearance.allCases {
@@ -225,7 +225,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   }
   // #172: the balance-match receipt on Import Review, with a matching row, one that differs
   // and a hidden account Money Manager has no figure for (the demo ledger's made-up receipt).
-  log("balance receipt")
+  captureLog("balance receipt")
   let receipt = try await MountedRoot(
     showing: .importReview, size: captureSize, appWindow: true, readsInProcess: true)
   defer { receipt.close() }
@@ -482,9 +482,9 @@ private func distinctColours(in image: NSBitmapImageRep) -> Int {
 
 /// Window size for captures: it fits on the runner's 1024 x 768 display, so the window server
 /// has drawn all of it.
-private let captureSize = NSSize(width: 1000, height: 700)
+let captureSize = NSSize(width: 1000, height: 700)
 
-private func log(_ line: String) {
+func captureLog(_ line: String) {
   FileHandle.standardError.write(Data("CAPTURE \(line)\n".utf8))
 }
 
@@ -493,7 +493,7 @@ private func log(_ line: String) {
 /// SwiftUI (the sidebar, most labels) yet still passes the size and colour checks, so it is
 /// only a fallback for a local Mac without Screen Recording permission, and CI fails on it.
 @MainActor
-private func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
+func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
   window.contentView?.layoutSubtreeIfNeeded()
   window.displayIfNeeded()
   let file = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -511,7 +511,7 @@ private func windowPNG(_ window: NSWindow) -> (png: Data, method: String)? {
       return (data, "screencapture")
     }
   }
-  log("screencapture failed for window \(window.windowNumber); using AppKit's drawing")
+  captureLog("screencapture failed for window \(window.windowNumber); using AppKit's drawing")
   if ProcessInfo.processInfo.environment["CI"] != nil {
     Issue.record("screencapture failed on CI; AppKit's drawing is not accepted there")
   }
@@ -572,11 +572,11 @@ enum ScrollOutcome: String {
 private func drainLog(_ step: String, seconds: Double = 0.3) {
   for _ in 0..<Int(seconds / 0.05) {
     let result = CFRunLoopRunInMode(.defaultMode, 0.05, false)
-    if result != .timedOut { log("\(step): run loop returned \(result.rawValue)") }
+    if result != .timedOut { captureLog("\(step): run loop returned \(result.rawValue)") }
   }
 }
 
-private func pump(_ seconds: TimeInterval) {
+func pump(_ seconds: TimeInterval) {
   RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
@@ -643,7 +643,7 @@ extension MountedRoot {
       }
     }
     guard let frame else {
-      log("nothing named \(name) to click")
+      captureLog("nothing named \(name) to click")
       return false
     }
     let centre = NSPoint(x: frame.midX, y: frame.midY)
@@ -673,12 +673,12 @@ extension MountedRoot {
       $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY
     }
     let described = ordered.map { ($0.accessibilityLabel() ?? "-") + ($0.isEnabled ? "" : " (off)") }
-    log("pop-ups: \(described)")
+    captureLog("pop-ups: \(described)")
     let popUp =
       ordered.first { $0.accessibilityLabel() == label }
       ?? (ordered.indices.contains(row) ? ordered[row] : nil)
     guard let popUp, let menu = popUp.menu else {
-      log("no pop-up \(label) or \(row); \(ordered.count) pop-ups")
+      captureLog("no pop-up \(label) or \(row); \(ordered.count) pop-ups")
       return false
     }
     // SwiftUI fills the menu only while it is open, so open it with a mouse press. The
@@ -727,12 +727,12 @@ extension MountedRoot {
       window.sendEvent(press)
     }
     timer.invalidate()
-    log(
+    captureLog(
       "press returned; chosen \(picked.chosen) after \(picked.ticks) ticks, "
         + "\(picked.closeAttempts) close attempts")
     drainLog("menu closed")
     guard picked.chosen else {
-      log("pop-up \(row) has \(picked.titles), not \(title)")
+      captureLog("pop-up \(row) has \(picked.titles), not \(title)")
       return false
     }
     return true

@@ -75,6 +75,21 @@ func everyControlOnEveryScreenHasAVoiceOverLabel(_ destination: AppDestination) 
   }
 }
 
+/// Text on the accent (primary buttons, the active filter chip) is readable in every look:
+/// 4.5:1, and 7:1 with Increase Contrast.
+@MainActor
+@Test func onAccentTextMeetsContrastOverTheAccent() throws {
+  for (normal, high) in themeAppearancePairs {
+    for (appearance, minimum) in [(normal, 4.5), (high, 7.0)] {
+      let accent = try resolvedThemeColor(LedgerTheme.accent, appearance)
+      let ratio = contrastRatio(try resolvedThemeColor(LedgerTheme.onAccent, appearance), over: accent)
+      #expect(
+        ratio >= minimum,
+        "onAccent on accent in \(appearance.rawValue) is \(ratio):1, needs \(minimum):1")
+    }
+  }
+}
+
 /// Each appearance picks its own look, and the test switch picks the high-contrast one.
 @MainActor
 @Test func themeVariantFollowsTheAppearance() throws {
@@ -593,6 +608,9 @@ final class MountedRoot {
   ) async throws {
     self.readsInProcess = readsInProcess
     Self.launchOnce()
+    // The Transactions inspector remembers its state in the standard defaults; every mount
+    // starts undecided, so it picks its default by width as on a first launch.
+    UserDefaults.standard.removeObject(forKey: LedgerBrowseList.inspectorDefaultsKey)
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
       "a11y-\(UUID().uuidString)")
     self.directory = directory
@@ -951,10 +969,18 @@ final class TreeBox: @unchecked Sendable {
 }
 
 /// CI runners have a small virtual display; keep the requested window size.
-private final class FullSizeTestWindow: NSWindow {
+final class FullSizeTestWindow: NSWindow {
+  /// The CI runner's test process never becomes the frontmost app, so its windows draw with
+  /// the inactive look (grey title, toolbar and selection). The design-review captures set
+  /// this so the window draws as the key, main window a person sees in use.
+  nonisolated(unsafe) static var drawsAsActive = false
+
   override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
     frameRect
   }
+
+  override var isKeyWindow: Bool { Self.drawsAsActive || super.isKeyWindow }
+  override var isMainWindow: Bool { Self.drawsAsActive || super.isMainWindow }
 }
 
 /// Reduce Motion: every animation in the app goes through `MotionPolicy`, which drops it when

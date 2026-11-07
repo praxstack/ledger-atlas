@@ -97,18 +97,26 @@ public struct LedgerAtlasRootView: View {
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
     } detail: {
-      if appLock.isLocked {
-        LockedSurface(
-          lock: appLock,
-          unlock: { appLock.unlock(with: $0) },
-          biometricUnlock: { await appLock.unlockWithBiometrics() })
-      } else {
-        destinationPreview
-          .animation(
-            MotionPolicy.navigationAnimation(reduceMotion: effectiveReduceMotion),
-            value: selection
-          )
+      Group {
+        if appLock.isLocked {
+          LockedSurface(
+            lock: appLock,
+            unlock: { appLock.unlock(with: $0) },
+            biometricUnlock: { await appLock.unlockWithBiometrics() })
+            .navigationTitle("Ledger Atlas")
+            .navigationSubtitle("Locked")
+        } else {
+          destinationPreview
+            .animation(
+              MotionPolicy.navigationAnimation(reduceMotion: effectiveReduceMotion),
+              value: selection
+            )
+        }
       }
+      // Every screen sits on the same canvas: lists and forms drop their own white or grey
+      // scroll background, so the base never changes shade from one screen to the next.
+      .scrollContentBackground(.hidden)
+      .ledgerCanvas()
     }
     // The whole app follows the Appearance setting, not just this window (see LedgerAppearance).
     .onChange(of: productSettings.appearance, initial: true) { _, appearance in
@@ -141,24 +149,18 @@ public struct LedgerAtlasRootView: View {
       }
     }
     .toolbar {
-      ToolbarItemGroup {
-        Button(action: chooseImportSource) {
-          Label("Import", systemImage: "square.and.arrow.down")
+      // New and Open Ledger live in the File menu (⇧⌘N, ⌘O); the toolbar keeps the screen's
+      // own controls. Locked, there is nothing to act on, so the toolbar is empty.
+      if !appLock.isLocked, session.screen == .loaded {
+        ToolbarItem {
+          Button(action: chooseImportSource) {
+            Label("Import", systemImage: "square.and.arrow.down")
+          }
+          .accessibilityLabel(Self.importBackupActionTitle)
+          .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
+          .help("Import a Money Manager backup (⇧⌘I)")
+          .disabled(journey.backgroundWork != nil)
         }
-        .accessibilityLabel(Self.importBackupActionTitle)
-        .accessibilityHint("Makes a new ledger from a Money Manager backup. The backup is not changed.")
-        .help("Import a Money Manager backup (⇧⌘I)")
-        .disabled(appLock.isLocked || journey.backgroundWork != nil)
-        Button("Create Ledger…", action: createLedger)
-          .accessibilityLabel(Self.createLedgerActionLabel)
-          .accessibilityHint("Opens a save panel for a new Ledger Atlas ledger.")
-          .keyboardShortcut("n", modifiers: [.command, .shift])
-          .disabled(appLock.isLocked)
-        Button("Open Ledger…", action: openLedger)
-          .accessibilityLabel(Self.openLedgerActionLabel)
-          .accessibilityHint("Opens a file panel for an existing Ledger Atlas ledger.")
-          .keyboardShortcut("o", modifiers: .command)
-          .disabled(appLock.isLocked)
       }
     }
     .fileImporter(
@@ -178,6 +180,14 @@ public struct LedgerAtlasRootView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: Self.importBackupRequested)) { _ in
       chooseImportSource()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: Self.createLedgerRequested)) { _ in
+      guard !appLock.isLocked else { return }
+      createLedger()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: Self.openLedgerRequested)) { _ in
+      guard !appLock.isLocked else { return }
+      openLedger()
     }
     .onReceive(NotificationCenter.default.publisher(for: LedgerIntentBridge.didEnqueueNotification)) { _ in
       consumePendingIntentIfUnlocked()
@@ -231,6 +241,9 @@ public struct LedgerAtlasRootView: View {
   package static let importBackupActionTitle = "Import Money Manager Backup…"
   /// Posted by the File menu's import command.
   public static let importBackupRequested = Notification.Name("LedgerAtlas.importBackupRequested")
+  /// File > New Ledger… and File > Open Ledger… (the app's menu commands post these).
+  public static let createLedgerRequested = Notification.Name("LedgerAtlas.createLedgerRequested")
+  public static let openLedgerRequested = Notification.Name("LedgerAtlas.openLedgerRequested")
 
   /// Shows the import screen and its file panel.
   private func chooseImportSource() {

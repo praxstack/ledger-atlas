@@ -29,12 +29,12 @@ Source: `LedgerTheme.swift`. Every colour resolves for light, dark, and both Inc
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `canvas` | `#FBFBFA` | `#1C1C1E` | Window content background |
-| `recessed` | `#F4F4F2` | `#232325` | Inspector, drop zones, day headers |
-| `card` | `#FFFFFF` | `#232326` | Cards on the canvas |
+| `canvas` | `#F5F5F4` | `#1C1C1E` | Window content background behind every screen |
+| `recessed` | `#F0F0EE` | `#161618` | Inspector, drop zones, day headers (below the canvas in both looks) |
+| `card` | `#FFFFFF` | `#28282B` | Cards on the canvas (above it in both looks) |
 | `ink` | `#1D1D1F` | `#F5F5F7` | Primary text, spending amounts |
 | `inkSecondary` | `#515154` | `#C7C7CC` | Secondary text |
-| `inkTertiary` | `#6E6E72` | `#8E8E93` | Labels, captions, axis text |
+| `inkTertiary` | `#69696D` | `#8E8E93` | Labels, captions, axis text |
 | `hairline` | black 8% | white 9% | Separators (22% / 26% with Increase Contrast) |
 | `inkQuiet`, `positiveQuiet`, `negativeQuiet` | their colour, faded only as far as 4.5:1 allows | same | The currency symbol and paise of a figure |
 | `fieldFill` | black 4.5% | white 7% | Fields, chips, segmented items |
