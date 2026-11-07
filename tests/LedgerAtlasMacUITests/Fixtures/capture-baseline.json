@@ -41,33 +41,33 @@
   },
   "05-statistics.category_detail-annual.income.category-dark.png" : {
     "lines" : 270,
-    "looks" : "e8634243c0d020ea",
-    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
+    "looks" : "ea6b4243c0d020ea",
+    "text" : "00de78d3868f79bb7800bb6e249b564d9d274fb6c3fed28d7da6176327f0592d"
   },
   "05-statistics.category_detail-annual.income.category-light.png" : {
     "lines" : 270,
-    "looks" : "b031bdb820205192",
-    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
+    "looks" : "b035bdb820205192",
+    "text" : "00de78d3868f79bb7800bb6e249b564d9d274fb6c3fed28d7da6176327f0592d"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-dark.png" : {
     "lines" : 270,
-    "looks" : "e8634243c0d020ea",
-    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
+    "looks" : "ea6b4243c0d020ea",
+    "text" : "00de78d3868f79bb7800bb6e249b564d9d274fb6c3fed28d7da6176327f0592d"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-light.png" : {
     "lines" : 270,
-    "looks" : "b031bdb820205192",
-    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
+    "looks" : "b035bdb820205192",
+    "text" : "00de78d3868f79bb7800bb6e249b564d9d274fb6c3fed28d7da6176327f0592d"
   },
   "07-statistics.category_detail-annual.expense.subcategory-dark.png" : {
     "lines" : 270,
-    "looks" : "e8634243c0d020ea",
-    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
+    "looks" : "ea6b4243c0d020ea",
+    "text" : "00de78d3868f79bb7800bb6e249b564d9d274fb6c3fed28d7da6176327f0592d"
   },
   "07-statistics.category_detail-annual.expense.subcategory-light.png" : {
     "lines" : 270,
-    "looks" : "b031bdb820205192",
-    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
+    "looks" : "b035bdb820205192",
+    "text" : "00de78d3868f79bb7800bb6e249b564d9d274fb6c3fed28d7da6176327f0592d"
   },
   "08-statistics.total_balance-monthly.trend-dark.png" : {
     "lines" : 208,
@@ -81,62 +81,62 @@
   },
   "09-accounts.overview-upper.cards.totals-dark.png" : {
     "lines" : 302,
-    "looks" : "e0624243c36363ea",
+    "looks" : "e062e24bc34363e2",
     "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "09-accounts.overview-upper.cards.totals-light.png" : {
     "lines" : 302,
-    "looks" : "923cbcb034949892",
+    "looks" : "b03c3cb034b49192",
     "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "10-accounts.overview-cards.savings.groups-dark.png" : {
     "lines" : 304,
-    "looks" : "e0626243c36363ea",
+    "looks" : "e062e24bc36363e2",
     "text" : "eb89bbc61bf9686f8663cf7058e3286d6e02d15cae029f93481035c965ccba16"
   },
   "10-accounts.overview-cards.savings.groups-light.png" : {
     "lines" : 304,
-    "looks" : "923cbcb034989092",
+    "looks" : "b03c3cb430989492",
     "text" : "eb89bbc61bf9686f8663cf7058e3286d6e02d15cae029f93481035c965ccba16"
   },
   "11-accounts.overview-lower.groups.active_scroll-dark.png" : {
     "lines" : 303,
-    "looks" : "e0626243c36363e2",
+    "looks" : "e062e24ac36363e2",
     "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "11-accounts.overview-lower.groups.active_scroll-light.png" : {
     "lines" : 303,
-    "looks" : "923cbcb034989092",
+    "looks" : "b03c3cb430949092",
     "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "12-accounts.overview-restored.chrome-dark.png" : {
     "lines" : 302,
-    "looks" : "e0624243c36363ea",
+    "looks" : "e062e24bc34363e2",
     "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "12-accounts.overview-restored.chrome-light.png" : {
     "lines" : 302,
-    "looks" : "923cbcb034949892",
+    "looks" : "b03c3cb034b49192",
     "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "13-accounts.overview-investments.others.boundary-dark.png" : {
     "lines" : 303,
-    "looks" : "e0626243c36363e2",
+    "looks" : "e062e24ac36363e2",
     "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "13-accounts.overview-investments.others.boundary-light.png" : {
     "lines" : 303,
-    "looks" : "923cbcb034989092",
+    "looks" : "b03c3cb430949092",
     "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "14-accounts.account_info-existing.edit-dark.png" : {
     "lines" : 192,
-    "looks" : "c2606261e16165a2",
+    "looks" : "a2626063e36362a2",
     "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "14-accounts.account_info-existing.edit-light.png" : {
     "lines" : 192,
-    "looks" : "823c38797830199a",
+    "looks" : "a23d38787830119a",
     "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "15-settings.configuration-index-dark.png" : {
@@ -151,72 +151,72 @@
   },
   "16-settings.accounts-index-dark.png" : {
     "lines" : 324,
-    "looks" : "e0624247c56767e2",
+    "looks" : "e062e647c74766e0",
     "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "16-settings.accounts-index-light.png" : {
     "lines" : 324,
-    "looks" : "923cb8b13898999a",
+    "looks" : "b03c38b030b0999a",
     "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "17-settings.account_groups-edit.reorder.protected-dark.png" : {
     "lines" : 326,
-    "looks" : "e0626645c76767e2",
+    "looks" : "e062e24ec76763e2",
     "text" : "6b0d572fc20a6d12bb383868e1d3a9e04d61590d3aec52ca56d005483305b37f"
   },
   "17-settings.account_groups-edit.reorder.protected-light.png" : {
     "lines" : 326,
-    "looks" : "923cb8b13098999a",
+    "looks" : "b03c38b13098989a",
     "text" : "6b0d572fc20a6d12bb383868e1d3a9e04d61590d3aec52ca56d005483305b37f"
   },
   "18-settings.account_list-upper.hidden_variant-dark.png" : {
     "lines" : 324,
-    "looks" : "e0624247c56767e2",
+    "looks" : "e062e647c74766e0",
     "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "18-settings.account_list-upper.hidden_variant-light.png" : {
     "lines" : 324,
-    "looks" : "923cb8b13898999a",
+    "looks" : "b03c38b030b0999a",
     "text" : "641b2c6c100589a2c62bf815d7c180cb00857d3ebacc39801e835ae478f1c2d0"
   },
   "19-settings.account_list-tail-dark.png" : {
     "lines" : 325,
-    "looks" : "e0626244c76767e2",
+    "looks" : "e062e246c76763e2",
     "text" : "db391d751d1576f29acfd2e4a1aa101af3535fac822fd442d039428dfb5475b7"
   },
   "19-settings.account_list-tail-light.png" : {
     "lines" : 325,
-    "looks" : "923cb8b13899989a",
+    "looks" : "b03c38b13098989a",
     "text" : "db391d751d1576f29acfd2e4a1aa101af3535fac822fd442d039428dfb5475b7"
   },
   "20-accounts.add-group_picker.open-dark.png" : {
     "lines" : 190,
-    "looks" : "c2606261f14565a2",
+    "looks" : "c2606063f36762a2",
     "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "20-accounts.add-group_picker.open-light.png" : {
     "lines" : 190,
-    "looks" : "823c38796830119a",
+    "looks" : "823c38786830159a",
     "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "21-accounts.add-name.focused-dark.png" : {
     "lines" : 190,
-    "looks" : "c2606261f14565a2",
+    "looks" : "a2626063f36762a2",
     "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "21-accounts.add-name.focused-light.png" : {
     "lines" : 190,
-    "looks" : "823c38796830119a",
+    "looks" : "a23d38786830159a",
     "text" : "ff88ab74e148af1357750f242efa29ac89c65dff74cbb08aeafac0419d2beb8b"
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
     "lines" : 192,
-    "looks" : "a2626271e16165a2",
+    "looks" : "a2626073e36362a2",
     "text" : "d84ff7b9645d6ae9ced22319abf572cbfe16dad2ea5228dcc3cf411d39d7d7b0"
   },
   "22-accounts.account_info-savings.edit-light.png" : {
     "lines" : 192,
-    "looks" : "a23d38797830199a",
+    "looks" : "a23d38787830119a",
     "text" : "d84ff7b9645d6ae9ced22319abf572cbfe16dad2ea5228dcc3cf411d39d7d7b0"
   },
   "23-security.set_passcode-first_entry.empty-dark.png" : {
@@ -241,22 +241,22 @@
   },
   "25-backup.hub-all_entries-dark.png" : {
     "lines" : 286,
-    "looks" : "e0666660e26261e0",
+    "looks" : "e0666660e26062e4",
     "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
   },
   "25-backup.hub-all_entries-light.png" : {
     "lines" : 286,
-    "looks" : "92b0b09c3cbc5c92",
+    "looks" : "92b0b09e3cbc5c9a",
     "text" : "378e3c34aca05c8738256ca8fc7ac32789003b786e31e5db409c3c078ead0009"
   },
   "key-balance-receipt-dark.png" : {
     "lines" : 126,
-    "looks" : "ea63786cec6862f4",
+    "looks" : "ea636c6cec6060e4",
     "text" : "b1d490d37a5b028db848ab5036c8a432519f483ca39542d48adfde320ed8888b"
   },
   "key-balance-receipt-light.png" : {
     "lines" : 126,
-    "looks" : "929ca6b232b65c8a",
+    "looks" : "929ca2b232be5a8a",
     "text" : "b1d490d37a5b028db848ab5036c8a432519f483ca39542d48adfde320ed8888b"
   },
   "key-empty-dark.png" : {

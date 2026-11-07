@@ -177,7 +177,7 @@ private struct RecurrenceRow: View {
       }
       if rule.paused { LedgerBadge("Paused", systemImage: "pause.circle", tint: LedgerTheme.warning) }
       if rule.lifecycle == .tombstoned { LedgerBadge("Closed", systemImage: "archivebox") }
-      Menu("Actions") {
+      Menu {
         if rule.lifecycle == .active {
           Button(rule.paused ? "Resume rule" : "Pause rule") {
             guard let revised = try? LedgerRecurrenceRule(
@@ -200,9 +200,13 @@ private struct RecurrenceRow: View {
           else { return }
           toggle(revised)
         }
+      } label: {
+        LedgerRowActionsLabel()
       }
+      .ledgerRowActionsMenu()
       .shownWhileEditing(isEditing)
-      .accessibilityLabel("Actions for recurrence rule")
+      .accessibilityLabel(
+        "Actions for \(categoryName ?? rule.kind.rawValue.capitalized), \(formatter.amount(rule.amount))")
     }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
@@ -473,7 +477,9 @@ struct BudgetsView: View {
           let budgetStatus = status(of: budget)
           let category = categories.first(where: { $0.id == budget.categoryID })?.name ?? "Unknown category"
           HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
-            LedgerIconTile(.initials(AccountRow.initials(category)), swatch: LedgerTheme.swatch(for: category))
+            LedgerIconTile(
+              .symbol(LedgerCategorySymbol.name(for: category, kind: .expense)),
+              swatch: LedgerTheme.swatch(for: category))
             VStack(alignment: .leading, spacing: LedgerTheme.Space.xs) {
               HStack(alignment: .firstTextBaseline) {
                 Text(budget.name).font(LedgerTheme.Typeface.body).foregroundStyle(LedgerTheme.ink)

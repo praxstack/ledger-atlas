@@ -285,10 +285,13 @@ struct TagsView: View {
               .foregroundStyle(LedgerTheme.inkTertiary)
           }
           if tag.lifecycle == .active {
-            Menu("Actions") {
+            Menu {
               Button("Rename tag") { renamingTag = tag }
               Button("Retire tag") { if let retired = try? tag.tombstoned() { updateTag(retired) } }
+            } label: {
+              LedgerRowActionsLabel()
             }
+            .ledgerRowActionsMenu()
             .shownWhileEditing(isEditing)
             .accessibilityLabel("Actions for \(tag.name)")
           }
@@ -326,12 +329,15 @@ struct TagsView: View {
             .buttonStyle(LedgerSecondaryButtonStyle())
             .disabled(!isEditing)
             .accessibilityLabel("Record \(template.name) as a transaction today")
-          Menu("Actions") {
+          Menu {
             Button("Edit template") { editingTemplate = template }
             Button("Delete template") {
               if let retired = try? template.tombstoned() { saveTemplate(retired) }
             }
+          } label: {
+            LedgerRowActionsLabel()
           }
+          .ledgerRowActionsMenu()
           .shownWhileEditing(isEditing)
           .accessibilityLabel("Actions for \(template.name)")
         }
@@ -360,10 +366,13 @@ struct TagsView: View {
             Text(memo.body).font(LedgerTheme.Typeface.body).foregroundStyle(LedgerTheme.ink).lineLimit(3)
           }
           Spacer(minLength: LedgerTheme.Space.s)
-          Menu("Actions") {
+          Menu {
             Button("Edit memo") { editingMemo = memo }
             Button("Delete memo") { if let deleted = try? memo.tombstoned() { saveMemo(deleted) } }
+          } label: {
+            LedgerRowActionsLabel()
           }
+          .ledgerRowActionsMenu()
           .shownWhileEditing(isEditing)
           .accessibilityLabel("Actions for memo on \(date)")
         }
