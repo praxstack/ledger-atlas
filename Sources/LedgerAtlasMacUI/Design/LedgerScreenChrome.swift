@@ -35,11 +35,14 @@ struct LedgerEmptyState<Actions: View>: View {
         .foregroundStyle(LedgerTheme.ink)
         .multilineTextAlignment(.center)
         .accessibilityAddTraits(.isHeader)
+      // No fixedSize here: these screens don't scroll, and a fixed-height paragraph is measured
+      // at the window's narrowest width, which made the window taller than the display (the
+      // Installments empty state pushed Begin editing off screen).
       Text(message)
         .font(LedgerTheme.Typeface.secondary)
         .foregroundStyle(LedgerTheme.inkSecondary)
         .multilineTextAlignment(.center)
-        .fixedSize(horizontal: false, vertical: true)
+        .lineLimit(4)
       HStack(spacing: LedgerTheme.Space.s) { actions }
         .padding(.top, LedgerTheme.Space.xs)
     }

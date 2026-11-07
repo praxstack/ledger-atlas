@@ -6,7 +6,7 @@
   },
   "01-transactions.daily-dark.populated.root-light.png" : {
     "lines" : 532,
-    "looks" : "aa2d9cb830b0919e",
+    "looks" : "ac3d9cb830b0919e",
     "text" : "5a1025593eada7c65b154f004e0724ef75501e47198a3c9edf463d6b08032d6d"
   },
   "02-statistics.overview-monthly.expense-dark.png" : {
@@ -40,34 +40,34 @@
     "text" : "9704fc8d2ca6eec8abfe3f86af8ff72a90478ff1fa7e0d2c90cb2a92a59c9d4c"
   },
   "05-statistics.category_detail-annual.income.category-dark.png" : {
-    "lines" : 258,
-    "looks" : "e8614040c0d020ea",
-    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
+    "lines" : 270,
+    "looks" : "e8634243c0d020ea",
+    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
   },
   "05-statistics.category_detail-annual.income.category-light.png" : {
-    "lines" : 258,
-    "looks" : "b031b9b820205192",
-    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
+    "lines" : 270,
+    "looks" : "b031bdb820205192",
+    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-dark.png" : {
-    "lines" : 258,
-    "looks" : "e8614040c0d020ea",
-    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
+    "lines" : 270,
+    "looks" : "e8634243c0d020ea",
+    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
   },
   "06-statistics.category_detail-annual.income.capture_anomaly-light.png" : {
-    "lines" : 258,
-    "looks" : "b031b9b820205192",
-    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
+    "lines" : 270,
+    "looks" : "b031bdb820205192",
+    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
   },
   "07-statistics.category_detail-annual.expense.subcategory-dark.png" : {
-    "lines" : 258,
-    "looks" : "e8614040c0d020ea",
-    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
+    "lines" : 270,
+    "looks" : "e8634243c0d020ea",
+    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
   },
   "07-statistics.category_detail-annual.expense.subcategory-light.png" : {
-    "lines" : 258,
-    "looks" : "b031b9b820205192",
-    "text" : "a9792c682a461d39ba0890335f163a92be7979c3865c4673df7cd3ee057f4a9e"
+    "lines" : 270,
+    "looks" : "b031bdb820205192",
+    "text" : "a34d0e4f1645b9658dff7e2dad3bbdc0b893d1ecb8d4f6a134821d93b2f5a234"
   },
   "08-statistics.total_balance-monthly.trend-dark.png" : {
     "lines" : 208,
@@ -86,7 +86,7 @@
   },
   "09-accounts.overview-upper.cards.totals-light.png" : {
     "lines" : 302,
-    "looks" : "b03cbcb034949892",
+    "looks" : "923cbcb034949892",
     "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "10-accounts.overview-cards.savings.groups-dark.png" : {
@@ -96,7 +96,7 @@
   },
   "10-accounts.overview-cards.savings.groups-light.png" : {
     "lines" : 304,
-    "looks" : "b03cbcb034989092",
+    "looks" : "923cbcb034989092",
     "text" : "eb89bbc61bf9686f8663cf7058e3286d6e02d15cae029f93481035c965ccba16"
   },
   "11-accounts.overview-lower.groups.active_scroll-dark.png" : {
@@ -106,7 +106,7 @@
   },
   "11-accounts.overview-lower.groups.active_scroll-light.png" : {
     "lines" : 303,
-    "looks" : "b03cbcb034989092",
+    "looks" : "923cbcb034989092",
     "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "12-accounts.overview-restored.chrome-dark.png" : {
@@ -116,7 +116,7 @@
   },
   "12-accounts.overview-restored.chrome-light.png" : {
     "lines" : 302,
-    "looks" : "b03cbcb034949892",
+    "looks" : "923cbcb034949892",
     "text" : "947a4492ca14176e8a3d1a1d174278b7d8424e29945f38aa1bbb539c0d721326"
   },
   "13-accounts.overview-investments.others.boundary-dark.png" : {
@@ -126,17 +126,17 @@
   },
   "13-accounts.overview-investments.others.boundary-light.png" : {
     "lines" : 303,
-    "looks" : "b03cbcb034989092",
+    "looks" : "923cbcb034989092",
     "text" : "430f19b70e91b514a1019ed0478f77562c21dc6d55387aaf6688e62a1133713c"
   },
   "14-accounts.account_info-existing.edit-dark.png" : {
     "lines" : 192,
-    "looks" : "a2626261e16165a2",
+    "looks" : "c2606261e16165a2",
     "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "14-accounts.account_info-existing.edit-light.png" : {
     "lines" : 192,
-    "looks" : "a23d38797830199a",
+    "looks" : "823c38797830199a",
     "text" : "982bdef273c63d7b0adf2a1aa3328f3822f96bb6116ce01df43178ade7a13ab4"
   },
   "15-settings.configuration-index-dark.png" : {
@@ -211,12 +211,12 @@
   },
   "22-accounts.account_info-savings.edit-dark.png" : {
     "lines" : 192,
-    "looks" : "c2606271e16165a2",
+    "looks" : "a2626271e16165a2",
     "text" : "d84ff7b9645d6ae9ced22319abf572cbfe16dad2ea5228dcc3cf411d39d7d7b0"
   },
   "22-accounts.account_info-savings.edit-light.png" : {
     "lines" : 192,
-    "looks" : "823c38797830199a",
+    "looks" : "a23d38797830199a",
     "text" : "d84ff7b9645d6ae9ced22319abf572cbfe16dad2ea5228dcc3cf411d39d7d7b0"
   },
   "23-security.set_passcode-first_entry.empty-dark.png" : {
@@ -250,23 +250,23 @@
     "text" : "56bd32c4cf88777de13424474979d1fef93a7ededad4f0bb5890741dd7a3236d"
   },
   "key-balance-receipt-dark.png" : {
-    "lines" : 130,
-    "looks" : "ea63786cec6860e2",
-    "text" : "fe0fefb5fa82c445a3608dc27749fd4a001bcf07b31b9e805b6ba18ae386949f"
+    "lines" : 126,
+    "looks" : "ea63786cec6862f4",
+    "text" : "b1d490d37a5b028db848ab5036c8a432519f483ca39542d48adfde320ed8888b"
   },
   "key-balance-receipt-light.png" : {
-    "lines" : 130,
-    "looks" : "929ca6b232b69c9e",
-    "text" : "fe0fefb5fa82c445a3608dc27749fd4a001bcf07b31b9e805b6ba18ae386949f"
+    "lines" : 126,
+    "looks" : "929ca6b232b65c8a",
+    "text" : "b1d490d37a5b028db848ab5036c8a432519f483ca39542d48adfde320ed8888b"
   },
   "key-empty-dark.png" : {
     "lines" : 97,
-    "looks" : "e298785935387892",
+    "looks" : "ea98785935387892",
     "text" : "e747abf8b630b27440ac797291f343d74e8ae1c3d721df50318a307f33825944"
   },
   "key-empty-light.png" : {
     "lines" : 97,
-    "looks" : "9247c7c7c3c747e2",
+    "looks" : "9647c7c7c3c747e2",
     "text" : "e747abf8b630b27440ac797291f343d74e8ae1c3d721df50318a307f33825944"
   },
   "key-entry-suggestion-dark.png" : {

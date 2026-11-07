@@ -1567,7 +1567,9 @@ public struct LedgerAtlasRootView: View {
       CategoriesView(
         state: session.state, rows: journey.rows(for: .categories, hidesAmounts: productSettings.hidesAmounts),
         categories: journey.snapshot?.categories ?? [],
-        transactions: journey.snapshot?.transactions ?? [], isEditing: journey.isEditing,
+        transactions: journey.snapshot?.transactions ?? [],
+        snapshot: journey.snapshot, generation: journey.snapshotGeneration, settings: productSettings,
+        isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,
         beginEditing: { try? journey.performBeginEditing() },
         saveCategory: { category in
@@ -1641,7 +1643,7 @@ public struct LedgerAtlasRootView: View {
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
           } catch { journey.recordFailure("Recurrence occurrences could not be generated.") }
         },
-        open: openLedger, upcoming: upcoming())
+        open: openLedger, timeZone: productSettings.timeZone, upcoming: upcoming())
       .id(selection)
     } else if selection == .installments {
       InstallmentsView(
