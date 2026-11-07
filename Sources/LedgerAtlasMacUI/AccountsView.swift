@@ -28,11 +28,11 @@ struct AccountsView: View {
   var body: some View {
     let sheet = try? LedgerAccountBalanceSheet(accounts: accounts, transactions: transactions)
     let orderedGroups = Self.sortedGroups(groups)
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
       if !accounts.isEmpty {
         if let sheet {
           AccountTotalsSummary(sheet: sheet)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, LedgerTheme.Space.xxl)
         }
         List {
           ForEach(Array(orderedGroups.enumerated()), id: \.element.id) { index, group in
@@ -42,7 +42,9 @@ struct AccountsView: View {
                 accountRow(account, balance: sheet?.balances[account.id], in: members, at: position)
               }
               if members.isEmpty {
-                Text("No accounts in this group").foregroundStyle(.secondary)
+                Text("No accounts in this group")
+                  .font(LedgerTheme.Typeface.secondary)
+                  .foregroundStyle(LedgerTheme.inkTertiary)
               }
             } header: {
               AccountGroupHeader(
@@ -57,7 +59,9 @@ struct AccountsView: View {
           Section {
             let ungrouped = Self.sortedAccounts(accounts.filter { $0.groupID == nil })
             if ungrouped.isEmpty {
-              Text("No ungrouped accounts").foregroundStyle(.secondary)
+              Text("No ungrouped accounts")
+                .font(LedgerTheme.Typeface.secondary)
+                .foregroundStyle(LedgerTheme.inkTertiary)
             } else {
               ForEach(Array(ungrouped.enumerated()), id: \.element.id) { position, account in
                 accountRow(account, balance: sheet?.balances[account.id], in: ungrouped, at: position)
@@ -77,7 +81,7 @@ struct AccountsView: View {
         List(rows) { row in
           VStack(alignment: .leading, spacing: 4) {
             Text(row.title)
-            Text(row.detail).font(.caption).foregroundStyle(.secondary)
+            Text(row.detail).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
           }
           .accessibilityElement(children: .combine)
           .accessibilityLabel("\(row.title), \(row.detail)")
@@ -85,11 +89,8 @@ struct AccountsView: View {
       } else {
         emptyContent
       }
-      if let lastFailure {
-        Text(lastFailure)
-          .foregroundStyle(.red)
-          .accessibilityLabel(lastFailure)
-      }
+      LedgerStatusLine(failure: lastFailure)
+        .padding(.horizontal, LedgerTheme.Space.xxl)
       HStack {
         if isEditing {
           Button("New account") { showingAccountForm = true }
@@ -103,8 +104,8 @@ struct AccountsView: View {
           Button("Open Ledger…", action: open)
         }
       }
-      .padding(.horizontal, 16)
-      .padding(.bottom, 12)
+      .padding(.horizontal, LedgerTheme.Space.xxl)
+      .padding(.bottom, LedgerTheme.Space.m)
     }
     .navigationTitle("Accounts")
     .sheet(isPresented: $showingAccountForm) {
@@ -156,11 +157,20 @@ struct AccountsView: View {
     }
   }
 
+  /// The same colours the sidebar gives its accounts (active, shown ones), so a tile matches
+  /// its sidebar dot. Hidden and closed accounts aren't in the sidebar and keep a hashed colour.
+  private var tileSwatches: [String: LedgerTheme.Swatch] {
+    LedgerTheme.accountSwatches(
+      for: accounts.filter { $0.lifecycle == .active && !$0.hidden }.map(\.name))
+  }
+
   private func accountRow(
     _ account: LedgerAccount, balance: CurrencyAmount?, in members: [LedgerAccount], at position: Int
   ) -> some View {
     AccountRow(
-      account: account, balance: balance, isEditing: isEditing, save: saveAccount,
+      account: account, balance: balance,
+      swatch: tileSwatches[account.name] ?? LedgerTheme.swatch(for: account.name),
+      isEditing: isEditing, save: saveAccount,
       edit: { editingAccount = $0 },
       moveUp: position > 0 ? { move(account, in: members, by: -1) } : nil,
       moveDown: position < members.count - 1 ? { move(account, in: members, by: 1) } : nil)
@@ -267,8 +277,8 @@ struct AccountTotalsSummary: View {
         Label(
           "\(sheet.foreignCurrencyEffectCount) entries use a currency different from their account and are not in these balances.",
           systemImage: "exclamationmark.triangle")
-          .font(.caption)
-          .foregroundStyle(.orange)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.warning)
       }
       Text("Totals count open, visible accounts that are included in totals.")
         .font(LedgerTheme.Typeface.caption)
@@ -299,6 +309,7 @@ struct AccountTotalsSummary: View {
 struct AccountRow: View {
   let account: LedgerAccount
   var balance: CurrencyAmount? = nil
+  var swatch: LedgerTheme.Swatch? = nil
   let isEditing: Bool
   let save: (LedgerAccount) -> Void
   let edit: (LedgerAccount) -> Void
@@ -310,7 +321,7 @@ struct AccountRow: View {
   var body: some View {
     HStack(spacing: LedgerTheme.Space.m) {
       LedgerIconTile(
-        .initials(Self.initials(account.name)), swatch: LedgerTheme.swatch(for: account.name))
+        .initials(Self.initials(account.name)), swatch: swatch ?? LedgerTheme.swatch(for: account.name))
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         Text(account.name)
           .font(LedgerTheme.Typeface.body)
@@ -320,9 +331,9 @@ struct AccountRow: View {
           .foregroundStyle(LedgerTheme.inkTertiary)
       }
       Spacer()
-      if account.hidden { Label("Hidden", systemImage: "eye.slash").font(.caption) }
-      if !account.includeInTotals { Label("Excluded from totals", systemImage: "minus.circle").font(.caption) }
-      if account.lifecycle == .tombstoned { Label("Closed", systemImage: "archivebox").font(.caption) }
+      if account.hidden { LedgerBadge("Hidden", systemImage: "eye.slash") }
+      if !account.includeInTotals { LedgerBadge("Excluded from totals", systemImage: "minus.circle") }
+      if account.lifecycle == .tombstoned { LedgerBadge("Closed", systemImage: "archivebox") }
       if let balance {
         MoneyText(
           balance, size: .row, tone: account.countsInTotals ? .automatic : .secondary,
@@ -342,7 +353,7 @@ struct AccountRow: View {
           update(lifecycle: account.lifecycle == .active ? .tombstoned : .active)
         }
       }
-      .disabled(!isEditing)
+      .shownWhileEditing(isEditing)
       .accessibilityLabel("Actions for \(account.name)")
     }
     .accessibilityElement(children: .combine)
@@ -404,7 +415,7 @@ struct AccountEditForm: View {
   var body: some View {
     Form {
       TextField("Account name", text: $name)
-      Text("Currency: \(account.currencyUnit)").font(.caption).foregroundStyle(.secondary)
+      Text("Currency: \(account.currencyUnit)").font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       Picker("Group", selection: $groupID) {
         Text("No group").tag(String?.none)
         ForEach(groups.filter { $0.lifecycle == .active }, id: \.id) { Text($0.name).tag(Optional($0.id)) }
@@ -451,7 +462,7 @@ struct AccountGroupHeader: View {
     HStack {
       Text(group.name)
       if group.lifecycle == .tombstoned {
-        Text("Closed").font(.caption).foregroundStyle(.secondary)
+        Text("Closed").font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
       }
       Spacer()
       if !subtotal.isEmpty {

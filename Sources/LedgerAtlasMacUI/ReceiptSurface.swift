@@ -32,11 +32,8 @@ struct ReceiptSurface: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
+        // The window title already names the screen; no second large title in the content.
         HStack(spacing: LedgerTheme.Space.m) {
-          Text("Receipts")
-            .font(LedgerTheme.Typeface.screenTitle)
-            .foregroundStyle(LedgerTheme.ink)
-            .accessibilityAddTraits(.isHeader)
           Spacer(minLength: LedgerTheme.Space.s)
           if isWorking {
             ProgressView("Processing receipt…")
@@ -195,7 +192,7 @@ struct ReceiptSurface: View {
       if !matches.isEmpty {
         ForEach(matches, id: \.id) { row in
           Button("\(row.title) · \(row.detail)") { linkTarget = row.id }
-            .buttonStyle(.link)
+            .buttonStyle(LedgerLinkButtonStyle())
             .accessibilityLabel("Link to \(row.title), \(row.detail)")
         }
       }

@@ -146,11 +146,11 @@ private struct RecurrenceRow: View {
           toggle(revised)
         }
       }
-      .disabled(!isEditing)
+      .shownWhileEditing(isEditing)
       .accessibilityLabel("Actions for recurrence rule")
     }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(formatter.plain(rule.amount))")
+    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(formatter.amount(rule.amount))")
   }
 
   private func dateText(_ date: SourceLocalDate) -> String {
@@ -306,7 +306,7 @@ struct InstallmentsView: View {
           }
           .padding(.vertical, LedgerTheme.Space.xs)
           .accessibilityElement(children: .combine)
-          .accessibilityLabel("Installment plan, \(formatter.plain(plan.principal))")
+          .accessibilityLabel("Installment plan, \(formatter.amount(plan.principal))")
         }
         .scrollContentBackground(.hidden)
       }

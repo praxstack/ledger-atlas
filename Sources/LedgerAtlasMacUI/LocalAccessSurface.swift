@@ -11,11 +11,8 @@ struct LocalAccessSurface: View {
 
   var body: some View {
     LedgerCardColumn(maxWidth: 640) {
+      // The window title already names the screen; no second large title in the content.
       VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
-        Text("Local Web Access")
-          .font(LedgerTheme.Typeface.screenTitle)
-          .foregroundStyle(LedgerTheme.ink)
-          .accessibilityAddTraits(.isHeader)
         Text("This is a temporary read-only status view on this Mac. It exposes no mutation route and contains no financial amounts, names, notes, or paths.")
           .font(LedgerTheme.Typeface.secondary)
           .foregroundStyle(LedgerTheme.inkSecondary)
