@@ -2203,36 +2203,117 @@ private func simulateSaveCutOffByACrash(at url: URL) throws -> Int {
   }
 }
 
-@Test func lifecycleRejectsSparseOversizedV10BeforeMigrationAllocation() throws {
+/// The upgrade used to run in memory and refused a ledger over 512 MiB, so a large imported
+/// ledger could never move to a new schema (#180). It now runs on disk. A v10 ledger with a
+/// sparse 512 MiB tail upgrades, and the migrated ledger holds only the pages SQLite uses.
+@Test func lifecycleUpgradesALedgerOverTheOldInMemoryCap() throws {
   try withLifecycleDirectory { directory in
     let url = directory.appendingPathComponent("ledger.sqlite")
     _ = try writeV10Ledger(to: url)
-    let originalBytes = try Data(contentsOf: url)
+    let originalSize = try #require(
+      try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
     let descriptor = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
     #expect(descriptor >= 0)
     #expect(ftruncate(descriptor, off_t(512 * 1024 * 1024 + 4 * 1024)) == 0)
     #expect(fsync(descriptor) == 0)
     Darwin.close(descriptor)
 
-    #expect(throws: LedgerStoreLifecycle.Error.unsupportedStore) {
-      try LedgerStoreLifecycle.inspect(at: url)
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .upgradeRequired)
+    #if DEBUG
+      #expect(try LedgerStoreLifecycle.migrationMatchesInMemoryForTesting(at: url))
+    #endif
+    let result = try LedgerStoreLifecycle.open(at: url)
+    #expect(result.disposition == .upgraded)
+    #expect(try LedgerStoreLifecycle.inspect(at: url) == .current)
+    let upgradedSize = try #require(
+      try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+    #expect(upgradedSize < originalSize * 4)
+  }
+}
+
+// The in-memory migration it compares with exists only in debug builds.
+#if DEBUG
+/// An upgrade started by a build that migrated in memory must finish under this one, which
+/// checks the replacement against its own migration byte for byte.
+@Test func onDiskMigrationGivesTheInMemoryBytes() throws {
+  try withLifecycleDirectory { directory in
+    let plain = directory.appendingPathComponent("plain.sqlite")
+    _ = try writeV10Ledger(to: plain)
+    #expect(try LedgerStoreLifecycle.migrationMatchesInMemoryForTesting(at: plain))
+  }
+}
+#endif
+
+@Test func anUpgradeTheDiskHasNoRoomForIsRefusedFirst() throws {
+  let gib: UInt64 = 1024 * 1024 * 1024
+  #expect(throws: Never.self) {
+    try LedgerStoreLifecycle.requireMigrationSpace(
+      ledgerBytes: gib, copies: 3, availableBytes: 4 * gib)
+  }
+  #expect(throws: LedgerStoreLifecycle.Error.insufficientSpace) {
+    try LedgerStoreLifecycle.requireMigrationSpace(
+      ledgerBytes: gib, copies: 3, availableBytes: 3 * gib)
+  }
+  #expect(throws: LedgerStoreLifecycle.Error.insufficientSpace) {
+    try LedgerStoreLifecycle.requireMigrationSpace(
+      ledgerBytes: UInt64.max / 2, copies: 3, availableBytes: UInt64.max)
+  }
+  // The ledger's volume holds the replacement, the recovery image unless it exists, and the
+  // scratch migration only when the temporary folder is on the same volume.
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: false, scratchSharesVolume: true) == 3)
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: true, scratchSharesVolume: true) == 2)
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: false, scratchSharesVolume: false) == 2)
+  #expect(
+    LedgerStoreLifecycle.migrationCopiesOnLedgerVolume(
+      recoveryExists: true, scratchSharesVolume: false) == 1)
+}
+
+@Test func scratchMigrationsAKilledUpgradeLeftBehindAreSwept() throws {
+  try withLifecycleDirectory { root in
+    let fileManager = FileManager.default
+    func scratch(_ name: String, lock: Bool) throws -> URL {
+      let folder = root.appendingPathComponent(name, isDirectory: true)
+      try fileManager.createDirectory(at: folder, withIntermediateDirectories: false)
+      try Data("ledger".utf8).write(to: folder.appendingPathComponent("migration.sqlite"))
+      if lock { try Data().write(to: folder.appendingPathComponent("lock")) }
+      return folder
     }
-    #expect(throws: LedgerStoreLifecycle.Error.unsupportedStore) {
-      try LedgerStoreLifecycle.open(at: url)
-    }
-    var value = stat()
-    #expect(lstat(url.path, &value) == 0)
-    #expect(value.st_size == off_t(512 * 1024 * 1024 + 4 * 1024))
-    let prefix = originalBytes
-    let readDescriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-    #expect(readDescriptor >= 0)
-    var readBuffer = [UInt8](repeating: 0, count: prefix.count)
-    let count = readBuffer.withUnsafeMutableBytes {
-      pread(readDescriptor, $0.baseAddress, $0.count, 0)
-    }
-    Darwin.close(readDescriptor)
-    #expect(count == prefix.count)
-    #expect(Data(readBuffer) == prefix)
+    // Left behind by a killed upgrade: its lock file is there but nobody holds it.
+    let abandoned = try scratch("ledger-atlas-migration-killed", lock: true)
+    try fileManager.setAttributes(
+      [.modificationDate: Date(timeIntervalSinceNow: -3600)],
+      ofItemAtPath: abandoned.appendingPathComponent("lock").path)
+    // Its upgrade just made the lock file and hasn't taken the lock yet: left alone.
+    let locking = try scratch("ledger-atlas-migration-locking", lock: true)
+    // An upgrade running now holds its lock.
+    let live = try scratch("ledger-atlas-migration-running", lock: true)
+    let held = open(live.appendingPathComponent("lock").path, O_RDWR | O_CLOEXEC)
+    #expect(held >= 0)
+    defer { close(held) }
+    #expect(flock(held, LOCK_EX | LOCK_NB) == 0)
+    // Just made by mkdtemp, before its upgrade took the lock: left alone for now.
+    let starting = try scratch("ledger-atlas-migration-starting", lock: false)
+    // Made long ago and never locked: an upgrade killed before it took the lock.
+    let stale = try scratch("ledger-atlas-migration-stale", lock: false)
+    try fileManager.setAttributes(
+      [.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: stale.path)
+    // Not ours.
+    let other = try scratch("something-else", lock: true)
+
+    LedgerStoreLifecycle.removeAbandonedMigrations(in: root.path, grace: 600, lockGrace: 60)
+
+    #expect(!fileManager.fileExists(atPath: abandoned.path))
+    #expect(!fileManager.fileExists(atPath: stale.path))
+    #expect(fileManager.fileExists(atPath: live.appendingPathComponent("migration.sqlite").path))
+    #expect(fileManager.fileExists(atPath: starting.appendingPathComponent("migration.sqlite").path))
+    #expect(fileManager.fileExists(atPath: locking.appendingPathComponent("migration.sqlite").path))
+    #expect(fileManager.fileExists(atPath: other.appendingPathComponent("migration.sqlite").path))
   }
 }
 
