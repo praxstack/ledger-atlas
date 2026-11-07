@@ -1,19 +1,24 @@
 name: CI
 
-# Runs on every pull request and every push to main.
+# Runs on every pull request, every push to main, and every v* tag.
 # - checks (Linux, cheap): Python lint/tests and JSON parse checks
 # - swift (macOS): swift build, swift test, mmctl smoke
-# The Swift job skips docs-only PRs, and older runs on the same branch are cancelled.
+# The Swift job skips docs-only PRs. A newer push to a PR cancels its older run; runs on main
+# and on tags always finish, so every main commit gets its own result and a release can check
+# it (scripts/ci/wait-for-green-ci.sh, #186).
 
 on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
+# A PR's newer push cancels its older run. Pushes to main and tags get a group per commit, so
+# their runs never cancel or replace each other.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || format('{0}-{1}', github.ref, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -41,6 +46,8 @@ jobs:
 
   changes:
     name: Detect Swift changes
+    # Only pull requests skip the Swift jobs; pushes and tags always run them.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -72,7 +79,7 @@ jobs:
   keychain-probe:
     name: Keychain probe (macOS)
     needs: changes
-    if: needs.changes.outputs.swift == 'true' || github.event_name != 'pull_request'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.swift == 'true') }}
     runs-on: macos-26
     timeout-minutes: 10
     continue-on-error: true
@@ -93,7 +100,7 @@ jobs:
   release-import:
     name: Release-mode import (macOS)
     needs: changes
-    if: needs.changes.outputs.swift == 'true' || github.event_name != 'pull_request'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.swift == 'true') }}
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -112,7 +119,7 @@ jobs:
   swift:
     name: Swift build + test (macOS)
     needs: changes
-    if: needs.changes.outputs.swift == 'true' || github.event_name != 'pull_request'
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.swift == 'true') }}
     runs-on: macos-26
     timeout-minutes: 45
     steps:
