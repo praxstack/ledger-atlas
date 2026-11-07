@@ -30,6 +30,26 @@ extension MoneyManagerV19Semantics {
     return reason(forType: type)
   }
 
+  /// A record's mapping literals by column name.
+  static func literals(_ record: MoneyManagerV19SourceRecord) -> [String: String] {
+    var values: [String: String] = [:]
+    for field in record.fields {
+      if let literal = mappingLiteral(
+        storageClass: field.storageClass, payload: field.payload, value: field.value)
+      {
+        values[field.name] = values[field.name] ?? literal
+      }
+    }
+    return values
+  }
+
+  /// The debit-card rule over a staged backup's accounts and account groups.
+  static func debitCards(in input: MoneyManagerV19AdapterInput) -> DebitCards {
+    DebitCards(
+      accounts: input.assets.map(literals),
+      groups: input.allRecords.filter { assetGroupTables.contains($0.tableName) }.map(literals))
+  }
+
   /// A balance edit has no category row; every other category must resolve.
   static func categoryResolves(_ categoryUID: String, known: Set<String>) -> Bool {
     categoryUID == balanceEditCategoryUID || known.contains(categoryUID)

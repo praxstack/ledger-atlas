@@ -1068,6 +1068,8 @@ package enum CanonicalLedgerHealth {
   {
     let identity = try receiptIdentity(database, receipt: receipt)
     var components = [CanonicalReceiptDigest.eventSetPrefix]
+    // Read only when an entry was made with a debit card (#207); most ledgers never need it.
+    var retainedAccounts: MoneyManagerV19Semantics.RetainedAccounts?
     for row in try rows(
       database,
       "SELECT e.event_id, e.account_id, e.event_kind, e.amount_literal, e.currency_unit, e.instant_milliseconds, e.local_year, e.local_month, e.local_day, e.local_hour, e.local_minute, e.local_second, e.local_millisecond, e.timezone_kind, e.timezone_value, e.temporal_precision, e.resolved_offset_seconds, e.source_record_id, e.provenance_id FROM receipt_event r JOIN economic_event e ON e.event_id=r.event_id WHERE r.idempotency_key='\(receipt)' ORDER BY e.event_id",
@@ -1180,15 +1182,49 @@ package enum CanonicalLedgerHealth {
       let retained = try retainedSemanticFields(
         database, eventID: eventID, receipt: receipt, bindings: bindings)
       try validateGenericRetainedSemantics(event: event, fields: retained)
+      if retainedAccounts == nil,
+        let account = bindings.first(where: { $0.semantic == .account }),
+        MoneyManagerV19Semantics.accountTables.contains(account.provenance.locator.table)
+      {
+        retainedAccounts = try self.retainedAccounts(database, receipt: receipt)
+      }
       guard
         MoneyManagerV19Semantics.validateReplay(
           profileID: identity.profileID, adapterVersion: identity.adapterVersion,
-          event: event, fields: retained, sidecars: retainedSidecars,
+          event: event, fields: retained, sidecars: retainedSidecars, accounts: retainedAccounts,
           temporalCommitment: MoneyManagerV19Semantics.temporalCommitment(event.occurredAt))
           != .invalid
       else { throw HealthError.invalid }
     }
     return CanonicalReceiptDigest.hash(components)
+  }
+
+  /// The receipt's retained account and account-group fields, for a debit-card entry's account
+  /// proof (#207). Accounts and groups are never event records, so the receipt owns them.
+  private static func retainedAccounts(_ database: OpaquePointer, receipt: String) throws
+    -> MoneyManagerV19Semantics.RetainedAccounts
+  {
+    let tables = MoneyManagerV19Semantics.accountTables
+      .union(MoneyManagerV19Semantics.assetGroupTables)
+    var fields: [MoneyManagerV19Semantics.RetainedSidecar] = []
+    for row in try rows(
+      database,
+      "SELECT p.container_member, p.source_table, p.source_record_key, p.source_column_ordinal, p.source_column_name, r.storage_class, r.payload FROM receipt_preservation_payload r JOIN provenance_reference p ON p.provenance_id=r.provenance_id WHERE r.idempotency_key=?1 ORDER BY r.provenance_id",
+      binding: [receipt], { $0 }
+    ) {
+      guard row.textColumns([1, 2, 5]), row.blobColumns([6]), row.nullOrText(0),
+        row.nullOrInteger(3), row.nullOrText(4)
+      else { throw HealthError.invalid }
+      guard tables.contains(row.text(1)) else { continue }
+      fields.append(
+        .init(
+          locator: SourceLocator(
+            containerMember: row.optionalText(0), table: row.text(1), recordKey: row.text(2),
+            columnOrdinal: row.optionalInt(3), columnName: row.optionalText(4)),
+          storageClass: try enumValue(CanonicalFieldStorageClass.self, row.text(5)),
+          payload: row.blob(6)))
+    }
+    return MoneyManagerV19Semantics.RetainedAccounts(fields: fields)
   }
 
   /// Event sidecars and receipt-owned payloads are the only retained source bytes health may
