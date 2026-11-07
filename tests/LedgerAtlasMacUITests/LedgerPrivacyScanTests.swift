@@ -153,6 +153,8 @@ func theAppCannotOpenNetworkConnections(_ file: String) throws {
     #"(^|[^A-Za-z0-9_.])(print|NSLog|os_log|debugPrint|dump|fputs)\(|\bOSLog\(|FileHandle\.standard(Error|Output)"#)
   let logCall = try Regex(#"\b\w*[lL]og(ger)?\.(log|trace|debug|info|notice|warning|error|critical|fault)\("#)
   let allowedConsole = ["[demo-tour]"]
+  let publicError = try Regex(
+    #"\\\((String\(describing:\s*)?\w*([eE]rror|[fF]ailure)\w*(\.localizedDescription)?\)?\s*,\s*privacy:\s*\.public"#)
   // Log calls that interpolate, each with why it carries no ledger value.
   let allowedInterpolation = [
     // The operation name ("create" or "open") is public; the error's description, which for a
@@ -194,8 +196,10 @@ func theAppCannotOpenNetworkConnections(_ file: String) throws {
         if interpolates, !allowedInterpolation.contains(where: { "\(file): \(code)".hasPrefix($0) }) {
           offenders.append("\(file):\(index + 1): log message interpolates a value: \(code)")
         }
-        // Even an allowed message must keep an error's description private.
-        if statement.contains("String(describing: error), privacy: .public") {
+        // Even an allowed message must keep an error's description private: any interpolated
+        // error (`\(error, …)`, `String(describing: someError)`, `.localizedDescription`)
+        // marked public fails.
+        if statement.contains(publicError) {
           offenders.append("\(file):\(index + 1): an error's description is logged publicly")
         }
       }
