@@ -63,7 +63,7 @@ struct RecurrenceView: View {
       LedgerActionBar {
         if isEditing {
           Button("New recurrence") { showingForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
-        } else if !rules.isEmpty {
+        } else if !rules.isEmpty || state.isLoaded {
           Button("Begin editing", action: beginEditing).buttonStyle(LedgerSecondaryButtonStyle())
         } else {
           Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
@@ -311,7 +311,7 @@ struct InstallmentsView: View {
       LedgerActionBar {
         if isEditing {
           Button("New installment plan") { showingForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
-        } else if !plans.isEmpty {
+        } else if !plans.isEmpty || state.isLoaded {
           Button("Begin editing", action: beginEditing).buttonStyle(LedgerSecondaryButtonStyle())
         } else {
           Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
@@ -450,7 +450,7 @@ struct BudgetsView: View {
       LedgerActionBar {
         if isEditing {
           Button("New budget") { showingForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
-        } else if !budgets.isEmpty {
+        } else if !budgets.isEmpty || state.isLoaded {
           Button("Begin editing", action: beginEditing).buttonStyle(LedgerSecondaryButtonStyle())
         } else {
           Button("Open Ledger…", action: open).buttonStyle(LedgerPrimaryButtonStyle())
@@ -582,5 +582,13 @@ private struct PlanningEmptyView: View {
     LedgerSessionEmptyState(
       state: state, title: title, systemImage: "calendar.badge.plus",
       message: isEditing ? message : "Begin editing to manage this plan.", failure: failure, open: open)
+  }
+}
+
+extension LedgerSession.State {
+  /// A ledger is open, so an empty planning screen offers editing rather than opening one.
+  fileprivate var isLoaded: Bool {
+    if case .loaded = self { return true }
+    return false
   }
 }

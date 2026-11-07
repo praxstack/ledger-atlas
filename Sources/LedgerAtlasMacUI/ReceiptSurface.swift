@@ -86,31 +86,50 @@ struct ReceiptSurface: View {
     .task(id: journey.snapshotGeneration) { reload() }
   }
 
+  /// A plain list of buttons rather than a selection list: Tab into a SwiftUI selection
+  /// `List` on macOS 26 crashed AppKit (`viewAtColumn:` with no column) under Full Keyboard
+  /// Access. Each receipt is a button that VoiceOver reads as selected when it is shown.
   private var receiptList: some View {
-    List(selection: $selectedID) {
+    List {
       if receipts.isEmpty {
         Text("No receipts yet.")
           .font(LedgerTheme.Typeface.secondary)
           .foregroundStyle(LedgerTheme.inkTertiary)
       }
       ForEach(receipts, id: \.id) { receipt in
-        HStack(spacing: LedgerTheme.Space.m) {
-          LedgerIconTile(
-            .symbol(receipt.mediaType == .pdf ? "doc.richtext" : "photo"),
-            swatch: LedgerTheme.swatch(for: receipt.id))
-          VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
-            Text(Self.title(for: receipt))
-              .font(LedgerTheme.Typeface.bodyEmphasis)
-              .foregroundStyle(receipt.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
-            Text(linkText(for: receipt))
-              .font(LedgerTheme.Typeface.caption)
-              .foregroundStyle(LedgerTheme.inkTertiary)
-              .lineLimit(1)
+        let isSelected = receipt.id == selectedID
+        Button {
+          selectedID = receipt.id
+        } label: {
+          HStack(spacing: LedgerTheme.Space.m) {
+            LedgerIconTile(
+              .symbol(receipt.mediaType == .pdf ? "doc.richtext" : "photo"),
+              swatch: LedgerTheme.swatch(for: receipt.id))
+            VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+              Text(Self.title(for: receipt))
+                .font(LedgerTheme.Typeface.bodyEmphasis)
+                .foregroundStyle(receipt.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
+              Text(linkText(for: receipt))
+                .font(LedgerTheme.Typeface.caption)
+                .foregroundStyle(LedgerTheme.inkTertiary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
           }
+          .padding(.vertical, LedgerTheme.Space.xs)
+          .padding(.horizontal, LedgerTheme.Space.xs)
+          .background(
+            isSelected ? LedgerTheme.accentSoft : LedgerTheme.card,
+            in: .rect(cornerRadius: LedgerTheme.Radius.row)
+          )
+          .contentShape(.rect)
         }
-        .padding(.vertical, LedgerTheme.Space.xs)
-        .tag(Optional(receipt.id))
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(Self.title(for: receipt)), \(linkText(for: receipt))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("Shows this receipt.")
+        .listRowSeparator(.hidden)
       }
     }
     .scrollContentBackground(.hidden)
