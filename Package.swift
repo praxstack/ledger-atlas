@@ -41,7 +41,10 @@ let package = Package(
     .executableTarget(
       name: "LedgerAtlasMac", dependencies: ["LedgerAtlasMacUI"],
       linkerSettings: [.linkedFramework("AppIntents")]),
-    .testTarget(name: "LedgerCoreTests", dependencies: ["LedgerCore", "MMImport", "MMFixtures"]),
+    .testTarget(
+      name: "LedgerCoreTests", dependencies: ["LedgerCore", "MMImport", "MMFixtures"],
+      // The CSV golden file is read from disk by path.
+      exclude: ["Exchange/Fixtures"]),
     .testTarget(
       name: "LedgerStoreTests",
       dependencies: ["CSQLite", "LedgerCore", "LedgerStore", "LedgerAdapterSemantics"]),
