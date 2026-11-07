@@ -874,4 +874,16 @@ extension View {
       self
     }
   }
+
+  /// Uses the soft macOS 26 scroll edge effect on the given edges: content fades under the
+  /// toolbar (so its items stay readable when scrolled) without the opaque band the hard
+  /// style paints in the system window colour.
+  @ViewBuilder
+  func softScrollEdgeEffect(_ edges: Edge.Set) -> some View {
+    if #available(macOS 26.0, *) {
+      scrollEdgeEffectStyle(.soft, for: edges)
+    } else {
+      self
+    }
+  }
 }
