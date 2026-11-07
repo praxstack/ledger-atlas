@@ -747,53 +747,10 @@ struct LedgerBrowseList: View {
   /// view matches (all pages), and the bulk actions. They need editing, like every change.
   @ViewBuilder private var bulkBar: some View {
     if selectedIDs.count > 1 {
-      HStack(spacing: LedgerTheme.Space.m) {
-        Text("\(selectedIDs.count) selected")
-          .font(LedgerTheme.Typeface.captionEmphasis)
-          .foregroundStyle(LedgerTheme.ink)
-        if selectedIDs.count < matchCount {
-          Button("Select All \(matchCount)") { selectAllMatching() }
-            .buttonStyle(LedgerSecondaryButtonStyle())
-            .accessibilityLabel("Select all \(matchCount) entries this view shows")
-            .help("Select every entry this view shows, on every page")
-        }
-        Spacer(minLength: LedgerTheme.Space.s)
-        if let bulkEdit {
-          let ids = Array(selectedIDs)
-          Menu("Set Category") {
-            Button("No Category") { bulkEdit(.category(nil), ids) }
-            Divider()
-            ForEach(bulkCategories, id: \.id) { category in
-              Button(CategoryPresentation.label(category, in: categories)) {
-                bulkEdit(.category(category.id), ids)
-              }
-            }
-          }
-          .fixedSize()
-          .accessibilityLabel("Set the category of the selected entries")
-          Menu("Add Tag") {
-            ForEach(tags.filter { $0.lifecycle == .active }, id: \.id) { tag in
-              Button(tag.name) { bulkEdit(.addTag(tag.id), ids) }
-            }
-          }
-          .fixedSize()
-          .disabled(!tags.contains { $0.lifecycle == .active })
-          .accessibilityLabel("Add a tag to the selected entries")
-          Menu("Remove Tag") {
-            ForEach(tags, id: \.id) { tag in
-              Button(tag.name) { bulkEdit(.removeTag(tag.id), ids) }
-            }
-          }
-          .fixedSize()
-          .disabled(tags.isEmpty)
-          .accessibilityLabel("Remove a tag from the selected entries")
-        } else {
-          Text("Begin editing to change them.")
-            .font(LedgerTheme.Typeface.caption)
-            .foregroundStyle(LedgerTheme.inkTertiary)
-        }
-        Button("Clear Selection") { selectedIDs = [] }
-          .buttonStyle(LedgerSecondaryButtonStyle())
+      // Narrow (the inspector open in a small window): the three changes share one menu.
+      ViewThatFits(in: .horizontal) {
+        bulkBarRow(compact: false)
+        bulkBarRow(compact: true)
       }
       .padding(.horizontal, LedgerTheme.Space.l)
       .padding(.vertical, LedgerTheme.Space.s)
@@ -802,6 +759,88 @@ struct LedgerBrowseList: View {
       .accessibilityElement(children: .contain)
       .accessibilityLabel("Bulk actions for \(selectedIDs.count) selected entries")
     }
+  }
+
+  private func bulkBarRow(compact: Bool) -> some View {
+    HStack(spacing: LedgerTheme.Space.m) {
+      Text("\(selectedIDs.count) selected")
+        .font(LedgerTheme.Typeface.captionEmphasis)
+        .foregroundStyle(LedgerTheme.ink)
+        .fixedSize()
+      if selectedIDs.count < matchCount {
+        Button("Select All \(matchCount)") { selectAllMatching() }
+          .buttonStyle(LedgerSecondaryButtonStyle())
+          .fixedSize()
+          .help("Select every entry this view shows, on every page")
+      }
+      Spacer(minLength: LedgerTheme.Space.s)
+      if let bulkEdit {
+        let ids = Array(selectedIDs)
+        if compact {
+          Menu("Change") { bulkMenus(bulkEdit, ids) }
+            .fixedSize()
+            .help("Set the category, or add or remove a tag, on the selected entries")
+            .accessibilityLabel("Change")
+        } else {
+          bulkMenus(bulkEdit, ids)
+        }
+      } else {
+        Text("Begin editing to change them.")
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkTertiary)
+          .fixedSize()
+      }
+      if compact {
+        Button {
+          selectedIDs = []
+        } label: {
+          Image(systemName: "xmark")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Clear Selection")
+        .help("Clear Selection")
+      } else {
+        Button("Clear Selection") { selectedIDs = [] }
+          .buttonStyle(LedgerSecondaryButtonStyle())
+          .fixedSize()
+      }
+    }
+  }
+
+  /// Set Category, Add Tag and Remove Tag. Each keeps its visible title as its spoken name.
+  @ViewBuilder private func bulkMenus(
+    _ bulkEdit: @escaping (LedgerBulkChange, [String]) -> Void, _ ids: [String]
+  ) -> some View {
+    Menu("Set Category") {
+      Button("No Category") { bulkEdit(.category(nil), ids) }
+      Divider()
+      ForEach(bulkCategories, id: \.id) { category in
+        Button(CategoryPresentation.label(category, in: categories)) {
+          bulkEdit(.category(category.id), ids)
+        }
+      }
+    }
+    .fixedSize()
+    .help("Set the category of the selected entries")
+    .accessibilityLabel("Set Category")
+    Menu("Add Tag") {
+      ForEach(tags.filter { $0.lifecycle == .active }, id: \.id) { tag in
+        Button(tag.name) { bulkEdit(.addTag(tag.id), ids) }
+      }
+    }
+    .fixedSize()
+    .disabled(!tags.contains { $0.lifecycle == .active })
+    .help("Add a tag to the selected entries")
+    .accessibilityLabel("Add Tag")
+    Menu("Remove Tag") {
+      ForEach(tags, id: \.id) { tag in
+        Button(tag.name) { bulkEdit(.removeTag(tag.id), ids) }
+      }
+    }
+    .fixedSize()
+    .disabled(tags.isEmpty)
+    .help("Remove a tag from the selected entries")
+    .accessibilityLabel("Remove Tag")
   }
 
   private var bulkCategories: [LedgerCategory] {

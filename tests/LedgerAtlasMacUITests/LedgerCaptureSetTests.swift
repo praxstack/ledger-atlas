@@ -346,7 +346,9 @@ private func captureKeyStates(
             copy: { _ in }, tombstone: { _ in }, tags: ledger.tags,
             revisionTags: ledger.revisionTags, bulkEdit: { _, _ in })
         }),
-      NSSize(width: 1000, height: 600), ["3 selected", "Set Category", "Add Tag", "Remove Tag"],
+      // Wide enough for the full bar beside the inspector; a narrower window folds the three
+      // changes into one Change menu.
+      NSSize(width: 1240, height: 600), ["3 selected", "Set Category", "Add Tag", "Remove Tag"],
       "Several entries selected: the bulk bar says how many and offers category and tag changes."
     ),
     (
@@ -360,9 +362,18 @@ private func captureKeyStates(
     (
       "bulk-done",
       AnyView(
-        BulkEditNotice(text: "Category set to Rent on 3 entries.", revert: {}, dismiss: {})
-          .frame(width: 900)),
-      NSSize(width: 900, height: 80), ["Category set to Rent on 3 entries.", "Revert This Bulk Change"],
+        NavigationStack {
+          VStack(spacing: 0) {
+            LedgerBrowseList(
+              transactions: ledger.transactions, hiddenIDs: [], accounts: ledger.accounts,
+              categories: ledger.categories, splitPurchases: [], selectedIDs: .constant([]),
+              copy: { _ in }, tombstone: { _ in }, tags: ledger.tags,
+              revisionTags: ledger.revisionTags, bulkEdit: { _, _ in })
+            BulkEditNotice(text: "Category set to Rent on 3 entries.", revert: {}, dismiss: {})
+          }
+        }),
+      NSSize(width: 1240, height: 600),
+      ["Category set to Rent on 3 entries.", "Revert This Bulk Change"],
       "After a bulk change: what changed, and Revert This Bulk Change."
     ),
   ]
