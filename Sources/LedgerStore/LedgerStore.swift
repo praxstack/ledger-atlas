@@ -103,6 +103,10 @@ public final class LedgerStore {
     /// A package with import history did not rebuild the ledger it was exported from. Nothing
     /// was written.
     case importGraphMismatch
+    /// The ledger holds imported history, and its receipt key is not on this Mac (a new Mac,
+    /// a wiped container, a lost Keys folder). Nothing is damaged; the key has to come back
+    /// first (#182).
+    case receiptKeyMissing
 
     fileprivate var preservesMutationError: Bool {
       switch self {
@@ -339,6 +343,27 @@ public final class LedgerStore {
   static let busyTimeoutMilliseconds: Int32 = 5_000
 
   public static func openReadOnly(at url: URL) throws -> LedgerStore {
+    try openReadOnly(at: url, trustKey: nil)
+  }
+
+  /// Installs the receipt key from a recovery key file made on another Mac, after checking
+  /// that the file was made for the ledger at `url` and that its key opens it (#182). A
+  /// different key already on this Mac is never replaced.
+  package static func installRecoveryKey(_ file: Data, for url: URL) throws {
+    let candidate = try LedgerReceiptTrust.recoveryKey(from: file, for: url)
+    // A key already on this Mac, wherever it is kept, is never replaced or shadowed.
+    if let existing = try LedgerReceiptTrust.key(for: url, create: false) {
+      guard existing == candidate.key else { throw LedgerReceiptTrustError.conflictingKeys }
+      return
+    }
+    _ = try openReadOnly(at: url, trustKey: candidate.key)
+    try LedgerReceiptTrust.installRecoveryKey(candidate.key, account: candidate.account)
+  }
+
+  /// `suppliedKey` checks the ledger with a key that is not on this Mac yet.
+  private static func openReadOnly(at url: URL, trustKey suppliedKey: Data?) throws
+    -> LedgerStore
+  {
     try validateNoSQLiteCompanions(at: url)
     // Prefer a read-write description even though SQLite opens this connection read-only. With a
     // read-only one, a save on another connection in this process intermittently failed to take
@@ -371,20 +396,32 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     sqlite3_busy_timeout(database, Self.busyTimeoutMilliseconds)
+    var trustKey: Data?
+    var keyLookedUp = false
     do {
       // HAS_MOVED is not meaningful for a standard VFS opened through a file descriptor.
       // The descriptor was authenticated before opening and the path is revalidated below.
       try validateCanonicalSchema(on: database)
-      try CanonicalLedgerHealth.validate(
-        database, trustKey: try LedgerReceiptTrust.key(for: url, create: false),
-        remembering: .shared)
+      trustKey = try suppliedKey ?? LedgerReceiptTrust.key(for: url, create: false)
+      keyLookedUp = true
+      try CanonicalLedgerHealth.validate(database, trustKey: trustKey, remembering: .shared)
       try validatePath(url, matches: identity)
       try validateNoSQLiteCompanions(at: url)
       return LedgerStore(database: database, identity: identity, url: url)
     } catch {
+      let keyMissing = keyLookedUp && trustKey == nil && failedOnlyForMissingKey(database)
       sqlite3_close(database)
-      throw Error.incompatibleCanonicalStore
+      throw keyMissing ? Error.receiptKeyMissing : Error.incompatibleCanonicalStore
     }
+  }
+
+  /// A ledger with an import receipt can't be fully checked without its receipt key. A failed
+  /// check with no key on this Mac is reported as the missing key, not as damage, when the
+  /// ledger has a receipt and passes everything but the receipt signatures.
+  private static func failedOnlyForMissingKey(_ database: OpaquePointer) -> Bool {
+    (scalarInt("SELECT count(*) FROM main.import_receipt", on: database) ?? 0) > 0
+      && (try? validateCanonicalSchema(on: database)) != nil
+      && CanonicalLedgerHealth.passesAllButReceiptSignatures(database)
   }
 
   public static func openForMutation(at url: URL) throws -> LedgerStore {
@@ -470,6 +507,8 @@ public final class LedgerStore {
       throw Error.incompatibleCanonicalStore
     }
     sqlite3_busy_timeout(database, busyTimeoutMilliseconds)
+    var trustKey: Data?
+    var keyLookedUp = false
     do {
       try mutationTestHook?(.afterPinnedOpen)
       try execute("PRAGMA foreign_keys=ON", on: database)
@@ -477,7 +516,8 @@ public final class LedgerStore {
         throw Error.incompatibleCanonicalStore
       }
       try validateCanonicalJournalMode(on: database)
-      let trustKey = try LedgerReceiptTrust.key(for: url, create: false)
+      trustKey = try LedgerReceiptTrust.key(for: url, create: false)
+      keyLookedUp = true
       // A file with the same inode, size, modification and change time as when it was digested
       // still has the digested bytes: any write moves its change time (the caller only passes a
       // digest for a file whose change time is old enough for that to hold), and only a change
@@ -546,8 +586,9 @@ public final class LedgerStore {
       store.rememberCoreSnapshot(checked.snapshot, readFrom: stateBeforeCheck)
       return store
     } catch {
+      let keyMissing = keyLookedUp && trustKey == nil && failedOnlyForMissingKey(database)
       _ = csqlite_close_pinned(database, registration)
-      throw Error.incompatibleCanonicalStore
+      throw keyMissing ? Error.receiptKeyMissing : Error.incompatibleCanonicalStore
     }
   }
 
@@ -2859,6 +2900,142 @@ public final class LedgerStore {
           unsafeBitCast(-1, to: sqlite3_destructor_type.self)) == SQLITE_OK
       }
     }
+  }
+
+  /// What `repairCompanions` did to the files SQLite keeps beside a ledger.
+  package enum CompanionRepair: Equatable, Sendable {
+    case none
+    /// A save was cut off (crash, kill, power loss). Its rollback journal was bound to this
+    /// exact file, so SQLite undid it and the ledger is back at its last complete save (#178).
+    case rolledBackInterruptedSave
+    /// The journal was empty but its binding named other inodes, or was missing, as after a
+    /// Time Machine restore or a move to another Mac. An empty journal holds nothing to roll
+    /// back, so it was bound to this file again (#181).
+    case reboundEmptyJournal
+  }
+
+  /// Brings the journal beside a ledger back to the inactive shape every open accepts: an empty
+  /// `-journal` with a binding that names this file. Run before the companion checks, under
+  /// the lifecycle lease. Anything it can't vouch for (a WAL, a journal that isn't a private
+  /// regular file, a non-empty journal with no valid binding) is left alone for those checks
+  /// to refuse, so this never makes an open accept more than it did before, except the two
+  /// cases above.
+  package static func repairCompanions(at url: URL) throws -> CompanionRepair {
+    for suffix in ["-wal", "-shm"] {
+      var companion = stat()
+      errno = 0
+      guard lstat(url.path + suffix, &companion) != 0, errno == ENOENT else { return .none }
+    }
+    let journalPath = url.path + "-journal"
+    var journal = stat()
+    guard lstat(journalPath, &journal) == 0, isSafeJournalFile(journal) else { return .none }
+    if journal.st_size > 0 {
+      return try rollBackInterruptedSave(at: url) ? .rolledBackInterruptedSave : .none
+    }
+    return try rebindEmptyJournal(at: url) ? .reboundEmptyJournal : .none
+  }
+
+  /// Opens the ledger through the pinned VFS with its authenticated hot journal. The first read
+  /// takes SQLite's shared lock, finds the hot journal and rolls it back; the VFS then empties
+  /// the journal in place. A journal whose binding doesn't name this file is never used.
+  private static func rollBackInterruptedSave(at url: URL) throws -> Bool {
+    guard let journalDescriptor = try? openRecoveryJournal(at: url) else { return false }
+    defer { Darwin.close(journalDescriptor) }
+    let descriptor = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+    guard descriptor >= 0 else { return false }
+    defer { Darwin.close(descriptor) }
+    var identity = stat()
+    var atPath = stat()
+    guard fstat(descriptor, &identity) == 0, lstat(url.path, &atPath) == 0,
+      sameFile(identity, atPath), isSafeCanonicalFile(identity)
+    else { return false }
+    let parentDescriptor = Darwin.open(
+      url.deletingLastPathComponent().path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+    guard parentDescriptor >= 0 else { return false }
+    defer { Darwin.close(parentDescriptor) }
+    let leaf = url.lastPathComponent
+    var database: OpaquePointer?
+    var registration: UnsafeMutableRawPointer?
+    let openResult = url.path.withCString { path in
+      leaf.withCString { leaf in
+        csqlite_open_pinned_rw(
+          path, descriptor, parentDescriptor, journalDescriptor, leaf, &database, &registration)
+      }
+    }
+    guard openResult == SQLITE_OK, let database, let registration else { return false }
+    sqlite3_busy_timeout(database, busyTimeoutMilliseconds)
+    let read = scalarInt("SELECT count(*) FROM sqlite_schema", on: database) != nil
+    guard csqlite_close_pinned(database, registration) == SQLITE_OK, read else {
+      throw Error.incompatibleCanonicalStore
+    }
+    var after = stat()
+    guard lstat(url.path + "-journal", &after) == 0 else { return errno == ENOENT }
+    return after.st_size == 0
+  }
+
+  /// Writes a binding for an empty journal whose binding is missing or names other files.
+  private static func rebindEmptyJournal(at url: URL) throws -> Bool {
+    let journalPath = url.path + "-journal"
+    let bindingPath = journalPath + ".ledger-atlas-binding"
+    let databaseDescriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    guard databaseDescriptor >= 0 else { return false }
+    defer { Darwin.close(databaseDescriptor) }
+    let journalDescriptor = Darwin.open(journalPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    guard journalDescriptor >= 0 else { return false }
+    defer { Darwin.close(journalDescriptor) }
+    var database = stat()
+    var databaseAtPath = stat()
+    var journal = stat()
+    var journalAtPath = stat()
+    guard fstat(databaseDescriptor, &database) == 0, lstat(url.path, &databaseAtPath) == 0,
+      sameFile(database, databaseAtPath), isSafeCanonicalFile(database),
+      fstat(journalDescriptor, &journal) == 0, lstat(journalPath, &journalAtPath) == 0,
+      sameFile(journal, journalAtPath), isSafeJournalFile(journal), journal.st_size == 0
+    else { return false }
+    let expected = Data(journalBindingPayload(database: database, journal: journal).utf8)
+    var binding = stat()
+    if lstat(bindingPath, &binding) == 0 {
+      // Only a private regular file is ever replaced; anything else stays for the checks.
+      guard isSafeJournalFile(binding) else { return false }
+      if binding.st_size == expected.count, let actual = FileManager.default.contents(
+        atPath: bindingPath), actual == expected
+      {
+        return false
+      }
+    } else {
+      guard errno == ENOENT else { return false }
+    }
+    let parent = url.deletingLastPathComponent()
+    let parentDescriptor = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+    guard parentDescriptor >= 0 else { return false }
+    defer { Darwin.close(parentDescriptor) }
+    let bindingLeaf = url.lastPathComponent + "-journal.ledger-atlas-binding"
+    let temporaryLeaf = bindingLeaf + ".rebind-\(getpid())-\(UUID().uuidString)"
+    let temporary = openat(
+      parentDescriptor, temporaryLeaf, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+      mode_t(S_IRUSR | S_IWUSR))
+    guard temporary >= 0 else { throw Error.incompatibleCanonicalStore }
+    var published = false
+    defer {
+      Darwin.close(temporary)
+      if !published { unlinkat(parentDescriptor, temporaryLeaf, 0) }
+    }
+    let written = expected.withUnsafeBytes { bytes in
+      Darwin.write(temporary, bytes.baseAddress, bytes.count)
+    }
+    guard written == expected.count, fchmod(temporary, mode_t(S_IRUSR | S_IWUSR)) == 0,
+      fsync(temporary) == 0
+    else { throw Error.incompatibleCanonicalStore }
+    // The journal and the ledger must still be the files the payload names.
+    var journalNow = stat()
+    var databaseNow = stat()
+    guard lstat(journalPath, &journalNow) == 0, sameFile(journal, journalNow),
+      lstat(url.path, &databaseNow) == 0, sameFile(database, databaseNow),
+      renameat(parentDescriptor, temporaryLeaf, parentDescriptor, bindingLeaf) == 0
+    else { throw Error.incompatibleCanonicalStore }
+    published = true
+    guard fsync(parentDescriptor) == 0 else { throw Error.incompatibleCanonicalStore }
+    return true
   }
 
   private static func openRecoveryJournal(at url: URL) throws -> Int32? {
