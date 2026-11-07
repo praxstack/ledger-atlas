@@ -1574,7 +1574,7 @@ public final class LedgerJourney {
             "\(snapshot.accounts.count) accounts · \(snapshot.transactions.count) transactions"),
         SurfaceRow(
           id: "manifest", title: "Integrity",
-          detail: exported.map { "Checked · schema \($0.manifest.schemaVersion)" } ?? "Unavailable"),
+          detail: exported.map { "Exports cleanly · schema \($0.manifest.schemaVersion)" } ?? "Unavailable"),
       ]
     case .importReview:
       return summary.rows.map { SurfaceRow(id: $0.label, title: $0.label, detail: $0.value) }

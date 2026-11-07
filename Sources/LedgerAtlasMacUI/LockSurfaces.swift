@@ -9,6 +9,7 @@ struct LockedSurface: View {
   @State private var passcode = ""
   @State private var invalidAttempt = false
   @State private var biometricAttempted = false
+  @FocusState private var passcodeIsFocused: Bool
 
   var body: some View {
     VStack(spacing: LedgerTheme.Space.l) {
@@ -40,8 +41,10 @@ struct LockedSurface: View {
         .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.row))
         .overlay {
           RoundedRectangle(cornerRadius: LedgerTheme.Radius.row)
-            .strokeBorder(LedgerTheme.hairline, lineWidth: 1)
+            .strokeBorder(passcodeIsFocused ? LedgerTheme.accent : LedgerTheme.hairline, lineWidth: 1)
         }
+        .focused($passcodeIsFocused)
+        .onAppear { passcodeIsFocused = true }
         // No password content type: it opened the Passwords AutoFill bubble over Unlock, and
         // this passcode is never stored in a password manager.
         .accessibilityLabel("Ledger Atlas passcode")
