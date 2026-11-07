@@ -23,6 +23,20 @@ private enum PlanningSupport {
     return String(format: "%04d-%02d-%02d", date.year, date.month, date.day)
   }
 
+  /// The first date on or after `day` the rule still produces, nil once it has ended.
+  static func nextDate(of rule: LedgerRecurrenceRule, onOrAfter day: SourceLocalDate) -> SourceLocalDate? {
+    let skipped = Set(rule.skippedDates)
+    for index in 0..<LedgerSchedule.maximumOccurrences {
+      guard let date = try? LedgerSchedule.occurrence(
+        index, from: rule.start, frequency: rule.frequency, interval: rule.interval,
+        dayOfMonth: rule.dayOfMonth)
+      else { return nil }
+      if let until = rule.until, date > until { return nil }
+      if date >= day, !skipped.contains(date) { return date }
+    }
+    return nil
+  }
+
   static func generatedID(_ prefix: String) -> String {
     SHA256.hash(data: Data("ledger-atlas/\(prefix)/\(UUID().uuidString)".utf8))
       .map { String(format: "%02x", $0) }.joined()
@@ -47,7 +61,8 @@ struct RecurrenceView: View {
     VStack(alignment: .leading, spacing: 0) {
       if rules.isEmpty {
         PlanningEmptyView(
-          title: "No recurrence rules", message: "Create a rule to generate dated income or expenses.",
+          title: "Nothing recurring yet", systemImage: "repeat",
+          message: "Rent, salary and subscriptions can be added on their dates automatically.",
           state: state, isEditing: isEditing, failure: lastFailure, open: open)
       } else {
         List(rules, id: \.id) { rule in
@@ -72,7 +87,7 @@ struct RecurrenceView: View {
       }
     }
     .ledgerCanvas()
-    .navigationTitle("Recurrence")
+    .navigationTitle("Recurring")
     .sheet(isPresented: $showingForm) {
       RecurrenceForm(accounts: accounts, categories: categories, onSave: onCreate)
     }
@@ -101,8 +116,9 @@ private struct RecurrenceRow: View {
 
   var body: some View {
     HStack(spacing: LedgerTheme.Space.m) {
+      // The category's own symbol and colour, as on Transactions and Categories.
       LedgerIconTile(
-        .symbol(rule.kind == .income ? "arrow.down.left" : "arrow.up.right"),
+        .symbol(LedgerCategorySymbol.name(for: categoryName, kind: rule.kind)),
         swatch: LedgerTheme.swatch(for: categoryName ?? accountName ?? rule.id))
       VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
         HStack(alignment: .firstTextBaseline, spacing: LedgerTheme.Space.s) {
@@ -115,9 +131,7 @@ private struct RecurrenceRow: View {
             rule.amount, size: .row, sign: rule.kind == .income ? .always : .never,
             tone: rule.lifecycle == .active ? .automatic : .secondary)
         }
-        Text(
-          [cadence, "starts \(dateText(rule.start))", accountName].compactMap { $0 }.joined(separator: " · ")
-        )
+        Text([cadence, schedule, accountName].compactMap { $0 }.joined(separator: " · "))
         .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
       }
       if rule.paused { LedgerBadge("Paused", systemImage: "pause.circle", tint: LedgerTheme.warning) }
@@ -150,11 +164,21 @@ private struct RecurrenceRow: View {
       .accessibilityLabel("Actions for recurrence rule")
     }
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(rule.kind.rawValue) recurrence, \(formatter.amount(rule.amount))")
+    .accessibilityLabel(
+      "\(categoryName ?? rule.kind.rawValue.capitalized), \(formatter.amount(rule.amount)), "
+        + [cadence, schedule, accountName].compactMap { $0 }.joined(separator: ", "))
   }
 
-  private func dateText(_ date: SourceLocalDate) -> String {
-    String(format: "%04d-%02d-%02d", date.year, date.month, date.day)
+  /// "next Nov 3, 2026" while the rule runs; when it ended or is closed, when it started.
+  private var schedule: String {
+    let today = PlanningSupport.today()
+    if rule.lifecycle == .active, !rule.paused,
+      let next = PlanningSupport.nextDate(of: rule, onOrAfter: today)
+    {
+      return next == today ? "next today" : "next \(formatter.date(next))"
+    }
+    if let until = rule.until, until < today { return "ended \(formatter.date(until))" }
+    return "started \(formatter.date(rule.start))"
   }
 }
 
@@ -260,7 +284,8 @@ struct InstallmentsView: View {
     VStack(alignment: .leading, spacing: 0) {
       if plans.isEmpty {
         PlanningEmptyView(
-          title: "No installment plans", message: "Create a plan to divide a purchase into exact monthly entries.",
+          title: "No installment plans", systemImage: "calendar.badge.clock",
+          message: "Split one purchase into exact monthly entries that add up to the price.",
           state: state, isEditing: isEditing, failure: lastFailure, open: open)
       } else {
         List(plans, id: \.id) { plan in
@@ -574,7 +599,10 @@ private struct BudgetForm: View {
 
 private struct PlanningEmptyView: View {
   let title: String
+  var systemImage = "calendar.badge.plus"
+  /// What the screen is for, then how to start.
   let message: String
+  var action = "Begin editing to add one."
   let state: LedgerSession.State
   let isEditing: Bool
   let failure: String?
@@ -582,8 +610,8 @@ private struct PlanningEmptyView: View {
 
   var body: some View {
     LedgerSessionEmptyState(
-      state: state, title: title, systemImage: "calendar.badge.plus",
-      message: isEditing ? message : "Begin editing to manage this plan.", failure: failure, open: open)
+      state: state, title: title, systemImage: systemImage,
+      message: isEditing ? message : "\(message) \(action)", failure: failure, open: open)
   }
 }
 

@@ -10,6 +10,11 @@ struct CategoriesView: View {
   let rows: [LedgerJourney.SurfaceRow]
   let categories: [LedgerCategory]
   var transactions: [LedgerTransactionSnapshot] = []
+  /// The open ledger, for this month's figure on each row (added up off the main thread).
+  var snapshot: LedgerStore.LedgerReadSnapshot? = nil
+  /// `LedgerJourney.snapshotGeneration`: moves on every new snapshot.
+  var generation: Int = 0
+  var settings: LedgerProductSettings? = nil
   let isEditing: Bool
   let lastFailure: String?
   let beginEditing: () -> Void
@@ -20,6 +25,8 @@ struct CategoriesView: View {
   @State private var editingCategory: LedgerCategory?
   /// The category being drilled into; nil shows the top level.
   @State private var focusID: String?
+  @State private var figures: CategoryMonthFigures?
+  @Environment(\.ledgerFormatter) private var formatter
 
   private var tree: CategoryTree { CategoryTree(categories) }
 
@@ -29,9 +36,18 @@ struct CategoriesView: View {
     let focus = focusID.flatMap { tree[$0] }
     VStack(alignment: .leading, spacing: 0) {
       if !categories.isEmpty {
-        CategoryBreadcrumbs(path: focus.map { tree.path(to: $0.id) } ?? [], select: { focusID = $0 })
-          .padding(.horizontal, LedgerTheme.Space.l)
-          .padding(.vertical, LedgerTheme.Space.m)
+        HStack(alignment: .firstTextBaseline, spacing: LedgerTheme.Space.m) {
+          CategoryBreadcrumbs(path: focus.map { tree.path(to: $0.id) } ?? [], select: { focusID = $0 })
+          if let figures {
+            Text(formatter.monthTitle(figures.month))
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkTertiary)
+              .fixedSize()
+              .accessibilityLabel("Figures for \(formatter.monthTitle(figures.month))")
+          }
+        }
+        .padding(.horizontal, LedgerTheme.Space.l)
+        .padding(.vertical, LedgerTheme.Space.m)
         let visible = tree.children(of: focus?.id)
         if visible.isEmpty {
           LedgerEmptyState(
@@ -41,6 +57,7 @@ struct CategoriesView: View {
           List(visible, id: \.id) { category in
             CategoryTreeRow(
               category: category, tree: tree, usage: usage[category.id] ?? CategoryUsage(),
+              month: figures?.line(for: category),
               isEditing: isEditing, save: saveCategory, edit: { editingCategory = $0 },
               drillIn: { focusID = $0 })
           }
@@ -74,6 +91,19 @@ struct CategoriesView: View {
     }
     .ledgerCanvas()
     .navigationTitle(focus?.name ?? "Categories")
+    .task(id: figuresKey) {
+      guard let snapshot, let settings else {
+        figures = nil
+        return
+      }
+      let today = LedgerPeriodRule.today(in: settings.timeZone)
+      let rule = settings.periodRule
+      let built = await Task.detached(priority: .userInitiated) {
+        try? CategoryMonthFigures(snapshot: snapshot, today: today, rule: rule)
+      }.value
+      guard !Task.isCancelled else { return }
+      figures = built
+    }
     .onChange(of: categories) { _, updated in
       // A reload can remove the focused category; fall back to the top level.
       if let focusID, !updated.contains(where: { $0.id == focusID }) { self.focusID = nil }
@@ -93,6 +123,59 @@ struct CategoriesView: View {
         }
       }
     }
+  }
+
+  /// Changes with every new snapshot and when settings move the period.
+  private var figuresKey: Int {
+    var hasher = Hasher()
+    hasher.combine(generation)
+    hasher.combine(snapshot == nil)
+    hasher.combine(settings?.periodRule)
+    hasher.combine(settings?.timeZone.identifier)
+    return hasher.finalize()
+  }
+}
+
+/// This month's money per category, subcategories included, in the ledger's main currency.
+/// It is the same report Insights and Overview use, so the figures match theirs.
+struct CategoryMonthFigures: Sendable {
+  struct Line {
+    let amount: CurrencyAmount
+    /// Share of the month's spending (or income) of the same kind, 0...1.
+    let share: Double
+    let isIncome: Bool
+  }
+
+  let unitCode: String
+  let month: SourceLocalDate
+  let totals: [String: ExactDecimal]
+  let expense: Double
+  let income: Double
+
+  init(snapshot: LedgerStore.LedgerReadSnapshot, today: SourceLocalDate, rule: LedgerPeriodRule) throws {
+    let day = InsightsReport.openingDay(in: snapshot, today: today, .month, rule: rule)
+    let report = try InsightsReport(
+      snapshot: snapshot, kind: .month, containing: day, unitCode: nil, rule: rule)
+    unitCode = report.unitCode
+    month = report.period.start
+    var totals: [String: ExactDecimal] = [:]
+    for row in report.statistics.expenseCategories + report.statistics.incomeCategories {
+      totals[row.id] = row.totalAmount
+    }
+    self.totals = totals
+    expense = Double(report.statistics.expense.description) ?? 0
+    income = Double(report.statistics.income.description) ?? 0
+  }
+
+  /// Nil for a category with no money this month, or one that is neither income nor expense.
+  func line(for category: LedgerCategory) -> Line? {
+    guard category.kind != .neutral, let total = totals[category.id], total.isPositive || total.isNegative,
+      let amount = try? CurrencyAmount(unitCode: unitCode, amount: total)
+    else { return nil }
+    let isIncome = category.kind == .income
+    let whole = isIncome ? income : expense
+    let value = Double(total.description) ?? 0
+    return Line(amount: amount, share: whole > 0 ? min(max(value / whole, 0), 1) : 0, isIncome: isIncome)
   }
 }
 
@@ -133,9 +216,11 @@ struct CategoryBreadcrumbs: View {
 }
 
 struct CategoryTreeRow: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let category: LedgerCategory
   let tree: CategoryTree
   let usage: CategoryUsage
+  var month: CategoryMonthFigures.Line? = nil
   let isEditing: Bool
   let save: (LedgerCategory) -> Void
   let edit: (LedgerCategory) -> Void
@@ -167,6 +252,17 @@ struct CategoryTreeRow: View {
       }
       Spacer(minLength: LedgerTheme.Space.s)
       if category.hidden { LedgerBadge("Hidden", systemImage: "eye.slash") }
+      if let month {
+        VStack(alignment: .trailing, spacing: LedgerTheme.Space.xs) {
+          MoneyText(
+            month.amount, size: .row, sign: month.isIncome ? .always : .never,
+            tone: month.isIncome ? .automatic : .neutral)
+          LedgerProgressTrack(
+            fraction: month.share, tint: LedgerTheme.paletteColor(for: category.name), height: 4)
+            .frame(width: 72)
+            .accessibilityHidden(true)
+        }
+      }
       if isEditing { actions }
       if childCount > 0 {
         Button { drillIn(category.id) } label: {
@@ -183,7 +279,9 @@ struct CategoryTreeRow: View {
     .contentShape(Rectangle())
     .onTapGesture(count: 2) { if childCount > 0 { drillIn(category.id) } }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel("\(category.name), \(summary)\(category.hidden ? ", hidden" : "")")
+    .accessibilityLabel(
+      "\(category.name), \(summary)\(category.hidden ? ", hidden" : "")"
+        + (month.map { ", \(formatter.amount($0.amount)) this month" } ?? ""))
   }
 
   /// A symbol for what the money was for; unrecognised names fall back to the kind's arrow.
