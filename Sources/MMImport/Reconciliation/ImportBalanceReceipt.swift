@@ -320,11 +320,13 @@ public struct ImportBalanceReceipt: Codable, Equatable, Sendable {
     return receipt.describes(accounts: accounts) ? receipt : nil
   }
 
-  /// True when every account this receipt found in the ledger is among `accounts`.
+  /// True when the receipt found at least one account in the ledger and every such account is
+  /// among `accounts`. A receipt that found none can't be tied to any ledger, so it is not
+  /// shown again after the import that made it.
   public func describes(accounts: [LedgerAccount]) -> Bool {
     let ids = Set(accounts.map(\.id))
     let found = rows.filter { $0.ledgerBalance != nil }
-    return found.allSatisfy { ids.contains($0.ledgerAccountID) }
+    return !found.isEmpty && found.allSatisfy { ids.contains($0.ledgerAccountID) }
   }
 
   public static func removeSidecar(besideLedgerAt ledgerURL: URL) {

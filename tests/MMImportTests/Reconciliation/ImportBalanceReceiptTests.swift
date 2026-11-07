@@ -241,6 +241,15 @@ struct ImportBalanceReceiptTests {
         origin: LedgerOrigin(id: String(repeating: "7", count: 64), label: "other"))
       #expect(ImportBalanceReceipt.read(besideLedgerAt: ledger, accounts: [other]) == nil)
       #expect(!imported.receipt.describes(accounts: []))
+      // A receipt that found no account in its ledger is tied to none, so no ledger takes it.
+      let unbound = ImportBalanceReceipt(
+        importedAtEpochMilliseconds: 0, throughDay: nil,
+        rows: [
+          .init(
+            ledgerAccountID: "gone", name: "Gone", currencyUnit: "USD", ledgerBalance: nil,
+            sourceBalance: "1", outcome: .notInLedger)
+        ])
+      #expect(!unbound.describes(accounts: imported.snapshot.accounts))
     }
   }
 
