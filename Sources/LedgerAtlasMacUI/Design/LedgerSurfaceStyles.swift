@@ -14,9 +14,7 @@ extension View {
 
   /// A grouped box for key-value rows (inspector, sheets).
   public func ledgerGroupBox() -> some View {
-    background(LedgerTheme.card, in: .rect(cornerRadius: LedgerTheme.Radius.group))
-      .overlay(
-        RoundedRectangle(cornerRadius: LedgerTheme.Radius.group).strokeBorder(LedgerTheme.hairline, lineWidth: 0.5))
+    modifier(LedgerHairlineBox(radius: LedgerTheme.Radius.group, shadow: false))
   }
 
   /// A floating glass capsule for toolbar-like control groups drawn inside content.
@@ -42,9 +40,27 @@ struct LedgerCardModifier: ViewModifier {
     content
       .padding(padding)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(LedgerTheme.card, in: .rect(cornerRadius: LedgerTheme.Radius.card))
+      .modifier(LedgerHairlineBox(radius: LedgerTheme.Radius.card, shadow: true))
+  }
+}
+
+/// A solid card fill with a one-pixel hairline edge (0.5 pt drew nothing on 1x screens) and,
+/// for raised cards, a soft light-mode shadow.
+struct LedgerHairlineBox: ViewModifier {
+  let radius: CGFloat
+  let shadow: Bool
+  @Environment(\.displayScale) private var displayScale
+
+  func body(content: Content) -> some View {
+    content
+      .background {
+        RoundedRectangle(cornerRadius: radius)
+          .fill(LedgerTheme.card)
+          .shadow(color: shadow ? LedgerTheme.cardShadow : .clear, radius: 3, y: 1)
+      }
       .overlay(
-        RoundedRectangle(cornerRadius: LedgerTheme.Radius.card).strokeBorder(LedgerTheme.hairline, lineWidth: 0.5)
+        RoundedRectangle(cornerRadius: radius)
+          .strokeBorder(LedgerTheme.hairline, lineWidth: 1 / max(displayScale, 1))
       )
   }
 }
@@ -119,6 +135,58 @@ public struct LedgerSecondaryButtonStyle: ButtonStyle {
         configuration.isPressed ? LedgerTheme.fieldFillPressed : LedgerTheme.fieldFill,
         in: .rect(cornerRadius: LedgerTheme.Radius.control)
       )
+      .contentShape(.rect)
+  }
+}
+
+/// A destructive action (Reset): a quiet button with its label in the negative colour.
+/// `role: .destructive` alone doesn't colour a bordered button on macOS.
+public struct LedgerDestructiveButtonStyle: ButtonStyle {
+  public init() {}
+
+  public func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.system(.callout, weight: .medium))
+      .foregroundStyle(LedgerTheme.negative)
+      .padding(.horizontal, 11)
+      .frame(height: 26)
+      .background(
+        configuration.isPressed ? LedgerTheme.fieldFillPressed : LedgerTheme.fieldFill,
+        in: .rect(cornerRadius: LedgerTheme.Radius.control)
+      )
+      .modifier(LedgerFocusRing(radius: LedgerTheme.Radius.control))
+      .contentShape(.rect)
+  }
+}
+
+/// A visible keyboard-focus ring for custom button styles, which lose the system one.
+struct LedgerFocusRing: ViewModifier {
+  var radius: CGFloat
+  @Environment(\.isFocused) private var isFocused
+
+  func body(content: Content) -> some View {
+    content.overlay {
+      if isFocused {
+        RoundedRectangle(cornerRadius: radius)
+          .strokeBorder(LedgerTheme.accent, lineWidth: 2)
+          .padding(-3)
+          .allowsHitTesting(false)
+      }
+    }
+  }
+}
+
+/// An inline text link in the accent colour. The system `.link` style is always system blue,
+/// a second accent next to the teal.
+public struct LedgerLinkButtonStyle: ButtonStyle {
+  public init() {}
+
+  public func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .foregroundStyle(configuration.isPressed ? LedgerTheme.accentPressed : LedgerTheme.accent)
+      // An underline so the link does not rely on colour alone inside body text.
+      .underline()
+      .modifier(LedgerFocusRing(radius: 3))
       .contentShape(.rect)
   }
 }

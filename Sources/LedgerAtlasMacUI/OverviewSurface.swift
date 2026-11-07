@@ -25,8 +25,10 @@ struct OverviewSurface: View {
       if let model {
         ViewThatFits(in: .horizontal) {
           HStack(alignment: .top, spacing: LedgerTheme.Space.l) {
-            leftColumn(model).frame(minWidth: 440)
-            rightColumn(model).frame(width: 330)
+            // Two columns from about 730 pt of content width, so a 1000 pt window with the
+            // sidebar open still gets them: 380 + 16 + 280 + 2 × 24 padding.
+            leftColumn(model).frame(minWidth: 380, idealWidth: 380, maxWidth: .infinity)
+            rightColumn(model).frame(width: 280)
           }
           VStack(spacing: LedgerTheme.Space.l) {
             leftColumn(model)
@@ -110,7 +112,7 @@ private struct OverviewCardLink: View {
 
   var body: some View {
     Button(title, action: action)
-      .buttonStyle(.link)
+      .buttonStyle(LedgerLinkButtonStyle())
       .focused(focus, equals: link)
       .id(link)
       .accessibilityLabel(spokenName)

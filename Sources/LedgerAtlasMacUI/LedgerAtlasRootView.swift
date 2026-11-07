@@ -1487,6 +1487,9 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .transfers {
       TransferSurface(
         rows: journey.rows(for: .transfers),
+        transfers: (journey.snapshot?.transactions ?? [])
+          .filter { $0.currentRevision.draft.kind == .transfer && $0.currentRevision.lifecycle == .active }
+          .sorted { $0.currentRevision.draft.occurredAt.instant > $1.currentRevision.draft.occurredAt.instant },
         accounts: journey.snapshot?.accounts ?? [], intentRequest: pendingIntent,
         consumeIntent: { pendingIntent = nil }, isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,
