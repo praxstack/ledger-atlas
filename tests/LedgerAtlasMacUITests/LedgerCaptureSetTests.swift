@@ -157,8 +157,8 @@ import Testing
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
   try snapshots.verify(writingTo: output)
-  // 25 records and 7 key states, each in light and dark.
-  let expectedFiles: Int = 64
+  // 25 records and 10 key states, each in light and dark.
+  let expectedFiles: Int = 70
   #expect(index.count == expectedFiles)
   print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
   #expect(
@@ -167,8 +167,9 @@ import Testing
 }
 
 /// The empty state, the lock screen, a refused passcode, the balance receipt, the entry
-/// suggestion and the reminder's entry form with Upcoming (due and nothing due), in light and
-/// dark. (Loaded and the edit sheet are records 1 and 14 above.)
+/// suggestion, the reminder's entry form with Upcoming (due and nothing due) and bulk edit
+/// (selection, confirm, done), in light and dark. (Loaded and the edit sheet are records 1 and 14
+/// above.)
 @MainActor
 private func captureKeyStates(
   into output: URL, snapshots: CaptureSnapshots
@@ -299,37 +300,103 @@ private func captureKeyStates(
     transactions: ledger.transactions, today: MountedRoot.fixedToday)
   let nothingDue = LedgerUpcoming(
     rules: [], installmentPlans: [], transactions: [], today: MountedRoot.fixedToday)
-  let upcomingStates: [(name: String, upcoming: LedgerUpcoming, expects: [String], note: String)] = [
+  let upcomingStates: [(name: String, view: AnyView, size: NSSize, expects: [String], note: String)] = [
     (
-      "upcoming-reminder", dueSoon, ["Upcoming", "Overdue", "Rent", "Total"],
+      "upcoming-reminder", AnyView(
+        EntryFormWithUpcoming(
+          form: NativeTransactionForm(
+            accounts: ledger.accounts, categories: ledger.categories,
+            intent: LedgerIntentRequest(kind: .addExpense, showsUpcoming: true),
+            entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in .saved }),
+          upcoming: dueSoon, accounts: ledger.accounts, categories: ledger.categories)),
+      NSSize(width: 780, height: 520),
+      ["Upcoming", "Overdue", "Rent", "Total"],
       "The daily reminder opens the entry form with Upcoming beside it; an unentered date is overdue, in red and in words."
     ),
     (
-      "upcoming-empty", nothingDue, ["Upcoming", UpcomingPanel.emptyText],
+      "upcoming-empty", AnyView(
+        EntryFormWithUpcoming(
+          form: NativeTransactionForm(
+            accounts: ledger.accounts, categories: ledger.categories,
+            intent: LedgerIntentRequest(kind: .addExpense, showsUpcoming: true),
+            entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in .saved }),
+          upcoming: nothingDue, accounts: ledger.accounts, categories: ledger.categories)),
+      NSSize(width: 780, height: 520),
+      ["Upcoming", UpcomingPanel.emptyText],
       "Nothing due: the reminder still opens the entry form, and Upcoming says so."
     ),
   ]
-  for state in upcomingStates {
+  // #168: bulk edit. Three expenses selected show the bulk bar; the confirm sheet says how many
+  // entries change, what stays the same and how to revert; the notice after it offers Revert.
+  let rent = try #require(ledger.categories.first { $0.name == "Rent" })
+  let picked = Array(
+    ledger.transactions.filter {
+      $0.currentRevision.draft.kind == .expense && $0.links.isEmpty
+        && $0.currentRevision.lifecycle == .active && $0.currentRevision.draft.categoryID != rent.id
+    }.prefix(3).map(\.id))
+  let bulkPlan = try LedgerBulkEditPlan.make(.category(rent.id), transactionIDs: picked, in: ledger)
+  let bulkStates: [(name: String, view: AnyView, size: NSSize, expects: [String], note: String)] = [
+    (
+      "bulk-selection",
+      AnyView(
+        NavigationStack {
+          LedgerBrowseList(
+            transactions: ledger.transactions, hiddenIDs: [], accounts: ledger.accounts,
+            categories: ledger.categories, splitPurchases: [], selectedIDs: .constant(Set(picked)),
+            copy: { _ in }, tombstone: { _ in }, tags: ledger.tags,
+            revisionTags: ledger.revisionTags, bulkEdit: { _, _ in })
+        }),
+      // Wide enough for the full bar beside the inspector; a narrower window folds the three
+      // changes into one Change menu.
+      NSSize(width: 1240, height: 600), ["3 selected", "Set Category", "Add Tag", "Remove Tag"],
+      "Several entries selected: the bulk bar says how many and offers category and tag changes."
+    ),
+    (
+      "bulk-confirm",
+      AnyView(
+        BulkEditConfirmSheet(
+          plan: bulkPlan, categories: ledger.categories, tags: ledger.tags, confirm: {})),
+      NSSize(width: 480, height: 280), ["Set the category to Rent on 3 entries?", "Revert Bulk Change"],
+      "The confirm sheet states the count, what stays the same and the one-step revert."
+    ),
+    (
+      "bulk-done",
+      AnyView(
+        NavigationStack {
+          VStack(spacing: 0) {
+            LedgerBrowseList(
+              transactions: ledger.transactions, hiddenIDs: [], accounts: ledger.accounts,
+              categories: ledger.categories, splitPurchases: [], selectedIDs: .constant([]),
+              copy: { _ in }, tombstone: { _ in }, tags: ledger.tags,
+              revisionTags: ledger.revisionTags, bulkEdit: { _, _ in })
+            BulkEditNotice(text: "Category set to Rent on 3 entries.", revert: {}, dismiss: {})
+          }
+        }),
+      NSSize(width: 1240, height: 600),
+      ["Category set to Rent on 3 entries.", "Revert This Bulk Change"],
+      "After a bulk change: what changed, and Revert This Bulk Change."
+    ),
+  ]
+  for state in upcomingStates + bulkStates {
     captureLog(state.name)
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 780, height: 520), styleMask: [.titled],
+      contentRect: NSRect(origin: .zero, size: state.size), styleMask: [.titled],
       backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
-    window.contentViewController = NSHostingController(
-      rootView: EntryFormWithUpcoming(
-        form: NativeTransactionForm(
-          accounts: ledger.accounts, categories: ledger.categories,
-          intent: LedgerIntentRequest(kind: .addExpense, showsUpcoming: true),
-          entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in .saved }),
-        upcoming: state.upcoming, accounts: ledger.accounts, categories: ledger.categories))
+    window.contentViewController = NSHostingController(rootView: state.view)
+    window.setContentSize(state.size)
     window.makeKeyAndOrderFront(nil)
     defer { window.close() }
     var text: [String] = []
     for _ in 0..<40 {
       try await Task.sleep(for: .milliseconds(200))
       text = inProcessAccessibilityTree(of: window).map { "\($0.spokenName) \($0.value)" }
-      if text.contains(where: { $0.contains("Upcoming") }) { break }
+      if let first = state.expects.first, text.contains(where: { $0.contains(first) }) { break }
     }
+    // The list opens its inspector a moment after it measures its width; let that land so
+    // every run captures the same layout, then read the screen again.
+    try await Task.sleep(for: .milliseconds(1_000))
+    text = inProcessAccessibilityTree(of: window).map { "\($0.spokenName) \($0.value)" }
     for appearance in CaptureAppearance.allCases {
       window.appearance = NSAppearance(named: appearance.name)
       pump(0.6)

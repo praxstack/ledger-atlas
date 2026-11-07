@@ -42,8 +42,19 @@ struct LedgerView: View {
   var closeSplit: ((String) -> Void)?
   /// What is due soon (#171); the entry form shows it beside itself when the request asks.
   var upcoming: LedgerUpcoming? = nil
+  /// Bulk edit (#168), from the journey: plan, write, revert and dismiss. Nil while read-only.
+  var planBulkEdit: ((LedgerBulkChange, [String]) -> BulkEditPrompt)?
+  var applyBulkEdit: ((LedgerBulkEditPlan) -> Void)?
+  var lastBulkEdit: LedgerBulkEditReceipt? = nil
+  var revertBulkEdit: (() -> Void)?
+  var forgetBulkEdit: (() -> Void)?
+
+  /// The one selected entry; nil when none or several are selected.
+  private var selectedID: String? { selectedIDs.count == 1 ? selectedIDs.first : nil }
   @State private var editingSplit: LedgerSplitPurchase?
-  @State private var selectedID: String?
+  /// The selected entries; several give the bulk bar (#168).
+  @State private var selectedIDs: Set<String> = []
+  @State private var bulkPrompt: BulkEditPrompt?
   @State private var taggingID: String?
   @State private var templatingID: String?
   @State private var amountLiteral = ""
@@ -68,7 +79,7 @@ struct LedgerView: View {
           }
           LedgerBrowseList(
             transactions: transactions, hiddenIDs: splitTransactionIDs, accounts: accounts,
-            categories: categories, splitPurchases: splitPurchases, selectedID: $selectedID,
+            categories: categories, splitPurchases: splitPurchases, selectedIDs: $selectedIDs,
             copy: copy, tombstone: tombstone, tags: tags, revisionTags: revisionTags,
             editTags: isEditing && saveTags != nil ? { (id: String) in taggingID = id } : nil,
             saveAsTemplate: isEditing && saveAsTemplate != nil
@@ -76,7 +87,11 @@ struct LedgerView: View {
             editSplit: isEditing && editSplit != nil
               ? { (purchase: LedgerSplitPurchase) in editingSplit = purchase } : nil,
             closeSplit: isEditing && closeSplit != nil
-              ? { (purchase: LedgerSplitPurchase) in closeSplit?(purchase.id) } : nil)
+              ? { (purchase: LedgerSplitPurchase) in closeSplit?(purchase.id) } : nil,
+            bulkEdit: isEditing && planBulkEdit != nil
+              ? { (change: LedgerBulkChange, ids: [String]) in
+                bulkPrompt = planBulkEdit?(change, ids)
+              } : nil)
         if let lifecycleMessage {
           Text(lifecycleMessage)
             .font(LedgerTheme.Typeface.caption)
@@ -92,6 +107,11 @@ struct LedgerView: View {
             .accessibilityLabel(lastFailure)
             .padding(.horizontal, LedgerTheme.Space.l)
             .padding(.vertical, LedgerTheme.Space.xs)
+        }
+        if let lastBulkEdit, let revertBulkEdit {
+          BulkEditNotice(
+            text: BulkEditWording.done(lastBulkEdit, categories: categories, tags: tags),
+            revert: revertBulkEdit, dismiss: { forgetBulkEdit?() })
         }
         editBar
           .padding(.horizontal, LedgerTheme.Space.l)
@@ -237,6 +257,20 @@ struct LedgerView: View {
         }
       }
     }
+    .sheet(item: $bulkPrompt) { prompt in
+      switch prompt {
+      case .confirm(let plan):
+        BulkEditConfirmSheet(plan: plan, categories: categories, tags: tags) {
+          applyBulkEdit?(plan)
+        }
+      case .refused(let message):
+        BulkEditRefusedSheet(message: message)
+      }
+    }
+    .focusedSceneValue(
+      \.revertBulkEdit,
+      lastBulkEdit != nil && revertBulkEdit != nil
+        ? RevertBulkEditAction(perform: { revertBulkEdit?() }) : nil)
     .onChange(of: selectedID) { _, id in
       // Start an amount edit from the selected entry's current amount. With amounts hidden
       // (#173), selecting an entry must not show its amount, so the field starts empty.

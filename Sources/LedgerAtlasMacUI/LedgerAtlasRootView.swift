@@ -30,6 +30,7 @@ public struct LedgerAtlasRootView: View {
     productSettings.reduceMotion(systemReduceMotion: reduceMotion)
   }
   @State private var pendingIntent: LedgerIntentRequest?
+  @State private var upcomingCache = UpcomingCache()
   @State private var isChoosingImportSource = false
   /// True from an approved import until the person moves on from its balance receipt.
   @State private var justImported = false
@@ -1646,7 +1647,25 @@ public struct LedgerAtlasRootView: View {
                 for: error, otherwise: "Split purchase could not be closed."))
           }
         },
-        upcoming: pendingIntent?.showsUpcoming == true ? upcoming() : nil
+        upcoming: pendingIntent?.showsUpcoming == true ? upcoming() : nil,
+        planBulkEdit: { change, ids in
+          do { return .confirm(try journey.planBulkEdit(change, transactionIDs: ids)) }
+          catch { return .refused(LedgerJourney.bulkEditMessage(for: error)) }
+        },
+        applyBulkEdit: { plan in
+          do {
+            try journey.applyBulkEdit(
+              plan, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
+        },
+        lastBulkEdit: journey.lastBulkEdit,
+        revertBulkEdit: {
+          do {
+            try journey.revertLastBulkEdit(
+              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+          } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
+        },
+        forgetBulkEdit: { journey.forgetLastBulkEdit() }
       )
       .id(selection)
     } else if selection == .receipts {
@@ -1980,12 +1999,15 @@ public struct LedgerAtlasRootView: View {
   }
 
   /// What is due soon in the open ledger (#171), for the person's calendar day.
+  /// Worked out once per snapshot and day, not on every render.
   private func upcoming() -> LedgerUpcoming? {
     guard let snapshot = journey.snapshot else { return nil }
-    return LedgerUpcoming(
-      rules: snapshot.recurrenceRules, installmentPlans: snapshot.installmentPlans,
-      transactions: snapshot.transactions,
-      today: todayOverride?() ?? LedgerPeriodRule.today(in: productSettings.timeZone))
+    let today = todayOverride?() ?? LedgerPeriodRule.today(in: productSettings.timeZone)
+    return upcomingCache.value(generation: journey.snapshotGeneration, today: today) {
+      LedgerUpcoming(
+        rules: snapshot.recurrenceRules, installmentPlans: snapshot.installmentPlans,
+        transactions: snapshot.transactions, today: today)
+    }
   }
 
   private func route(_ request: LedgerIntentRequest) {
@@ -2019,5 +2041,22 @@ public struct LedgerAtlasRootView: View {
     } catch {
       journey.recordFailure("Diagnostics could not be exported.")
     }
+  }
+}
+
+/// The last Upcoming list, kept while the snapshot and the day stay the same. A class, so
+/// filling it while the view renders doesn't trigger another render.
+@MainActor final class UpcomingCache {
+  private var key: (generation: Int, today: SourceLocalDate)?
+  private var cached: LedgerUpcoming?
+
+  func value(
+    generation: Int, today: SourceLocalDate, make: () -> LedgerUpcoming
+  ) -> LedgerUpcoming {
+    if let key, key.generation == generation, key.today == today, let cached { return cached }
+    let value = make()
+    key = (generation, today)
+    cached = value
+    return value
   }
 }

@@ -55,6 +55,12 @@ Swift feedback comes from the `CI` workflow on the pull request.
   total at the bottom. Turn on the daily reminder in Settings, wait for it (or set the hour to
   the next one) and click it: the entry form opens with Upcoming beside it, also on a day with
   nothing due.
+- **Bulk edit (#168, touches data: use a copy of a ledger).** On Transactions, Begin editing,
+  then ⌘-click three entries: the bar above the list says "3 selected". Choose **Set Category ›**
+  a category; the sheet says how many entries change and that Edit › Revert Bulk Change undoes
+  it. Confirm, check the three rows, then **Revert This Bulk Change**: each row has its old
+  category back. Select a transfer with an expense and set a category: it is refused with
+  nothing changed.
 
 For a tagged release: `git tag v0.2.0 && git push origin v0.2.0` publishes a GitHub
 Release (marked pre-release) with the DMG and its SHA-256.

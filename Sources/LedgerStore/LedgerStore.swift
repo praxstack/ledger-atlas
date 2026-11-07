@@ -859,18 +859,43 @@ public final class LedgerStore {
     else { throw Error.incompatibleCanonicalStore }
     var results: [MutationResult] = []
     _ = try mutate { snapshot in
-      results = try requests.map { try applyCorrection($0, in: snapshot) }
+      // A bulk change (#168) can correct thousands of entries: look revisions and tags up once.
+      let lookup = CorrectionLookup(
+        history: Dictionary(
+          snapshot.revisionHistory.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+        current: Dictionary(
+          snapshot.transactions.map { ($0.id, $0.currentRevision.id) },
+          uniquingKeysWith: { first, _ in first }),
+        tags: try Self.loadRevisionTags(on: database))
+      results = try requests.map { try applyCorrection($0, in: snapshot, lookup: lookup) }
       return results[0]
     }
     return results
   }
 
+  /// Lookups that a batch of corrections shares. Each correction in a batch is for another
+  /// transaction, so what one writes never changes what another reads here.
+  private struct CorrectionLookup {
+    let history: [String: LedgerTransactionRevision]
+    let current: [String: String]
+    let tags: [String: LedgerTagLinks]
+  }
+
   private func applyCorrection(
-    _ request: CorrectTransactionRequest, in snapshot: LedgerReadSnapshot
+    _ request: CorrectTransactionRequest, in snapshot: LedgerReadSnapshot,
+    lookup: CorrectionLookup? = nil
   ) throws -> MutationResult {
-    let predecessor = try Self.predecessor(
-      transactionID: request.transactionID, revisionID: request.expectedCurrentRevisionID,
-      in: snapshot)
+    let predecessor: LedgerTransactionRevision
+    if let lookup {
+      guard let found = lookup.history[request.expectedCurrentRevisionID],
+        found.transactionID == request.transactionID
+      else { throw Error.incompatibleCanonicalStore }
+      predecessor = found
+    } else {
+      predecessor = try Self.predecessor(
+        transactionID: request.transactionID, revisionID: request.expectedCurrentRevisionID,
+        in: snapshot)
+    }
     guard predecessor.lifecycle == .active, request.createdAt >= predecessor.createdAt else {
       throw Error.incompatibleCanonicalStore
     }
@@ -881,20 +906,25 @@ public final class LedgerStore {
       transactionID: request.transactionID, number: predecessor.revision + 1,
       predecessorID: predecessor.id,
       draft: request.draft, lifecycle: .active, createdAt: request.createdAt)
-    let storedTags = try Self.loadRevisionTags(on: database)
+    let storedTags = try lookup?.tags ?? Self.loadRevisionTags(on: database)
     let previousTags = storedTags[predecessor.id] ?? .empty
     let tags = previousTags.carriedForward(replacing: request.tags)
-    if let existing = snapshot.revisionHistory.first(where: { $0.id == revision.id }) {
+    let existing: LedgerTransactionRevision?
+    let currentID: String?
+    if let lookup {
+      existing = lookup.history[revision.id]
+      currentID = lookup.current[request.transactionID]
+    } else {
+      existing = snapshot.revisionHistory.first(where: { $0.id == revision.id })
+      currentID =
+        snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
+    }
+    if let existing {
       guard Self.sameSubmission(existing, revision), storedTags[existing.id] ?? .empty == tags
       else { throw Error.revisionConflict }
       return .init(status: .unchanged, revision: existing)
     }
-    guard
-      snapshot.transactions.first(where: { $0.id == request.transactionID })?.currentRevision.id
-        == predecessor.id
-    else {
-      throw Error.revisionConflict
-    }
+    guard currentID == predecessor.id else { throw Error.revisionConflict }
     try Self.validateReferences(revision, in: snapshot, on: database)
     try Self.insert(revision, on: database)
     try Self.writeRevisionTags(

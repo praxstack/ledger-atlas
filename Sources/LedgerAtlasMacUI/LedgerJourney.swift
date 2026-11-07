@@ -48,6 +48,9 @@ public final class LedgerJourney {
   package private(set) var balanceReceipt: ImportBalanceReceipt?
   public private(set) var searchQuery = LedgerSearchQuery()
   public private(set) var lastFailure: String?
+  /// The last bulk change (#168), until it is reverted, another replaces it or the ledger
+  /// closes. Edit › Revert Bulk Change and the notice under the ledger revert it.
+  public private(set) var lastBulkEdit: LedgerBulkEditReceipt?
   public var reduceMotion: Bool = false
   public var isEditing: Bool { application != nil }
   public var isSourceTimeZoneSelectionLocked: Bool { phase == .reviewing || phase == .imported }
@@ -454,9 +457,96 @@ public final class LedgerJourney {
     openedStore = nil
     snapshot = nil
     balanceReceipt = nil
+    lastBulkEdit = nil
     ledgerURL = nil
     canonicalURL = nil
     importDestination = nil
+  }
+
+  // MARK: Bulk edit (#168)
+
+  /// Works out a bulk change against the open ledger. Nothing is written.
+  public func planBulkEdit(_ change: LedgerBulkChange, transactionIDs: [String]) throws
+    -> LedgerBulkEditPlan
+  {
+    guard let snapshot, application != nil else { throw LedgerApplication.Error.invalidCommand }
+    return try LedgerBulkEditPlan.make(change, transactionIDs: transactionIDs, in: snapshot)
+  }
+
+  /// Writes a planned bulk change in one step and keeps its receipt for Revert.
+  public func applyBulkEdit(_ plan: LedgerBulkEditPlan, createdAt: UTCInstant) throws {
+    guard let application else { throw LedgerApplication.Error.invalidCommand }
+    do {
+      lastBulkEdit = try application.applyBulkEdit(plan, createdAt: createdAt)
+      snapshot = try application.snapshot()
+      lastFailure = nil
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
+  /// Reverts the last bulk change in one step: every entry it touched gets back the category
+  /// and tags it had. Refused, with nothing changed, when one of them was edited since.
+  public func revertLastBulkEdit(createdAt: UTCInstant) throws {
+    guard let application, let receipt = lastBulkEdit else {
+      throw LedgerApplication.Error.invalidCommand
+    }
+    do {
+      try application.revertBulkEdit(receipt, createdAt: createdAt)
+      lastBulkEdit = nil
+      snapshot = try application.snapshot()
+      lastFailure = nil
+    } catch {
+      snapshot = try? application.snapshot()
+      throw error
+    }
+  }
+
+  /// Lets go of the last bulk change's receipt: the person dismissed the notice.
+  public func forgetLastBulkEdit() { lastBulkEdit = nil }
+
+  /// Says in words why a bulk change or its revert was not made. Nothing was written in any case.
+  package static func bulkEditMessage(for error: Error) -> String {
+    switch error {
+    case LedgerBulkEditRefusal.nothingSelected:
+      return "Select the entries to change first."
+    case LedgerBulkEditRefusal.transfersHaveNoCategory(let count):
+      return count == 1
+        ? "1 of these is a transfer, which has no category. Nothing was changed."
+        : "\(count) of these are transfers, which have no category. Nothing was changed."
+    case LedgerBulkEditRefusal.splitLinesKeepTheirCategories:
+      return "A split's lines keep their own categories; edit the split instead. Nothing was changed."
+    case LedgerBulkEditRefusal.categoryDoesNotFit(let count):
+      return count == 1
+        ? "1 of these entries is a different kind from this category. Nothing was changed."
+        : "\(count) of these entries are a different kind from this category. Nothing was changed."
+    case LedgerBulkEditRefusal.unavailableCategoryOrTag:
+      return "That category or tag is closed or no longer in this ledger. Nothing was changed."
+    case LedgerBulkEditRefusal.closedAccount(let count):
+      return count == 1
+        ? "1 entry is on a closed account; reopen the account to change it. Nothing was changed."
+        : "\(count) entries are on a closed account; reopen it to change them. Nothing was changed."
+    case LedgerBulkEditRefusal.closedEntries(let count):
+      return count == 1
+        ? "1 of these entries is closed and can't be changed. Nothing was changed."
+        : "\(count) of these entries are closed and can't be changed. Nothing was changed."
+    case LedgerBulkEditRefusal.nothingToChange:
+      return "Every selected entry is already like that. Nothing was changed."
+    case LedgerBulkEditRefusal.changedSince(let count):
+      return count == 1
+        ? "1 entry was edited after the bulk change, so it can't be reverted in one step. Nothing was changed."
+        : "\(count) entries were edited after the bulk change, so it can't be reverted in one step. Nothing was changed."
+    case LedgerBulkEditRefusal.tooManyTags(let count):
+      let most = LedgerTagLinks.maximumCount
+      return count == 1
+        ? "1 entry already has \(most) tags, the most an entry can have. Nothing was changed."
+        : "\(count) entries already have \(most) tags, the most an entry can have. Nothing was changed."
+    case LedgerStore.Error.revisionConflict:
+      return "Some of these entries changed while you were choosing. Nothing was changed; try again."
+    default:
+      return "The change could not be saved. Nothing was changed."
+    }
   }
 
   public func correctAmount(
