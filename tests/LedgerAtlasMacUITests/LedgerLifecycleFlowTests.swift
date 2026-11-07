@@ -1185,6 +1185,33 @@ private enum FlowTestError: Error { case sqlite, injected }
       .init(kind: .failed, recoveryImageExists: false, message: nil, failure: .busy)))
 }
 
+/// A ledger whose receipt key is on another Mac is not called damaged, and its copy in app
+/// storage stays so the key can be added and the ledger opened (#182).
+@MainActor
+@Test func aMissingReceiptKeyIsNotCalledDamage() {
+  let message = LedgerAtlasRootView.lifecycleFailureMessage(
+    .open, LedgerStoreLifecycle.Error.receiptKeyMissing)
+  #expect(message == LedgerAtlasRootView.receiptKeyMissingExplanation)
+  #expect(message.hasPrefix("Nothing is damaged."))
+  #expect(
+    !LedgerAtlasRootView.shouldRemoveRefusedCopy(
+      .init(
+        kind: .failed, recoveryImageExists: false, message: nil, failure: .receiptKeyMissing)))
+  #expect(
+    LedgerAtlasRootView.recoveryKeyFailureMessage(for: LedgerReceiptTrustError.invalidKey)
+      .hasPrefix("This file isn't the recovery key for this ledger."))
+  #expect(
+    LedgerAtlasRootView.recoveryKeyFailureMessage(for: LedgerReceiptTrustError.conflictingKeys)
+      .contains("nothing was changed"))
+  #expect(
+    LedgerAtlasRootView.recoveryKeyFailureMessage(for: LedgerStore.Error.incompatibleCanonicalStore)
+      .hasPrefix("This recovery key doesn't open this ledger"))
+  #expect(
+    LedgerAtlasRootView.backupSavedMessage(sha256: "ab", needsRecoveryKey: true)
+      .contains("Save recovery key…"))
+  #expect(!LedgerAtlasRootView.backupSavedMessage(sha256: "ab").contains("recovery key"))
+}
+
 /// Owner-only, as Open Ledger's copy into app storage is (`LedgerLocations.importCopy`); the
 /// store refuses a group- or world-readable file as an unsafe path before reading it.
 private func writeFlowMoneyManagerBackup(to url: URL) throws {

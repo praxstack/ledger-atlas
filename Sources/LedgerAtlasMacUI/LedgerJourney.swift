@@ -52,6 +52,10 @@ public final class LedgerJourney {
   public var isEditing: Bool { application != nil }
   public var isSourceTimeZoneSelectionLocked: Bool { phase == .reviewing || phase == .imported }
   private var canonicalURL: URL?
+  /// Where a background import goes once it is complete. Until then it is written under a
+  /// hidden name (`canonicalURL`), so a quit or crash mid-import leaves no half-written ledger
+  /// under a real name (#178).
+  private var importDestination: URL?
 
   private var prepared: ImportWorkspace.PreparedHandle?
   private let workspace = ImportWorkspace()
@@ -89,16 +93,20 @@ public final class LedgerJourney {
     let work = LedgerQuitGuard.shared.begin("Reading a Money Manager backup")
     defer { work.end() }
     let workspace = workspace
+    let directory = canonicalDatabaseURL.deletingLastPathComponent()
+    // No import is running (`backgroundWork` was nil), so anything hidden there is left over.
+    LedgerLocations.removeUnfinishedImports(in: directory)
+    let inProgressURL = LedgerLocations.importInProgressURL(in: directory)
     let request = ImportWorkspace.Request(
       sourceURL: sourceURL, stagingDatabaseURL: stagingDatabaseURL,
-      canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone)
+      canonicalDatabaseURL: inProgressURL, sourceTimeZone: sourceTimeZone)
     do {
       let preparation = try await Task.detached(priority: .userInitiated) {
         try workspace.prepare(request)
       }.value
       guard generation == started else { return }
-      try adopt(
-        preparation, canonicalDatabaseURL: canonicalDatabaseURL, sourceTimeZone: sourceTimeZone)
+      try adopt(preparation, canonicalDatabaseURL: inProgressURL, sourceTimeZone: sourceTimeZone)
+      importDestination = canonicalDatabaseURL
     } catch {
       guard generation == started else { return }
       failClosed(message: "Import could not be prepared.")
@@ -136,6 +144,7 @@ public final class LedgerJourney {
       workspaceReviewJSON: data, sourceTimeZoneIdentifier: sourceTimeZone.ianaIdentifier)
     prepared = preparation.preparedHandle
     canonicalURL = requestCanonicalURL(canonicalDatabaseURL)
+    importDestination = nil
     ledgerURL = nil
     application = nil
     mutableStore = nil
@@ -177,20 +186,23 @@ public final class LedgerJourney {
       failClosed(message: "Import could not be approved.")
       throw LedgerApplication.Error.invalidCommand
     }
-    let approval = workspace.approve(prepared)
-    _ = try workspace.commit(prepared, approval: approval)
+    let destination = canonicalURL == nil ? nil : importDestination
+    let url = try Self.commit(
+      prepared, workspace: workspace, at: canonicalDatabaseURL, publishingTo: destination)
+    importDestination = nil
     application = nil
     mutableStore = nil
-    let store = try LedgerStore.openReadOnly(at: canonicalDatabaseURL)
+    let store = try LedgerStore.openReadOnly(at: url)
     let read = try store.readSnapshot()
+    // Saved beside the ledger's own name, once the import has moved there.
     let receipt = Self.balanceReceipt(
       for: read, sourceBalances: workspace.sourceBalances(prepared),
-      importID: store.latestImportID(), ledgerURL: canonicalDatabaseURL)
+      importID: store.latestImportID(), ledgerURL: url)
     snapshot = read
     balanceReceipt = receipt
     openedStore = store
-    ledgerURL = canonicalDatabaseURL
-    canonicalURL = canonicalDatabaseURL
+    ledgerURL = url
+    canonicalURL = url
     phase = .imported
   }
 
@@ -224,6 +236,22 @@ public final class LedgerJourney {
       besideLedgerAt: url, accounts: snapshot.accounts, latestImportID: store.latestImportID())
   }
 
+  /// Commits the import, then moves it from its hidden name to `destination` when it has one.
+  /// A failed import leaves nothing under the hidden name.
+  nonisolated private static func commit(
+    _ prepared: ImportWorkspace.PreparedHandle, workspace: ImportWorkspace, at url: URL,
+    publishingTo destination: URL?
+  ) throws -> URL {
+    do {
+      _ = try workspace.commit(prepared, approval: workspace.approve(prepared))
+      guard let destination else { return url }
+      return try LedgerLocations.publishImport(url, as: destination)
+    } catch {
+      if destination != nil { LedgerLocations.removeLedgerFiles(at: url) }
+      throw error
+    }
+  }
+
   /// `approveAndOpen` with the commit and the first read off the main thread. On a real
   /// backup the commit takes minutes, which froze the window when it ran on the main thread.
   /// Returns true only when this call imported the ledger and opened it in `session`.
@@ -241,32 +269,36 @@ public final class LedgerJourney {
     let work = LedgerQuitGuard.shared.begin("Importing a Money Manager backup")
     defer { work.end() }
     let workspace = workspace
+    let destination = importDestination
     do {
       let opened = try await Task.detached(priority: .userInitiated) {
-        _ = try workspace.commit(prepared, approval: workspace.approve(prepared))
-        let store = try LedgerStore.openReadOnly(at: canonicalURL)
+        let url = try Self.commit(
+          prepared, workspace: workspace, at: canonicalURL, publishingTo: destination)
+        let store = try LedgerStore.openReadOnly(at: url)
         let read = try store.readSnapshot()
-        // Built here, off the main thread: the balance sheet walks every entry.
+        // Built here, off the main thread: the balance sheet walks every entry. Saved beside the
+        // ledger's own name, once the import has moved there.
         let receipt = Self.balanceReceipt(
           for: read, sourceBalances: workspace.sourceBalances(prepared),
-          importID: store.latestImportID(), ledgerURL: canonicalURL)
-        return OpenedImport(store: store, snapshot: read, balanceReceipt: receipt)
+          importID: store.latestImportID(), ledgerURL: url)
+        return OpenedImport(store: store, snapshot: read, balanceReceipt: receipt, url: url)
       }.value
       // The ledger was closed, replaced or locked while this ran. The new file stays in the
       // ledgers folder, where Open Ledger finds it, but this journey doesn't adopt it.
       guard generation == started else { return false }
       // The handle is spent; approving again must not import a second time.
       self.prepared = nil
+      importDestination = nil
       application = nil
       mutableStore = nil
       snapshot = opened.snapshot
       balanceReceipt = opened.balanceReceipt
       openedStore = opened.store
-      ledgerURL = canonicalURL
-      self.canonicalURL = canonicalURL
+      ledgerURL = opened.url
+      self.canonicalURL = opened.url
       phase = .imported
       // Present the snapshot just read instead of loading the ledger again (#143).
-      session.openValidated(canonicalURL, snapshot: opened.snapshot)
+      session.openValidated(opened.url, snapshot: opened.snapshot)
       return true
     } catch {
       guard generation == started else { return false }
@@ -411,6 +443,7 @@ public final class LedgerJourney {
     balanceReceipt = nil
     ledgerURL = nil
     canonicalURL = nil
+    importDestination = nil
   }
 
   public func correctAmount(
@@ -1670,6 +1703,7 @@ private struct OpenedImport: @unchecked Sendable {
   let store: LedgerStore
   let snapshot: LedgerStore.LedgerReadSnapshot
   let balanceReceipt: ImportBalanceReceipt?
+  let url: URL
 }
 
 /// What the entry form's Save did (#169).
