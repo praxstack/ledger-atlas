@@ -4,6 +4,7 @@ import Darwin
 import Foundation
 import LedgerCore
 import LedgerStore
+import MMImport
 import Testing
 
 @testable import LedgerAtlasMacUI
@@ -1314,6 +1315,64 @@ private func writeEmptyCanonicalLedger(to url: URL, origin: LedgerOrigin, accoun
   // Approving again without a new preparation fails visibly instead of importing twice.
   await journey.approveInBackground(into: session)
   #expect(journey.lastFailure == "Import could not be approved.")
+}
+
+/// #172: approving an import leaves a balance-match receipt beside the ledger; reopening the
+/// ledger shows it again, closing forgets it and deleting the ledger deletes it.
+@MainActor
+@Test func approvedImportKeepsABalanceReceiptBesideTheLedger() async throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("synthetic.sqlite")
+  try writeSyntheticV19(to: source)
+  let canonical = directory.appendingPathComponent("canonical.sqlite")
+  let journey = LedgerJourney()
+  await journey.selectSourceInBackground(
+    source, stagingDatabaseURL: directory.appendingPathComponent("stage.sqlite"),
+    canonicalDatabaseURL: canonical, sourceTimeZone: try SourceTimeZone(fixedOffsetSeconds: 0))
+  #expect(journey.balanceReceipt == nil)
+  #expect(await journey.approveInBackground(into: LedgerSession()))
+
+  let receipt = try #require(journey.balanceReceipt)
+  #expect(receipt.throughDay == "2025-02-03")
+  #expect(receipt.rows.count == 1)
+  let row = try #require(receipt.rows.first)
+  #expect(row.ledgerBalance == "-12.3")
+  #expect(row.sourceBalance == "-12.3")
+  #expect(row.outcome == .equal)
+  #expect(receipt.allMatch)
+  let sidecar = ImportBalanceReceipt.sidecarURL(forLedgerAt: canonical)
+  #expect(FileManager.default.fileExists(atPath: sidecar.path))
+
+  journey.closeLedger()
+  #expect(journey.balanceReceipt == nil)
+  journey.openLedger(canonical)
+  #expect(journey.balanceReceipt == receipt)
+
+  journey.closeLedger()
+  LedgerLocations.removeLedgerFiles(at: canonical)
+  #expect(!FileManager.default.fileExists(atPath: sidecar.path))
+}
+
+/// The demo ledger carries a made-up receipt with each kind of row, so captures show them all;
+/// the sample ledger a person opens has none.
+@Test func demoLedgerReceiptShowsEveryKindOfRow() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let demo = directory.appendingPathComponent("Demo Household.sqlite")
+  try LedgerDemoTour.makeDemoLedger(at: demo)
+  let receipt = try #require(ImportBalanceReceipt.read(besideLedgerAt: demo))
+  #expect(receipt.rows.count == 7)
+  #expect(receipt.equalCount >= 1)
+  #expect(receipt.differingCount == 1)
+  #expect(receipt.notStoredCount == 1)
+  #expect(receipt.rows.contains { $0.hiddenInSource && $0.sourceBalance == nil })
+
+  let sample = directory.appendingPathComponent("Sample Household.sqlite")
+  try LedgerDemoTour.makeDemoLedger(at: sample, withBalanceReceipt: false)
+  #expect(ImportBalanceReceipt.read(besideLedgerAt: sample) == nil)
 }
 
 @MainActor
