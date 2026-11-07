@@ -94,8 +94,8 @@ final class CaptureSnapshots {
     print("SNAPSHOT \(readings.count) captures compared with the baseline, \(problems.count) changed")
     #expect(
       problems.isEmpty,
-      "captures differ from the committed baseline. If the change is intended, update Fixtures/capture-baseline.json from the ui-captures artifact.\n"
-        + problems.joined(separator: "\n"))
+      "captures differ from the committed baseline. If the change is intended, update Fixtures/capture-baseline.json from the ui-captures artifact.\n\(problems.joined(separator: "\n"))"
+    )
   }
 
   // MARK: Readings
