@@ -25,17 +25,25 @@ struct LockedSurface: View {
           .font(LedgerTheme.Typeface.screenTitle)
           .foregroundStyle(LedgerTheme.ink)
           .accessibilityAddTraits(.isHeader)
-        Text("Unlock to view ledger content. The widget and this window stay redacted while locked.")
+        Text("Enter your passcode to see your ledger. The widget hides its figures until you unlock.")
           .font(LedgerTheme.Typeface.secondary)
           .foregroundStyle(LedgerTheme.inkSecondary)
           .multilineTextAlignment(.center)
           .fixedSize(horizontal: false, vertical: true)
       }
       SecureField("Passcode", text: $passcode)
-        .textFieldStyle(.roundedBorder)
+        // A plain field on the field fill: the system rounded border vanished on the dark card.
+        .textFieldStyle(.plain)
+        .font(LedgerTheme.Typeface.body)
+        .padding(.horizontal, LedgerTheme.Space.m)
+        .frame(height: 32)
+        .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.row))
+        .overlay {
+          RoundedRectangle(cornerRadius: LedgerTheme.Radius.row)
+            .strokeBorder(LedgerTheme.hairline, lineWidth: 1)
+        }
         // No password content type: it opened the Passwords AutoFill bubble over Unlock, and
         // this passcode is never stored in a password manager.
-        .controlSize(.large)
         .accessibilityLabel("Ledger Atlas passcode")
       if lock.storageUnavailable {
         LedgerStatusLine(failure: "Credential storage is unavailable. Restore access and reopen Ledger Atlas.")
@@ -52,12 +60,14 @@ struct LockedSurface: View {
         .buttonStyle(LedgerPrimaryButtonStyle(large: true))
         .keyboardShortcut(.defaultAction)
         if !biometricAttempted {
-          Button("Use Touch ID") {
+          Button {
             biometricAttempted = true
             Task {
               _ = await biometricUnlock()
               biometricAttempted = false
             }
+          } label: {
+            Label("Use Touch ID", systemImage: "touchid")
           }
           .buttonStyle(LedgerSecondaryButtonStyle())
         }

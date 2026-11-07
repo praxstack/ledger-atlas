@@ -7,47 +7,181 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SearchSurface: View {
-  let rows: [LedgerJourney.SurfaceRow]
+  /// Matching transactions, newest first, built by `LedgerBrowser` so a result reads exactly
+  /// like the same entry on Transactions.
+  let results: [LedgerBrowseEntry]
+  let accountNames: [String: String]
+  let categoryNames: [String: String]
+  let tagNames: [String: String]
   let query: String
   let emptyMessage: String
   let onQuery: (String) -> Void
   let open: () -> Void
   @State private var draft = ""
+  @FocusState private var fieldIsFocused: Bool
+  @Environment(\.ledgerFormatter) private var formatter
+
+  private struct Day: Identifiable {
+    let date: SourceLocalDate
+    var entries: [LedgerBrowseEntry]
+    var id: SourceLocalDate { date }
+  }
+
+  /// Results grouped by day, newest day first; `results` is already sorted.
+  private var days: [Day] {
+    var grouped: [Day] = []
+    for entry in results {
+      if let last = grouped.last, last.date == entry.occurredAt.date {
+        grouped[grouped.count - 1].entries.append(entry)
+      } else {
+        grouped.append(Day(date: entry.occurredAt.date, entries: [entry]))
+      }
+    }
+    return grouped
+  }
+
+  private var subtitle: String {
+    if query.isEmpty { return "" }
+    return results.count == 1 ? "1 result" : "\(results.count) results"
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      HStack(spacing: LedgerTheme.Space.s) {
-        Image(systemName: "magnifyingglass")
-          .foregroundStyle(LedgerTheme.inkTertiary)
-          .accessibilityHidden(true)
-        TextField("Search accounts, memos, tags, status", text: $draft)
-          .textFieldStyle(.plain)
-          .font(LedgerTheme.Typeface.body)
-          .onChange(of: draft) { _, value in onQuery(value) }
-          .onAppear { draft = query }
-          .accessibilityLabel("Search ledger")
-          .accessibilityHint("Filters canonical transactions by memo, tag, kind, or status.")
-      }
-      .padding(.horizontal, LedgerTheme.Space.m)
-      .frame(height: 32)
-      .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.row))
-      .padding(LedgerTheme.Space.l)
-      if rows.isEmpty {
+      field
+        .padding(.horizontal, LedgerTheme.Space.l)
+        .padding(.top, LedgerTheme.Space.m)
+        .padding(.bottom, LedgerTheme.Space.m)
+      Divider().overlay(LedgerTheme.hairline)
+      if results.isEmpty {
         LedgerEmptyState(
           query.isEmpty ? "Search the ledger" : "No matching transactions", systemImage: "magnifyingglass",
-          message: query.isEmpty ? emptyMessage : "Nothing matches “\(query)”. Try a memo, a tag, a kind or a status."
+          message: query.isEmpty
+            ? emptyMessage : "Nothing matches “\(query)”. Try a memo, a tag, a kind or a status."
         ) {
           if query.isEmpty {
             Button("Open…", action: open).buttonStyle(LedgerSecondaryButtonStyle())
           }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityLabel(query.isEmpty ? emptyMessage : "No matching transactions")
       } else {
-        LedgerSurfaceRowList(rows: rows)
+        List {
+          ForEach(days) { day in
+            Section {
+              ForEach(day.entries) { entry in
+                SearchResultRow(
+                  entry: entry, accountNames: accountNames, categoryNames: categoryNames,
+                  tagNames: tagNames)
+              }
+            } header: {
+              Text(formatter.date(day.date, style: .full))
+                .font(LedgerTheme.Typeface.caption.weight(.semibold))
+                .foregroundStyle(LedgerTheme.inkSecondary)
+                .accessibilityAddTraits(.isHeader)
+            }
+          }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
       }
     }
     .ledgerCanvas()
     .navigationTitle("Search")
+    .navigationSubtitle(subtitle)
+    .onAppear {
+      draft = query
+      fieldIsFocused = true
+    }
+  }
+
+  private var field: some View {
+    HStack(spacing: LedgerTheme.Space.s) {
+      Image(systemName: "magnifyingglass")
+        .foregroundStyle(LedgerTheme.inkTertiary)
+        .accessibilityHidden(true)
+      TextField("Search memos, tags, accounts and status", text: $draft)
+        .textFieldStyle(.plain)
+        .font(LedgerTheme.Typeface.body)
+        .focused($fieldIsFocused)
+        .onChange(of: draft) { _, value in onQuery(value) }
+        .accessibilityLabel("Search ledger")
+        .accessibilityHint("Filters transactions by memo, tag, kind, or status.")
+      if !draft.isEmpty {
+        Button {
+          draft = ""
+          fieldIsFocused = true
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(LedgerTheme.inkTertiary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Clear search")
+        .help("Clear search")
+      }
+    }
+    .padding(.horizontal, LedgerTheme.Space.m)
+    .frame(height: 32)
+    .background(LedgerTheme.fieldFill, in: .rect(cornerRadius: LedgerTheme.Radius.row))
+    .overlay {
+      RoundedRectangle(cornerRadius: LedgerTheme.Radius.row)
+        .strokeBorder(fieldIsFocused ? LedgerTheme.accent : LedgerTheme.hairline, lineWidth: 1)
+    }
+  }
+}
+
+/// One search result, laid out like a Transactions row: category tile, what it was for, where
+/// the money moved, and the signed amount through `MoneyText`.
+struct SearchResultRow: View {
+  let entry: LedgerBrowseEntry
+  let accountNames: [String: String]
+  let categoryNames: [String: String]
+  let tagNames: [String: String]
+  @Environment(\.ledgerFormatter) private var formatter
+
+  var body: some View {
+    let category = entry.categoryID.flatMap { categoryNames[$0] }
+    let account = entry.accountIDs.compactMap { accountNames[$0] }.joined(separator: " → ")
+    let title = category ?? entry.kind.rawValue.capitalized
+    let signed = LedgerBrowseList.signedAmount(entry)
+    let tags = entry.tagIDs.compactMap { tagNames[$0] }.sorted {
+      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    }.map { "#\($0)" }
+    let detail = ([account.isEmpty ? nil : account, entry.note] + tags).compactMap { $0 }
+      .joined(separator: " · ")
+    let kind = category == nil ? nil : entry.kind.rawValue.capitalized
+    let spoken = [
+      title, kind, detail.isEmpty ? nil : detail,
+      formatter.parts(signed.amount, sign: signed.sign).text,
+      entry.lifecycle == .tombstoned ? "closed" : nil,
+    ].compactMap { $0 }.joined(separator: ", ")
+
+    HStack(alignment: .center, spacing: LedgerTheme.Space.m) {
+      LedgerIconTile(
+        .symbol(LedgerCategorySymbol.name(for: category, kind: entry.kind)),
+        swatch: LedgerTheme.swatch(for: title))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+        Text(title)
+          .font(LedgerTheme.Typeface.body)
+          .foregroundStyle(LedgerTheme.ink)
+          .strikethrough(entry.lifecycle == .tombstoned)
+          .lineLimit(1)
+        if !detail.isEmpty {
+          Text(detail)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+      }
+      .layoutPriority(1)
+      Spacer(minLength: LedgerTheme.Space.s)
+      MoneyText(signed.amount, size: .row, sign: signed.sign)
+        .fixedSize()
+    }
+    .frame(minHeight: LedgerTheme.Metrics.tableRow - 4)
+    .padding(.vertical, LedgerTheme.Space.xxs)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(spoken)
   }
 }
 
@@ -99,9 +233,18 @@ struct BackupSurface: View {
         } else {
           VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
-              LedgerKeyValue(row.title, row.detail)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(row.title), \(row.detail)")
+              HStack(spacing: LedgerTheme.Space.s) {
+                if row.id == "manifest" {
+                  // Healthy or not at a glance, and never by colour alone: the words say it too.
+                  let healthy = row.detail != "Unavailable"
+                  Image(systemName: healthy ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(healthy ? LedgerTheme.positive : LedgerTheme.negative)
+                    .accessibilityHidden(true)
+                }
+                LedgerKeyValue(row.title, row.detail)
+              }
+              .accessibilityElement(children: .combine)
+              .accessibilityLabel("\(row.title), \(row.detail)")
               if row.id != rows.last?.id { LedgerRowDivider() }
             }
           }
@@ -180,6 +323,6 @@ struct BackupSurface: View {
         .ledgerCard()
       }
     }
-    .navigationTitle("Backup")
+    .navigationTitle(AppDestination.backupRestore.sidebarTitle)
   }
 }

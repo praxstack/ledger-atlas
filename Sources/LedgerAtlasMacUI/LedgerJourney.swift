@@ -1569,12 +1569,12 @@ public final class LedgerJourney {
       let exported = try? exportPackage()
       return [
         SurfaceRow(
-          id: "schema", title: "Canonical package",
+          id: "schema", title: "Contents",
           detail:
             "\(snapshot.accounts.count) accounts · \(snapshot.transactions.count) transactions"),
         SurfaceRow(
           id: "manifest", title: "Integrity",
-          detail: exported.map { "schema \($0.manifest.schemaVersion)" } ?? "unavailable"),
+          detail: exported.map { "Checked · schema \($0.manifest.schemaVersion)" } ?? "Unavailable"),
       ]
     case .importReview:
       return summary.rows.map { SurfaceRow(id: $0.label, title: $0.label, detail: $0.value) }
