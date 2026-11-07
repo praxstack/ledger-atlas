@@ -18,6 +18,7 @@ struct TransferSurface: View {
   /// (submission ID, from, to, amount sent, amount received, fee, fee account).
   let createTransfer: (String, String, String, String, String?, String?, String?) -> Void
   @State private var showingForm = false
+  @Environment(\.ledgerFormatter) private var formatter
 
   var body: some View {
     let activeCount = accounts.filter { $0.lifecycle == .active }.count
@@ -70,13 +71,33 @@ struct TransferSurface: View {
     showingForm = true
   }
 
-  /// Transfers as money rows; source records kept from a backup follow as plain rows.
+  /// Transfers as money rows grouped by month, newest first; source records kept from a
+  /// backup follow as plain rows.
   private var transferList: some View {
     let names = Dictionary(accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+    // The same colours the sidebar and Accounts give each account.
+    let swatches = LedgerTheme.accountSwatches(
+      for: accounts.filter { $0.lifecycle == .active && !$0.hidden }.map(\.name))
     let transferIDs = Set(transfers.map(\.id))
     return List {
-      ForEach(transfers, id: \.id) { transfer in
-        TransferMoneyRow(transfer: transfer, accountNames: names)
+      ForEach(Self.months(transfers), id: \.month) { group in
+        Section {
+          ForEach(group.transfers, id: \.id) { transfer in
+            TransferMoneyRow(transfer: transfer, accountNames: names, swatches: swatches)
+          }
+        } header: {
+          HStack(alignment: .firstTextBaseline) {
+            Text(formatter.monthTitle(group.month))
+              .font(LedgerTheme.Typeface.captionEmphasis)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+            Spacer(minLength: LedgerTheme.Space.s)
+            Text(group.transfers.count == 1 ? "1 transfer" : "\(group.transfers.count) transfers")
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkTertiary)
+          }
+          .accessibilityElement(children: .combine)
+          .accessibilityAddTraits(.isHeader)
+        }
       }
       // Rows for transfer transactions carry the transfer kind as detail; only the source
       // records kept from a backup remain.
@@ -90,9 +111,24 @@ struct TransferSurface: View {
           .accessibilityLabel("\(row.title), \(row.detail)")
       }
     }
-    .listStyle(.plain)
     .scrollContentBackground(.hidden)
     .ledgerCanvas()
+  }
+
+  /// Transfers by the month they happened in, newest month first; the order inside a month is
+  /// kept.
+  static func months(_ transfers: [LedgerTransactionSnapshot])
+    -> [(month: SourceLocalDate, transfers: [LedgerTransactionSnapshot])]
+  {
+    var order: [SourceLocalDate] = []
+    var groups: [SourceLocalDate: [LedgerTransactionSnapshot]] = [:]
+    for transfer in transfers {
+      let day = transfer.currentRevision.draft.occurredAt.localDay
+      guard let month = try? SourceLocalDate(year: day.year, month: day.month, day: 1) else { continue }
+      if groups[month] == nil { order.append(month) }
+      groups[month, default: []].append(transfer)
+    }
+    return order.sorted(by: >).map { ($0, groups[$0] ?? []) }
   }
 }
 
@@ -230,6 +266,8 @@ struct NativeTransferForm: View {
 struct TransferMoneyRow: View {
   let transfer: LedgerTransactionSnapshot
   let accountNames: [String: String]
+  /// Account colours by name, as in the sidebar.
+  var swatches: [String: LedgerTheme.Swatch] = [:]
   @Environment(\.ledgerFormatter) private var formatter
 
   private var draft: LedgerTransactionDraft { transfer.currentRevision.draft }
@@ -238,11 +276,9 @@ struct TransferMoneyRow: View {
     draft.effects.first { $0.direction == .increase && $0.accountID != sent?.accountID }
   }
 
-  private var route: String {
-    let from = sent.flatMap { accountNames[$0.accountID] } ?? "Unknown account"
-    let to = received.flatMap { accountNames[$0.accountID] } ?? "Unknown account"
-    return "\(from) → \(to)"
-  }
+  private var fromName: String { sent.flatMap { accountNames[$0.accountID] } ?? "Unknown account" }
+  private var toName: String { received.flatMap { accountNames[$0.accountID] } ?? "Unknown account" }
+  private var route: String { "\(fromName) → \(toName)" }
 
   private var detail: String {
     var parts = [formatter.date(draft.occurredAt.localDay)]
@@ -256,16 +292,42 @@ struct TransferMoneyRow: View {
   }
 
   var body: some View {
-    LedgerRow(route, detail: detail) {
+    HStack(spacing: LedgerTheme.Space.m) {
       LedgerIconTile(
-        .symbol("arrow.left.arrow.right"), swatch: LedgerTheme.Swatch(color: LedgerTheme.accent, soft: LedgerTheme.accentSoft))
-    } trailing: {
+        .symbol("arrow.left.arrow.right"),
+        swatch: LedgerTheme.Swatch(color: LedgerTheme.accent, soft: LedgerTheme.accentSoft))
+      VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+        HStack(spacing: LedgerTheme.Space.xs) {
+          account(fromName)
+          Image(systemName: "arrow.right")
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkTertiary)
+          account(toName)
+        }
+        .lineLimit(1)
+        Text(detail)
+          .font(LedgerTheme.Typeface.caption)
+          .foregroundStyle(LedgerTheme.inkTertiary)
+          .lineLimit(1)
+      }
+      Spacer(minLength: LedgerTheme.Space.s)
       if let sent {
         MoneyText(sent.amount, size: .row, sign: .never, tone: .neutral)
       }
     }
+    .padding(.vertical, LedgerTheme.Space.xxs)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(
       "Transfer, \(route), \(sent.map { formatter.amount($0.amount) } ?? ""), \(detail)")
+  }
+
+  /// An account name with its colour key, so the two ends of a transfer read at a glance.
+  private func account(_ name: String) -> some View {
+    HStack(spacing: LedgerTheme.Space.xs) {
+      if let swatch = swatches[name] { LedgerColorKey(swatch.color) }
+      Text(name)
+        .font(LedgerTheme.Typeface.bodyEmphasis)
+        .foregroundStyle(LedgerTheme.ink)
+    }
   }
 }

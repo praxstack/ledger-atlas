@@ -823,7 +823,8 @@ struct ImportReviewSurface: View {
           receipt: balanceReceipt, saveAsPDF: saveReceipt, continueTitle: continueTitle,
           continueAction: continueAfterReceipt)
       }
-      header
+      // After an import the receipt leads; the introduction is for a backup still to approve.
+      if balanceReceipt == nil { header }
       decisionCard
       metadataCard
       actionsCard
@@ -833,12 +834,12 @@ struct ImportReviewSurface: View {
 
   private var header: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.s) {
-      Label("Money Manager import review", systemImage: "eye")
+      Text("Check the backup before anything is written")
         .font(LedgerTheme.Typeface.screenTitle)
         .foregroundStyle(LedgerTheme.ink)
         .accessibilityAddTraits(.isHeader)
       Text(
-        "Import Review shows redacted structural metadata for a Money Manager backup. Approving a reviewable source writes a local canonical ledger; the original file stays read-only."
+        "This page shows what the Money Manager backup contains, without any of your entries. Approving writes a new ledger on this Mac; the backup file itself is only read."
       )
       .font(LedgerTheme.Typeface.secondary)
       .foregroundStyle(LedgerTheme.inkSecondary)
@@ -874,7 +875,7 @@ struct ImportReviewSurface: View {
 
   private var metadataCard: some View {
     VStack(alignment: .leading, spacing: LedgerTheme.Space.m) {
-      LedgerCardHeader("Redacted metadata")
+      LedgerCardHeader("What the backup contains")
       VStack(alignment: .leading, spacing: 0) {
         ForEach(Array(summary.rows.enumerated()), id: \.offset) { offset, row in
           LedgerKeyValue(row.label, row.value)
