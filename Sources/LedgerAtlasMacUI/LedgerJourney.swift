@@ -522,9 +522,9 @@ public final class LedgerJourney {
       categoryID: nil, note: nil, createdAt: createdAt)
   }
 
-  package static let entryAmountNotANumberMessage =
+  nonisolated package static let entryAmountNotANumberMessage =
     "Not saved. Write the amount as a number, like 1250 or 1250.50, without commas."
-  package static let entryNotSavedMessage =
+  nonisolated package static let entryNotSavedMessage =
     "Not saved: Ledger Atlas could not write this entry. Everything you typed is still here; try Save again."
 
   /// The entry form's Save (#169): nil when the entry was written, otherwise the words the form
