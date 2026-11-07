@@ -342,14 +342,14 @@ struct LedgerBrowseList: View {
   /// Money in, spending and net for what is shown, as figures: the first thing the eye
   /// reads on the screen. One group per currency.
   private var summaryStrip: some View {
-    LedgerPageSummary {
+    LedgerSummaryStrip {
       ForEach(totals, id: \.unitCode) { total in
         if let figures = Self.summaryFigures(total) {
           // Money in is green with "+"; spending stays in ink; net carries its sign and is
           // the one figure drawn large, so the eye lands on it.
-          LedgerPageFigure("Money in", MoneyText(figures.income, size: .row, sign: .always))
-          LedgerPageFigure("Spending", MoneyText(figures.expense, size: .row, sign: .never, tone: .neutral))
-          LedgerPageFigure("Net", MoneyText(figures.net, size: .figure, sign: .always))
+          LedgerSummaryFigure("Money in", MoneyText(figures.income, size: .row, sign: .always))
+          LedgerSummaryFigure("Spending", MoneyText(figures.expense, size: .row, sign: .never, tone: .neutral))
+          LedgerSummaryFigure("Net", MoneyText(figures.net, size: .figure, sign: .always))
         } else {
           Text(Self.describe([total], formatter: formatter))
             .font(LedgerTheme.Typeface.secondary)

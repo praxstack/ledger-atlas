@@ -26,8 +26,10 @@ struct LedgerView: View {
   let tombstone: (String) -> Void
   let copy: (String) -> Void
   let addMacTransaction: (String) -> Void
+  /// Answers what the entry form's Save did.
   let createTransaction:
-    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> Void
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks)
+      -> NativeEntrySaveResult
   let createSplit: (LedgerSplitDraft) -> Void
   var tags: [LedgerTag] = []
   var revisionTags: [String: LedgerTagLinks] = [:]
@@ -184,9 +186,12 @@ struct LedgerView: View {
     .sheet(isPresented: $showingTransactionForm) {
       NativeTransactionForm(
         accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
+        entries: transactions,
         onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
-          createTransaction(submissionID, amount, kind, accountID, categoryID, note, links)
-          if intentRequest != nil { consumeIntent() }
+          let result = createTransaction(
+            submissionID, amount, kind, accountID, categoryID, note, links)
+          if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
+          return result
         })
     }
     .sheet(isPresented: $showingSplitForm) {

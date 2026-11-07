@@ -1337,45 +1337,29 @@ public struct LedgerAtlasRootView: View {
         importDisabled: journey.backgroundWork != nil,
         importBackup: chooseImportSource, createLedger: createLedger, openLedger: openLedger,
         trySampleData: openSampleLedger)
-    } else if selection == .importReview || selection == .onboarding {
-      VStack(alignment: .leading, spacing: 16) {
-        ImportReviewView(
-          summary: journey.phase == .idle ? importReviewSummary : journey.summary,
-          balanceReceipt: shownBalanceReceipt, saveReceipt: exportBalanceReceipt,
-          continueTitle: justImported ? "Continue to \(productSettings.startScreen.sidebarTitle)" : nil,
-          continueAfterReceipt: {
-            justImported = false
-            selection = productSettings.startScreen
-          })
-        if let lastFailure = journey.lastFailure {
-          Text(lastFailure)
-            .font(LedgerTheme.Typeface.secondary)
-            .foregroundStyle(LedgerTheme.negative)
-            .accessibilityLabel(lastFailure)
+    } else if selection == .onboarding {
+      LedgerGetStartedView(
+        hasLedger: session.screen == .loaded,
+        importDisabled: journey.backgroundWork != nil,
+        importBackup: chooseImportSource,
+        show: { selection = $0 })
+    } else if selection == .importReview {
+      ImportReviewSurface(
+        summary: journey.phase == .idle ? importReviewSummary : journey.summary,
+        failure: journey.lastFailure,
+        sourceTimeZoneIdentifier: $sourceTimeZoneIdentifier,
+        timeZoneLocked: journey.isSourceTimeZoneSelectionLocked || journey.backgroundWork != nil,
+        backgroundWork: journey.backgroundWork,
+        canApprove: journey.phase == .reviewing,
+        chooseBackup: { isChoosingImportSource = true },
+        approve: { Task { await approveImport() } },
+        balanceReceipt: shownBalanceReceipt, saveReceipt: exportBalanceReceipt,
+        continueTitle: justImported ? "Continue to \(productSettings.startScreen.sidebarTitle)" : nil,
+        continueAfterReceipt: {
+          justImported = false
+          selection = productSettings.startScreen
         }
-        Picker("Backup source time zone", selection: $sourceTimeZoneIdentifier) {
-          Text("Choose source time zone…").tag("")
-          ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { identifier in
-            Text(identifier).tag(identifier)
-          }
-        }
-        .accessibilityLabel("Backup source time zone")
-        .accessibilityHint("Required to preserve the backup's civil date and time meaning.")
-        .disabled(journey.isSourceTimeZoneSelectionLocked || journey.backgroundWork != nil)
-        Button("Choose Money Manager backup…") { isChoosingImportSource = true }
-          .accessibilityLabel("Choose Money Manager backup")
-          .disabled(sourceTimeZoneIdentifier.isEmpty || journey.backgroundWork != nil)
-        if let work = journey.backgroundWork {
-          ImportProgressView(work: work)
-        }
-        if journey.phase == .reviewing {
-          Button("Approve import") {
-            Task { await approveImport() }
-          }
-          .accessibilityLabel("Approve import")
-          .disabled(journey.backgroundWork != nil)
-        }
-      }
+      )
       .id(selection)
     } else if selection == .overview {
       OverviewSurface(
@@ -1426,15 +1410,11 @@ public struct LedgerAtlasRootView: View {
             createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
         },
         createTransaction: { submissionID, amount, kind, accountID, categoryID, note, tags in
-          do {
-            _ = try journey.createNativeTransaction(
-              amountLiteral: amount, kind: kind, accountID: accountID,
-              categoryID: categoryID, note: note,
-              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
-              submissionID: submissionID, tags: tags)
-          } catch {
-            journey.recordFailure("Transaction could not be saved.")
-          }
+          journey.saveNativeEntry(
+            amountLiteral: amount, kind: kind, accountID: accountID, categoryID: categoryID,
+            note: note,
+            createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
+            submissionID: submissionID, tags: tags)
         },
         createSplit: { draft in
           do {
@@ -1527,6 +1507,9 @@ public struct LedgerAtlasRootView: View {
     } else if selection == .transfers {
       TransferSurface(
         rows: journey.rows(for: .transfers),
+        transfers: (journey.snapshot?.transactions ?? [])
+          .filter { $0.currentRevision.draft.kind == .transfer && $0.currentRevision.lifecycle == .active }
+          .sorted { $0.currentRevision.draft.occurredAt.instant > $1.currentRevision.draft.occurredAt.instant },
         accounts: journey.snapshot?.accounts ?? [], intentRequest: pendingIntent,
         consumeIntent: { pendingIntent = nil }, isEditing: journey.isEditing,
         lastFailure: lifecycleMessage ?? journey.lastFailure,

@@ -77,10 +77,10 @@ enum AnnotationPresentation {
 
   static func templateSummary(
     _ template: LedgerTransactionTemplate, accounts: [LedgerAccount],
-    categories: [LedgerCategory]
+    categories: [LedgerCategory], formatter: LedgerDisplayFormatter
   ) -> String {
     let name: (String?) -> String? = { id in accounts.first { $0.id == id }?.name }
-    let amount = "\(template.amount.amount.rawLiteral) \(template.amount.unitCode)"
+    let amount = formatter.amount(template.amount)
     let from = name(template.accountID) ?? "Unknown account"
     if template.kind == .transfer {
       let to = name(template.counterAccountID) ?? "Unknown account"
@@ -110,6 +110,7 @@ enum AnnotationPresentation {
 }
 
 struct TagsView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let tags: [LedgerTag]
   let templates: [LedgerTransactionTemplate]
@@ -144,58 +145,53 @@ struct TagsView: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 0) {
       switch state {
       case .loaded:
         Picker("Show", selection: $section) {
           ForEach(AnnotationPresentation.Section.allCases) { Text($0.rawValue).tag($0) }
         }
         .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .labelsHidden()
+        .frame(maxWidth: 320)
+        .padding(.horizontal, LedgerTheme.Space.l)
+        .padding(.vertical, LedgerTheme.Space.m)
         .accessibilityLabel("Show tags, templates or memos")
         switch section {
         case .tags: tagList
         case .templates: templateList
         case .memos: memoList
         }
-      case .unavailable:
-        EmptyLedgerPrompt(
-          title: "Ledger unavailable",
-          description: "Choose a compatible ledger to view its tags and memos.",
-          guidance: .unavailable, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
-      case .noLedger:
-        EmptyLedgerPrompt(
-          title: "Open a ledger", description: "Choose a Ledger Atlas ledger to view its tags and memos.",
-          guidance: .noLedger, failure: lastFailure, buttonTitle: "Open Ledger…", open: open)
-      case .loading:
-        ProgressView("Opening ledger…").frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
-      if let lastFailure {
-        Text(lastFailure).foregroundStyle(.red).accessibilityLabel(lastFailure)
-          .padding(.horizontal, 16)
+      default:
+        LedgerSessionEmptyState(
+          state: state, title: "No tags", systemImage: "number",
+          message: "Choose a ledger to view its tags and memos.", failure: lastFailure, open: open)
       }
       if case .loaded = state {
-        HStack {
+        LedgerActionBar {
           if isEditing {
             switch section {
             case .tags:
-              Button("New tag") { showingTagForm = true }
+              Button("New tag") { showingTagForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
             case .templates:
               Button("New template") { showingTemplateForm = true }
+                .buttonStyle(LedgerPrimaryButtonStyle())
                 .disabled(accounts.allSatisfy { $0.lifecycle != .active })
             case .memos:
-              Button("New memo") { showingMemoForm = true }
+              Button("New memo") { showingMemoForm = true }.buttonStyle(LedgerPrimaryButtonStyle())
             }
           } else {
             Button("Begin editing", action: beginEditing)
+              .buttonStyle(LedgerSecondaryButtonStyle())
               .accessibilityLabel("Begin editing tags, templates and memos")
           }
+          if let lastFailure { LedgerStatusLine(failure: lastFailure) }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+      } else if let lastFailure {
+        LedgerActionBar { LedgerStatusLine(failure: lastFailure) }
       }
     }
+    .ledgerCanvas()
     .navigationTitle("Tags & Memos")
     .sheet(isPresented: $showingTagForm) {
       TagNameForm(title: "New tag", initialName: "") { name in
@@ -246,7 +242,8 @@ struct TagsView: View {
       }
       Button("Cancel", role: .cancel) { pendingUse = nil }
     } message: { use in
-      Text(AnnotationPresentation.templateSummary(use.template, accounts: accounts, categories: categories))
+      Text(AnnotationPresentation.templateSummary(
+        use.template, accounts: accounts, categories: categories, formatter: formatter))
     }
   }
 
@@ -257,26 +254,30 @@ struct TagsView: View {
   @ViewBuilder private var tagList: some View {
     let ordered = AnnotationPresentation.sortedTags(tags)
     if ordered.isEmpty {
-      ContentUnavailableView(
+      LedgerEmptyState(
         "No tags", systemImage: "number",
-        description: Text(isEditing ? "Create a tag to label transactions across categories." : "Begin editing to create tags."))
+        message: isEditing ? "Create a tag to label transactions across categories." : "Begin editing to create tags.")
     } else {
       let counts = AnnotationPresentation.usageCounts(transactions: transactions, revisionTags: revisionTags)
       List(ordered, id: \.id) { tag in
         let count = counts[tag.id, default: 0]
         let detail = "\(count) transaction\(count == 1 ? "" : "s")\(tag.lifecycle == .active ? "" : " · retired")"
-        HStack {
-          VStack(alignment: .leading, spacing: 3) {
-            Text(tag.name).foregroundStyle(tag.lifecycle == .active ? Color.primary : Color.secondary)
-            Text(detail).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: LedgerTheme.Space.m) {
+          LedgerIconTile(.symbol("number"), swatch: LedgerTheme.swatch(for: tag.name))
+          VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+            Text(tag.name)
+              .font(LedgerTheme.Typeface.bodyEmphasis)
+              .foregroundStyle(tag.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
+            Text(detail).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
           }
-          Spacer()
+          Spacer(minLength: LedgerTheme.Space.s)
+          if tag.lifecycle != .active { LedgerBadge("Retired", systemImage: "archivebox") }
           if tag.lifecycle == .active {
             Menu("Actions") {
               Button("Rename tag") { renamingTag = tag }
               Button("Retire tag") { if let retired = try? tag.tombstoned() { updateTag(retired) } }
             }
-            .disabled(!isEditing)
+            .shownWhileEditing(isEditing)
             .accessibilityLabel("Actions for \(tag.name)")
           }
         }
@@ -289,24 +290,28 @@ struct TagsView: View {
   @ViewBuilder private var templateList: some View {
     let active = AnnotationPresentation.activeTemplates(templates)
     if active.isEmpty {
-      ContentUnavailableView(
+      LedgerEmptyState(
         "No templates", systemImage: "doc.on.doc",
-        description: Text(isEditing ? "Save a transaction you repeat, then record it in one step." : "Begin editing to create templates."))
+        message: isEditing ? "Save a transaction you repeat, then record it in one step." : "Begin editing to create templates.")
     } else {
       List(active, id: \.id) { template in
-        let summary = AnnotationPresentation.templateSummary(template, accounts: accounts, categories: categories)
+        let summary = AnnotationPresentation.templateSummary(
+          template, accounts: accounts, categories: categories, formatter: formatter)
         let tagNames = AnnotationPresentation.tagNames(template.tags, in: tags)
-        HStack {
-          VStack(alignment: .leading, spacing: 3) {
-            Text(template.name)
-            Text(summary).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: LedgerTheme.Space.m) {
+          LedgerIconTile(.symbol("doc.on.doc"), swatch: LedgerTheme.swatch(for: template.name))
+          VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+            Text(template.name).font(LedgerTheme.Typeface.bodyEmphasis).foregroundStyle(LedgerTheme.ink)
+            Text(summary).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
             if !tagNames.isEmpty {
-              Text(tagNames.map { "#\($0)" }.joined(separator: " ")).font(.caption)
-                .foregroundStyle(.secondary)
+              Text(tagNames.map { "#\($0)" }.joined(separator: " "))
+                .font(LedgerTheme.Typeface.caption)
+                .foregroundStyle(LedgerTheme.accent)
             }
           }
-          Spacer()
+          Spacer(minLength: LedgerTheme.Space.s)
           Button("Use") { pendingUse = PendingTemplateUse(template: template) }
+            .buttonStyle(LedgerSecondaryButtonStyle())
             .disabled(!isEditing)
             .accessibilityLabel("Record \(template.name) as a transaction today")
           Menu("Actions") {
@@ -315,7 +320,7 @@ struct TagsView: View {
               if let retired = try? template.tombstoned() { saveTemplate(retired) }
             }
           }
-          .disabled(!isEditing)
+          .shownWhileEditing(isEditing)
           .accessibilityLabel("Actions for \(template.name)")
         }
         .accessibilityElement(children: .contain)
@@ -327,23 +332,27 @@ struct TagsView: View {
   @ViewBuilder private var memoList: some View {
     let active = AnnotationPresentation.activeMemos(memos)
     if active.isEmpty {
-      ContentUnavailableView(
+      LedgerEmptyState(
         "No memos", systemImage: "note.text",
-        description: Text(isEditing ? "Write a note for a day, such as a trip or a bill you expect." : "Begin editing to write memos."))
+        message: isEditing ? "Write a note for a day, such as a trip or a bill you expect." : "Begin editing to write memos.")
     } else {
       List(active, id: \.id) { memo in
         let date = AnnotationPresentation.dateLabel(memo.date)
-        HStack(alignment: .top) {
-          VStack(alignment: .leading, spacing: 3) {
-            Text(date).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            Text(memo.body).lineLimit(3)
+        HStack(alignment: .top, spacing: LedgerTheme.Space.m) {
+          LedgerIconTile(.symbol("note.text"), swatch: LedgerTheme.swatch(for: date))
+          VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
+            Text(date)
+              .font(LedgerTheme.Typeface.captionEmphasis)
+              .foregroundStyle(LedgerTheme.inkSecondary)
+              .monospacedDigit()
+            Text(memo.body).font(LedgerTheme.Typeface.body).foregroundStyle(LedgerTheme.ink).lineLimit(3)
           }
-          Spacer()
+          Spacer(minLength: LedgerTheme.Space.s)
           Menu("Actions") {
             Button("Edit memo") { editingMemo = memo }
             Button("Delete memo") { if let deleted = try? memo.tombstoned() { saveMemo(deleted) } }
           }
-          .disabled(!isEditing)
+          .shownWhileEditing(isEditing)
           .accessibilityLabel("Actions for memo on \(date)")
         }
         .accessibilityElement(children: .contain)
@@ -377,7 +386,7 @@ struct TagNameForm: View {
 
   var body: some View {
     Form {
-      Text(title).font(.headline)
+      Text(title).font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       TextField(fieldLabel, text: $name)
       HStack {
         Button("Cancel", role: .cancel) { dismiss() }
@@ -413,10 +422,10 @@ struct TagPickerForm: View {
 
   var body: some View {
     Form {
-      Text("Tags").font(.headline)
+      Text("Tags").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       let choices = AnnotationPresentation.selectableTags(tags, keeping: original)
       if choices.isEmpty {
-        Text("No tags yet. Create tags under Tags & Memos.").foregroundStyle(.secondary)
+        Text("No tags yet. Create tags under Tags & Memos.").font(LedgerTheme.Typeface.secondary).foregroundStyle(LedgerTheme.inkSecondary)
       }
       ForEach(choices, id: \.id) { tag in
         Toggle(
@@ -491,7 +500,7 @@ struct TemplateForm: View {
 
   var body: some View {
     Form {
-      Text(template == nil ? "New template" : "Edit template").font(.headline)
+      Text(template == nil ? "New template" : "Edit template").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       TextField("Template name", text: $name)
       if template == nil {
         Picker("Kind", selection: $kind) {
@@ -599,7 +608,7 @@ struct MemoForm: View {
 
   var body: some View {
     Form {
-      Text(memo == nil ? "New memo" : "Edit memo").font(.headline)
+      Text(memo == nil ? "New memo" : "Edit memo").font(LedgerTheme.Typeface.cardTitle).foregroundStyle(LedgerTheme.ink)
       DatePicker("Day", selection: $day, displayedComponents: .date)
       TextEditor(text: $text)
         .frame(minHeight: 120)

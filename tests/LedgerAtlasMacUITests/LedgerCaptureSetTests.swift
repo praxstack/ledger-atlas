@@ -157,8 +157,8 @@ import Testing
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
   try snapshots.verify(writingTo: output)
-  // 25 records and 4 key states, each in light and dark.
-  let expectedFiles: Int = 58
+  // 25 records and 5 key states, each in light and dark.
+  let expectedFiles: Int = 60
   #expect(index.count == expectedFiles)
   print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
   #expect(
@@ -250,6 +250,44 @@ private func captureKeyStates(
       capture, "balance-receipt", appearance,
       "After an import: each account beside Money Manager's figure, with the difference in words.",
       text: text)
+  }
+
+  // #169: the entry form after typing a memo an earlier entry used. Account and category are
+  // filled from that entry and the form says so in words; nothing is saved yet.
+  captureLog("entry suggestion")
+  let demo = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "entry-suggestion-\(UUID().uuidString).sqlite")
+  defer { try? FileManager.default.removeItem(at: demo) }
+  try LedgerDemoTour.makeDemoLedger(at: demo, withBalanceReceipt: false)
+  let ledger = try LedgerStore.openReadOnly(at: demo).readSnapshot()
+  let form = NSWindow(
+    contentRect: NSRect(x: 0, y: 0, width: 520, height: 420), styleMask: [.titled],
+    backing: .buffered, defer: false)
+  form.isReleasedWhenClosed = false
+  form.contentViewController = NSHostingController(
+    rootView: NativeTransactionForm(
+      accounts: ledger.accounts, categories: ledger.categories,
+      intent: LedgerIntentRequest(kind: .addExpense, amountLiteral: "24000.00", note: "Flat rent"),
+      entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in .saved }))
+  form.makeKeyAndOrderFront(nil)
+  defer { form.close() }
+  var formText: [String] = []
+  for _ in 0..<40 {
+    try await Task.sleep(for: .milliseconds(200))
+    formText = inProcessAccessibilityTree(of: form).map { "\($0.spokenName) \($0.value)" }
+    if formText.contains(where: { $0.contains("suggested from an entry") }) { break }
+  }
+  for appearance in CaptureAppearance.allCases {
+    form.appearance = NSAppearance(named: appearance.name)
+    pump(0.6)
+    let capture = try #require(windowPNG(form))
+    expectUsable(
+      capture.png, text: formText, expecting: ["suggested from an entry", "Flat rent"],
+      for: "entry-suggestion")
+    try save(
+      capture, "entry-suggestion", appearance,
+      "A memo used before fills account and category, labelled as a suggestion; nothing is saved yet.",
+      text: formText)
   }
   return index
 }

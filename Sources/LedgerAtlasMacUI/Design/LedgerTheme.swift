@@ -32,6 +32,10 @@ public enum LedgerTheme {
   public static let hairlineSoft = dynamic(
     light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.045, darkAlpha: 0.05,
     highContrastLightAlpha: 0.16, highContrastDarkAlpha: 0.2)
+  /// A card's soft drop shadow: light mode only (dark cards are lifted by their fill).
+  public static let cardShadow = dynamic(
+    light: 0x000000, dark: 0x000000, lightAlpha: 0.05, darkAlpha: 0,
+    highContrastLightAlpha: 0.09)
   /// Fill for fields, chips and unselected segmented items.
   public static let fieldFill = dynamic(
     light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.06, darkAlpha: 0.10,
@@ -107,6 +111,7 @@ public enum LedgerTheme {
       ("hairlineSoft", hairlineSoft), ("fieldFill", fieldFill), ("fieldFillPressed", fieldFillPressed),
       ("accentSoft", accentSoft), ("accentPressed", accentPressed), ("onAccent", onAccent),
       ("track", track), ("positiveSoft", positiveSoft), ("inkSoft", inkSoft),
+      ("cardShadow", cardShadow),
     ]
 
   /// Tokens that keep their colour under Increase Contrast, and why. The window surfaces
@@ -115,6 +120,7 @@ public enum LedgerTheme {
   static let increaseContrastExceptions: [String: String] = [
     "canvas": "window background", "recessed": "window background",
     "card": "already white in light mode (dark mode changes)", "onAccent": "label on the accent",
+    "cardShadow": "no shadow in dark mode (light mode deepens)",
   ]
 
   /// A palette colour with its soft fill (icon tiles, selected chips).
@@ -211,6 +217,8 @@ public enum LedgerTheme {
     public static let card: CGFloat = 14
     /// Floating sidebar and sheets (concentric with the window corner).
     public static let panel: CGFloat = 16
+    /// The 44 pt icon tile of empty states and the lock screen.
+    public static let tile: CGFloat = 12
   }
 
   /// Standard row heights.
@@ -220,10 +228,6 @@ public enum LedgerTheme {
     public static let sidebarRow: CGFloat = 27
     public static let iconTile: CGFloat = 28
     public static let inspectorWidth: CGFloat = 320
-    /// The one left and right margin of every page (LedgerPage).
-    public static let pageGutter: CGFloat = 24
-    /// The widest a page's column of cards grows before it centres.
-    public static let pageMaxWidth: CGFloat = 820
     /// The widest a paragraph of explanation runs (about 80 characters).
     public static let readableWidth: CGFloat = 560
   }
@@ -251,6 +255,10 @@ public enum LedgerTheme {
     public static let secondary = Font.callout
     public static let caption = Font.subheadline
     public static let captionEmphasis = Font.system(.subheadline, weight: .semibold)
+    /// Addresses, digests and the accessible table: body size, fixed pitch.
+    public static let mono = Font.body.monospaced()
+    /// The symbol in a badge.
+    public static let badgeSymbol = Font.system(.caption2, weight: .semibold)
   }
 
   /// Tracking for figures by role: large figures tighten like SF Pro Display.

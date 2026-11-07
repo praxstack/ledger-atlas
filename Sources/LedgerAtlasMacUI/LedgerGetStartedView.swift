@@ -43,12 +43,13 @@ struct LedgerGetStartedView: View {
   ]
 
   var body: some View {
-    LedgerPage {
+    LedgerCardColumn {
       header
       VStack(spacing: 0) {
         importStep
         ForEach(Self.laterSteps) { step in
-          LedgerPageDivider()
+          LedgerRowDivider()
+            .padding(.leading, LedgerTheme.Space.l + LedgerTheme.Metrics.iconTile + LedgerTheme.Space.m)
           row(step)
         }
       }

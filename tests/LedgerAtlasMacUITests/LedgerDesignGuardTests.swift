@@ -4,8 +4,9 @@ import Testing
 /// Design guards from DESIGN.md: colours come from `LedgerTheme`, amounts on screen go through
 /// `MoneyText` or the display formatter, and captions use the theme's caption style.
 ///
-/// These are ratchets. A file not listed below may have none of these uses. A listed file may
-/// have at most its count, so the lists only shrink as screens move onto the design system.
+/// These are ratchets. A file not listed below may have none of these uses (system colours and
+/// caption fonts are already gone everywhere). A listed file may have at most its count, so the
+/// lists only shrink as screens move onto the design system.
 /// When you remove uses, lower the count (or drop the file) in the same change.
 @Test func designSystemUsesOnlyShrink() throws {
   for rule in DesignGuardRule.all {
@@ -64,13 +65,7 @@ private struct DesignGuardRule {
         #"\.buttonStyle\(\.link\)"#,
         #"\bNSColor\.(system[A-Z]\w*|labelColor|secondaryLabelColor|tertiaryLabelColor|controlAccentColor)\b"#,
       ],
-      remaining: [
-        "AccountsView.swift": 7, "CategoriesView.swift": 7, "ImportReview.swift": 3,
-        "InsightsSurface.swift": 11, "LedgerLifecycleViews.swift": 6, "LedgerSurfaces.swift": 9,
-        "LedgerWelcomeView.swift": 1, "LocalAccessSurface.swift": 3, "LockSurfaces.swift": 14,
-        "OverviewSurface.swift": 1, "PlanningViews.swift": 12, "ReceiptSurface.swift": 10,
-        "TagsView.swift": 8, "TransferViews.swift": 7,
-      ],
+      remaining: [:],
       exempt: ["LedgerTheme.swift": "defines the tokens"]),
     DesignGuardRule(
       "raw amount",
@@ -78,19 +73,14 @@ private struct DesignGuardRule {
       patterns: [#"\\\([\w.$]*rawLiteral\)"#],
       remaining: [
         "InsightsSurface.swift": 1, "LedgerJourney.swift": 4, "LedgerSession.swift": 1,
-        "PlanningViews.swift": 10, "TagsView.swift": 1, "TransactionForms.swift": 2,
+        "PlanningViews.swift": 6, "TransactionForms.swift": 2,
       ],
       exempt: ["InsightsReport.swift": "plain-text export, not shown on screen"]),
     DesignGuardRule(
       "raw caption font",
       fix: "Use LedgerTheme.Typeface.caption (Subheadline); .caption is below the design's size.",
       patterns: [#"\.font\(\.(caption2?|footnote)\)"#],
-      remaining: [
-        "AccountsView.swift": 7, "CategoriesView.swift": 6, "ImportReview.swift": 1,
-        "InsightsSurface.swift": 4, "LedgerLifecycleViews.swift": 2, "LedgerSurfaces.swift": 4,
-        "LockSurfaces.swift": 8, "PlanningViews.swift": 6, "ReceiptSurface.swift": 1,
-        "TagsView.swift": 4, "TransferViews.swift": 5,
-      ]),
+      remaining: [:]),
   ]
 }
 
