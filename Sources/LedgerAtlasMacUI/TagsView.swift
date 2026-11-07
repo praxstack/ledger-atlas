@@ -148,15 +148,6 @@ struct TagsView: View {
     VStack(alignment: .leading, spacing: 0) {
       switch state {
       case .loaded:
-        Picker("Show", selection: $section) {
-          ForEach(AnnotationPresentation.Section.allCases) { Text($0.rawValue).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(maxWidth: 320)
-        .padding(.horizontal, LedgerTheme.Space.l)
-        .padding(.vertical, LedgerTheme.Space.m)
-        .accessibilityLabel("Show tags, templates or memos")
         switch section {
         case .tags: tagList
         case .templates: templateList
@@ -193,6 +184,20 @@ struct TagsView: View {
     }
     .ledgerCanvas()
     .navigationTitle("Tags & Memos")
+    .toolbar {
+      // Which list the screen shows is screen-level navigation, so it sits in the toolbar
+      // like the Transactions view switch.
+      if case .loaded = state {
+        ToolbarItem(placement: .principal) {
+          Picker("Show", selection: $section) {
+            ForEach(AnnotationPresentation.Section.allCases) { Text($0.rawValue).tag($0) }
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          .accessibilityLabel("Show tags, templates or memos")
+        }
+      }
+    }
     .sheet(isPresented: $showingTagForm) {
       TagNameForm(title: "New tag", initialName: "") { name in
         guard let origin = try? LedgerOrigin.macNative(),
@@ -264,14 +269,21 @@ struct TagsView: View {
         let detail = "\(count) transaction\(count == 1 ? "" : "s")\(tag.lifecycle == .active ? "" : " · retired")"
         HStack(spacing: LedgerTheme.Space.m) {
           LedgerIconTile(.symbol("number"), swatch: LedgerTheme.swatch(for: tag.name))
-          VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {
-            Text(tag.name)
-              .font(LedgerTheme.Typeface.bodyEmphasis)
-              .foregroundStyle(tag.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
-            Text(detail).font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkTertiary)
-          }
+          Text(tag.name)
+            .font(LedgerTheme.Typeface.bodyEmphasis)
+            .foregroundStyle(tag.lifecycle == .active ? LedgerTheme.ink : LedgerTheme.inkTertiary)
           Spacer(minLength: LedgerTheme.Space.s)
           if tag.lifecycle != .active { LedgerBadge("Retired", systemImage: "archivebox") }
+          // How often the tag is used, as the row's figure.
+          VStack(alignment: .trailing, spacing: 0) {
+            Text(count.formatted())
+              .font(LedgerTheme.Typeface.bodyEmphasis)
+              .foregroundStyle(count == 0 ? LedgerTheme.inkTertiary : LedgerTheme.ink)
+              .monospacedDigit()
+            Text(count == 1 ? "transaction" : "transactions")
+              .font(LedgerTheme.Typeface.caption)
+              .foregroundStyle(LedgerTheme.inkTertiary)
+          }
           if tag.lifecycle == .active {
             Menu("Actions") {
               Button("Rename tag") { renamingTag = tag }
@@ -337,7 +349,7 @@ struct TagsView: View {
         message: isEditing ? "Write a note for a day, such as a trip or a bill you expect." : "Begin editing to write memos.")
     } else {
       List(active, id: \.id) { memo in
-        let date = AnnotationPresentation.dateLabel(memo.date)
+        let date = formatter.date(memo.date)
         HStack(alignment: .top, spacing: LedgerTheme.Space.m) {
           LedgerIconTile(.symbol("note.text"), swatch: LedgerTheme.swatch(for: date))
           VStack(alignment: .leading, spacing: LedgerTheme.Space.xxs) {

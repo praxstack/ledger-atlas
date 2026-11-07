@@ -82,6 +82,27 @@ enum MoneyManagerV19ObservedGraph {
     }
 
     let accountUIDs = try uniqueUIDs(inTables: Array(MoneyManagerV19Vocabulary.accountTables))
+    // Debit cards (#207): a card's rows move the account that pays it, and their account
+    // binding is the card's `cardAssetUid` field instead of the row's `assetUid`.
+    func literals(_ recordID: String) throws -> [String: String] {
+      try fields(for: recordID).compactMapValues { mappingLiteral($0) }
+    }
+    var cardAssetFieldByAccount: [String: String] = [:]
+    var accountLiterals: [[String: String]] = []
+    for recordID in records(inTables: Array(MoneyManagerV19Vocabulary.accountTables)) {
+      let values = try fields(for: recordID)
+      let literals = values.compactMapValues { mappingLiteral($0) }
+      accountLiterals.append(literals)
+      if let uid = aliased(values, MoneyManagerV19Vocabulary.uidAliases).flatMap(mappingLiteral),
+        let field = aliased(values, MoneyManagerV19Vocabulary.cardAssetAliases)
+      {
+        cardAssetFieldByAccount[uid] = field.0
+      }
+    }
+    let cards = MoneyManagerV19Vocabulary.DebitCards(
+      accounts: accountLiterals,
+      groups: try records(inTables: Array(MoneyManagerV19Vocabulary.assetGroupTables))
+        .map(literals))
     let categoryUIDs = try uniqueUIDs(inTables: Array(MoneyManagerV19Vocabulary.categoryTables))
     var currencies: [String: String] = [:]
     for recordID in records(inTables: Array(MoneyManagerV19Vocabulary.currencyTables)) {
@@ -153,13 +174,20 @@ enum MoneyManagerV19ObservedGraph {
         MoneyManagerV19Vocabulary.reason(forType: type, categoryUID: categoryUID) == nil,
         currencies[currencyUID] != nil
       else { throw CanonicalCommitError.unsafeMapping }
-      accountsByRecord[recordID] = accountUID
+      let movedAccountUID = cards.movedAccount(accountUID)
+      let accountFieldID: String?
+      if movedAccountUID == accountUID {
+        accountFieldID = aliased(values, MoneyManagerV19Vocabulary.assetAliases)?.0
+      } else {
+        accountFieldID = cardAssetFieldByAccount[accountUID]
+      }
+      accountsByRecord[recordID] = movedAccountUID
       for event in effects {
         guard currencies[currencyUID] == event.amount.unitCode,
           amount == event.amount.amount.rawLiteral,
           event.accountID
             == (try? StableCanonicalID.account(
-              profileID: request.expectedManifest.profileID, sourceAccountID: accountUID)),
+              profileID: request.expectedManifest.profileID, sourceAccountID: movedAccountUID)),
           MoneyManagerV19Vocabulary.eventKind(forType: type)?.canonical == event.kind,
           event.occurredAt.precision == .millisecond,
           Int64(zdate).flatMap({
@@ -185,15 +213,16 @@ enum MoneyManagerV19ObservedGraph {
             else { throw CanonicalCommitError.unsafeMapping }
             continue
           }
-          let aliases: [String]
+          let expectedFieldID: String?
           switch binding.semantic {
-          case .amount: aliases = MoneyManagerV19Vocabulary.amountAliases
-          case .occurredAt: aliases = MoneyManagerV19Vocabulary.zdateAliases
-          case .account: aliases = MoneyManagerV19Vocabulary.assetAliases
-          case .kind: aliases = MoneyManagerV19Vocabulary.doTypeAliases
+          case .amount: expectedFieldID = aliased(values, MoneyManagerV19Vocabulary.amountAliases)?.0
+          case .occurredAt:
+            expectedFieldID = aliased(values, MoneyManagerV19Vocabulary.zdateAliases)?.0
+          case .account: expectedFieldID = accountFieldID
+          case .kind: expectedFieldID = aliased(values, MoneyManagerV19Vocabulary.doTypeAliases)?.0
           default: throw CanonicalCommitError.unsafeMapping
           }
-          guard aliased(values, aliases)?.0 == binding.provenance.deterministicID else {
+          guard let expectedFieldID, expectedFieldID == binding.provenance.deterministicID else {
             throw CanonicalCommitError.unsafeMapping
           }
         }

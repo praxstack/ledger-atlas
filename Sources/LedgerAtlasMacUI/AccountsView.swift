@@ -288,7 +288,7 @@ struct AccountTotalsSummary: View {
 
   private func text(_ unit: String, _ value: ExactDecimal) -> String {
     (try? CurrencyAmount(unitCode: unit, amount: value)).map { formatter.parts($0).text }
-      ?? value.description
+      ?? formatter.figure(value.description)
   }
 
   @ViewBuilder
@@ -300,7 +300,7 @@ struct AccountTotalsSummary: View {
       if let amount = try? CurrencyAmount(unitCode: unit, amount: value) {
         MoneyText(amount, size: size, negativeIsAlert: alert)
       } else {
-        Text(value.description).monospacedDigit()
+        Text(formatter.figure(value.description)).monospacedDigit()
       }
     }
   }

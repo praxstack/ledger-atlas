@@ -6,6 +6,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LedgerView: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let state: LedgerSession.State
   let isEditing: Bool
   let accounts: [LedgerAccount]
@@ -26,8 +27,10 @@ struct LedgerView: View {
   let tombstone: (String) -> Void
   let copy: (String) -> Void
   let addMacTransaction: (String) -> Void
+  /// Answers what the entry form's Save did.
   let createTransaction:
-    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> Void
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks)
+      -> NativeEntrySaveResult
   let createSplit: (LedgerSplitDraft) -> Void
   var tags: [LedgerTag] = []
   var revisionTags: [String: LedgerTagLinks] = [:]
@@ -169,7 +172,7 @@ struct LedgerView: View {
             ForEach(snapshot.transactions) { transaction in
               VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
-                Text(transaction.detail)
+                Text(transaction.detail(hidingAmounts: formatter.hidesAmounts))
                   .font(.caption)
                   .foregroundStyle(.secondary)
               }
@@ -182,9 +185,12 @@ struct LedgerView: View {
     .sheet(isPresented: $showingTransactionForm) {
       NativeTransactionForm(
         accounts: accounts, categories: categories, intent: intentRequest, tags: tags,
+        entries: transactions,
         onSave: { submissionID, amount, kind, accountID, categoryID, note, links in
-          createTransaction(submissionID, amount, kind, accountID, categoryID, note, links)
-          if intentRequest != nil { consumeIntent() }
+          let result = createTransaction(
+            submissionID, amount, kind, accountID, categoryID, note, links)
+          if case .notSaved = result {} else if intentRequest != nil { consumeIntent() }
+          return result
         })
     }
     .sheet(isPresented: $showingSplitForm) {
@@ -225,8 +231,9 @@ struct LedgerView: View {
       }
     }
     .onChange(of: selectedID) { _, id in
-      // Start an amount edit from the selected entry's current amount.
-      guard let id,
+      // Start an amount edit from the selected entry's current amount. With amounts hidden
+      // (#173), selecting an entry must not show its amount, so the field starts empty.
+      guard let id, !formatter.hidesAmounts,
         let amount = transactions.first(where: { $0.id == id })?.currentRevision.draft.effects
           .first?.amount.amount.rawLiteral
       else { return }

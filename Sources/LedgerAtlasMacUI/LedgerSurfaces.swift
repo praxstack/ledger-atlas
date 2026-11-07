@@ -151,7 +151,8 @@ struct SearchResultRow: View {
     let kind = category == nil ? nil : entry.kind.rawValue.capitalized
     let spoken = [
       title, kind, detail.isEmpty ? nil : detail,
-      formatter.parts(signed.amount, sign: signed.sign).text,
+      formatter.hidesAmounts
+        ? LedgerDisplayFormatter.hiddenAmountLabel : formatter.parts(signed.amount, sign: signed.sign).text,
       entry.lifecycle == .tombstoned ? "closed" : nil,
     ].compactMap { $0 }.joined(separator: ", ")
 
@@ -206,6 +207,7 @@ struct DataBackedSurface: View {
 }
 
 struct BackupSurface: View {
+  @Environment(\.ledgerFormatter) private var formatter
   let rows: [LedgerJourney.SurfaceRow]
   let emptyMessage: String
   let lastFailure: String?
@@ -291,6 +293,10 @@ struct BackupSurface: View {
           .foregroundStyle(LedgerTheme.inkTertiary)
           .fixedSize(horizontal: false, vertical: true)
           .accessibilityLabel(VendorExport.notice)
+        if formatter.hidesAmounts {
+          Text(LedgerProductSettings.hideAmountsExportNotice)
+            .font(LedgerTheme.Typeface.caption).foregroundStyle(LedgerTheme.inkSecondary)
+        }
       }
       .ledgerCard()
 

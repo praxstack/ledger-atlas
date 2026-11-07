@@ -154,7 +154,25 @@ public struct LedgerDestructiveButtonStyle: ButtonStyle {
         configuration.isPressed ? LedgerTheme.fieldFillPressed : LedgerTheme.fieldFill,
         in: .rect(cornerRadius: LedgerTheme.Radius.control)
       )
+      .modifier(LedgerFocusRing(radius: LedgerTheme.Radius.control))
       .contentShape(.rect)
+  }
+}
+
+/// A visible keyboard-focus ring for custom button styles, which lose the system one.
+struct LedgerFocusRing: ViewModifier {
+  var radius: CGFloat
+  @Environment(\.isFocused) private var isFocused
+
+  func body(content: Content) -> some View {
+    content.overlay {
+      if isFocused {
+        RoundedRectangle(cornerRadius: radius)
+          .strokeBorder(LedgerTheme.accent, lineWidth: 2)
+          .padding(-3)
+          .allowsHitTesting(false)
+      }
+    }
   }
 }
 
@@ -166,6 +184,9 @@ public struct LedgerLinkButtonStyle: ButtonStyle {
   public func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .foregroundStyle(configuration.isPressed ? LedgerTheme.accentPressed : LedgerTheme.accent)
+      // An underline so the link does not rely on colour alone inside body text.
+      .underline()
+      .modifier(LedgerFocusRing(radius: 3))
       .contentShape(.rect)
   }
 }
