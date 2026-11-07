@@ -225,7 +225,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
   }
   // #172: the balance-match receipt on Import Review, with a matching row, one that differs
   // and a hidden account Money Manager has no figure for (the demo ledger's made-up receipt).
-  log("balance receipt")
+  captureLog("balance receipt")
   let receipt = try await MountedRoot(
     showing: .importReview, size: captureSize, appWindow: true, readsInProcess: true)
   defer { receipt.close() }
