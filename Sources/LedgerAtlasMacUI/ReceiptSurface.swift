@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 /// suggestions; a transaction is recorded only when the person confirms the expense form.
 struct ReceiptSurface: View {
   let journey: LedgerJourney
+  @Environment(\.ledgerFormatter) private var formatter
 
   @State private var receipts: [LedgerReceiptAttachment] = []
   @State private var selectedID: String?
@@ -87,6 +88,7 @@ struct ReceiptSurface: View {
     .ledgerCanvas()
     .navigationTitle("Receipts")
     .task(id: journey.snapshotGeneration) { reload() }
+    .onChange(of: formatter.hidesAmounts) { reload() }
   }
 
   /// A plain list of buttons rather than a selection list: Tab into a SwiftUI selection
@@ -291,7 +293,7 @@ struct ReceiptSurface: View {
 
   private func reload() {
     receipts = (try? journey.receiptAttachments()) ?? []
-    transactionRows = journey.rows(for: .ledger)
+    transactionRows = journey.rows(for: .ledger, hidesAmounts: formatter.hidesAmounts)
     rowsByID = Dictionary(transactionRows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     if let selectedID, !receipts.contains(where: { $0.id == selectedID }) {
       self.selectedID = nil
