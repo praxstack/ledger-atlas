@@ -15,11 +15,12 @@ struct NativeTransactionForm: View {
   let tags: [LedgerTag]
   /// The open ledger's entries, searched for an earlier entry with the memo typed (#169).
   let entries: [LedgerTransactionSnapshot]
-  /// (submission ID, amount literal, kind, account ID, category ID, note, tags), answering nil
-  /// when the entry was saved or the message to show when it was not. The submission ID is
-  /// fixed for one entry, so a repeated Save is the same submission, not a new entry.
+  /// (submission ID, amount literal, kind, account ID, category ID, note, tags), answering what
+  /// the Save did. The submission ID is fixed for one entry, so a repeated Save is the same
+  /// submission, not a new entry.
   let onSave:
-    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks) -> String?
+    (String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks)
+      -> NativeEntrySaveResult
   @Environment(\.dismiss) private var dismiss
   @Environment(\.ledgerFormatter) private var formatter
   @AppStorage(Self.lastAccountKey) private var lastAccountID = ""
@@ -39,7 +40,7 @@ struct NativeTransactionForm: View {
     tags: [LedgerTag] = [], entries: [LedgerTransactionSnapshot] = [],
     onSave: @escaping (
       String, String, LedgerTransactionKind, String, String?, String?, LedgerTagLinks
-    ) -> String?
+    ) -> NativeEntrySaveResult
   ) {
     self.accounts = accounts
     self.categories = categories
@@ -138,6 +139,11 @@ struct NativeTransactionForm: View {
           Text(error)
             .font(LedgerTheme.Typeface.caption)
             .foregroundStyle(LedgerTheme.negative)
+            .fixedSize(horizontal: false, vertical: true)
+        } else if let notice = entry.saveNotice {
+          Text(notice)
+            .font(LedgerTheme.Typeface.caption)
+            .foregroundStyle(LedgerTheme.inkSecondary)
             .fixedSize(horizontal: false, vertical: true)
         } else if entry.savedCount > 0 {
           Text(
@@ -254,11 +260,11 @@ struct NativeTransactionForm: View {
     defer { isSaving = false }
     let cleanNote = entry.note.trimmingCharacters(in: .whitespacesAndNewlines)
     let links = (try? LedgerTagLinks(Array(entry.selectedTags))) ?? .empty
-    let failure = onSave(
-      entry.submissionID, cleanAmount, kind, accountID, entry.categoryID,
-      cleanNote.isEmpty ? nil : cleanNote, links)
-    entry.finishSave(failure: failure)
-    guard failure == nil else { return }
+    entry.finishSave(
+      onSave(
+        entry.submissionID, cleanAmount, kind, accountID, entry.categoryID,
+        cleanNote.isEmpty ? nil : cleanNote, links))
+    guard entry.saveError == nil else { return }
     lastAccountID = accountID
     defaultAccountID = accountID
     amountFocused = true
@@ -281,16 +287,19 @@ struct NativeEntryFields: Equatable {
   var savedCount = 0
   /// Why the last Save did not save, shown under the form until the next Save.
   var saveError: String?
+  /// What a Save that did save needs said, such as an earlier Save having recorded it.
+  var saveNotice: String?
 
-  /// After `onSave` answers. Saved (nil): a fresh entry with a new submission ID, so the next
-  /// Save is a new entry; the form keeps the kind and account. Not saved: every field and the
-  /// same submission ID stay, so nothing typed is lost and Save again is the same submission.
-  mutating func finishSave(failure: String?) {
-    if let failure {
-      saveError = failure
-      return
+  /// After `onSave` answers. Saved: a fresh entry with a new submission ID, so the next Save is
+  /// a new entry; the form keeps the kind and account. Not saved: every field and the same
+  /// submission ID stay, so nothing typed is lost and Save again is the same submission.
+  mutating func finishSave(_ result: NativeEntrySaveResult) {
+    switch result {
+    case .saved: self = NativeEntryFields(savedCount: savedCount + 1)
+    case .savedEarlier(let notice):
+      self = NativeEntryFields(savedCount: savedCount + 1, saveNotice: notice)
+    case .notSaved(let failure): saveError = failure
     }
-    self = NativeEntryFields(savedCount: savedCount + 1)
   }
 }
 

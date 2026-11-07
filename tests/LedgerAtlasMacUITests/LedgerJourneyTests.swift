@@ -922,26 +922,42 @@ import Testing
   let account = try #require(journey.snapshot?.accounts.first)
   let before = try #require(journey.snapshot).transactions.count
   let checksum = try journey.checksum()
-  func save(_ amount: String) -> String? {
+  let now = UTCInstant.currentEpochMilliseconds()
+  func save(
+    _ amount: String, submission: String = UUID().uuidString, note: String = "Chai",
+    at instant: Int64? = nil
+  ) -> NativeEntrySaveResult {
     journey.saveNativeEntry(
       amountLiteral: amount, kind: .expense, accountID: account.id, categoryID: nil,
-      note: "Chai", createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()),
-      submissionID: UUID().uuidString, tags: .empty)
+      note: note, createdAt: UTCInstant(epochMilliseconds: instant ?? now), submissionID: submission,
+      tags: .empty)
   }
 
   // An amount that isn't a number: the form is told, and nothing is written.
   for amount in ["abc", "12,5,0", "1,250"] {
-    #expect(save(amount) == LedgerJourney.entryAmountNotANumberMessage)
+    #expect(save(amount) == .notSaved(LedgerJourney.entryAmountNotANumberMessage))
   }
   #expect(try journey.checksum() == checksum)
 
   // A good amount saves.
-  #expect(save("4.00") == nil)
+  let submission = UUID().uuidString
+  #expect(save("4.00", submission: submission) == .saved)
+  #expect(journey.snapshot?.transactions.count == before + 1)
+
+  // The form heard "couldn't confirm" although that Save was written. Save again the next
+  // day builds a different date, which the store refuses as another submission; the entry is
+  // found instead, so the form hears it is saved and nothing is entered twice.
+  let nextDay = now + 86_400_000
+  #expect(save("4.00", submission: submission, at: nextDay) == .saved)
+  // Changed before Save again: what was written stays, and the form says so.
+  #expect(
+    save("5.00", submission: submission, note: "Chai and samosa")
+      == .savedEarlier(LedgerJourney.entrySavedEarlierMessage))
   #expect(journey.snapshot?.transactions.count == before + 1)
 
   // The ledger can no longer be written (closed, as after a lost lease): the form is told.
   journey.closeLedger()
-  #expect(save("4.00") == LedgerJourney.entryNotSavedMessage)
+  #expect(save("4.00") == .notSaved(LedgerJourney.entryNotSavedMessage))
 }
 
 @MainActor

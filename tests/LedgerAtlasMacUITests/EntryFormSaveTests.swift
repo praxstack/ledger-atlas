@@ -26,7 +26,7 @@ private func typedEntry() throws -> NativeEntryFields {
 @Test func aFailedSaveKeepsTheEntryAndTheSameSubmission() throws {
   let typed = try typedEntry()
   var entry = typed
-  entry.finishSave(failure: LedgerJourney.entryAmountNotANumberMessage)
+  entry.finishSave(.notSaved(LedgerJourney.entryAmountNotANumberMessage))
   #expect(entry.saveError == LedgerJourney.entryAmountNotANumberMessage)
   // Everything else is exactly as typed, including the submission ID, so Save again is the
   // same submission and cannot write the entry twice.
@@ -37,14 +37,30 @@ private func typedEntry() throws -> NativeEntryFields {
 
 @Test func aSuccessfulSaveStartsAFreshEntryWithANewSubmission() throws {
   var entry = try typedEntry()
-  entry.finishSave(failure: LedgerJourney.entryNotSavedMessage)
+  entry.finishSave(.notSaved(LedgerJourney.entryNotSavedMessage))
   let failedSubmission = entry.submissionID
   // Saved on the retry: the error goes, the fields clear, and the next entry is a new submission.
-  entry.finishSave(failure: nil)
+  entry.finishSave(.saved)
   #expect(entry.saveError == nil)
   #expect(entry.savedCount == 3)
   #expect(entry.submissionID != failedSubmission)
   #expect(entry.amount.isEmpty && entry.note.isEmpty)
   #expect(entry.categoryID == nil && entry.selectedTags.isEmpty && entry.suggestion == nil)
   #expect(!entry.accountChosen && !entry.categoryChosen)
+}
+
+@Test func aSaveAnEarlierTryHadRecordedSaysSoOnTheFreshEntry() throws {
+  var entry = try typedEntry()
+  entry.finishSave(.notSaved(LedgerJourney.entryNotSavedMessage))
+  let failedSubmission = entry.submissionID
+  entry.amount = "130"
+  // The first try had been written after all, with the amount as first typed.
+  entry.finishSave(.savedEarlier(LedgerJourney.entrySavedEarlierMessage))
+  #expect(entry.saveError == nil)
+  #expect(entry.saveNotice == LedgerJourney.entrySavedEarlierMessage)
+  #expect(entry.savedCount == 3)
+  #expect(entry.submissionID != failedSubmission && entry.amount.isEmpty)
+  // The next entry that saves drops the notice.
+  entry.finishSave(.saved)
+  #expect(entry.saveNotice == nil)
 }

@@ -259,7 +259,7 @@ private func captureKeyStates(into output: URL) async throws -> [[String: String
     rootView: NativeTransactionForm(
       accounts: ledger.accounts, categories: ledger.categories,
       intent: LedgerIntentRequest(kind: .addExpense, amountLiteral: "24000.00", note: "Flat rent"),
-      entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in nil }))
+      entries: ledger.transactions, onSave: { _, _, _, _, _, _, _ in .saved }))
   form.makeKeyAndOrderFront(nil)
   defer { form.close() }
   var formText: [String] = []
