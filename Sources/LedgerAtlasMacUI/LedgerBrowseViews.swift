@@ -141,6 +141,7 @@ struct LedgerBrowseList: View {
         .keyboardShortcut("i", modifiers: [.command, .option])
       }
     }
+    .focusedSceneValue(\.ledgerViewCSV, csvExport)
     .onAppear { rebuild() }
     .onChange(of: transactions) { _, _ in rebuild() }
     .onChange(of: hiddenIDs) { _, _ in rebuild() }
@@ -152,6 +153,25 @@ struct LedgerBrowseList: View {
     }
     .onChange(of: filter) { _, _ in refresh(keepingSelection: true) }
     .onChange(of: pageIndex) { _, _ in refreshPage() }
+  }
+
+  /// File > Export > CSV: every row this view matches (all pages), in the order shown (#170).
+  private var csvExport: LedgerViewCSV {
+    let browser = browser
+    let mode = mode
+    let filter = filter
+    let transactions = transactions
+    let revisionTags = revisionTags
+    let names = LedgerCSVExport.Names(
+      accounts: accountNames, categories: categories, tags: tagNames)
+    return LedgerViewCSV(modeName: mode.rawValue) {
+      let byID = Dictionary(
+        transactions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+      let shown = browser.matches(mode: mode, filter: filter).compactMap {
+        byID[browser.entries[$0].id]
+      }
+      return LedgerCSVExport.data(shown, names: names, revisionTags: revisionTags)
+    }
   }
 
   // MARK: Controls

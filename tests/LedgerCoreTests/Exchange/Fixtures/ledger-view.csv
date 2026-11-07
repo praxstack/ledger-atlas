@@ -1,0 +1,10 @@
+﻿date,account,kind,category,amount,currency,memo,tags,transfer_counterpart,status,id
+2026-03-04 09:00,Bank,transfer,,-12.00,USD,,,"Cash, wallet",active,cd9b86c15563e7851aa9288127931087597219ecd71b48e86439cdc1e985bfac
+2026-03-03 12:00,"Cash, wallet",expense,Food,-99,INR,'@SUM(A1),,,closed,ee490c406f35085772f1bc204192aac8ef70040d281c28f0cafb3d9234f982f1
+2026-03-03 11:00,"Cash, wallet",expense,Food,-40,INR,"'-2+3, ""quoted""
+second line",,,active,51b040902b62efcc60f301bf04857a19f55357fc18260266f76f7fb2d3a226b0
+2026-03-03 09:00,"Cash, wallet",expense,Food,-0.5,INR,"'=HYPERLINK(""http://x"")",,,active,522ce11b19d00b9d9548f9c5548196a8aab4eb319402a5785fb2d6429016d60f
+2026-03-02 18:00,"Cash, wallet",expense,Food > Groceries,-1200.50,INR,Big shop,👥 shared; trip,,active,25d8b6b511e26aefc9c3fd5a1f4aee9f55c0f8d5cdaf36646128b1e9b368cf8b
+2026-03-02 18:00,"Cash, wallet",expense,Household,-300,INR,Big shop,,,active,aefadcf49b4942761e4d3b461ad9fd2304d9abeac2fd69544d3e82d5028047e3
+2026-03-02 10:00,"Cash, wallet",transfer,,-5000.00,INR,,trip,Bank,active,59a450f1e18507e943da5be4b2bc68ed957d2e05796fccb92ddba8b76c6a7368
+2026-03-01,Bank,income,Salary,85000,INR,,,,active,0fb8951f07230b5a8a85a5d4373f6ad63ed115ab77f89eafac172538a4e2b749
