@@ -23,9 +23,10 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
   #expect(parts.whole == LedgerDisplayFormatter.hiddenAmountMask)
   #expect(parts.fraction.isEmpty)
   #expect(parts.leading == visible.leading)
-  #expect(parts == hidden.parts(try rupees("5"), sign: .always))
-  #expect(hidden.amount(amount) == hidden.amount(try rupees("5")))
-  #expect(hidden.plain(amount) == hidden.plain(try rupees("5")))
+  let small = try rupees("5")
+  #expect(parts == hidden.parts(small, sign: .always))
+  #expect(hidden.amount(amount) == hidden.amount(small))
+  #expect(hidden.plain(amount) == hidden.plain(small))
   #expect(hidden.figure("Balance ₹12 of ₹3,000") == "Balance ₹••••• of ₹•••••")
 
   #expect(!hidden.amount(amount).contains(where: \.isNumber))
@@ -50,15 +51,14 @@ private func rupees(_ literal: String) throws -> CurrencyAmount {
   #expect(LedgerDisplayFormatter(settings: on).hidesAmounts)
 }
 
-/// A money figure as any screen might spell it: a currency symbol before a digit, a grouped
-/// number with paise or cents, or a literal with its currency code.
-private let moneyPattern = try! Regex(
-  #"[₹$€£]\s?\d|\d[\d,]*\.\d{2}(?!\d)|\d+(\.\d+)?\s(INR|USD|EUR|GBP)\b"#)
-
 @MainActor
 private func spokenFigures(on destination: AppDestination, hidesAmounts: Bool) async throws
   -> [String]
 {
+  // A money figure as any screen might spell it: a currency symbol before a digit, a grouped
+  // number with paise or cents, or a literal with its currency code.
+  let moneyPattern = try Regex(
+    #"[₹$€£]\s?\d|\d[\d,]*\.\d{2}(?!\d)|\d+(\.\d+)?\s(INR|USD|EUR|GBP)\b"#)
   let settings = LedgerProductSettings(startScreen: destination, hidesAmounts: hidesAmounts)
   let mounted = try await MountedRoot(showing: destination, settings: settings)
   defer { mounted.close() }
