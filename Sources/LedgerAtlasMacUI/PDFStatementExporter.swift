@@ -91,10 +91,12 @@ public enum LedgerPDFStatementExporter {
     let linesPerPage = max(1, Int((pageSize.height - 72) / lineHeight))
     // Pages are cut by line count, so no line may wrap when drawn: a wrapped line would push
     // the page past its rectangle and the overflow would be clipped. Each line is broken to
-    // the columns the monospaced font fits across the page, one column spare.
-    let advance = max(1, ("M" as NSString).size(withAttributes: attributes).width)
-    let columns = max(20, Int((pageSize.width - 72) / advance) - 1)
-    let drawn = wrapped(lines, columns: columns)
+    // what its rendered width allows, measured with the font that draws it, so wide
+    // characters and fallback fonts are measured too, not counted.
+    let width = pageSize.width - 72 - 2
+    let drawn = wrapped(lines.map { $0.replacingOccurrences(of: "\t", with: "    ") }) {
+      NSAttributedString(string: $0, attributes: attributes).size().width <= width
+    }
     for pageLines in stride(from: 0, to: max(drawn.count, 1), by: linesPerPage).map({ index in
       Array(drawn[index..<min(index + linesPerPage, drawn.count)])
     }) {
@@ -119,29 +121,43 @@ public enum LedgerPDFStatementExporter {
     }
   }
 
-  /// `lines` broken so none is longer than `columns` characters. A line breaks at its last
-  /// space that fits, or mid-word when a word alone is too long; the continuation keeps the
-  /// line's leading indent plus two spaces so it reads as the same entry.
+  /// `lines` broken so none is longer than `columns` characters.
   package static func wrapped(_ lines: [String], columns: Int) -> [String] {
     let columns = max(columns, 8)
+    return wrapped(lines) { $0.count <= columns }
+  }
+
+  /// `lines` broken so each piece `fits`. A line breaks at its last space that fits, or
+  /// mid-word when a word alone is too long; the continuation keeps the line's leading indent
+  /// plus two spaces so it reads as the same entry. Every piece keeps at least one character,
+  /// so a line always makes progress.
+  package static func wrapped(_ lines: [String], fits: (String) -> Bool) -> [String] {
     var result: [String] = []
     for line in lines {
-      guard line.count > columns else {
+      guard !fits(line) else {
         result.append(line)
         continue
       }
-      let indent = String(line.prefix { $0 == " " }.prefix(columns / 2))
-      let continuation = indent + "  "
+      let indentCount = min(line.prefix { $0 == " " }.count, 8)
+      let continuation = String(repeating: " ", count: indentCount + 2)
       var remaining = Substring(line)
       var prefix = ""
-      while prefix.count + remaining.count > columns {
-        let room = columns - prefix.count
-        let head = remaining.prefix(room + 1)
-        var cut = head.lastIndex(of: " ").flatMap { $0 > remaining.startIndex ? $0 : nil }
-        if let space = cut, remaining[remaining.startIndex..<space].allSatisfy({ $0 == " " }) {
-          cut = nil
+      while !remaining.isEmpty, !fits(prefix + remaining) {
+        // The most characters of `remaining` that fit after `prefix`, by binary search.
+        var low = 1
+        var high = remaining.count
+        while low < high {
+          let mid = (low + high + 1) / 2
+          if fits(prefix + remaining.prefix(mid)) { low = mid } else { high = mid - 1 }
         }
-        let end = cut ?? remaining.index(remaining.startIndex, offsetBy: room)
+        var end = remaining.index(remaining.startIndex, offsetBy: low)
+        // Break at the last space inside what fits, unless that leaves only indent.
+        if end < remaining.endIndex, remaining[end] != " ",
+          let space = remaining[remaining.startIndex..<end].lastIndex(of: " "),
+          !remaining[remaining.startIndex..<space].allSatisfy({ $0 == " " })
+        {
+          end = space
+        }
         result.append(prefix + String(remaining[remaining.startIndex..<end]))
         remaining = remaining[end...].drop { $0 == " " }
         prefix = continuation

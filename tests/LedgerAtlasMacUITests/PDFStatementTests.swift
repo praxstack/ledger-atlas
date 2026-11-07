@@ -182,3 +182,14 @@ private func snapshot(
   #expect(rejoined == long.trimmingCharacters(in: .whitespaces))
   #expect(lines.suffix(3).joined().filter { $0 == "x" }.count == 90)
 }
+
+/// Wide characters take more room than they count for, so the exporter measures each piece
+/// with the font that draws it instead of counting characters.
+@Test func pdfLinesAreBrokenByMeasuredWidthForWideCharacters() {
+  let wide = "日本語の口座名がとても長い場合でも切れないこと確認します"
+  let fits: (String) -> Bool = { $0.unicodeScalars.count * 2 <= 20 }
+  let lines = LedgerPDFStatementExporter.wrapped([wide], fits: fits)
+  #expect(lines.count > 1)
+  #expect(lines.allSatisfy(fits))
+  #expect(lines.map { $0.trimmingCharacters(in: .whitespaces) }.joined() == wide)
+}
