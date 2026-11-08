@@ -348,8 +348,11 @@ private func captureKeyStates(
         }),
       // Wide enough for the full bar beside the inspector; a narrower window folds the three
       // changes into one Change menu.
-      NSSize(width: 1240, height: 600), ["3 selected", "Set Category", "Add Tag", "Remove Tag"],
-      "Several entries selected: the bulk bar says how many and offers category and tag changes."
+      NSSize(width: 1240, height: 600), [
+        "3 selected", "Selection total: Spending", "Set Category", "Add Tag", "Remove Tag",
+      ],
+      "Several entries selected: the bulk bar says how many, what they add up to (#237), and"
+        + " offers category and tag changes."
     ),
     (
       "bulk-confirm",

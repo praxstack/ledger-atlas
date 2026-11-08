@@ -82,6 +82,12 @@ public struct LedgerBrowseTotal: Equatable, Sendable {
   public let unitCode: String
   public let income: ExactDecimal?
   public let expense: ExactDecimal?
+
+  public init(unitCode: String, income: ExactDecimal?, expense: ExactDecimal?) {
+    self.unitCode = unitCode
+    self.income = income
+    self.expense = expense
+  }
 }
 
 public struct LedgerBrowseSection: Identifiable, Equatable, Sendable {
@@ -258,6 +264,19 @@ public struct LedgerBrowser: Sendable {
     var overall = TotalsAccumulator()
     for position in matches(mode: mode, filter: filter) { overall.add(entries[position]) }
     return overall.totals
+  }
+
+  /// Income and expense of the given entries (a selection, #237), by the summary row's rules:
+  /// closed entries, transfers and adjustments add nothing. Ids this browser doesn't hold are
+  /// skipped, and an id named twice counts once.
+  public func totals(of ids: some Sequence<String>) -> [LedgerBrowseTotal] {
+    var counted = Set<Int>()
+    var sum = TotalsAccumulator()
+    for id in ids {
+      guard let position = positionByID[id], counted.insert(position).inserted else { continue }
+      sum.add(entries[position])
+    }
+    return sum.totals
   }
 
   /// The page that shows `id`, so editing returns to the same place. Nil when the entry is gone
