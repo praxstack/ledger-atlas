@@ -157,8 +157,8 @@ import Testing
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
   try snapshots.verify(writingTo: output)
-  // 25 records and 12 key states, each in light and dark.
-  let expectedFiles: Int = 74
+  // 25 records and 14 key states, each in light and dark.
+  let expectedFiles: Int = 78
   #expect(index.count == expectedFiles)
   print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
   #expect(
@@ -414,7 +414,33 @@ private func captureKeyStates(
       "Nothing waits in To Review: it says what would."
     ),
   ]
-  for state in upcomingStates + bulkStates + reviewStates {
+  // #239: Month in Review and Year in Review on the demo ledger, with "today" fixed so the
+  // finished periods don't depend on the day the captures run.
+  let recapStates: [(name: String, view: AnyView, size: NSSize, expects: [String], note: String)] = [
+    (
+      "recap-month",
+      AnyView(
+        NavigationStack {
+          InsightsRecapView(
+            snapshot: ledger, today: try SourceLocalDate(year: 2026, month: 11, day: 15),
+            period: .month(2026, 10))
+        }),
+      NSSize(width: 980, height: 760), ["October 2026 in review", "Money in", "Top spending"],
+      "Month in Review: money in, spending and net against the month before, top categories, biggest expenses and activity."
+    ),
+    (
+      "recap-year",
+      AnyView(
+        NavigationStack {
+          InsightsRecapView(
+            snapshot: ledger, today: try SourceLocalDate(year: 2027, month: 1, day: 15),
+            period: .year(2026))
+        }),
+      NSSize(width: 980, height: 760), ["2026 in review", "Money in", "Top spending"],
+      "Year in Review: the same blocks for a year, plus spending by month and the best and hardest month."
+    ),
+  ]
+  for state in upcomingStates + bulkStates + reviewStates + recapStates {
     captureLog(state.name)
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: state.size), styleMask: [.titled],

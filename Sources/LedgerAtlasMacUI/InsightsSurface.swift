@@ -25,6 +25,8 @@ struct InsightsSurface: View {
   /// Built off the main thread whenever the period, currency or ledger changes; the
   /// sections, the drill-down and the PDF all read this one value.
   @State private var report: InsightsReport?
+  /// Statistics, or Review: the recaps of finished months and years (#239).
+  @State private var section: InsightsSection = .statistics
 
   private var formatter: LedgerDisplayFormatter { LedgerDisplayFormatter(settings: settings) }
 
@@ -70,40 +72,59 @@ struct InsightsSurface: View {
       .ledgerCanvas()
       .navigationTitle("Insights")
     } else {
-      LedgerCardColumn(maxWidth: 820) {
-        if let report {
-          periodCard(report)
-          categoryCard("Expense by category", report.statistics.expenseCategories, report: report)
-          categoryCard("Income by category", report.statistics.incomeCategories, report: report)
-          trendCard(report)
-          statementCard(report)
+      Group {
+        if section == .review, let snapshot {
+          InsightsRecapView(snapshot: snapshot, settings: settings)
+        } else {
+          statistics
         }
-        accessibleTableCard
-        statusCard
-        exportCard
       }
       .navigationTitle("Insights")
-      .task(id: reportKey) {
-        guard let snapshot else {
-          report = nil
-          return
+      .toolbar {
+        ToolbarItem(placement: .principal) {
+          Picker("Insights view", selection: $section) {
+            ForEach(InsightsSection.allCases) { Text($0.title).tag($0) }
+          }
+          .pickerStyle(.segmented)
+          .help("Statistics for any period, or a recap of a finished month or year")
         }
-        let key = reportKey
-        let built = await Task.detached(priority: .userInitiated) {
-          try? InsightsReport(
-            snapshot: snapshot, kind: key.kind, containing: key.day, unitCode: key.unitCode,
-            rule: key.rule)
-        }.value
-        // A newer key started its own task; this result is for an older one.
-        guard !Task.isCancelled else { return }
-        report = built
       }
-      .sheet(item: $drillDown) { category in
-        if let report, let snapshot {
-          InsightsDrillDown(
-            category: category, report: report, snapshot: snapshot, formatter: formatter
-          ) { drillDown = nil }
-        }
+    }
+  }
+
+  private var statistics: some View {
+    LedgerCardColumn(maxWidth: 820) {
+      if let report {
+        periodCard(report)
+        categoryCard("Expense by category", report.statistics.expenseCategories, report: report)
+        categoryCard("Income by category", report.statistics.incomeCategories, report: report)
+        trendCard(report)
+        statementCard(report)
+      }
+      accessibleTableCard
+      statusCard
+      exportCard
+    }
+    .task(id: reportKey) {
+      guard let snapshot else {
+        report = nil
+        return
+      }
+      let key = reportKey
+      let built = await Task.detached(priority: .userInitiated) {
+        try? InsightsReport(
+          snapshot: snapshot, kind: key.kind, containing: key.day, unitCode: key.unitCode,
+          rule: key.rule)
+      }.value
+      // A newer key started its own task; this result is for an older one.
+      guard !Task.isCancelled else { return }
+      report = built
+    }
+    .sheet(item: $drillDown) { category in
+      if let report, let snapshot {
+        InsightsDrillDown(
+          category: category, report: report, snapshot: snapshot, formatter: formatter
+        ) { drillDown = nil }
       }
     }
   }
@@ -531,4 +552,19 @@ struct InsightsReportKey: Hashable, Sendable {
   let rule: LedgerPeriodRule
   let hasLedger: Bool
   let ledger: Int
+}
+
+/// The two halves of Insights.
+enum InsightsSection: String, CaseIterable, Identifiable, Sendable {
+  case statistics
+  case review
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .statistics: "Statistics"
+    case .review: "Review"
+    }
+  }
 }

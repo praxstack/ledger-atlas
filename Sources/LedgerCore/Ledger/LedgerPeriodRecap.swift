@@ -115,6 +115,13 @@ public struct LedgerPeriodRecap: Equatable, Sendable {
     public let expense: ExactDecimal
     public let net: ExactDecimal
     public var id: Int { month }
+
+    public init(month: Int, income: ExactDecimal, expense: ExactDecimal, net: ExactDecimal) {
+      self.month = month
+      self.income = income
+      self.expense = expense
+      self.net = net
+    }
   }
 
   /// One currency's figures.
