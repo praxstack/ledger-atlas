@@ -82,6 +82,51 @@ private func temporaryDirectory() throws -> URL {
 }
 
 @MainActor
+@Test func nothingElseUsesTheLedgerWhileABulkChangeIsWritten() async throws {
+  let directory = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let (journey, food, ids) = try bulkLedger(in: directory)
+  let package = try journey.exportPackage()
+  let plan = try journey.planBulkEdit(.category(food.id), transactionIDs: ids)
+  // The write waits here until every other use of the ledger has been tried.
+  let gate = DispatchSemaphore(value: 0)
+  journey.beforeBackgroundWrite = { gate.wait() }
+  let writing = Task {
+    try await journey.applyBulkEdit(plan, createdAt: UTCInstant(epochMilliseconds: 10))
+  }
+  while journey.backgroundWork == nil { await Task.yield() }
+
+  let refused = LedgerApplication.Error.invalidCommand
+  #expect(throws: refused) {
+    _ = try journey.backupCanonicalLedger(to: directory.appendingPathComponent("copy.sqlite"))
+  }
+  #expect(throws: refused) {
+    try journey.exportXLSX(to: directory.appendingPathComponent("out.xlsx"))
+  }
+  #expect(throws: refused) {
+    _ = try journey.planXLSXImport(from: directory.appendingPathComponent("in.xlsx"))
+  }
+  #expect(throws: refused) { _ = try journey.receiptAttachments() }
+  #expect(throws: refused) { _ = try journey.receiptBytes("receipt") }
+  #expect(throws: refused) { _ = try journey.exportPackage() }
+  #expect(throws: refused) {
+    try journey.restorePackage(
+      manifest: package.manifest, payload: package.payload,
+      into: directory.appendingPathComponent("bulk.sqlite"))
+  }
+  #expect(throws: refused) {
+    try journey.beginEditing(directory.appendingPathComponent("bulk.sqlite"))
+  }
+
+  gate.signal()
+  try await writing.value
+  #expect(journey.backgroundWork == nil)
+  #expect(journey.snapshot?.transactions.map(\.currentRevision.draft.categoryID)
+    == [food.id, food.id, food.id])
+  #expect(try journey.receiptAttachments().isEmpty)
+}
+
+@MainActor
 @Test func theBulkProgressSaysWhatIsBeingWritten() {
   #expect(BulkEditWording.working(.bulkEditing(count: 1)) == "Changing 1 entry…")
   #expect(BulkEditWording.working(.bulkEditing(count: 1_200)) == "Changing 1200 entries…")

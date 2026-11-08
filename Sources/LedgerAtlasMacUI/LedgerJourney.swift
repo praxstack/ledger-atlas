@@ -88,8 +88,18 @@ public final class LedgerJourney {
   /// The ledger to write to. Nil while a bulk change is written off the main thread, so no
   /// other change shares the connection with it and every edit is refused until it ends (#246).
   private var application: LedgerApplication? {
-    backgroundWork?.isBulkEdit == true ? nil : editingApplication
+    isWritingInBackground ? nil : editingApplication
   }
+  /// A bulk change or its revert is being written on the ledger's connection off the main
+  /// thread. Nothing else reads or writes through that connection until it ends (#246).
+  private var isWritingInBackground: Bool { backgroundWork?.isBulkEdit == true }
+  /// The open ledger's store for reading. Nil while a bulk change is written, so no backup,
+  /// export or receipt read shares the connection with it or sees its uncommitted rows.
+  private var readableStore: LedgerStore? {
+    isWritingInBackground ? nil : mutableStore ?? openedStore
+  }
+  /// Runs on the background task just before a bulk write. Tests hold the write here.
+  package var beforeBackgroundWrite: @Sendable () -> Void = {}
   /// Reads the ledger after a command. Tests swap it to make a read fail.
   package var readSnapshot: (LedgerApplication) throws -> LedgerStore.LedgerReadSnapshot = {
     try $0.snapshot()
@@ -401,6 +411,8 @@ public final class LedgerJourney {
   }
 
   public func beginEditing(_ url: URL) throws {
+    // Swapping the connection mid-write would drop the bulk change's result on the floor.
+    guard !isWritingInBackground else { throw LedgerApplication.Error.invalidCommand }
     let store = try LedgerStore.openForMutation(at: url)
     mutableStore = store
     openedStore = nil
@@ -607,8 +619,10 @@ public final class LedgerJourney {
     let token = LedgerQuitGuard.shared.begin(quitReason)
     defer { token.end() }
     let writer = BackgroundWriter(application: application)
+    let hold = beforeBackgroundWrite
     let outcome = await Task.detached(priority: .userInitiated) {
-      writer.run(write)
+      hold()
+      return writer.run(write)
     }.value
     guard generation == started else { return }
     if let read = outcome.snapshot { snapshot = read }
@@ -1000,7 +1014,7 @@ public final class LedgerJourney {
       throw LedgerApplication.Error.invalidCommand
     }
     do {
-      guard let store = mutableStore ?? openedStore else {
+      guard let store = readableStore else {
         throw LedgerApplication.Error.invalidCommand
       }
       let digest = try store.backupCanonicalDatabase(to: destination)
@@ -1082,7 +1096,7 @@ public final class LedgerJourney {
   /// The save panel has already asked before replacing an existing file.
   public func exportXLSX(to destination: URL) throws {
     guard destination.isFileURL,
-      let snapshot = try application?.snapshot() ?? (mutableStore ?? openedStore)?.readSnapshot()
+      let snapshot = try application?.snapshot() ?? readableStore?.readSnapshot()
     else { throw LedgerApplication.Error.invalidCommand }
     let data = try LedgerXLSXExchange.xlsxData(LedgerXLSXExchange.Content(snapshot: snapshot))
     try SavedFile.write(data, to: destination, replacing: true)
@@ -1093,7 +1107,7 @@ public final class LedgerJourney {
   /// written. Throws `LedgerXLSXExchange.Error.invalid` with the problems a person can fix.
   public func planXLSXImport(from source: URL) throws -> LedgerXLSXImportPlan {
     // Planning only reads, so it works on a ledger that is open but not yet being edited.
-    guard source.isFileURL, let store = mutableStore ?? openedStore else {
+    guard source.isFileURL, let store = readableStore else {
       throw LedgerApplication.Error.invalidCommand
     }
     let data = try Self.readRegularFile(source, maximumBytes: Self.maximumXLSXImportBytes)
@@ -1276,7 +1290,8 @@ public final class LedgerJourney {
   /// Receipts don't travel in portable packages yet, so a ledger holding any can't be
   /// exported as a package or merged.
   private func refuseWhenReceiptsArePresent() throws {
-    if let store = mutableStore ?? openedStore, try !store.receiptAttachments().isEmpty {
+    guard !isWritingInBackground else { throw LedgerApplication.Error.invalidCommand }
+    if let store = readableStore, try !store.receiptAttachments().isEmpty {
       throw ReceiptAttachmentError.receiptsCannotTravelInPackages
     }
   }
@@ -1429,7 +1444,7 @@ public final class LedgerJourney {
 
   /// The open ledger's receipts, newest first. Metadata only; bytes load on demand.
   public func receiptAttachments() throws -> [LedgerReceiptAttachment] {
-    guard let store = mutableStore ?? openedStore else {
+    guard let store = readableStore else {
       throw LedgerApplication.Error.invalidCommand
     }
     return try store.receiptAttachments().sorted {
@@ -1439,7 +1454,7 @@ public final class LedgerJourney {
 
   /// One receipt's bytes, checked against its stored digest.
   public func receiptBytes(_ receiptID: String) throws -> Data {
-    guard let store = mutableStore ?? openedStore else {
+    guard let store = readableStore else {
       throw LedgerApplication.Error.invalidCommand
     }
     return try store.receiptBytes(receiptID)
@@ -1723,7 +1738,7 @@ public final class LedgerJourney {
 
   public func exportPackage() throws -> (manifest: LedgerExportManifest, payload: Data) {
     if let application { return try application.exportPackage() }
-    guard let ledgerURL else { throw LedgerApplication.Error.invalidCommand }
+    guard !isWritingInBackground, let ledgerURL else { throw LedgerApplication.Error.invalidCommand }
     let store = try LedgerStore.openReadOnly(at: ledgerURL)
     return try LedgerApplication(store: store).exportPackage()
   }
@@ -1731,11 +1746,13 @@ public final class LedgerJourney {
   public func restorePackage(
     manifest: LedgerExportManifest, payload: Data, into url: URL
   ) throws {
+    // Restoring writes to the ledger, so it waits for a bulk change being written.
+    guard !isWritingInBackground else { throw LedgerApplication.Error.invalidCommand }
     if let application, ledgerURL == url {
       try application.importPackage(manifest: manifest, payload: payload)
       snapshot = try application.snapshot()
       balanceReceipt = Self.savedReceipt(
-        at: url, store: mutableStore ?? openedStore, snapshot: snapshot)
+        at: url, store: readableStore, snapshot: snapshot)
       clearReviewQueue()
       phase = .imported
       return
