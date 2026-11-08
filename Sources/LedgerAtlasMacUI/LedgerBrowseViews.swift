@@ -88,6 +88,13 @@ struct LedgerBrowseList: View {
   }
 
   var body: some View {
+    // Kept apart from the long chain below, which is already near what the type checker can
+    // handle in reasonable time.
+    browseBody
+      .onChange(of: selectedIDs) { _, _ in refreshSelectionTotals() }
+  }
+
+  private var browseBody: some View {
     VStack(alignment: .leading, spacing: 0) {
       controls
         .padding(.horizontal, LedgerTheme.Space.l)
@@ -164,7 +171,6 @@ struct LedgerBrowseList: View {
     }
     .onChange(of: filter) { _, _ in refresh(keepingSelection: true) }
     .onChange(of: pageIndex) { _, _ in refreshPage() }
-    .onChange(of: selectedIDs) { _, _ in refreshSelectionTotals() }
   }
 
   /// File > Export > CSV: every row this view matches (all pages), in the order shown (#170).
@@ -778,7 +784,7 @@ struct LedgerBrowseList: View {
           .truncationMode(.tail)
           .layoutPriority(compact ? 0 : 1)
           .fixedSize(horizontal: !compact, vertical: false)
-          .help("What the selected entries add up to. Transfers count as neither in nor out.")
+          .help("What the selected entries add up to. Transfers and adjustments count as neither in nor out.")
           .accessibilityLabel(
             "Selection total: "
               + (formatter.hidesAmounts ? LedgerDisplayFormatter.hiddenAmountLabel : total))
