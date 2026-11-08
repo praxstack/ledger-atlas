@@ -416,13 +416,15 @@ private func captureKeyStates(
   ]
   // #239: Month in Review and Year in Review on the demo ledger, with "today" fixed so the
   // finished periods don't depend on the day the captures run.
+  let recapMonthToday = try SourceLocalDate(year: 2026, month: 11, day: 15)
+  let recapYearToday = try SourceLocalDate(year: 2027, month: 1, day: 15)
   let recapStates: [(name: String, view: AnyView, size: NSSize, expects: [String], note: String)] = [
     (
       "recap-month",
       AnyView(
         NavigationStack {
           InsightsRecapView(
-            snapshot: ledger, today: try SourceLocalDate(year: 2026, month: 11, day: 15),
+            snapshot: ledger, today: recapMonthToday,
             period: .month(2026, 10))
         }),
       NSSize(width: 980, height: 760), ["October 2026 in review", "Money in", "Top spending"],
@@ -433,7 +435,7 @@ private func captureKeyStates(
       AnyView(
         NavigationStack {
           InsightsRecapView(
-            snapshot: ledger, today: try SourceLocalDate(year: 2027, month: 1, day: 15),
+            snapshot: ledger, today: recapYearToday,
             period: .year(2026))
         }),
       NSSize(width: 980, height: 760), ["2026 in review", "Money in", "Top spending"],
