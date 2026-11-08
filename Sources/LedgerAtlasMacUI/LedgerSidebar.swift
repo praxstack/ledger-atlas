@@ -52,6 +52,8 @@ struct LedgerSidebar: View {
   let showsImportCard: Bool
   let importDisabled: Bool
   let importBackup: () -> Void
+  /// How many entries wait in To Review (#238); shown as the row's badge.
+  var reviewCount = 0
 
   private var listSelection: Binding<SidebarItem?> {
     Binding(
@@ -104,8 +106,12 @@ struct LedgerSidebar: View {
     Section(section.rawValue) {
       ForEach(section.destinations) { destination in
         Label(destination.sidebarTitle, systemImage: destination.systemImageName)
+          .badge(destination == .toReview ? reviewCount : 0)
           .tag(SidebarItem.screen(destination))
-          .accessibilityLabel(destination.accessibilityLabel)
+          .accessibilityLabel(
+            destination == .toReview && reviewCount > 0
+              ? "\(destination.accessibilityLabel), \(reviewCount) waiting"
+              : destination.accessibilityLabel)
           .accessibilityHint(destination.accessibilityHint)
       }
     }

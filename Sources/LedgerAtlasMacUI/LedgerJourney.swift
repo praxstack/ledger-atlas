@@ -38,11 +38,23 @@ public final class LedgerJourney {
   private var review: ImportWorkspace.Review?
   public private(set) var summary: ImportReviewSummary = .awaitingSyntheticMetadata
   public private(set) var snapshot: LedgerStore.LedgerReadSnapshot? {
-    didSet { snapshotGeneration &+= 1 }
+    didSet {
+      snapshotGeneration &+= 1
+      syncReview()
+    }
   }
   /// Changes whenever `snapshot` is replaced, so views can react without comparing snapshots.
   public private(set) var snapshotGeneration = 0
-  public private(set) var ledgerURL: URL?
+  public private(set) var ledgerURL: URL? {
+    didSet { syncReview() }
+  }
+  /// To Review (#238): entries the app added for the person, kept beside the ledger in app
+  /// storage, never in it.
+  package private(set) var reviewQueue = LedgerReviewQueue()
+  /// The entries waiting in To Review now: active and unchanged since they arrived.
+  package private(set) var waitingReviewIDs: Set<String> = []
+  /// The ledger `reviewQueue` was read for.
+  private var reviewLedgerPath: String?
   /// The balance-match receipt of the import that created the open ledger (#172), read from
   /// its sidecar file. Nil for a ledger that was not imported or whose receipt is missing.
   package private(set) var balanceReceipt: ImportBalanceReceipt?
@@ -461,6 +473,55 @@ public final class LedgerJourney {
     ledgerURL = nil
     canonicalURL = nil
     importDestination = nil
+  }
+
+  // MARK: To Review (#238)
+
+  private var transactionIDs: Set<String> { Set(snapshot?.transactions.map(\.id) ?? []) }
+
+  /// Reads the review list when another ledger opens, and works out what is waiting.
+  private func syncReview() {
+    let path = ledgerURL?.path
+    if path != reviewLedgerPath {
+      reviewLedgerPath = path
+      reviewQueue = ledgerURL.map { LedgerReviewQueue.read(besideLedgerAt: $0) } ?? .init()
+    }
+    let waiting = snapshot.map { reviewQueue.waitingIDs(in: $0.transactions) } ?? []
+    if waiting != waitingReviewIDs { waitingReviewIDs = waiting }
+  }
+
+  /// Puts the entries an action added (they weren't in `before`) in To Review.
+  private func sendAddedEntriesToReview(since before: Set<String>) {
+    guard let snapshot else { return }
+    let added = LedgerReviewQueue.added(since: before, in: snapshot.transactions)
+    guard !added.isEmpty else { return }
+    reviewQueue.add(added)
+    saveReviewQueue()
+  }
+
+  /// Saves the list beside the ledger, without the entries that no longer wait. A list that
+  /// can't be saved still shows until the ledger closes; the ledger itself is never written.
+  private func saveReviewQueue() {
+    let waiting = snapshot.map { reviewQueue.waitingIDs(in: $0.transactions) } ?? []
+    reviewQueue.prune(keeping: waiting)
+    if let ledgerURL { try? reviewQueue.write(besideLedgerAt: ledgerURL) }
+    if waiting != waitingReviewIDs { waitingReviewIDs = waiting }
+  }
+
+  private func clearReviewQueue() {
+    reviewQueue.markAllReviewed()
+    saveReviewQueue()
+  }
+
+  /// Mark Reviewed: the entries leave To Review. Nothing is written to the ledger.
+  package func markReviewed(_ transactionIDs: some Sequence<String>) {
+    reviewQueue.markReviewed(transactionIDs)
+    saveReviewQueue()
+  }
+
+  /// Mark All Reviewed. Nothing is written to the ledger.
+  package func markAllReviewed() {
+    clearReviewQueue()
   }
 
   // MARK: Bulk edit (#168)
@@ -1009,9 +1070,11 @@ public final class LedgerJourney {
   /// Adds everything in the plan in one step, or nothing.
   public func applyXLSXImport(_ plan: LedgerXLSXImportPlan, createdAt: UTCInstant) throws {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
+    let before = transactionIDs
     do {
       try application.applyXLSXImport(plan, createdAt: createdAt)
       snapshot = try application.snapshot()
+      sendAddedEntriesToReview(since: before)
       lastFailure = nil
     } catch {
       snapshot = try? application.snapshot()
@@ -1175,7 +1238,10 @@ public final class LedgerJourney {
     try refuseWhenReceiptsArePresent()
     let merged = try LedgerApplication.mergedPackage(
       current: try exportPackage(), incoming: incoming)
+    let before = transactionIDs
     try createLedger(from: (merged.manifest, merged.payload), at: destination)
+    // Entries keep their IDs through a merge, so what is new came from the backup.
+    sendAddedEntriesToReview(since: before)
     return merged.summary
   }
 
@@ -1542,9 +1608,11 @@ public final class LedgerJourney {
     _ plan: LedgerInstallmentPlan, occurredAt: SourceTemporal, createdAt: UTCInstant
   ) throws -> [LedgerTransactionRevision] {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
+    let before = transactionIDs
     let result = try application.createInstallmentPlan(
       plan, occurredAt: occurredAt, createdAt: createdAt)
     snapshot = try application.snapshot()
+    sendAddedEntriesToReview(since: before)
     return result
   }
 
@@ -1582,7 +1650,12 @@ public final class LedgerJourney {
     _ rule: LedgerRecurrenceRule, through end: SourceLocalDate, createdAt: UTCInstant
   ) throws {
     guard let application else { throw LedgerApplication.Error.invalidCommand }
-    defer { snapshot = (try? application.snapshot()) ?? snapshot }
+    let before = transactionIDs
+    // Batches that were written stay written when a later one fails, so they go to review too.
+    defer {
+      snapshot = (try? application.snapshot()) ?? snapshot
+      sendAddedEntriesToReview(since: before)
+    }
     guard !rule.paused, rule.lifecycle == .active else { return }
     // LA-028: a long catch-up (a daily rule started years ago) runs as several bounded batches.
     // Each batch is all-or-nothing and repeating one adds nothing, so a failure part-way can
@@ -1612,6 +1685,7 @@ public final class LedgerJourney {
       snapshot = try application.snapshot()
       balanceReceipt = Self.savedReceipt(
         at: url, store: mutableStore ?? openedStore, snapshot: snapshot)
+      clearReviewQueue()
       phase = .imported
       return
     }
@@ -1624,6 +1698,8 @@ public final class LedgerJourney {
     balanceReceipt = Self.savedReceipt(at: url, store: store, snapshot: snapshot)
     canonicalURL = url
     ledgerURL = url
+    // A restored ledger starts with nothing to review.
+    clearReviewQueue()
     phase = .imported
   }
 
@@ -1700,6 +1776,12 @@ public final class LedgerJourney {
         return SurfaceRow(
           id: $0.id, title: draft.kind.rawValue,
           detail: "\(amount) · \($0.currentRevision.lifecycle.rawValue)")
+      }
+    case .toReview:
+      return snapshot.transactions.filter { waitingReviewIDs.contains($0.id) }.map {
+        let draft = $0.currentRevision.draft
+        let amount = draft.effects.first.map { money.plain($0.amount) } ?? money.figure("0")
+        return SurfaceRow(id: $0.id, title: draft.kind.rawValue, detail: amount)
       }
     case .receipts:
       return []
