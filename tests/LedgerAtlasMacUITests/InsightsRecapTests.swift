@@ -44,7 +44,9 @@ private func decimal(_ literal: String) throws -> ExactDecimal { try ExactDecima
     try decimal("1"), from: try decimal("90000"), unit: "INR", before: "September 2026",
     formatter: hidden)
   #expect(up == down)
-  let hasDigit = up.contains { $0.isNumber }
+  // The period's own name ("September 2026") may have digits; the amount may not.
+  let amount = up.replacingOccurrences(of: "September 2026", with: "")
+  let hasDigit = amount.contains { $0.isNumber }
   #expect(!hasDigit)
   #expect(!up.contains("Up") && !up.contains("Down"))
 }
