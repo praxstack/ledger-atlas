@@ -11,6 +11,7 @@ private let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"),
 
 private func decimal(_ literal: String) throws -> ExactDecimal { try ExactDecimal(literal) }
 
+@MainActor
 @Test func aRecapIsNamedForItsMonthOrYear() {
   let formatter = LedgerDisplayFormatter(locale: Locale(identifier: "en_US"))
   #expect(InsightsRecapView.title(.month(2026, 10), formatter: formatter) == "October 2026 in review")
@@ -18,6 +19,7 @@ private func decimal(_ literal: String) throws -> ExactDecimal { try ExactDecima
   #expect(InsightsRecapView.name(LedgerRecapPeriod.month(2026, 1).previous, formatter: formatter) == "December 2025")
 }
 
+@MainActor
 @Test func aChangeSaysWhichWayAndByHowMuch() throws {
   #expect(
     InsightsRecapView.change(
@@ -33,6 +35,7 @@ private func decimal(_ literal: String) throws -> ExactDecimal { try ExactDecima
       formatter: shown) == "Same as 2024")
 }
 
+@MainActor
 @Test func hiddenAmountsHideTheSizeAndDirectionOfAChange() throws {
   let up = InsightsRecapView.change(
     try decimal("1500"), from: try decimal("1000"), unit: "INR", before: "September 2026",
@@ -46,6 +49,7 @@ private func decimal(_ literal: String) throws -> ExactDecimal { try ExactDecima
   #expect(!up.contains("Up") && !up.contains("Down"))
 }
 
+@MainActor
 @Test func theBestAndHardestMonthsAreNamed() throws {
   let best = LedgerPeriodRecap.MonthFigures(
     month: 2, income: try decimal("1000"), expense: try decimal("100"), net: try decimal("900"))
