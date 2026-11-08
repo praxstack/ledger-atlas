@@ -17,12 +17,14 @@ private func total(_ unit: String, in income: String?, out expense: String?) thr
 private let shown = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"))
 private let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"), hidesAmounts: true)
 
+@MainActor
 @Test func aSelectionOfSpendingShowsOnlyItsSpending() throws {
   let summary = LedgerBrowseList.selectionSummary(
     [try total("INR", in: "0", out: "1429")], formatter: shown)
   #expect(summary == "Spending ₹1,429.00")
 }
 
+@MainActor
 @Test func aMixedSelectionShowsInOutAndASignedNet() throws {
   let summary = LedgerBrowseList.selectionSummary(
     [try total("INR", in: "40000", out: "6210")], formatter: shown)
@@ -32,6 +34,7 @@ private let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"),
   #expect(overspent == "In ₹100.00 · Out ₹250.00 · Net \u{2212}₹150.00")
 }
 
+@MainActor
 @Test func eachCurrencyIsTotalledOnItsOwn() throws {
   let summary = LedgerBrowseList.selectionSummary(
     [try total("EUR", in: "0", out: "5"), try total("INR", in: "500", out: "0")],
@@ -43,6 +46,7 @@ private let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"),
   #expect(parts[1] == "Money in ₹500.00")
 }
 
+@MainActor
 @Test func aSelectionOfOnlyTransfersShowsNoTotal() throws {
   #expect(LedgerBrowseList.selectionSummary([], formatter: shown) == nil)
   #expect(
@@ -50,12 +54,14 @@ private let hidden = LedgerDisplayFormatter(locale: Locale(identifier: "en_IN"),
       == nil)
 }
 
+@MainActor
 @Test func aTotalPastTheExactLimitSaysSoRatherThanShowAWrongNumber() throws {
   let summary = LedgerBrowseList.selectionSummary(
     [try total("INR", in: nil, out: "5")], formatter: shown)
   #expect(summary == "INR total unavailable")
 }
 
+@MainActor
 @Test func hiddenAmountsMaskTheSelectionTotal() throws {
   let big = LedgerBrowseList.selectionSummary(
     [try total("INR", in: "40000", out: "6210")], formatter: hidden)
