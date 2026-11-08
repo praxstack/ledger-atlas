@@ -208,20 +208,22 @@ struct LedgerPeriodRecapTests {
     #expect(recap.daysWithoutEntries == 365 - 3)
   }
 
-  @Test("budgets are judged on the period's last day")
+  private func budget(
+    _ key: Character, _ category: LedgerCategory, _ limit: String,
+    period: LedgerBudget.Period = .monthly, start: SourceLocalDate? = nil
+  ) throws -> LedgerBudget {
+    try LedgerBudget(
+      id: String(repeating: key, count: 64), origin: origin, name: category.name,
+      categoryID: category.id,
+      amount: CurrencyAmount(unitCode: "INR", amount: ExactDecimal(limit)), period: period,
+      rollover: false, start: start ?? SourceLocalDate(year: 2026, month: 1, day: 1))
+  }
+
+  @Test("budgets whose period is the month are judged on that month")
   func budgetsKeptAndOverspent() throws {
     let cash = try account("a")
     let food = try category("f", "Food")
     let fuel = try category("d", "Fuel")
-    func budget(_ key: Character, _ category: LedgerCategory, _ limit: String) throws
-      -> LedgerBudget
-    {
-      try LedgerBudget(
-        id: String(repeating: key, count: 64), origin: origin, name: category.name,
-        categoryID: category.id,
-        amount: CurrencyAmount(unitCode: "INR", amount: ExactDecimal(limit)), period: .monthly,
-        rollover: false, start: SourceLocalDate(year: 2026, month: 1, day: 1))
-    }
     let transactions = [
       try entry(.expense, "900", on: cash, category: food),
       try entry(.expense, "100", on: cash, category: fuel),
@@ -232,6 +234,32 @@ struct LedgerPeriodRecapTests {
       budgets: [try budget("1", food, "500"), try budget("2", fuel, "500")])
     #expect(recap.budgetsKept == 1)
     #expect(recap.budgetsOverspent == 1)
+  }
+
+  @Test("a budget whose periods start mid-month, or a yearly one, isn't judged on a month")
+  func budgetsOnOtherPeriodsAreLeftOut() throws {
+    let cash = try account("a")
+    let food = try category("f", "Food")
+    // Its period runs 15 October to 14 November, so it would count November's 900.
+    let midMonth = try budget(
+      "1", food, "500", start: SourceLocalDate(year: 2026, month: 1, day: 15))
+    let yearly = try budget("2", food, "100000", period: .yearly)
+    let transactions = [
+      try entry(.expense, "100", on: cash, category: food, month: 10, day: 20),
+      try entry(.expense, "900", on: cash, category: food, month: 11, day: 2),
+    ]
+    let month = try LedgerPeriodRecap(
+      period: .month(2026, 10), accounts: [cash], categories: [food],
+      transactions: transactions, budgets: [midMonth, yearly])
+    #expect(month.budgetsKept == 0)
+    #expect(month.budgetsOverspent == 0)
+
+    // A year judges only the yearly budget that starts on 1 January.
+    let year = try LedgerPeriodRecap(
+      period: .year(2026), accounts: [cash], categories: [food],
+      transactions: transactions, budgets: [midMonth, yearly, try budget("3", food, "50")])
+    #expect(year.budgetsKept == 1)
+    #expect(year.budgetsOverspent == 0)
   }
 
   @Test("only finished months and years with entries are offered, newest first")

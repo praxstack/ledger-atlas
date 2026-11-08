@@ -40,14 +40,39 @@ struct InsightsRecapView: View {
       snapshot.categories.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
   }
 
-  /// What the recap depends on: the period and the ledger's contents.
+  /// What the recap depends on: the period and the ledger's contents. An edit or a deletion
+  /// adds a revision; accounts, categories and budgets are hashed field by field, so a
+  /// change that keeps their counts still rebuilds the recap.
   private struct Key: Hashable {
     let period: LedgerRecapPeriod?
-    let transactions: Int
-    let revisions: Int
-    let accounts: Int
-    let categories: Int
-    let budgets: Int
+    let ledger: Int
+  }
+
+  private static func ledgerKey(_ snapshot: LedgerStore.LedgerReadSnapshot) -> Int {
+    var hasher = Hasher()
+    hasher.combine(snapshot.transactions.count)
+    hasher.combine(snapshot.revisionHistory.count)
+    for account in snapshot.accounts {
+      hasher.combine(account.id)
+      hasher.combine(account.currencyUnit)
+      hasher.combine(account.countsInTotals)
+    }
+    for category in snapshot.categories {
+      hasher.combine(category.id)
+      hasher.combine(category.name)
+      hasher.combine(category.parentID)
+    }
+    for budget in snapshot.budgets {
+      hasher.combine(budget.id)
+      hasher.combine(budget.categoryID)
+      hasher.combine(budget.amount.unitCode)
+      hasher.combine(budget.amount.amount.description)
+      hasher.combine(budget.period)
+      hasher.combine(budget.rollover)
+      hasher.combine(budget.start)
+      hasher.combine(budget.lifecycle)
+    }
+    return hasher.finalize()
   }
 
   var body: some View {
@@ -60,12 +85,7 @@ struct InsightsRecapView: View {
           recapCards(recap)
         }
       }
-      .task(
-        id: Key(
-          period: period, transactions: snapshot.transactions.count,
-          revisions: snapshot.revisionHistory.count, accounts: snapshot.accounts.count,
-          categories: snapshot.categories.count, budgets: snapshot.budgets.count)
-      ) {
+      .task(id: Key(period: period, ledger: Self.ledgerKey(snapshot))) {
         let snapshot = snapshot
         let built = await Task.detached(priority: .userInitiated) {
           try? LedgerPeriodRecap(

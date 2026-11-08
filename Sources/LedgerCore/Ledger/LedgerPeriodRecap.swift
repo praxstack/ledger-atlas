@@ -153,6 +153,7 @@ public struct LedgerPeriodRecap: Equatable, Sendable {
   public let busiestDay: SourceLocalDate?
   public let busiestDayCount: Int
   public let daysWithoutEntries: Int
+  /// Budgets whose period is exactly this month or year, kept within or over their limit.
   public let budgetsKept: Int
   public let budgetsOverspent: Int
 
@@ -201,15 +202,17 @@ public struct LedgerPeriodRecap: Equatable, Sendable {
         categories: categories, transactions: transactions, counted: counted)
     }
 
-    // A budget is judged on the period's last day: kept when that day's budget period is
-    // within its limit.
+    // Only a budget whose own period is exactly this month or year is judged: a monthly
+    // budget that starts on the 1st for a month, a yearly one that starts on 1 January for a
+    // year. A budget whose periods start mid-month would mix in another month's spending.
+    // A closed budget has no record of when it closed, so it is left out.
     let lastDay = try LedgerSchedule.addingDays(-1, to: range.end)
     var kept = 0
     var overspent = 0
     for budget in budgets {
-      guard let status = try budget.status(on: lastDay, transactions: transactions) else {
-        continue
-      }
+      guard let status = try budget.status(on: lastDay, transactions: transactions),
+        status.periodStart == range.start, status.periodEnd == lastDay
+      else { continue }
       if status.isOverBudget { overspent += 1 } else { kept += 1 }
     }
     self.budgetsKept = kept
