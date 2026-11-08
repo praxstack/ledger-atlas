@@ -4,6 +4,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
   case importReview
   case accounts
   case ledger
+  case toReview
   case receipts
   case localAccess
   case categories
@@ -33,6 +34,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Accounts"
     case .ledger:
       "Ledger"
+    case .toReview:
+      "To Review"
     case .receipts:
       "Receipts"
     case .localAccess:
@@ -84,7 +87,7 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
 
     public var destinations: [AppDestination] {
       switch self {
-      case .money: [.overview, .ledger, .accounts, .budgets, .insights, .recurrence]
+      case .money: [.overview, .ledger, .toReview, .accounts, .budgets, .insights, .recurrence]
       case .organise: [.categories, .tags, .transfers, .installments, .receipts, .search]
       case .ledger: [.importReview, .backupRestore, .localAccess, .onboarding, .settings]
       }
@@ -103,6 +106,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Show canonical accounts."
     case .ledger:
       "Show the canonical ledger."
+    case .toReview:
+      "Check the entries the app added for you: recurring dates, installments and imports."
     case .receipts:
       "Import receipt images and review local OCR suggestions without changing financial truth."
     case .localAccess:
@@ -142,6 +147,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "rectangle.stack"
     case .ledger:
       "list.bullet.rectangle"
+    case .toReview:
+      "tray"
     case .receipts:
       "doc.text.image"
     case .localAccess:
@@ -181,6 +188,8 @@ public enum AppDestination: String, CaseIterable, Hashable, Identifiable, Sendab
       "Canonical accounts appear after a successful import or ledger open."
     case .ledger:
       "Canonical transactions appear after a successful import or ledger open."
+    case .toReview:
+      "Entries the app adds for you wait here after a ledger is open."
     case .receipts:
       "Receipt images stay private. OCR suggestions require explicit review and never write automatically."
     case .localAccess:

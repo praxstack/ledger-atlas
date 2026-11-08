@@ -48,6 +48,8 @@ struct LedgerView: View {
   var lastBulkEdit: LedgerBulkEditReceipt? = nil
   var revertBulkEdit: (() -> Void)?
   var forgetBulkEdit: (() -> Void)?
+  /// To Review (#238): only the waiting entries show, under a bar that marks them reviewed.
+  var review: LedgerReviewMode? = nil
 
   /// The one selected entry; nil when none or several are selected.
   private var selectedID: String? { selectedIDs.count == 1 ? selectedIDs.first : nil }
@@ -65,9 +67,31 @@ struct LedgerView: View {
   /// + New was pressed while read-only: the form opens once editing has begun.
   @State private var opensFormWhenEditing = false
 
+  /// In To Review, every entry that isn't waiting is hidden too.
+  private var hiddenIDs: Set<String> {
+    guard let review else { return splitTransactionIDs }
+    var hidden = splitTransactionIDs
+    for transaction in transactions where !review.waitingIDs.contains(transaction.id) {
+      hidden.insert(transaction.id)
+    }
+    return hidden
+  }
+
+  private var reviewIsEmpty: Bool {
+    guard let review, case .loaded = state else { return false }
+    return review.waitingIDs.isEmpty
+  }
+
   var body: some View {
     Group {
-      if !transactions.isEmpty {
+      if reviewIsEmpty {
+        ContentUnavailableView(
+          LedgerReviewMode.emptyTitle, systemImage: "checkmark.circle",
+          description: Text(LedgerReviewMode.emptyText))
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .ledgerCanvas()
+          .navigationTitle(LedgerReviewMode.title)
+      } else if !transactions.isEmpty {
         VStack(alignment: .leading, spacing: 0) {
           if let splitNotice {
             Text(splitNotice)
@@ -78,8 +102,9 @@ struct LedgerView: View {
               .accessibilityLabel(splitNotice)
           }
           LedgerBrowseList(
-            transactions: transactions, hiddenIDs: splitTransactionIDs, accounts: accounts,
-            categories: categories, splitPurchases: splitPurchases, selectedIDs: $selectedIDs,
+            transactions: transactions, hiddenIDs: hiddenIDs, accounts: accounts,
+            categories: categories, splitPurchases: review == nil ? splitPurchases : [],
+            selectedIDs: $selectedIDs,
             copy: copy, tombstone: tombstone, tags: tags, revisionTags: revisionTags,
             editTags: isEditing && saveTags != nil ? { (id: String) in taggingID = id } : nil,
             saveAsTemplate: isEditing && saveAsTemplate != nil
@@ -108,6 +133,9 @@ struct LedgerView: View {
             .padding(.horizontal, LedgerTheme.Space.l)
             .padding(.vertical, LedgerTheme.Space.xs)
         }
+        if let review {
+          reviewBar(review)
+        }
         if let lastBulkEdit, let revertBulkEdit {
           BulkEditNotice(
             text: BulkEditWording.done(lastBulkEdit, categories: categories, tags: tags),
@@ -120,31 +148,33 @@ struct LedgerView: View {
           .background(LedgerTheme.recessed)
           .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
         }
-        .navigationTitle("Transactions")
+        .navigationTitle(review == nil ? "Transactions" : LedgerReviewMode.title)
         .toolbar {
-          ToolbarItem(placement: .primaryAction) {
-            // The one primary action on the screen. Read-only, it begins editing first.
-            Button {
-              if isEditing {
-                entryForm = EntryFormRequest()
-              } else {
-                opensFormWhenEditing = true
-                beginEditing()
-                // If editing can't begin (ledger busy or locked), forget the request, so a
-                // later Begin editing never pops the form up unasked.
-                Task {
-                  try? await Task.sleep(for: .seconds(3))
-                  opensFormWhenEditing = false
+          if review == nil {
+            ToolbarItem(placement: .primaryAction) {
+              // The one primary action on the screen. Read-only, it begins editing first.
+              Button {
+                if isEditing {
+                  entryForm = EntryFormRequest()
+                } else {
+                  opensFormWhenEditing = true
+                  beginEditing()
+                  // If editing can't begin (ledger busy or locked), forget the request, so a
+                  // later Begin editing never pops the form up unasked.
+                  Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    opensFormWhenEditing = false
+                  }
                 }
+              } label: {
+                Label(Self.newTransactionTitle, systemImage: "plus")
+                  .labelStyle(.titleAndIcon)
               }
-            } label: {
-              Label(Self.newTransactionTitle, systemImage: "plus")
-                .labelStyle(.titleAndIcon)
+              // The app's own primary style, so it is the teal accent like every other primary
+              // action, not the system accent colour.
+              .buttonStyle(LedgerPrimaryButtonStyle())
+              .help("New transaction: add income or an expense")
             }
-            // The app's own primary style, so it is the teal accent like every other primary
-            // action, not the system accent colour.
-            .buttonStyle(LedgerPrimaryButtonStyle())
-            .help("New transaction: add income or an expense")
           }
         }
       } else {
@@ -289,6 +319,45 @@ struct LedgerView: View {
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
+  }
+
+  /// How many entries wait, and Mark Reviewed for the selected ones or for all. Marking writes
+  /// nothing to the ledger; editing an entry with the bar below also takes it off the list.
+  private func reviewBar(_ review: LedgerReviewMode) -> some View {
+    let picked = selectedIDs.filter { review.waitingIDs.contains($0) }
+    return HStack(spacing: LedgerTheme.Space.m) {
+      Text(LedgerReviewMode.waitingText(review.waitingIDs.count))
+        .font(LedgerTheme.Typeface.captionEmphasis)
+        .foregroundStyle(LedgerTheme.ink)
+        .fixedSize()
+      Text("Added for you by recurring dates, installments or imports.")
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.inkTertiary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+      Spacer(minLength: LedgerTheme.Space.s)
+      Button(picked.count > 1 ? "Mark \(picked.count) Reviewed" : "Mark Reviewed") {
+        review.markReviewed(Array(picked))
+        selectedIDs.subtract(picked)
+      }
+      .buttonStyle(LedgerSecondaryButtonStyle())
+      .disabled(picked.isEmpty)
+      .fixedSize()
+      .help("Take the selected entries off To Review. The ledger doesn't change.")
+      Button("Mark All Reviewed") {
+        review.markAllReviewed()
+        selectedIDs = []
+      }
+      .buttonStyle(LedgerSecondaryButtonStyle())
+      .fixedSize()
+      .help("Take every entry off To Review. The ledger doesn't change.")
+    }
+    .padding(.horizontal, LedgerTheme.Space.l)
+    .padding(.vertical, LedgerTheme.Space.s)
+    .background(LedgerTheme.recessed)
+    .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("To Review actions")
   }
 
   /// Short, so the toolbar keeps the view switcher and the inspector toggle at 1,000 pt.
@@ -441,5 +510,21 @@ struct EntryFormWithUpcoming: View {
           .frame(minHeight: 380, maxHeight: 560)
       }
     }
+  }
+}
+
+/// To Review (#238) as `LedgerView` shows it: the entries waiting and what marking does.
+struct LedgerReviewMode {
+  let waitingIDs: Set<String>
+  let markReviewed: ([String]) -> Void
+  let markAllReviewed: () -> Void
+
+  static let title = "To Review"
+  static let emptyTitle = "Nothing to review"
+  static let emptyText =
+    "Entries the app adds for you (recurring dates, installments, imports) wait here until you've checked them."
+
+  static func waitingText(_ count: Int) -> String {
+    "\(count) \(count == 1 ? "entry" : "entries") to review"
   }
 }

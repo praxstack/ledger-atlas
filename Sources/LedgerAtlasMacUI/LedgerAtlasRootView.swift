@@ -103,7 +103,8 @@ public struct LedgerAtlasRootView: View {
         accounts: appLock.isLocked ? [] : sidebarAccounts,
         showsImportCard: !appLock.isLocked && session.screen != .loaded,
         importDisabled: journey.backgroundWork != nil,
-        importBackup: chooseImportSource)
+        importBackup: chooseImportSource,
+        reviewCount: appLock.isLocked ? 0 : journey.waitingReviewIDs.count)
       .navigationTitle("Ledger Atlas")
       .navigationSplitViewColumnWidth(min: 240, ideal: 250, max: 300)
       .toolbar {
@@ -1548,7 +1549,7 @@ public struct LedgerAtlasRootView: View {
       OverviewSurface(
         snapshot: journey.snapshot, generation: journey.snapshotGeneration,
         settings: productSettings, show: { selection = $0 })
-    } else if selection == .ledger {
+    } else if selection == .ledger || selection == .toReview {
       let listing = splitListing
       LedgerView(
         state: session.state, isEditing: journey.isEditing,
@@ -1665,7 +1666,13 @@ public struct LedgerAtlasRootView: View {
               createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
           } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
         },
-        forgetBulkEdit: { journey.forgetLastBulkEdit() }
+        forgetBulkEdit: { journey.forgetLastBulkEdit() },
+        review: selection == .toReview
+          ? LedgerReviewMode(
+            waitingIDs: journey.waitingReviewIDs,
+            markReviewed: { journey.markReviewed($0) },
+            markAllReviewed: { journey.markAllReviewed() })
+          : nil
       )
       .id(selection)
     } else if selection == .receipts {

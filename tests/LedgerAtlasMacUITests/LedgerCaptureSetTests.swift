@@ -157,8 +157,8 @@ import Testing
   try data.write(to: output.appendingPathComponent("index.json"))
   print("CAPTURES \(index.count) files in \(output.path)")
   try snapshots.verify(writingTo: output)
-  // 25 records and 10 key states, each in light and dark.
-  let expectedFiles: Int = 70
+  // 25 records and 12 key states, each in light and dark.
+  let expectedFiles: Int = 74
   #expect(index.count == expectedFiles)
   print("CAPTURE main run loop restarts so far: \(MountedRoot.runLoopRestarts)")
   #expect(
@@ -380,7 +380,41 @@ private func captureKeyStates(
       "After a bulk change: what changed, and Revert This Bulk Change."
     ),
   ]
-  for state in upcomingStates + bulkStates {
+  // #238: To Review with three entries the app added, and with nothing waiting.
+  let reviewWaiting = Set(
+    ledger.transactions.filter {
+      $0.currentRevision.draft.kind == .expense && $0.links.isEmpty
+        && $0.currentRevision.lifecycle == .active
+    }.suffix(3).map(\.id))
+  func reviewScreen(_ waiting: Set<String>) -> AnyView {
+    AnyView(
+      NavigationStack {
+        LedgerView(
+          state: .loaded(LedgerSession.Presentation(snapshot: ledger)), isEditing: false,
+          accounts: ledger.accounts, categories: ledger.categories,
+          transactions: ledger.transactions, splitPurchases: [], splitTransactionIDs: [],
+          splitNotice: nil, intentRequest: nil, consumeIntent: {}, open: {},
+          lifecycleMessage: nil, lastFailure: nil, beginEditing: {}, saveAmount: { _, _ in },
+          tombstone: { _ in }, copy: { _ in }, addMacTransaction: { _ in },
+          createTransaction: { _, _, _, _, _, _, _ in .saved }, createSplit: { _ in },
+          tags: ledger.tags, revisionTags: ledger.revisionTags,
+          review: LedgerReviewMode(
+            waitingIDs: waiting, markReviewed: { _ in }, markAllReviewed: {}))
+      })
+  }
+  let reviewStates: [(name: String, view: AnyView, size: NSSize, expects: [String], note: String)] = [
+    (
+      "to-review", reviewScreen(reviewWaiting), NSSize(width: 1240, height: 600),
+      [LedgerReviewMode.waitingText(3), "Mark Reviewed", "Mark All Reviewed"],
+      "To Review: entries the app added wait, grouped by day, with Mark Reviewed and Mark All Reviewed."
+    ),
+    (
+      "to-review-empty", reviewScreen([]), NSSize(width: 900, height: 520),
+      [LedgerReviewMode.emptyTitle, LedgerReviewMode.emptyText],
+      "Nothing waits in To Review: it says what would."
+    ),
+  ]
+  for state in upcomingStates + bulkStates + reviewStates {
     captureLog(state.name)
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: state.size), styleMask: [.titled],
