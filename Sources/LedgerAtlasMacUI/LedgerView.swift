@@ -85,12 +85,7 @@ struct LedgerView: View {
   var body: some View {
     Group {
       if reviewIsEmpty {
-        ContentUnavailableView(
-          LedgerReviewMode.emptyTitle, systemImage: "checkmark.circle",
-          description: Text(LedgerReviewMode.emptyText))
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .ledgerCanvas()
-          .navigationTitle(LedgerReviewMode.title)
+        reviewEmpty
       } else if !transactions.isEmpty {
         VStack(alignment: .leading, spacing: 0) {
           if let splitNotice {
@@ -319,6 +314,16 @@ struct LedgerView: View {
     .onAppear { presentIntentIfNeeded() }
     .onChange(of: intentRequest) { _, _ in presentIntentIfNeeded() }
     .onChange(of: accounts.count) { _, _ in presentIntentIfNeeded() }
+  }
+
+  /// To Review with nothing waiting: says what would.
+  private var reviewEmpty: some View {
+    ContentUnavailableView(
+      LedgerReviewMode.emptyTitle, systemImage: "checkmark.circle",
+      description: Text(LedgerReviewMode.emptyText))
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .ledgerCanvas()
+      .navigationTitle(LedgerReviewMode.title)
   }
 
   /// How many entries wait, and Mark Reviewed for the selected ones or for all. Marking writes
