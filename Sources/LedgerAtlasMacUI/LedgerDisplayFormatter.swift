@@ -157,6 +157,11 @@ public struct LedgerDisplayFormatter: Sendable {
     templated("MMM", date)
   }
 
+  /// "November", in the display locale.
+  public func monthName(_ date: SourceLocalDate) -> String {
+    templated("MMMM", date)
+  }
+
   /// "November 2026" for screen subtitles.
   public func monthTitle(_ date: SourceLocalDate) -> String {
     templated("MMMMyyyy", date)
