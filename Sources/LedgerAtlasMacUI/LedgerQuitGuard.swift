@@ -4,7 +4,8 @@ import Foundation
 /// Holds Quit while Ledger Atlas is writing a ledger off the main thread (an import, an upgrade,
 /// a restore). `.suddenTerminationDisabled` does not stop Cmd-Q, and a quit in the middle of
 /// such a write leaves a half-written file behind (#178). Edits save on the main thread, so a
-/// quit can't land in the middle of one.
+/// quit can't land in the middle of one; a bulk change and its revert run off it and are held
+/// here too (#246).
 ///
 /// Quit asks first. "Quit When Finished" keeps the app running until the last write ends and
 /// then quits; "Keep Working" cancels the quit.

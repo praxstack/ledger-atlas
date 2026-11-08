@@ -48,6 +48,8 @@ struct LedgerView: View {
   var lastBulkEdit: LedgerBulkEditReceipt? = nil
   var revertBulkEdit: (() -> Void)?
   var forgetBulkEdit: (() -> Void)?
+  /// What a bulk change being written off the main thread says, or nil when none is (#246).
+  var bulkWork: String? = nil
   /// To Review (#238): only the waiting entries show, under a bar that marks them reviewed.
   var review: LedgerReviewMode? = nil
 
@@ -131,11 +133,7 @@ struct LedgerView: View {
         if let review {
           reviewBar(review)
         }
-        if let lastBulkEdit, let revertBulkEdit {
-          BulkEditNotice(
-            text: BulkEditWording.done(lastBulkEdit, categories: categories, tags: tags),
-            revert: revertBulkEdit, dismiss: { forgetBulkEdit?() })
-        }
+        bulkStatus
         editBar
           .padding(.horizontal, LedgerTheme.Space.l)
           .padding(.vertical, LedgerTheme.Space.s)
@@ -294,7 +292,7 @@ struct LedgerView: View {
     }
     .focusedSceneValue(
       \.revertBulkEdit,
-      lastBulkEdit != nil && revertBulkEdit != nil
+      lastBulkEdit != nil && revertBulkEdit != nil && bulkWork == nil
         ? RevertBulkEditAction(perform: { revertBulkEdit?() }) : nil)
     .onChange(of: selectedID) { _, id in
       // Start an amount edit from the selected entry's current amount. With amounts hidden
@@ -317,6 +315,17 @@ struct LedgerView: View {
   }
 
   /// To Review with nothing waiting: says what would.
+  /// Below the list: a bulk change being written, or the notice with Revert once it's done.
+  @ViewBuilder private var bulkStatus: some View {
+    if let bulkWork {
+      BulkEditProgress(text: bulkWork)
+    } else if let lastBulkEdit, let revertBulkEdit {
+      BulkEditNotice(
+        text: BulkEditWording.done(lastBulkEdit, categories: categories, tags: tags),
+        revert: revertBulkEdit, dismiss: { forgetBulkEdit?() })
+    }
+  }
+
   private var reviewEmpty: some View {
     ContentUnavailableView(
       LedgerReviewMode.emptyTitle, systemImage: "checkmark.circle",

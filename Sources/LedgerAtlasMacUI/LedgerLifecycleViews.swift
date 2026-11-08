@@ -132,6 +132,7 @@ struct ImportProgressView: View {
     switch work {
     case .preparingImport: "Reading the backup…"
     case .importing: "Importing into a new ledger…"
+    case .bulkEditing, .revertingBulkEdit: BulkEditWording.working(work) ?? ""
     }
   }
 
