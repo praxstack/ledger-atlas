@@ -137,3 +137,102 @@ private func temporaryDirectory() throws -> URL {
   #expect(LedgerReviewMode.waitingText(3) == "3 entries to review")
   #expect(LedgerReviewMode.emptyText.hasPrefix("Entries the app adds for you"))
 }
+
+private struct SyntheticReadFailure: Error {}
+
+/// Makes the journey's next read of the ledger fail once, then read normally.
+@MainActor
+private func failNextRead(of journey: LedgerJourney) {
+  var failed = false
+  journey.readSnapshot = { application in
+    if !failed {
+      failed = true
+      throw SyntheticReadFailure()
+    }
+    return try application.snapshot()
+  }
+}
+
+@MainActor
+@Test func installmentsReachToReviewWhenTheFirstReadAfterSavingFails() throws {
+  let directory = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let (journey, _, account, _) = try reviewLedger(in: directory)
+  let origin = try LedgerOrigin.macNative()
+  let when = try SourceTemporal(
+    resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 11, day: 2)),
+    in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
+  failNextRead(of: journey)
+  // The plan was saved and the second read works, so the call succeeds.
+  #expect(throws: Never.self) {
+    try journey.createInstallmentPlan(
+      LedgerInstallmentPlan(
+        id: StableLedgerID.installmentPlan(
+          origin: origin, localKey: String(repeating: "9", count: 64)),
+        origin: origin, accountID: account.id, categoryID: nil,
+        principal: CurrencyAmount(unitCode: "INR", amount: ExactDecimal("90")),
+        occurrenceCount: 3),
+      occurredAt: when, createdAt: UTCInstant(epochMilliseconds: 2))
+  }
+  // Its entries wait even though the first read failed (#244).
+  let all = Set(journey.snapshot?.transactions.map(\.id) ?? [])
+  #expect(!all.isEmpty)
+  #expect(journey.waitingReviewIDs == all)
+}
+
+@MainActor
+@Test func spreadsheetRowsReachToReviewWhenTheFirstReadAfterImportFails() throws {
+  let directory = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let (source, _, account, _) = try reviewLedger(in: directory)
+  let typed = source.saveNativeEntry(
+    amountLiteral: "12", kind: .expense, accountID: account.id, categoryID: nil, note: nil,
+    createdAt: UTCInstant(epochMilliseconds: 1), submissionID: UUID().uuidString, tags: .empty)
+  guard case .saved = typed else {
+    Issue.record("the typed entry was not saved")
+    return
+  }
+  let workbook = directory.appendingPathComponent("synthetic.xlsx")
+  try source.exportXLSX(to: workbook)
+  source.closeLedger()
+
+  let targetURL = directory.appendingPathComponent("target.sqlite")
+  _ = try LedgerStoreLifecycle.create(at: targetURL)
+  let target = LedgerJourney()
+  try target.beginEditing(targetURL)
+  let plan = try target.planXLSXImport(from: workbook)
+  #expect(plan.canApply)
+  failNextRead(of: target)
+  #expect(throws: Never.self) {
+    try target.applyXLSXImport(plan, createdAt: UTCInstant(epochMilliseconds: 3))
+  }
+  #expect(target.lastFailure == nil)
+  let imported = Set(target.snapshot?.transactions.map(\.id) ?? [])
+  #expect(imported.count == 1)
+  #expect(target.waitingReviewIDs == imported)
+}
+
+@MainActor
+@Test func aSecondFailedReadIsThrownAndKeepsTheLastSnapshot() throws {
+  let directory = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let (journey, _, account, _) = try reviewLedger(in: directory)
+  let before = try #require(journey.snapshot).transactions.map(\.id)
+  let origin = try LedgerOrigin.macNative()
+  journey.readSnapshot = { _ in throw SyntheticReadFailure() }
+  #expect(throws: SyntheticReadFailure.self) {
+    try journey.createInstallmentPlan(
+      LedgerInstallmentPlan(
+        id: StableLedgerID.installmentPlan(
+          origin: origin, localKey: String(repeating: "7", count: 64)),
+        origin: origin, accountID: account.id, categoryID: nil,
+        principal: CurrencyAmount(unitCode: "INR", amount: ExactDecimal("30")),
+        occurrenceCount: 3),
+      occurredAt: SourceTemporal(
+        resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 11, day: 2)),
+        in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day),
+      createdAt: UTCInstant(epochMilliseconds: 2))
+  }
+  // The plan was saved, but neither read worked: the journey keeps what it last read.
+  #expect(journey.snapshot?.transactions.map(\.id) == before)
+}

@@ -75,6 +75,10 @@ public final class LedgerJourney {
   private var prepared: ImportWorkspace.PreparedHandle?
   private let workspace = ImportWorkspace()
   private var application: LedgerApplication?
+  /// Reads the ledger after a command. Tests swap it to make a read fail.
+  package var readSnapshot: (LedgerApplication) throws -> LedgerStore.LedgerReadSnapshot = {
+    try $0.snapshot()
+  }
   private var mutableStore: LedgerStore? {
     didSet { refreshImportedHistory() }
   }
@@ -488,6 +492,21 @@ public final class LedgerJourney {
     }
     let waiting = snapshot.map { reviewQueue.waitingIDs(in: $0.transactions) } ?? []
     if waiting != waitingReviewIDs { waitingReviewIDs = waiting }
+  }
+
+  /// After a command that adds entries has committed: reads the ledger and puts what is new
+  /// in To Review (#244). A failed read is tried once more; the command already succeeded, so
+  /// only a second failure is thrown, and entries that were written still reach the list.
+  private func refreshSendingAddedToReview(
+    _ application: LedgerApplication, since before: Set<String>
+  ) throws {
+    defer { sendAddedEntriesToReview(since: before) }
+    do {
+      snapshot = try readSnapshot(application)
+    } catch {
+      guard let retried = try? readSnapshot(application) else { throw error }
+      snapshot = retried
+    }
   }
 
   /// Puts the entries an action added (they weren't in `before`) in To Review.
@@ -1073,13 +1092,12 @@ public final class LedgerJourney {
     let before = transactionIDs
     do {
       try application.applyXLSXImport(plan, createdAt: createdAt)
-      snapshot = try application.snapshot()
-      sendAddedEntriesToReview(since: before)
-      lastFailure = nil
     } catch {
-      snapshot = try? application.snapshot()
+      snapshot = try? readSnapshot(application)
       throw error
     }
+    try refreshSendingAddedToReview(application, since: before)
+    lastFailure = nil
   }
 
   /// Counts only, for the confirmation before an import.
@@ -1611,8 +1629,7 @@ public final class LedgerJourney {
     let before = transactionIDs
     let result = try application.createInstallmentPlan(
       plan, occurredAt: occurredAt, createdAt: createdAt)
-    snapshot = try application.snapshot()
-    sendAddedEntriesToReview(since: before)
+    try refreshSendingAddedToReview(application, since: before)
     return result
   }
 
