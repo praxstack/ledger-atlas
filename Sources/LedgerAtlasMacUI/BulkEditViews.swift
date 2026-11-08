@@ -17,6 +17,18 @@ enum BulkEditPrompt: Identifiable {
 
 /// Names a bulk change in words: "Set the category to Groceries", "Add the tag trip".
 enum BulkEditWording {
+  /// What the bar says while a bulk change or its revert is written (#246).
+  static func working(_ work: LedgerJourney.BackgroundWork) -> String? {
+    switch work {
+    case .bulkEditing(let count):
+      return count == 1 ? "Changing 1 entry…" : "Changing \(count) entries…"
+    case .revertingBulkEdit(let count):
+      return count == 1 ? "Reverting 1 entry…" : "Reverting \(count) entries…"
+    case .preparingImport, .importing:
+      return nil
+    }
+  }
+
   static func action(
     _ change: LedgerBulkChange, categories: [LedgerCategory], tags: [LedgerTag]
   ) -> String {
@@ -145,6 +157,30 @@ struct BulkEditRefusedSheet: View {
 }
 
 /// The last bulk change, under the list, with the one-step way back.
+/// Shown in place of the notice while a bulk change or its revert is written. Other edits
+/// wait for it, and Quit asks first.
+struct BulkEditProgress: View {
+  let text: String
+
+  var body: some View {
+    HStack(spacing: LedgerTheme.Space.m) {
+      ProgressView()
+        .controlSize(.small)
+        .accessibilityHidden(true)
+      Text(text)
+        .font(LedgerTheme.Typeface.caption)
+        .foregroundStyle(LedgerTheme.ink)
+      Spacer(minLength: LedgerTheme.Space.s)
+    }
+    .padding(.horizontal, LedgerTheme.Space.l)
+    .padding(.vertical, LedgerTheme.Space.s)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(LedgerTheme.recessed)
+    .overlay(alignment: .top) { Divider().overlay(LedgerTheme.hairline) }
+    .accessibilityElement(children: .combine)
+  }
+}
+
 struct BulkEditNotice: View {
   let text: String
   let revert: () -> Void

@@ -1654,19 +1654,25 @@ public struct LedgerAtlasRootView: View {
           catch { return .refused(LedgerJourney.bulkEditMessage(for: error)) }
         },
         applyBulkEdit: { plan in
-          do {
-            try journey.applyBulkEdit(
-              plan, createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
-          } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
+          Task {
+            do {
+              try await journey.applyBulkEdit(
+                plan,
+                createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+            } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
+          }
         },
         lastBulkEdit: journey.lastBulkEdit,
         revertBulkEdit: {
-          do {
-            try journey.revertLastBulkEdit(
-              createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
-          } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
+          Task {
+            do {
+              try await journey.revertLastBulkEdit(
+                createdAt: UTCInstant(epochMilliseconds: UTCInstant.currentEpochMilliseconds()))
+            } catch { journey.recordFailure(LedgerJourney.bulkEditMessage(for: error)) }
+          }
         },
         forgetBulkEdit: { journey.forgetLastBulkEdit() },
+        bulkWork: journey.backgroundWork.flatMap(BulkEditWording.working),
         review: selection == .toReview
           ? LedgerReviewMode(
             waitingIDs: journey.waitingReviewIDs,
