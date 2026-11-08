@@ -163,7 +163,8 @@ private func failNextRead(of journey: LedgerJourney) {
     resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 11, day: 2)),
     in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day)
   failNextRead(of: journey)
-  #expect(throws: SyntheticReadFailure.self) {
+  // The plan was saved and the second read works, so the call succeeds.
+  #expect(throws: Never.self) {
     try journey.createInstallmentPlan(
       LedgerInstallmentPlan(
         id: StableLedgerID.installmentPlan(
@@ -173,7 +174,7 @@ private func failNextRead(of journey: LedgerJourney) {
         occurrenceCount: 3),
       occurredAt: when, createdAt: UTCInstant(epochMilliseconds: 2))
   }
-  // The plan was saved, so its entries wait even though the first read failed (#244).
+  // Its entries wait even though the first read failed (#244).
   let all = Set(journey.snapshot?.transactions.map(\.id) ?? [])
   #expect(!all.isEmpty)
   #expect(journey.waitingReviewIDs == all)
@@ -202,10 +203,36 @@ private func failNextRead(of journey: LedgerJourney) {
   let plan = try target.planXLSXImport(from: workbook)
   #expect(plan.canApply)
   failNextRead(of: target)
-  #expect(throws: SyntheticReadFailure.self) {
+  #expect(throws: Never.self) {
     try target.applyXLSXImport(plan, createdAt: UTCInstant(epochMilliseconds: 3))
   }
+  #expect(target.lastFailure == nil)
   let imported = Set(target.snapshot?.transactions.map(\.id) ?? [])
   #expect(imported.count == 1)
   #expect(target.waitingReviewIDs == imported)
+}
+
+@MainActor
+@Test func aSecondFailedReadIsThrownAndKeepsTheLastSnapshot() throws {
+  let directory = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let (journey, _, account, _) = try reviewLedger(in: directory)
+  let before = try #require(journey.snapshot).transactions.map(\.id)
+  let origin = try LedgerOrigin.macNative()
+  journey.readSnapshot = { _ in throw SyntheticReadFailure() }
+  #expect(throws: SyntheticReadFailure.self) {
+    try journey.createInstallmentPlan(
+      LedgerInstallmentPlan(
+        id: StableLedgerID.installmentPlan(
+          origin: origin, localKey: String(repeating: "7", count: 64)),
+        origin: origin, accountID: account.id, categoryID: nil,
+        principal: CurrencyAmount(unitCode: "INR", amount: ExactDecimal("30")),
+        occurrenceCount: 3),
+      occurredAt: SourceTemporal(
+        resolving: SourceLocalDateTime(date: SourceLocalDate(year: 2026, month: 11, day: 2)),
+        in: SourceTimeZone(fixedOffsetSeconds: 0), precision: .day),
+      createdAt: UTCInstant(epochMilliseconds: 2))
+  }
+  // The plan was saved, but neither read worked: the journey keeps what it last read.
+  #expect(journey.snapshot?.transactions.map(\.id) == before)
 }

@@ -495,8 +495,8 @@ public final class LedgerJourney {
   }
 
   /// After a command that adds entries has committed: reads the ledger and puts what is new
-  /// in To Review. A failed read is tried once more before the error is thrown, so entries
-  /// that were written still reach the list (#244).
+  /// in To Review (#244). A failed read is tried once more; the command already succeeded, so
+  /// only a second failure is thrown, and entries that were written still reach the list.
   private func refreshSendingAddedToReview(
     _ application: LedgerApplication, since before: Set<String>
   ) throws {
@@ -504,8 +504,8 @@ public final class LedgerJourney {
     do {
       snapshot = try readSnapshot(application)
     } catch {
-      snapshot = (try? readSnapshot(application)) ?? snapshot
-      throw error
+      guard let retried = try? readSnapshot(application) else { throw error }
+      snapshot = retried
     }
   }
 
@@ -1093,7 +1093,7 @@ public final class LedgerJourney {
     do {
       try application.applyXLSXImport(plan, createdAt: createdAt)
     } catch {
-      snapshot = try? application.snapshot()
+      snapshot = try? readSnapshot(application)
       throw error
     }
     try refreshSendingAddedToReview(application, since: before)
