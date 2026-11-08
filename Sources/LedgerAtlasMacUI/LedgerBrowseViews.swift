@@ -42,6 +42,8 @@ struct LedgerBrowseList: View {
   @State private var totals: [LedgerBrowseTotal] = []
   /// How many entries the view matches across all pages, for "Select All N".
   @State private var matchCount = 0
+  /// What the selected entries add up to, when more than one is selected (#237).
+  @State private var selectionTotals: [LedgerBrowseTotal] = []
   @State private var calendarMonth: (year: Int, month: Int)?
   @State private var calendarDays: [LedgerBrowseDay] = []
   /// True until the first index of this ledger is built; large ledgers build off the main thread.
@@ -162,6 +164,7 @@ struct LedgerBrowseList: View {
     }
     .onChange(of: filter) { _, _ in refresh(keepingSelection: true) }
     .onChange(of: pageIndex) { _, _ in refreshPage() }
+    .onChange(of: selectedIDs) { _, _ in refreshSelectionTotals() }
   }
 
   /// File > Export > CSV: every row this view matches (all pages), in the order shown (#170).
@@ -767,6 +770,19 @@ struct LedgerBrowseList: View {
         .font(LedgerTheme.Typeface.captionEmphasis)
         .foregroundStyle(LedgerTheme.ink)
         .fixedSize()
+      if let total = Self.selectionSummary(selectionTotals, formatter: formatter) {
+        Text(total)
+          .font(LedgerTheme.Typeface.caption.monospacedDigit())
+          .foregroundStyle(LedgerTheme.inkSecondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .layoutPriority(compact ? 0 : 1)
+          .fixedSize(horizontal: !compact, vertical: false)
+          .help("What the selected entries add up to. Transfers count as neither in nor out.")
+          .accessibilityLabel(
+            "Selection total: "
+              + (formatter.hidesAmounts ? LedgerDisplayFormatter.hiddenAmountLabel : total))
+      }
       if selectedIDs.count < matchCount {
         Button("Select All \(matchCount)") { selectAllMatching() }
           .buttonStyle(LedgerSecondaryButtonStyle())
@@ -911,8 +927,13 @@ struct LedgerBrowseList: View {
       pageIndex = 0
     }
     totals = browser.totals(mode: mode, filter: filter)
+    refreshSelectionTotals()
     refreshPage()
     refreshCalendar()
+  }
+
+  private func refreshSelectionTotals() {
+    selectionTotals = selectedIDs.count > 1 ? browser.totals(of: selectedIDs) : []
   }
 
   private func refreshPage() {
@@ -944,6 +965,33 @@ struct LedgerBrowseList: View {
       return sides.isEmpty ? nil : sides.joined(separator: " · ")
     }
     .joined(separator: "; ")
+  }
+
+  /// What a selection adds up to (#237), by the summary row's rules, one part per currency:
+  /// "Spending ₹1,429.00", "Money in ₹500.00", or "In ₹40,000.00 · Out ₹6,210.00 · Net
+  /// +₹33,790.00" when there is both. Nil when nothing selected moves money in or out (only
+  /// transfers, say). Hidden amounts are masked like every other figure.
+  static func selectionSummary(
+    _ totals: [LedgerBrowseTotal], formatter: LedgerDisplayFormatter
+  ) -> String? {
+    let parts = totals.compactMap { total -> String? in
+      guard let figures = summaryFigures(total) else {
+        return "\(total.unitCode) total unavailable"
+      }
+      let hasIncome = figures.income.amount.isPositive
+      let hasExpense = figures.expense.amount.isPositive
+      let income = formatter.parts(figures.income, sign: .never).text
+      let expense = formatter.parts(figures.expense, sign: .never).text
+      switch (hasIncome, hasExpense) {
+      case (true, true):
+        let net = formatter.parts(figures.net, sign: .always).text
+        return "In \(income) · Out \(expense) · Net \(net)"
+      case (true, false): return "Money in \(income)"
+      case (false, true): return "Spending \(expense)"
+      case (false, false): return nil
+      }
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: "; ")
   }
 
   static func describe(_ totals: [LedgerBrowseTotal], hidingAmounts: Bool) -> String {

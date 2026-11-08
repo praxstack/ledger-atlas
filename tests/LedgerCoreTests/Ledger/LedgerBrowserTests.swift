@@ -147,6 +147,27 @@ struct LedgerBrowserTests {
     #expect(overall.last?.expense?.rawLiteral == "13.75")
   }
 
+  @Test("a selection totals its own entries: per currency, transfers and closed ones excluded")
+  func selectionTotals() throws {
+    let sample = try Self.sample()
+    let browser = LedgerBrowser(transactions: sample)
+    let ids = sample.map(\.id)
+    // Coffee 4.50, salary 100, bank 2.25, a transfer, a closed taxi, EUR 5; one id twice and
+    // one the browser doesn't hold.
+    let picked = [ids[0], ids[1], ids[2], ids[3], ids[5], ids[6], ids[0], "not-an-entry"]
+    let totals = browser.totals(of: picked)
+    #expect(totals.map(\.unitCode) == ["EUR", "USD"])
+    #expect(totals[0].income?.rawLiteral == "0")
+    #expect(totals[0].expense?.rawLiteral == "5")
+    #expect(totals[1].income?.rawLiteral == "100")
+    #expect(totals[1].expense?.rawLiteral == "6.75")
+    // Only a transfer: nothing in or out, so no currency at all.
+    #expect(browser.totals(of: [ids[3]]).isEmpty)
+    #expect(browser.totals(of: []).isEmpty)
+    // Selecting everything matches the whole-ledger total.
+    #expect(browser.totals(of: ids) == browser.totals(mode: .total))
+  }
+
   @Test("filters narrow by text, account, category, kind, closed and day")
   func filtersNarrow() throws {
     let browser = LedgerBrowser(
